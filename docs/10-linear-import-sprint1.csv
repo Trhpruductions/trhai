@@ -1,0 +1,13 @@
+Title,Description,Priority,Estimate,Project,Team,Labels,State
+"S1-T01 Create monorepo scaffold","Create apps/services structure, shared scripts, and local startup command.",1,3,"Ascend AI Phase 1","Core","sprint1;platform;setup","Backlog"
+"S1-T02 Configure environments and secrets baseline","Add env templates and secure secret loading with fail-fast validation.",1,3,"Ascend AI Phase 1","Core","sprint1;security;devops","Backlog"
+"S1-T03 Implement authentication integration","Implement login/logout and attach auth context to API requests.",1,5,"Ascend AI Phase 1","Core","sprint1;auth;backend","Backlog"
+"S1-T04 Build workspace creation API","Create workspace endpoint with atomic owner membership creation and safe slug handling.",1,5,"Ascend AI Phase 1","Core","sprint1;backend;workspace","Backlog"
+"S1-T05 Add RBAC middleware baseline","Enforce role checks, structured errors, and audit events on protected routes.",1,5,"Ascend AI Phase 1","Core","sprint1;backend;security","Backlog"
+"S1-T06 Implement conversation create/list APIs","Build conversation create/list endpoints with workspace scoping and pagination.",2,5,"Ascend AI Phase 1","Core","sprint1;backend;assistant","Backlog"
+"S1-T07 Implement message send endpoint with assistant stub","Persist user message and return persisted assistant stub with trace metadata.",1,8,"Ascend AI Phase 1","Core","sprint1;backend;ai","Backlog"
+"S1-T08 Build onboarding flow UI","Create login-to-workspace onboarding flow with resilient error handling.",2,5,"Ascend AI Phase 1","Core","sprint1;frontend;onboarding","Backlog"
+"S1-T09 Build chat shell UI","Implement thread list and active chat panel with streaming-ready state model.",1,8,"Ascend AI Phase 1","Core","sprint1;frontend;assistant","Backlog"
+"S1-T10 Setup structured logging and tracing","Add request-level structured logs and distributed traces for core API paths.",1,5,"Ascend AI Phase 1","Core","sprint1;observability;devops","Backlog"
+"S1-T11 Setup CI pipeline and quality gates","Run lint typecheck unit tests and enforce required checks.",1,5,"Ascend AI Phase 1","Core","sprint1;ci;quality","Backlog"
+"S1-T12 Author QA test plan and run smoke tests","Define and execute auth workspace chat smoke scenarios with defect reporting.",2,3,"Ascend AI Phase 1","Core","sprint1;qa;testing","Backlog"

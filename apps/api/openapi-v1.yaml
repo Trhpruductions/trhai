@@ -1,0 +1,596 @@
+openapi: 3.1.0
+info:
+  title: Ascend AI API
+  version: 1.0.0
+  description: Draft v1 API contract for Project Ascend AI / TRH AI
+servers:
+  - url: https://api.ascend.local
+    description: Local/staging
+security:
+  - bearerAuth: []
+paths:
+  /v1/workspaces:
+    post:
+      summary: Create workspace
+      operationId: createWorkspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkspaceRequest'
+      responses:
+        '201':
+          description: Workspace created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceResponse'
+  /v1/workspaces/{workspaceId}/members:
+    get:
+      summary: List workspace members
+      operationId: listWorkspaceMembers
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: Members list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberListResponse'
+  /v1/workspaces/{workspaceId}/conversations:
+    post:
+      summary: Create conversation
+      operationId: createConversation
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConversationRequest'
+      responses:
+        '201':
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationResponse'
+    get:
+      summary: List conversations
+      operationId: listConversations
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: pageSize
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Conversation list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationListResponse'
+  /v1/workspaces/{workspaceId}/conversations/{conversationId}/messages:
+    post:
+      summary: Send message in conversation
+      operationId: sendMessage
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/ConversationId'
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '200':
+          description: Assistant response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMessageResponse'
+  /v1/workspaces/{workspaceId}/memory:
+    get:
+      summary: List memory records
+      operationId: listMemory
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - in: query
+          name: projectId
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: scope
+          schema:
+            type: string
+            enum: [personal, workspace, team]
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: pageSize
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Memory list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryListResponse'
+  /v1/workspaces/{workspaceId}/memory/{memoryId}/pin:
+    post:
+      summary: Pin memory record
+      operationId: pinMemory
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/MemoryId'
+      responses:
+        '200':
+          description: Memory pinned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryRecordResponse'
+  /v1/workspaces/{workspaceId}/memory/{memoryId}/forget:
+    post:
+      summary: Soft-delete memory record
+      operationId: forgetMemory
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/MemoryId'
+      responses:
+        '200':
+          description: Memory forgotten
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryRecordResponse'
+  /v1/workspaces/{workspaceId}/workflows:
+    post:
+      summary: Create workflow
+      operationId: createWorkflow
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkflowRequest'
+      responses:
+        '201':
+          description: Workflow created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowResponse'
+  /v1/workspaces/{workspaceId}/workflows/{workflowId}/runs:
+    post:
+      summary: Execute workflow run
+      operationId: runWorkflow
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/WorkflowId'
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Workflow run accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowRunResponse'
+  /v1/workspaces/{workspaceId}/usage:
+    get:
+      summary: Retrieve usage summary
+      operationId: getUsage
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Usage summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageSummaryResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    WorkspaceId:
+      in: path
+      name: workspaceId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ConversationId:
+      in: path
+      name: conversationId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MemoryId:
+      in: path
+      name: memoryId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    WorkflowId:
+      in: path
+      name: workflowId
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [code, message, traceId]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        traceId:
+          type: string
+    MetaPagination:
+      type: object
+      required: [page, pageSize, total, hasNext]
+      properties:
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        hasNext:
+          type: boolean
+    Workspace:
+      type: object
+      required: [id, name, slug, planTier]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        planTier:
+          type: string
+          enum: [free, pro, business, enterprise]
+    WorkspaceMember:
+      type: object
+      required: [userId, role]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [owner, admin, member, viewer, billing_admin, automation_operator]
+    Conversation:
+      type: object
+      required: [id, workspaceId, mode]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+        mode:
+          type: string
+          enum: [general, coding, business, creator]
+        title:
+          type: string
+          nullable: true
+    Message:
+      type: object
+      required: [id, role, content, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant, system, tool]
+        content:
+          type: string
+        model:
+          type: string
+          nullable: true
+        traceId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    MemoryRecord:
+      type: object
+      required: [id, title, body, ownerScope, pinned, locked]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        body:
+          type: string
+        ownerScope:
+          type: string
+          enum: [personal, workspace, team]
+        sourceType:
+          type: string
+          enum: [conversation, file, workflow, manual]
+        pinned:
+          type: boolean
+        locked:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    Workflow:
+      type: object
+      required: [id, workspaceId, name, version, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        version:
+          type: integer
+        status:
+          type: string
+          enum: [draft, active, paused, archived]
+    WorkflowRun:
+      type: object
+      required: [id, workflowId, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workflowId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, running, success, failed, cancelled]
+        traceId:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        endedAt:
+          type: string
+          format: date-time
+          nullable: true
+    UsageSummary:
+      type: object
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        totals:
+          type: array
+          items:
+            type: object
+            properties:
+              feature:
+                type: string
+              quantity:
+                type: number
+              unit:
+                type: string
+              costUsdMicros:
+                type: integer
+    CreateWorkspaceRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 80
+        teamId:
+          type: string
+          format: uuid
+          nullable: true
+    WorkspaceResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          $ref: '#/components/schemas/Workspace'
+        traceId:
+          type: string
+    MemberListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceMember'
+        traceId:
+          type: string
+    CreateConversationRequest:
+      type: object
+      required: [mode]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+        mode:
+          type: string
+          enum: [general, coding, business, creator]
+        title:
+          type: string
+          nullable: true
+    ConversationResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Conversation'
+        traceId:
+          type: string
+    ConversationListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conversation'
+        meta:
+          $ref: '#/components/schemas/MetaPagination'
+        traceId:
+          type: string
+    SendMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+        modeOverride:
+          type: string
+          enum: [general, coding, business, creator]
+        stream:
+          type: boolean
+          default: false
+    SendMessageResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            userMessage:
+              $ref: '#/components/schemas/Message'
+            assistantMessage:
+              $ref: '#/components/schemas/Message'
+            usage:
+              type: object
+              properties:
+                inputTokens:
+                  type: integer
+                outputTokens:
+                  type: integer
+                model:
+                  type: string
+        traceId:
+          type: string
+    MemoryRecordResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/MemoryRecord'
+        traceId:
+          type: string
+    MemoryListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryRecord'
+        meta:
+          $ref: '#/components/schemas/MetaPagination'
+        traceId:
+          type: string
+    CreateWorkflowRequest:
+      type: object
+      required: [name, definition]
+      properties:
+        name:
+          type: string
+        definition:
+          type: object
+          additionalProperties: true
+    WorkflowResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Workflow'
+        traceId:
+          type: string
+    WorkflowRunResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/WorkflowRun'
+        traceId:
+          type: string
+    UsageSummaryResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/UsageSummary'
+        traceId:
+          type: string

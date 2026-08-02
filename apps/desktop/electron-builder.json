@@ -1,0 +1,25 @@
+{
+  "appId": "com.trh.ascend.desktop",
+  "productName": "Ascend AI Desktop",
+  "asar": true,
+  "directories": {
+    "output": "release"
+  },
+  "icon": "assets/ascend-logo",
+  "files": [
+    "dist/**/*",
+    "renderer/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": [
+      "nsis",
+      "portable"
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "artifactName": "ascend-ai-desktop-setup-${version}.${ext}"
+  }
+}

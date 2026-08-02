@@ -1,0 +1,28 @@
+{
+  "name": "ascend-ai",
+  "private": true,
+  "version": "0.1.3",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @ascend/api",
+    "dev:api": "npm run dev --workspace @ascend/api",
+    "dev:web": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-web-dev.ps1",
+    "dev:desktop": "npm run dev --workspace @ascend/desktop",
+    "dev:all": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-local-dev.ps1",
+    "db:up": "docker compose -f infra/docker-compose.postgres.yml up -d",
+    "db:down": "docker compose -f infra/docker-compose.postgres.yml down",
+    "build": "npm run build --workspaces",
+    "build:desktop": "npm run build --workspace @ascend/desktop",
+    "dist:desktop": "npm run dist --workspace @ascend/desktop",
+    "dist:desktop:win": "npm run dist:win --workspace @ascend/desktop",
+    "lint": "npm run lint --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "health:api": "curl -fsS http://localhost:4000/health"
+  }
+}

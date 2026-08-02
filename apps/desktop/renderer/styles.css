@@ -1,0 +1,116 @@
+:root {
+  --bg-1: #020914;
+  --bg-2: #0b1f39;
+  --panel: rgba(8, 19, 34, 0.9);
+  --line: rgba(117, 221, 255, 0.3);
+  --text: #e9f7ff;
+  --muted: #98bfd6;
+  --accent: #57deff;
+  --ok: #72ffd5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(79, 190, 255, 0.24), transparent 36%),
+    radial-gradient(circle at 90% 12%, rgba(41, 115, 187, 0.2), transparent 32%),
+    linear-gradient(160deg, var(--bg-1), var(--bg-2));
+  font-family: "Exo 2", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--text);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.18;
+  background-image:
+    linear-gradient(rgba(102, 213, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(102, 213, 255, 0.06) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+.shell {
+  width: min(760px, 92vw);
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(11, 24, 42, 0.94), var(--panel));
+  border-radius: 16px;
+  padding: 22px;
+  box-shadow: 0 24px 48px rgba(2, 9, 20, 0.58);
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  color: #a5dcf8;
+}
+
+h1 {
+  margin: 8px 0 10px;
+  font-size: clamp(1.2rem, 3vw, 1.7rem);
+  letter-spacing: 0.02em;
+}
+
+.lead {
+  margin: 0;
+  color: var(--muted);
+}
+
+.signal {
+  margin-top: 14px;
+  border: 1px solid rgba(127, 226, 255, 0.26);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(6, 17, 29, 0.72);
+  display: grid;
+  gap: 8px;
+}
+
+.signal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.signal-row p {
+  margin: 0;
+  color: #c9e9fb;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(128, 151, 167, 0.55);
+}
+
+.dot.online {
+  background: var(--ok);
+  box-shadow: 0 0 14px rgba(114, 255, 213, 0.8);
+}
+
+ol {
+  margin: 14px 0 0;
+  padding-left: 20px;
+}
+
+li {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.meta {
+  margin: 14px 0 0;
+  color: var(--accent);
+  font-size: 0.9rem;
+}

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ascend AI Desktop</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <p class="eyebrow">JARVIS Fallback Console</p>
+      <h1>Desktop Relay Waiting For Web Channel</h1>
+      <p class="lead">Core desktop process is online. The command interface is still establishing connection at http://localhost:5173.</p>
+
+      <section class="signal" aria-label="Connection diagnostics">
+        <div class="signal-row"><span class="dot online"></span><p>Desktop shell heartbeat</p></div>
+        <div class="signal-row"><span class="dot"></span><p>Web command deck on port 5173</p></div>
+        <div class="signal-row"><span class="dot"></span><p>API relay verification on port 4000</p></div>
+      </section>
+
+      <ol>
+        <li>Start or restart the web app service on port 5173.</li>
+        <li>Confirm the API service responds on port 4000.</li>
+        <li>Leave this window open while auto-retry continues.</li>
+      </ol>
+      <p id="meta" class="meta"></p>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

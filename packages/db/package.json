@@ -1,0 +1,12 @@
+{
+  "name": "@ascend/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo \"No build step for db package\"",
+    "migrate": "echo Run your migration tool against packages/db/migrations",
+    "lint": "echo \"No linter configured yet\"",
+    "typecheck": "echo \"No TypeScript in db package\""
+  }
+}

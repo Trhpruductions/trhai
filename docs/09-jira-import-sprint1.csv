@@ -1,0 +1,13 @@
+Summary,Issue Type,Description,Priority,Story Points,Epic Name,Epic Link,Labels
+"S1-T01 Create monorepo scaffold",Task,"Create apps/services structure, shared scripts, and local startup command.",Highest,3,"E10 Reliability and Operations",,"sprint1,platform,setup"
+"S1-T02 Configure environments and secrets baseline",Task,"Add env templates and secure secret loading with fail-fast validation.",Highest,3,"E9 Security and Compliance",,"sprint1,security,devops"
+"S1-T03 Implement authentication integration",Story,"Implement login/logout and attach auth context to API requests.",Highest,5,"E1 Identity Workspaces RBAC",,"sprint1,auth,backend"
+"S1-T04 Build workspace creation API",Story,"Create workspace endpoint with atomic owner membership creation and safe slug handling.",Highest,5,"E1 Identity Workspaces RBAC",,"sprint1,backend,workspace"
+"S1-T05 Add RBAC middleware baseline",Story,"Enforce role checks, structured errors, and audit events on protected routes.",Highest,5,"E1 Identity Workspaces RBAC",,"sprint1,backend,security"
+"S1-T06 Implement conversation create/list APIs",Story,"Build conversation create/list endpoints with workspace scoping and pagination.",High,5,"E2 Assistant Core",,"sprint1,backend,assistant"
+"S1-T07 Implement message send endpoint with assistant stub",Story,"Persist user message and return persisted assistant stub with trace metadata.",Highest,8,"E2 Assistant Core",,"sprint1,backend,ai"
+"S1-T08 Build onboarding flow UI",Story,"Create login-to-workspace onboarding flow with resilient error handling.",High,5,"E1 Identity Workspaces RBAC",,"sprint1,frontend,onboarding"
+"S1-T09 Build chat shell UI",Story,"Implement thread list and active chat panel with streaming-ready state model.",Highest,8,"E2 Assistant Core",,"sprint1,frontend,assistant"
+"S1-T10 Setup structured logging and tracing",Task,"Add request-level structured logs and distributed traces for core API paths.",Highest,5,"E10 Reliability and Operations",,"sprint1,observability,devops"
+"S1-T11 Setup CI pipeline and quality gates",Task,"Run lint typecheck unit tests and enforce required checks.",Highest,5,"E10 Reliability and Operations",,"sprint1,ci,quality"
+"S1-T12 Author QA test plan and run smoke tests",Task,"Define and execute auth workspace chat smoke scenarios with defect reporting.",High,3,"E10 Reliability and Operations",,"sprint1,qa,testing"

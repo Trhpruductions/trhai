@@ -1,0 +1,26 @@
+{
+  "name": "@ascend/web",
+  "version": "0.1.3",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:web": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../scripts/run-web-dev.ps1",
+    "build": "tsc -p tsconfig.json && vite build",
+    "test": "node --test --import tsx tests/**/*.test.ts",
+    "preview": "vite preview",
+    "lint": "echo \"No linter configured yet\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.0"
+  }
+}
