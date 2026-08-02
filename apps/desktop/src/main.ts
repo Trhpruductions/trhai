@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import net from "node:net";
-import { constants as fsConstants, existsSync } from "node:fs";
+import { constants as fsConstants, existsSync, statfsSync } from "node:fs";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, writeFile } from "node:fs/promises";
 import { getDetachedSpawnConfig } from "./launcher.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -45,6 +46,280 @@ const autoStartDisabled = process.env.ASCEND_DISABLE_AUTOSTART === "1";
 const forceFallbackRenderer = process.env.ASCEND_FORCE_FALLBACK_RENDERER === "1";
 const startupRetryDelayMs = Number(process.env.ASCEND_STARTUP_RETRY_DELAY_MS ?? 1500);
 const logoPath = path.resolve(workspaceRoot, "apps/web/public/branding/ascend-logo.png");
+
+type CpuSnapshot = {
+  idle: number;
+  total: number;
+};
+
+let lastCpuSnapshot: CpuSnapshot | null = null;
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function readCpuSnapshot(): CpuSnapshot {
+  const cpus = os.cpus();
+  let idle = 0;
+  let total = 0;
+
+  for (const cpu of cpus) {
+    idle += cpu.times.idle;
+    total += cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.idle + cpu.times.irq;
+  }
+
+  return { idle, total };
+}
+
+function getCpuUsagePercent(): number {
+  const current = readCpuSnapshot();
+  if (!lastCpuSnapshot) {
+    lastCpuSnapshot = current;
+    return 0;
+  }
+
+  const idleDelta = current.idle - lastCpuSnapshot.idle;
+  const totalDelta = current.total - lastCpuSnapshot.total;
+  lastCpuSnapshot = current;
+
+  if (totalDelta <= 0) {
+    return 0;
+  }
+
+  return clampPercent((1 - idleDelta / totalDelta) * 100);
+}
+
+function getStorageUsagePercent(): number {
+  try {
+    const stats = statfsSync(workspaceRoot);
+    const totalBlocks = Number(stats.blocks ?? 0);
+    const availableBlocks = Number(stats.bavail ?? 0);
+    if (totalBlocks <= 0) {
+      return 0;
+    }
+
+    const usedRatio = 1 - availableBlocks / totalBlocks;
+    return clampPercent(usedRatio * 100);
+  } catch {
+    return 0;
+  }
+}
+
+function getNetworkSignal(): { type: string; qualityPercent: number } {
+  const interfaces = os.networkInterfaces();
+  const externalNames = Object.entries(interfaces)
+    .filter(([, records]) => (records ?? []).some((record) => !record.internal))
+    .map(([name]) => name);
+
+  if (!externalNames.length) {
+    return { type: "OFFLINE", qualityPercent: 0 };
+  }
+
+  const candidate = externalNames[0].toLowerCase();
+  if (candidate.includes("wi-fi") || candidate.includes("wifi") || candidate.includes("wlan")) {
+    return { type: "WIFI", qualityPercent: 76 };
+  }
+
+  if (candidate.includes("eth") || candidate.includes("ethernet")) {
+    return { type: "ETHERNET", qualityPercent: 92 };
+  }
+
+  return { type: "ONLINE", qualityPercent: 70 };
+}
+
+type HostProject = {
+  name: string;
+  path: string;
+  group: "workspace" | "app" | "package" | "generated";
+};
+
+type StorageDevice = {
+  name: string;
+  mountPath: string;
+  totalBytes: number;
+  freeBytes: number;
+  usedBytes: number;
+  usedPercent: number;
+};
+
+const ignoredProjectFolders = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  "release",
+  ".next",
+  ".ascend-temp",
+  ".turbo"
+]);
+
+async function fileExists(candidatePath: string): Promise<boolean> {
+  try {
+    await access(candidatePath, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function collectProjectsFrom(baseDir: string, group: HostProject["group"]): Promise<HostProject[]> {
+  const projects: HostProject[] = [];
+  if (!(await fileExists(baseDir))) {
+    return projects;
+  }
+
+  const entries = await readdir(baseDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (ignoredProjectFolders.has(entry.name)) continue;
+
+    const projectRoot = path.join(baseDir, entry.name);
+    const packageJsonPath = path.join(projectRoot, "package.json");
+    if (await fileExists(packageJsonPath)) {
+      projects.push({
+        name: entry.name,
+        path: path.resolve(projectRoot),
+        group
+      });
+    }
+  }
+
+  return projects;
+}
+
+async function buildProjectInventory(): Promise<HostProject[]> {
+  const rootPackageExists = await fileExists(path.join(workspaceRoot, "package.json"));
+  const rootItem: HostProject[] = rootPackageExists
+    ? [{ name: path.basename(workspaceRoot), path: path.resolve(workspaceRoot), group: "workspace" }]
+    : [];
+
+  const [apps, packages, generated] = await Promise.all([
+    collectProjectsFrom(path.join(workspaceRoot, "apps"), "app"),
+    collectProjectsFrom(path.join(workspaceRoot, "packages"), "package"),
+    collectProjectsFrom(path.join(workspaceRoot, "generated-projects"), "generated")
+  ]);
+
+  const all = [...rootItem, ...apps, ...packages, ...generated];
+  const seen = new Set<string>();
+  return all.filter((project) => {
+    if (seen.has(project.path)) return false;
+    seen.add(project.path);
+    return true;
+  });
+}
+
+function enumerateStorageDevices(): StorageDevice[] {
+  const devices: StorageDevice[] = [];
+  for (let code = 67; code <= 90; code += 1) {
+    const letter = String.fromCharCode(code);
+    const mountPath = `${letter}:\\`;
+    if (!existsSync(mountPath)) continue;
+
+    try {
+      const stats = statfsSync(mountPath);
+      const blockSize = Number(stats.bsize || 4096);
+      const totalBytes = Math.max(0, Number(stats.blocks ?? 0) * blockSize);
+      const freeBytes = Math.max(0, Number(stats.bavail ?? stats.bfree ?? 0) * blockSize);
+      const usedBytes = Math.max(0, totalBytes - freeBytes);
+      const usedPercent = totalBytes > 0 ? clampPercent((usedBytes / totalBytes) * 100) : 0;
+
+      devices.push({
+        name: `${letter}:`,
+        mountPath,
+        totalBytes,
+        freeBytes,
+        usedBytes,
+        usedPercent
+      });
+    } catch {
+      // Skip inaccessible volumes.
+    }
+  }
+
+  return devices;
+}
+
+ipcMain.handle("ascend:get-system-telemetry", async () => {
+  try {
+    const cpuPercent = getCpuUsagePercent();
+    const totalMemory = os.totalmem();
+    const freeMemory = os.freemem();
+    const usedMemoryPercent = totalMemory > 0 ? clampPercent(((totalMemory - freeMemory) / totalMemory) * 100) : 0;
+    const storagePercent = getStorageUsagePercent();
+    const network = getNetworkSignal();
+
+    return {
+      ok: true,
+      source: "host",
+      timestamp: Date.now(),
+      cpuPercent,
+      memoryPercent: usedMemoryPercent,
+      storagePercent,
+      networkPercent: network.qualityPercent,
+      networkType: network.type
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      source: "host",
+      timestamp: Date.now(),
+      error: error instanceof Error ? error.message : "Failed to read host telemetry."
+    };
+  }
+});
+
+ipcMain.handle("ascend:list-project-inventory", async () => {
+  try {
+    const projects = await buildProjectInventory();
+    return { ok: true, projects };
+  } catch (error) {
+    return {
+      ok: false,
+      projects: [],
+      error: error instanceof Error ? error.message : "Failed to collect project inventory."
+    };
+  }
+});
+
+ipcMain.handle("ascend:list-storage-devices", async () => {
+  try {
+    const devices = enumerateStorageDevices();
+    return { ok: true, devices };
+  } catch (error) {
+    return {
+      ok: false,
+      devices: [],
+      error: error instanceof Error ? error.message : "Failed to collect storage devices."
+    };
+  }
+});
+
+ipcMain.handle("ascend:open-path", async (_event, targetPath) => {
+  try {
+    const candidate = typeof targetPath === "string" ? targetPath : "";
+    if (!candidate) {
+      return { ok: false, error: "Missing target path." };
+    }
+
+    const normalized = path.resolve(candidate);
+    if (!existsSync(normalized)) {
+      return { ok: false, error: "Target path does not exist." };
+    }
+
+    const openError = await shell.openPath(normalized);
+    if (openError) {
+      return { ok: false, error: openError };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to open path."
+    };
+  }
+});
 
 ipcMain.handle("ascend:create-scaffold", async (_event, payload) => {
   try {

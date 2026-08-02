@@ -2,9 +2,21 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
+import { runAssistantOrchestrator } from "./services/orchestrator.js";
 import { attachAuthIdentity } from "./middleware/auth.js";
 import { v1MemoryRouter } from "./routes/v1Memory.js";
 import { v1Router } from "./routes/v1.js";
+
+type AssistRouteMode = "general" | "coding" | "business" | "creator";
+
+function normalizeAssistMode(mode: unknown): AssistRouteMode {
+  if (mode === "code" || mode === "debug" || mode === "research" || mode === "plan" || mode === "coding") {
+    return "coding";
+  }
+  if (mode === "business") return "business";
+  if (mode === "creator") return "creator";
+  return "general";
+}
 
 export function createApp() {
   const app = express();
@@ -17,6 +29,37 @@ export function createApp() {
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", service: "ascend-api" });
+  });
+
+  app.post("/v1/assist", async (req, res, next) => {
+    try {
+      const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+      if (!message) {
+        res.status(400).json({
+          code: "INVALID_REQUEST",
+          message: "message is required",
+          traceId: "trace-local"
+        });
+        return;
+      }
+
+      const mode = normalizeAssistMode(req.body?.mode);
+      const result = await runAssistantOrchestrator({
+        mode,
+        userMessage: message
+      });
+
+      res.json({
+        data: {
+          assistantMessage: result.assistantMessage,
+          model: result.model,
+          mode
+        },
+        traceId: "trace-local"
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.use(attachAuthIdentity());

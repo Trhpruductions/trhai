@@ -20,6 +20,42 @@ declare global {
         message?: string;
         error?: string;
       }>;
+      getSystemTelemetry?: () => Promise<{
+        ok?: boolean;
+        source?: string;
+        timestamp?: number;
+        cpuPercent?: number;
+        memoryPercent?: number;
+        storagePercent?: number;
+        networkPercent?: number;
+        networkType?: string;
+        error?: string;
+      }>;
+      listProjectInventory?: () => Promise<{
+        ok?: boolean;
+        projects?: Array<{
+          name: string;
+          path: string;
+          group: "workspace" | "app" | "package" | "generated";
+        }>;
+        error?: string;
+      }>;
+      listStorageDevices?: () => Promise<{
+        ok?: boolean;
+        devices?: Array<{
+          name: string;
+          mountPath: string;
+          totalBytes: number;
+          freeBytes: number;
+          usedBytes: number;
+          usedPercent: number;
+        }>;
+        error?: string;
+      }>;
+      openPath?: (targetPath: string) => Promise<{
+        ok?: boolean;
+        error?: string;
+      }>;
     };
   }
 }
