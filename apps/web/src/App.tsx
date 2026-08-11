@@ -19,6 +19,7 @@ import {
   type Account
 } from "./accountClient";
 import { generateProject, planProject } from "@ascend/shared";
+import { buildLocalCapabilityReply, inferLocalIntent, type LocalIntent } from "./localAssistant";
 import {
   allPersonalities,
   applyResponseStyle,
@@ -343,44 +344,14 @@ const assistantModes: Array<{ key: AssistantMode; label: string }> = [
   { key: "creator", label: "Creator" }
 ];
 
-function inferAssistantMode(request: string): AssistantMode {
-  const value = request.toLowerCase();
-  if (/bug|fix|error|issue|broken|stack trace|exception/.test(value)) return "debug";
-  if (/research|compare|investigate|analyze options|benchmark/.test(value)) return "research";
-  if (/roadmap|plan|milestone|architecture|scope/.test(value)) return "plan";
-  if (/revenue|pricing|go[- ]to[- ]market|kpi|sales|cost/.test(value)) return "business";
-  if (/design|branding|creative|content|campaign|story/.test(value)) return "creator";
-  if (/code|function|class|api|refactor|typescript|react|node/.test(value)) return "code";
-  if (/build|create|app|platform|tool|dashboard|system/.test(value)) return "build";
-  return "build";
-}
-
-function buildCapabilityResponse(mode: AssistantMode, request: string): string {
-  if (mode === "code") {
-    return `Coding track active. I will produce implementation-ready code strategy for: ${request}. Next: define modules, APIs, tests, and rollout checks.`;
-  }
-
-  if (mode === "debug") {
-    return `Debug track active. I will isolate root cause and provide corrective actions for: ${request}. Next: reproduce issue, trace failing path, patch safely, and verify.`;
-  }
-
-  if (mode === "research") {
-    return `Research track active. I will break down ${request} into options, tradeoffs, risks, and recommended path with execution steps.`;
-  }
-
-  if (mode === "plan") {
-    return `Planning track active. I will convert ${request} into milestones, owners, dependencies, and delivery checkpoints.`;
-  }
-
-  if (mode === "business") {
-    return `Business track active. I will map ${request} into KPIs, operating model, cost/revenue assumptions, and launch strategy.`;
-  }
-
-  if (mode === "creator") {
-    return `Creator track active. I will shape ${request} into creative direction, assets, messaging, and production execution.`;
-  }
-
-  return `Build track active. I will convert ${request} into architecture, stack, milestones, and scaffold outputs.`;
+/**
+ * Maps the user's explicit mode selection onto the offline reply builder.
+ * "auto" defers to the tested intent detector in localAssistant.ts, which is
+ * the only path that can return "question" — a mode the picker deliberately
+ * does not offer, because it describes the request rather than a work track.
+ */
+function resolveLocalIntent(mode: AssistantMode, request: string): LocalIntent {
+  return mode === "auto" ? inferLocalIntent(request) : mode;
 }
 
 const assistantApiRetryDelaysMs = [0, 350, 900];
@@ -2158,7 +2129,10 @@ export function App() {
     if (!chatSubmitLatchRef.current.tryAcquire(`${assistantMode}:${request}`)) return;
     const startedAt = performance.now();
 
-    const resolvedMode = assistantMode === "auto" ? inferAssistantMode(request) : assistantMode;
+    const resolvedIntent = resolveLocalIntent(assistantMode, request);
+    // The mode chips never show "question", so keep the displayed mode on a real
+    // track while the offline reply still uses the honest intent.
+    const resolvedMode: AssistantMode = resolvedIntent === "question" ? "auto" : resolvedIntent;
 
     setChatBusy(true);
     setActionBusy(true);
@@ -2254,7 +2228,7 @@ export function App() {
             : `Assistant created blueprint · ${plan.title}`
         );
       } else {
-        const reply = apiReply?.assistantMessage ?? buildCapabilityResponse(resolvedMode, request);
+        const reply = apiReply?.assistantMessage ?? buildLocalCapabilityReply(resolvedIntent, request);
         pushChatMessage("assistant", reply, buildResponseProvenance({
           apiModel: apiReply?.model ?? null,
           attempts: apiAttempts,
