@@ -3,7 +3,11 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $webDir = Join-Path $repoRoot 'apps/web'
-$targetPort = 4173
+# Must match apps/web/vite.config.ts and the port the desktop shell waits on
+# (ASCEND_WEB_PORT in apps/desktop/src/main.ts). When these disagree the desktop
+# window waits forever on an empty port and falls back to the placeholder shell,
+# which looks like the app failing to start.
+$targetPort = if ($env:ASCEND_WEB_PORT) { [int]$env:ASCEND_WEB_PORT } else { 5173 }
 
 function Get-PortListenerPids {
   param(

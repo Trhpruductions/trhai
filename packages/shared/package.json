@@ -7,8 +7,9 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "node --experimental-vm-modules --test --import tsx tests/**/*.test.ts",
     "lint": "echo \"No linter configured yet\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "devDependencies": {
     "typescript": "^5.9.2"

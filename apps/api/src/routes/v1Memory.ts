@@ -4,7 +4,8 @@ import { query } from "../db.js";
 import { runAssistantOrchestrator } from "../services/orchestrator.js";
 
 type Role = "owner" | "admin" | "member" | "viewer" | "billing_admin" | "automation_operator";
-type Mode = "general" | "coding" | "business" | "creator";
+const assistantModes = ["general", "build", "code", "debug", "research", "plan", "coding", "business", "creator"] as const;
+type Mode = typeof assistantModes[number];
 
 type Workspace = {
   id: string;
@@ -76,14 +77,14 @@ const createWorkspaceSchema = z.object({
 });
 
 const createConversationSchema = z.object({
-  mode: z.enum(["general", "coding", "business", "creator"]),
+  mode: z.enum(assistantModes),
   title: z.string().trim().max(200).optional().nullable(),
   projectId: z.string().uuid().optional().nullable()
 });
 
 const sendMessageSchema = z.object({
   content: z.string().trim().min(1),
-  modeOverride: z.enum(["general", "coding", "business", "creator"]).optional(),
+  modeOverride: z.enum(assistantModes).optional(),
   stream: z.boolean().optional()
 });
 

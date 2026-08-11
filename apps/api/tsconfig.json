@@ -1,8 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@ascend/shared": ["../../packages/shared/src/index.ts"]
+    }
   },
   "include": ["src"]
 }

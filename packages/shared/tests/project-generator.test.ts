@@ -1,0 +1,666 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { planProject, extractEntityNames, detectFeatures, pluralize, singularize } from "../src/projectPlan.js";
+import { generateProject } from "../src/projectGenerator.js";
+
+test("derives the entity from the request rather than a fixed template", () => {
+  assert.deepEqual(
+    planProject("Build a minimal incident response tracker").entities.map((e) => e.name),
+    ["incident"]
+  );
+  // "ticket escalation" is one compound; its head is the escalation.
+  assert.equal(
+    planProject("Build an internal ticket escalation service").entities[0].name,
+    "escalation"
+  );
+});
+
+test("compound nouns resolve to a single entity", () => {
+  // English compounds are head-final: a gym membership is a membership, an
+  // expense report is a report. Each run of adjacent nouns collapses to its last.
+  assert.deepEqual(extractEntityNames("gym membership system"), ["membership"]);
+  assert.deepEqual(extractEntityNames("expense report tracker"), ["report"]);
+  assert.deepEqual(extractEntityNames("job application tracker"), ["application"]);
+  // Words filtered as app-shape break the run, leaving the real record.
+  assert.deepEqual(extractEntityNames("incident response tracker"), ["incident"]);
+  assert.deepEqual(extractEntityNames("support ticket system"), ["ticket"]);
+  assert.deepEqual(extractEntityNames("customer directory"), ["customer"]);
+  assert.deepEqual(extractEntityNames("task kanban board"), ["task"]);
+});
+
+test("an app-kind word is a record only when a modifier precedes it", () => {
+  // "application" names software on its own, so it must not become an entity.
+  assert.deepEqual(extractEntityNames("build an application to manage things"), []);
+  // With a modifier in front it is the thing being stored.
+  assert.deepEqual(extractEntityNames("job application tracker"), ["application"]);
+  assert.deepEqual(extractEntityNames("client project tracker"), ["project"]);
+  // The compound ends at the head: a following noun starts a new run.
+  assert.deepEqual(
+    extractEntityNames("job application tracker storing companies"),
+    ["application", "company"]
+  );
+});
+
+test("the record the app is for outranks the word naming the app", () => {
+  // Without this, "inventory" takes the primary slot and "part" is left an
+  // empty stub carrying none of the named fields.
+  const spec = planProject(
+    "Build an inventory tracker for parts with name, unit price and quantity in stock"
+  );
+
+  assert.deepEqual(spec.entities.map((e) => e.name), ["part"]);
+  assert.deepEqual(
+    spec.entities[0].fields.map((f) => `${f.name}:${f.type}`),
+    [
+      "title:string",
+      "description:text",
+      "name:string",
+      "unitPrice:number",
+      "quantityStock:number"
+    ]
+  );
+});
+
+test("a container noun keeps the thing it contains, not itself", () => {
+  // A recipe book stores recipes; the head-final rule would keep the book.
+  assert.deepEqual(extractEntityNames("recipe book app"), ["recipe"]);
+  assert.deepEqual(extractEntityNames("photo album system"), ["photo"]);
+  // Leading, the same word is an ordinary record type.
+  assert.deepEqual(extractEntityNames("book tracker"), ["book"]);
+});
+
+test("a separator keeps genuinely distinct entities apart", () => {
+  // "and" breaks the run, so these stay separate rather than collapsing.
+  assert.deepEqual(
+    extractEntityNames("ticket system tracking customers and agents"),
+    ["ticket", "customer", "agent"]
+  );
+});
+
+test("ignores words that describe the kind of app, not the records", () => {
+  const names = extractEntityNames("Build a minimal internal dashboard tool platform system");
+
+  assert.deepEqual(names, []);
+});
+
+test("falls back to a generic entity rather than inventing one", () => {
+  const spec = planProject("Build something useful");
+
+  assert.equal(spec.entities.length, 1);
+  assert.equal(spec.entities[0].name, "item");
+});
+
+test("detects only features the request actually mentions", () => {
+  assert.deepEqual(
+    detectFeatures("with role controls and an event timeline").sort(),
+    ["roles", "timeline"]
+  );
+  assert.deepEqual(detectFeatures("a plain list of notes"), []);
+});
+
+test("keeps a three-word field label instead of dropping it", () => {
+  // Regression: "quantity in stock" exceeded a two-word limit and vanished from
+  // the spec silently — the field the user asked for simply never existed.
+  const spec = planProject("Build an inventory tracker with SKU, quantity in stock and unit price");
+  const byName = new Map(spec.entities[0].fields.map((field) => [field.name, field.type]));
+
+  assert.ok(byName.has("quantityStock"), "three-word label should survive");
+  assert.equal(byName.get("quantityStock"), "number");
+  assert.equal(byName.get("unitPrice"), "number");
+});
+
+test("types a field from any word in its label, not just an exact match", () => {
+  const spec = planProject("Build a tracker with applied date, unit price and reorder level");
+  const byName = new Map(spec.entities[0].fields.map((field) => [field.name, field.type]));
+
+  assert.equal(byName.get("appliedDate"), "date");
+  assert.equal(byName.get("unitPrice"), "number");
+  assert.equal(byName.get("reorderLevel"), "number");
+});
+
+test("a bare role field does not switch on access control", () => {
+  // "with company, role and status" wants a field; enabling RBAC would put 403s
+  // on every write the user never asked to protect.
+  const spec = planProject("Build a job tracker with company, role and status");
+
+  assert.ok(!spec.features.includes("roles"));
+  assert.ok(spec.entities[0].fields.some((field) => field.name === "role"));
+});
+
+test("explicit access-control wording still switches roles on", () => {
+  for (const request of [
+    "Build a tracker with role-based access",
+    "Build a tracker with role controls",
+    "Build a tracker with roles and permissions"
+  ]) {
+    assert.ok(planProject(request).features.includes("roles"), request);
+  }
+});
+
+test("captures fields the request actually names", () => {
+  const spec = planProject("Build a customer tracker with email, phone and company");
+  const names = spec.entities[0].fields.map((field) => field.name);
+
+  assert.ok(names.includes("email"));
+  assert.ok(names.includes("phone"));
+  assert.ok(names.includes("company"));
+});
+
+test("infers a sensible type for each named field", () => {
+  const spec = planProject(
+    "Build a contact tracker with email, phone, website, notes, balance and active"
+  );
+  const byName = new Map(spec.entities[0].fields.map((field) => [field.name, field.type]));
+
+  assert.equal(byName.get("email"), "email");
+  assert.equal(byName.get("phone"), "phone");
+  assert.equal(byName.get("website"), "url");
+  assert.equal(byName.get("notes"), "text");
+  assert.equal(byName.get("balance"), "number");
+  assert.equal(byName.get("active"), "boolean");
+});
+
+test("camel-cases a two-word field label", () => {
+  const spec = planProject("Build an invoice tracker with due date and total amount");
+  const names = spec.entities[0].fields.map((field) => field.name);
+
+  assert.ok(names.includes("dueDate"));
+  assert.ok(names.includes("totalAmount"));
+});
+
+test("does not turn related entities into columns", () => {
+  // "tracking customers and agents" names entities, not fields.
+  const spec = planProject("Build a ticket system tracking customers and agents");
+  const names = spec.entities[0].fields.map((field) => field.name);
+
+  assert.ok(!names.includes("customer"));
+  assert.ok(!names.includes("agent"));
+  assert.deepEqual(spec.entities.map((entity) => entity.name), ["ticket", "customer", "agent"]);
+});
+
+test("does not invent fields from loose prose", () => {
+  const spec = planProject("Build a really nice simple tracker");
+  const names = spec.entities[0].fields.map((field) => field.name);
+
+  assert.deepEqual(names, ["title", "description"]);
+});
+
+test("a feature named inside a field list does not become a column", () => {
+  // "with amount, status and a dashboard" names one field and two features.
+  const spec = planProject("Build an invoice tracker with amount, status and a dashboard");
+  const names = spec.entities[0].fields.map((field) => field.name);
+
+  assert.ok(names.includes("amount"));
+  assert.ok(!names.includes("dashboard"), "dashboard is a feature, not a field");
+  assert.equal(spec.entities[0].fields.find((f) => f.name === "status")?.type, "enum");
+});
+
+test("a named field is not duplicated by a feature field", () => {
+  const spec = planProject("Build a task tracker with due date and deadlines");
+  const dueDates = spec.entities[0].fields.filter((field) => field.name === "dueDate");
+
+  assert.equal(dueDates.length, 1);
+});
+
+test("generated validation enforces the inferred formats", () => {
+  const server = generateProject(planProject("Build a contact tracker with email and website"))
+    .find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  assert.match(server.content, /is not a valid email/);
+  assert.match(server.content, /is not a valid url/);
+});
+
+test("the UI uses native input types for inferred fields", () => {
+  const html = generateProject(planProject("Build a contact tracker with email, phone, website and active"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.match(html.content, /type="email" name="email"/);
+  assert.match(html.content, /type="tel" name="phone"/);
+  assert.match(html.content, /type="url" name="website"/);
+  assert.match(html.content, /type="checkbox" name="active"/);
+});
+
+test("plans every entity the request mentions", () => {
+  const spec = planProject("Build a support ticket system tracking customers and agents");
+
+  assert.deepEqual(spec.entities.map((entity) => entity.name), ["ticket", "customer", "agent"]);
+});
+
+test("only the primary entity carries the workflow fields", () => {
+  // A customer does not have a priority.
+  const spec = planProject("Build a ticket system tracking customers with status and priority");
+  const [primary, secondary] = spec.entities;
+
+  assert.ok(primary.fields.some((field) => field.name === "priority"));
+  assert.deepEqual(secondary.fields.map((field) => field.name), ["title", "description"]);
+});
+
+test("roles add enforcement, not a decorative field", () => {
+  // A "visibility" dropdown looked like permissions while granting none.
+  const spec = planProject("Build a tracker with role-based access");
+  const server = generateProject(spec).find((file) => file.path === "server.js");
+
+  assert.ok(!spec.entities[0].fields.some((field) => field.name === "visibility"));
+  assert.ok(server);
+  assert.match(server.content, /rolePermissions/);
+  assert.match(server.content, /sendJson\(response, 403/);
+});
+
+test("no role enforcement is emitted when roles were not requested", () => {
+  const server = generateProject(planProject("Build a plain note keeper"))
+    .find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  assert.doesNotMatch(server.content, /rolePermissions/);
+});
+
+test("links the primary entity to each supporting one", () => {
+  const spec = planProject("Build a ticket system tracking customers and agents");
+  const refs = spec.entities[0].fields.filter((field) => field.type === "reference");
+
+  assert.deepEqual(refs.map((field) => field.name), ["customerId", "agentId"]);
+  assert.deepEqual(refs.map((field) => field.references), ["customers", "agents"]);
+  // Optional: a ticket must be creatable before its customer record exists.
+  assert.ok(refs.every((field) => !field.required));
+});
+
+test("a single-entity project has no reference fields", () => {
+  const spec = planProject("Build a note keeper");
+
+  assert.ok(!spec.entities[0].fields.some((field) => field.type === "reference"));
+});
+
+test("generated server validates references and protects deletes", () => {
+  const spec = planProject("Build a ticket system tracking customers");
+  const server = generateProject(spec).find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  assert.match(server.content, /referenceMap/);
+  assert.match(server.content, /blockingReferences/);
+  assert.match(server.content, /sendJson\(response, 409/);
+});
+
+test("number fields accept the strings an HTML form submits", () => {
+  // Regression: the create form posts "500", and requiring a JS number made
+  // every generated app with a numeric field unable to save one.
+  const server = generateProject(planProject("Build an invoice tracker with amount"))
+    .find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  assert.match(server.content, /Number\(String\(raw\)\.trim\(\)\)/);
+  assert.match(server.content, /Number\.isFinite\(parsed\)/);
+});
+
+test("boolean fields are not flipped by the string \"false\"", () => {
+  const server = generateProject(planProject("Build a task tracker with active"))
+    .find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  assert.match(server.content, /"false", "0", "off", "no"/);
+});
+
+test("a calendar request implies a date field to place records on", () => {
+  const spec = planProject("Build a shift schedule");
+
+  assert.ok(spec.features.includes("calendar"));
+  assert.ok(spec.features.includes("dueDates"));
+  assert.ok(spec.entities[0].fields.some((field) => field.type === "date"));
+});
+
+test("a calendar emits a month grid and navigation", () => {
+  const html = generateProject(planProject("Build an appointment calendar"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.match(html.content, /class="calendar-grid"/);
+  assert.match(html.content, /renderCalendar/);
+  assert.match(html.content, /data-month="-1"/);
+  assert.match(html.content, /data-view="calendar"/);
+});
+
+test("calendar dates are compared as strings, not Date objects", () => {
+  // Parsing "2026-03-01" as a Date and reading local parts shifts the day in
+  // negative-offset timezones, landing records on the wrong square.
+  const html = generateProject(planProject("Build an appointment calendar"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.match(html.content, /value\.slice\(0, 10\) !== key/);
+});
+
+test("records with no date are reported rather than silently dropped", () => {
+  const html = generateProject(planProject("Build an appointment calendar"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.match(html.content, /have no ' \+ calendarField \+ ' and are not shown/);
+});
+
+test("board and calendar can coexist as separate views", () => {
+  const spec = planProject("Build a task kanban board with a delivery schedule");
+  const html = generateProject(spec).find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.match(html.content, /data-view="board"/);
+  assert.match(html.content, /data-view="calendar"/);
+});
+
+test("no calendar code is emitted when none was requested", () => {
+  const html = generateProject(planProject("Build a plain note keeper"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.doesNotMatch(html.content, /renderCalendar/);
+});
+
+test("calendar words do not become fields or entities", () => {
+  const spec = planProject("Build an appointment calendar with a schedule view");
+
+  assert.deepEqual(spec.entities.map((entity) => entity.name), ["appointment"]);
+  const names = spec.entities[0].fields.map((field) => field.name);
+  assert.ok(!names.includes("calendar"));
+  assert.ok(!names.includes("schedule"));
+});
+
+test("a board request implies a status field to form columns", () => {
+  // "kanban board for tasks" never says status, but a board needs columns.
+  const spec = planProject("Build a kanban board for tasks");
+
+  assert.ok(spec.features.includes("board"));
+  assert.ok(spec.features.includes("status"));
+  assert.equal(spec.entities[0].fields.find((f) => f.name === "status")?.type, "enum");
+});
+
+test("a board emits columns and a view toggle", () => {
+  const html = generateProject(planProject("Build a task kanban board"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.match(html.content, /class="board"/);
+  assert.match(html.content, /data-view="board"/);
+  assert.match(html.content, /renderBoard/);
+  assert.match(html.content, /moveCard/);
+});
+
+test("moving a card patches the record rather than only moving the DOM", () => {
+  // If the board reordered locally, the list view would disagree with it.
+  const html = generateProject(planProject("Build a task kanban board"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.match(html.content, /method: 'PATCH'/);
+  assert.match(html.content, /\[boardField\]: next/);
+});
+
+test("no board code is emitted when none was requested", () => {
+  const html = generateProject(planProject("Build a plain note keeper"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.doesNotMatch(html.content, /renderBoard/);
+  assert.doesNotMatch(html.content, /data-view="board"/);
+});
+
+test("board words do not become fields", () => {
+  const spec = planProject("Build a task tracker with a kanban board and columns");
+  const names = spec.entities[0].fields.map((field) => field.name);
+
+  assert.ok(!names.includes("kanban"));
+  assert.ok(!names.includes("board"));
+  assert.ok(!names.includes("columns"));
+});
+
+test("detects a dashboard request", () => {
+  assert.ok(planProject("Build a ticket tracker with a dashboard").features.includes("dashboard"));
+  assert.ok(planProject("Build a sales report with status").features.includes("dashboard"));
+  assert.ok(!planProject("Build a plain note keeper").features.includes("dashboard"));
+});
+
+test("a dashboard emits a summary endpoint and a UI panel", () => {
+  const spec = planProject("Build a ticket tracker with status, priority and a dashboard");
+  const files = generateProject(spec);
+  const server = files.find((file) => file.path === "server.js");
+  const html = files.find((file) => file.path === "public/index.html");
+
+  assert.ok(server && html);
+  assert.match(server.content, /buildSummary/);
+  assert.match(server.content, /collection === "summary"/);
+  assert.match(html.content, /id="summary"/);
+  assert.match(html.content, /loadSummary/);
+});
+
+test("no summary code is emitted when no dashboard was asked for", () => {
+  const server = generateProject(planProject("Build a plain note keeper"))
+    .find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  assert.doesNotMatch(server.content, /buildSummary/);
+});
+
+test("the summary groups by every enum field and totals every number field", () => {
+  const spec = planProject("Build an invoice tracker with amount, status, priority and a dashboard");
+  const server = generateProject(spec).find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  // Route metadata the summary depends on.
+  assert.match(server.content, /enumFields: \[\{"name":"status"/);
+  assert.match(server.content, /numberFields: \["amount"\]/);
+  assert.match(server.content, /average: numbers\.length \? sum \/ numbers\.length : null/);
+});
+
+test("an average over no rows is null, not zero", () => {
+  // Reporting 0 as the average of nothing is a lie the UI would render as fact.
+  const server = generateProject(planProject("Build an invoice tracker with amount and a dashboard"))
+    .find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  assert.match(server.content, /numbers\.length \? sum \/ numbers\.length : null/);
+});
+
+test("the README documents the summary endpoint", () => {
+  const readme = generateProject(planProject("Build a ticket tracker with status and a dashboard"))
+    .find((file) => file.path === "README.md");
+
+  assert.ok(readme);
+  assert.match(readme.content, /\/api\/summary/);
+});
+
+test("a detected search feature is reachable from the UI", () => {
+  // Regression: the planner detected search and the server implemented ?q=, but
+  // the UI had no control, so the feature was unreachable.
+  const spec = planProject("Build a ticket tracker with search");
+  const html = generateProject(spec).find((file) => file.path === "public/index.html");
+  const server = generateProject(spec).find((file) => file.path === "server.js");
+
+  assert.ok(spec.features.includes("search"));
+  assert.ok(html && server);
+  assert.match(html.content, /type="search"/);
+  assert.match(html.content, /\?q=' \+ encodeURIComponent/);
+  assert.match(server.content, /searchParams\.get\("q"\)/);
+});
+
+test("no search control is emitted when search was not requested", () => {
+  const spec = planProject("Build a plain note keeper");
+  const html = generateProject(spec).find((file) => file.path === "public/index.html");
+
+  assert.ok(!spec.features.includes("search"));
+  assert.ok(html);
+  assert.doesNotMatch(html.content, /type="search"/);
+});
+
+test("the README documents the features that were generated", () => {
+  const readme = generateProject(planProject("Build a ticket tracker with search and role-based access"))
+    .find((file) => file.path === "README.md");
+
+  assert.ok(readme);
+  assert.match(readme.content, /\?q=/);
+  assert.match(readme.content, /x-role/);
+  assert.match(readme.content, /only admins can delete/i);
+});
+
+test("the UI can update records, not only create and delete", () => {
+  const html = generateProject(planProject("Build a ticket tracker with status and priority"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.match(html.content, /renderEditRow/);
+  assert.match(html.content, /method: 'PATCH'/);
+  assert.match(html.content, /'Save'/);
+  assert.match(html.content, /'Cancel'/);
+});
+
+test("the client receives full field metadata, not just names", () => {
+  // Inline editing needs the type, options and reference target to build the
+  // right control for each field.
+  const html = generateProject(planProject("Build a ticket tracker with status tracking customers"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.match(html.content, /"type":\s*"enum"/);
+  assert.match(html.content, /"options":/);
+  assert.match(html.content, /"references":\s*"customers"/);
+});
+
+test("reference selects are populated after the edit row is in the document", () => {
+  // Regression: fillReferences() scans the document, so calling it while the row
+  // was still detached left the select empty and saving silently cleared the
+  // reference — losing the link between records.
+  const html = generateProject(planProject("Build a ticket tracker tracking customers"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  const insertIndex = html.content.indexOf("tr.replaceWith(editRow)");
+  const fillIndex = html.content.indexOf("fillReferences();", insertIndex);
+  assert.ok(insertIndex > -1, "edit row should be inserted before references are filled");
+  assert.ok(fillIndex > insertIndex, "fillReferences must run after insertion");
+});
+
+test("a pending reference value is used when options have not loaded", () => {
+  const html = generateProject(planProject("Build a ticket tracker tracking customers"))
+    .find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.match(html.content, /dataset\.pending/);
+});
+
+test("reference inputs render as a picker, not a raw id box", () => {
+  const spec = planProject("Build a ticket system tracking customers");
+  const html = generateProject(spec).find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  assert.match(html.content, /select name="customerId" data-ref="customers"/);
+  assert.match(html.content, /fillReferences/);
+});
+
+test("fields follow from detected features", () => {
+  const plain = planProject("Build a note keeper");
+  const rich = planProject("Build a ticket tracker with status, priority, assignee and due dates");
+
+  assert.deepEqual(plain.entities[0].fields.map((f) => f.name), ["title", "description"]);
+  const richFields = rich.entities[0].fields.map((f) => f.name);
+  assert.ok(richFields.includes("status"));
+  assert.ok(richFields.includes("priority"));
+  assert.ok(richFields.includes("assignee"));
+  assert.ok(richFields.includes("dueDate"));
+});
+
+test("pluralization handles the awkward cases", () => {
+  assert.equal(pluralize("incident"), "incidents");
+  assert.equal(pluralize("policy"), "policies");
+  assert.equal(pluralize("class"), "classes");
+  assert.equal(singularize("policies"), "policy");
+  assert.equal(singularize("tickets"), "ticket");
+});
+
+test("generates a project with no npm dependencies", () => {
+  const files = generateProject(planProject("Build an incident tracker"));
+  const pkg = files.find((file) => file.path === "package.json");
+
+  assert.ok(pkg);
+  const parsed = JSON.parse(pkg.content);
+  assert.equal(parsed.dependencies, undefined, "generated projects must install nothing");
+  assert.equal(parsed.scripts.start, "node server.js");
+});
+
+test("never imports a package it does not declare", () => {
+  // The previous generator imported express while declaring no dependencies, so
+  // generated projects could not start at all.
+  const files = generateProject(planProject("Build an incident tracker"));
+
+  for (const file of files.filter((entry) => entry.path.endsWith(".js"))) {
+    const imports = [...file.content.matchAll(/from\s+"([^"]+)"/g)].map((match) => match[1]);
+    for (const specifier of imports) {
+      const isBuiltin = specifier.startsWith("node:");
+      const isRelative = specifier.startsWith("./") || specifier.startsWith("../");
+      assert.ok(isBuiltin || isRelative, `${file.path} imports bare specifier: ${specifier}`);
+    }
+  }
+});
+
+test("emits routes and validation for every entity", () => {
+  const spec = planProject("Build a ticket system tracking customers and agents");
+  const server = generateProject(spec).find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  for (const entity of spec.entities) {
+    assert.match(server.content, new RegExp(`collection: "${entity.plural}"`));
+    assert.match(server.content, new RegExp(`validate${entity.label}\\b`));
+  }
+});
+
+test("the UI exposes a section per entity", () => {
+  const spec = planProject("Build a ticket system tracking customers and agents");
+  const html = generateProject(spec).find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  for (const entity of spec.entities) {
+    assert.ok(html.content.includes(`data-collection="${entity.plural}"`), `missing UI for ${entity.plural}`);
+  }
+});
+
+test("wires timeline events only when the request asks for them", () => {
+  const withTimeline = generateProject(planProject("Build an incident tracker with an event timeline"))
+    .find((file) => file.path === "server.js");
+  const without = generateProject(planProject("Build an incident tracker"))
+    .find((file) => file.path === "server.js");
+
+  assert.ok(withTimeline && without);
+  assert.match(withTimeline.content, /recordEvent/);
+  assert.doesNotMatch(without.content, /recordEvent/);
+});
+
+test("the UI form exposes exactly the derived fields", () => {
+  const spec = planProject("Build a ticket tracker with status and priority");
+  const html = generateProject(spec).find((file) => file.path === "public/index.html");
+
+  assert.ok(html);
+  for (const field of spec.entities[0].fields) {
+    assert.ok(html.content.includes(`name="${field.name}"`), `missing input for ${field.name}`);
+  }
+});
+
+test("generated JavaScript parses as a valid ES module", async () => {
+  // Catches template-assembly mistakes that would otherwise only surface at runtime.
+  // SourceTextModule compiles without executing, so this cannot start a server.
+  const vm = await import("node:vm");
+  const files = generateProject(planProject("Build a ticket tracker with status, priority and timeline"));
+
+  for (const file of files.filter((entry) => entry.path.endsWith(".js"))) {
+    assert.doesNotThrow(
+      () => new vm.SourceTextModule(file.content),
+      `${file.path} is not valid JavaScript`
+    );
+  }
+});
+
+test("every generated file has content", () => {
+  const files = generateProject(planProject("Build an incident tracker with roles and timeline"));
+
+  assert.ok(files.length >= 6);
+  for (const file of files) {
+    assert.ok(file.content.trim().length > 0, `${file.path} is empty`);
+    assert.ok(!file.path.startsWith("/"), `${file.path} must be relative`);
+  }
+});

@@ -1,0 +1,12 @@
+{
+  "//": "Typecheck-only config covering tests. The build config includes just src (rootDir), so without this the test suite is never type-checked and stale props survive silently.",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@ascend/shared": ["../../packages/shared/src/index.ts"]
+    }
+  },
+  "include": ["src", "tests"]
+}

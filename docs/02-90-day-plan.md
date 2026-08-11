@@ -25,6 +25,9 @@ Ask -> Plan -> Execute -> Verify -> Remember.
 - Memory recall helpfulness score >= 4.2/5.
 - Task completion rate for coding workflows >= 80%.
 - Gross margin model validated for Pro tier assumptions.
+- Live execution trust score >= 95% (users report that progress reflects real work, not simulation).
+- AI Core state accuracy >= 99% (visual state matches runtime state events).
+- Interaction frame stability >= 95% of sessions within motion budget on reference hardware.
 
 ## Scope for Day 90
 In-scope:
@@ -106,11 +109,42 @@ Deliverables:
 - Security hardening and key management review.
 - Billing tier scaffolding (Free/Pro/Business).
 - Beta onboarding and support playbook.
+- Premium UX conformance pass (AI Core, motion, live-thinking, status transparency).
 
 Exit criteria:
 - Beta launch checklist complete.
 - Incident response runbook tested.
 - Production readiness review signed off.
+
+## Premium Experience Track (Runs Across All 12 Weeks)
+1. AI Core state engine
+- Implement deterministic state transitions bound to real system events.
+- Validate state accuracy during voice, tool, and response workflows.
+
+2. Live Coding command center
+- Ensure coding workflows stream actual command and file events.
+- Reject releases that display simulated completion states.
+
+3. Live Thinking transparency
+- Show non-sensitive reasoning stages: understanding, gathering context, planning, building, verifying.
+- Measure stage timing to improve user-perceived responsiveness.
+
+4. Motion and rendering stability
+- Enforce frame/latency budgets for nav, prompt interactions, and panel transitions.
+- Include reduced-motion parity validation.
+
+## Non-Negotiable Release Gates
+- Gate A: Security and data integrity
+	- No unresolved critical findings across auth, RBAC, idempotency, and audit logs.
+
+- Gate B: Runtime truthfulness
+	- Live Coding and execution status surfaces reflect real operations and logs.
+
+- Gate C: Performance and fluidity
+	- Interaction and rendering stay within predefined budgets on reference hardware.
+
+- Gate D: Recovery and persistence
+	- Restart, replay, and degraded-mode recovery tests pass for critical workflows.
 
 ## Parallel Workstreams
 ### Product and Design

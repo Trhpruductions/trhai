@@ -320,3 +320,133 @@ Stories:
 2. Model router before cost controls and SLA tuning.
 3. Memory controls before large-scale beta onboarding.
 4. Usage collector before subscription gating.
+
+## Epic E11: Premium Experience Engine (AI Core + Motion)
+Goal: Deliver a distinctive, alive, high-trust interface identity with meaningful state motion.
+
+Stories:
+1. E11-S1 AI Core state machine and animation runtime
+- Priority: P0
+- Points: 8
+- Owner: Frontend
+- Acceptance:
+  - AI Core supports deterministic states: idle, listening, thinking, processing, speaking.
+  - State transitions are driven by real runtime events, not timer-only loops.
+  - Reduced-motion mode preserves state semantics without heavy animation.
+
+2. E11-S2 Design token system and glass surface primitives
+- Priority: P0
+- Points: 5
+- Owner: Frontend + Design
+- Acceptance:
+  - Color, spacing, radius, blur, and glow token sets are centralized.
+  - Tokens are used by top nav, side rails, prompt surface, and context rail.
+  - Contrast and accessibility checks pass for interactive controls.
+
+3. E11-S3 Motion performance harness
+- Priority: P0
+- Points: 5
+- Owner: Frontend + QA
+- Acceptance:
+  - Motion profiles are instrumented with frame-time telemetry.
+  - Target maintains fluid interaction on reference hardware under load.
+  - Regressions block release when frame budget threshold is exceeded.
+
+## Epic E12: Live Coding Command Center
+Goal: Transform coding requests into transparent, real execution with verifiable progress.
+
+Stories:
+1. E12-S1 Live split-layout mode switching
+- Priority: P0
+- Points: 8
+- Owner: Frontend
+- Acceptance:
+  - Coding intent triggers transition to split command-center layout.
+  - Left pane shows conversation/plan; right pane shows files/editor; bottom shows terminal.
+  - Layout can collapse responsively without losing execution trace visibility.
+
+2. E12-S2 Real-time execution event bus
+- Priority: P0
+- Points: 8
+- Owner: Backend + Frontend
+- Acceptance:
+  - Execution events stream in order: create, install, write, test, verify, launch.
+  - UI displays event timestamps, status, and artifact references.
+  - Failure events include deterministic retry/recover actions.
+
+3. E12-S3 Artifact integrity and replay view
+- Priority: P1
+- Points: 5
+- Owner: Backend
+- Acceptance:
+  - Every changed file has before/after metadata and trace correlation.
+  - Users can inspect command/output provenance for each step.
+  - Replay summary recreates a high-level execution timeline.
+
+## Epic E13: Live Thinking and Trust UX
+Goal: Keep the interface visibly intelligent at all times without exposing private reasoning.
+
+Stories:
+1. E13-S1 Public reasoning-stage model
+- Priority: P0
+- Points: 5
+- Owner: Full-stack
+- Acceptance:
+  - Stage labels support: understanding, context gathering, planning, building, verifying.
+  - Stage transitions map to actual pipeline checkpoints.
+  - Stage telemetry includes duration metrics for optimization.
+
+2. E13-S2 Context provenance badges
+- Priority: P1
+- Points: 5
+- Owner: Frontend
+- Acceptance:
+  - Responses show non-sensitive source classes (workspace files, memory, web, tools).
+  - Source display does not reveal restricted data.
+  - Users can drill down to action logs where applicable.
+
+3. E13-S3 Graceful degraded-state UX
+- Priority: P1
+- Points: 3
+- Owner: Frontend + Backend
+- Acceptance:
+  - Model/provider outages present clear fallback state and next options.
+  - Partial results are labeled and confidence-scoped.
+  - Recovery events are reflected automatically when services return.
+
+## Epic E14: Performance and Hardening Gates
+Goal: Guarantee premium feel under real-world pressure before each release.
+
+Stories:
+1. E14-S1 Interaction latency budget enforcement
+- Priority: P0
+- Points: 5
+- Owner: SRE + Frontend
+- Acceptance:
+  - Navigation, command bar, and chat input paths have measured latency budgets.
+  - CI/perf pipelines fail when budget regressions exceed threshold.
+  - Reports include culprit components and traces.
+
+2. E14-S2 Abuse and concurrency stress suite
+- Priority: P0
+- Points: 8
+- Owner: QA + Backend
+- Acceptance:
+  - Rapid command-spam tests cover duplicate suppression and idempotency.
+  - Concurrency tests validate message ordering and state consistency.
+  - Economy/billing-adjacent counters remain monotonic and non-negative.
+
+3. E14-S3 Restart persistence validation
+- Priority: P0
+- Points: 5
+- Owner: Backend + SRE
+- Acceptance:
+  - In-flight and completed jobs recover deterministically after restart.
+  - Idempotency and audit continuity survive service restarts.
+  - Cold-start health checks validate readiness for all critical paths.
+
+## Premium Quality Gates (Apply to Every Release)
+- Gate P1: No unresolved P0 defects in auth, permissions, idempotency, or data integrity.
+- Gate P2: Live Coding telemetry reflects real command/file activity with no simulated states.
+- Gate P3: Motion and interaction performance stay within agreed latency/frame budgets.
+- Gate P4: Restart persistence, audit continuity, and failure-replay checks all pass.

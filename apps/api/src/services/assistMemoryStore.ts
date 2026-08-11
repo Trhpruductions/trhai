@@ -1,0 +1,359 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { extractMemoryCandidates, suppressDuplicateMemories, type MemoryCandidate } from "./memoryExtraction.js";
+
+// Memory for the `/v1/assist` endpoint.
+//
+// `/v1/assist` is the only endpoint the web client calls and it has no workspace
+// concept, so memories are held per session key rather than per workspace. This is
+// intentionally a separate store from the workspace-scoped one in v1Memory.ts: that
+// store is reachable only through authenticated workspace routes, and quietly
+// writing anonymous memories into it would cross a permission boundary.
+
+export type StoredMemory = {
+  id: string;
+  title: string;
+  body: string;
+  kind: MemoryCandidate["kind"];
+  confidence: number;
+  rule: string;
+  createdAt: string;
+  /** Pinned entries rank first in retrieval and are never evicted. */
+  pinned: boolean;
+  /** Set when the user renames the entry, so extraction never overwrites intent. */
+  editedAt?: string;
+};
+
+export type MemoryAuditAction = "recorded" | "pinned" | "unpinned" | "relabeled" | "forgotten" | "cleared";
+
+export type MemoryAuditEntry = {
+  id: string;
+  sessionKey: string;
+  memoryId: string | null;
+  action: MemoryAuditAction;
+  detail: string;
+  createdAt: string;
+};
+
+/** Cap per session so an anonymous caller cannot grow memory without bound. */
+export const maxMemoriesPerSession = 50;
+/** How many memories are fed back into a single reply. */
+export const memoryRetrievalLimit = 5;
+/** The endpoint is unauthenticated, so session count is capped too. */
+export const maxTrackedSessions = 500;
+
+/** E4-S2: control actions are auditable. Capped so it cannot grow without bound. */
+export const maxAuditEntries = 500;
+
+// Insertion-ordered, so evicting the first key drops the least recently created.
+const memoriesBySession = new Map<string, StoredMemory[]>();
+const auditLog: MemoryAuditEntry[] = [];
+
+// ---------------------------------------------------------------------------
+// Persistence
+//
+// Memory that vanishes on restart is not memory. State is mirrored to a JSON
+// file using only the standard library — no database and no new dependency.
+// Writes go through a temp file and a rename so a crash mid-write cannot leave
+// a truncated file behind.
+// ---------------------------------------------------------------------------
+
+const memoryFilePath = process.env.ASSIST_MEMORY_FILE
+  ?? path.join(process.cwd(), "data", "assist-memory.json");
+
+let loaded = false;
+/** Disabled in tests that assert in-memory behaviour without touching disk. */
+let persistenceEnabled = process.env.ASSIST_MEMORY_PERSIST !== "off";
+
+type PersistedShape = {
+  version: 1;
+  sessions: Array<{ key: string; memories: StoredMemory[] }>;
+  audit: MemoryAuditEntry[];
+};
+
+function isStoredMemory(value: unknown): value is StoredMemory {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<StoredMemory>;
+  return typeof entry.id === "string"
+    && typeof entry.title === "string"
+    && typeof entry.body === "string"
+    && typeof entry.createdAt === "string";
+}
+
+function loadFromDisk(): void {
+  if (loaded) return;
+  loaded = true;
+  if (!persistenceEnabled || !existsSync(memoryFilePath)) return;
+
+  try {
+    const parsed = JSON.parse(readFileSync(memoryFilePath, "utf8")) as Partial<PersistedShape>;
+    if (!Array.isArray(parsed.sessions)) return;
+
+    for (const session of parsed.sessions) {
+      if (!session || typeof session.key !== "string" || !Array.isArray(session.memories)) continue;
+      // Stored data is only as trustworthy as the file; drop anything malformed
+      // rather than letting a hand-edited file crash retrieval later.
+      const memories = session.memories.filter(isStoredMemory).map((entry) => ({
+        ...entry,
+        pinned: Boolean(entry.pinned)
+      }));
+      if (memories.length) memoriesBySession.set(session.key, memories);
+    }
+
+    if (Array.isArray(parsed.audit)) {
+      auditLog.push(...parsed.audit.filter((entry): entry is MemoryAuditEntry =>
+        Boolean(entry) && typeof entry === "object" && typeof (entry as MemoryAuditEntry).id === "string"));
+    }
+  } catch {
+    // A corrupt file must never take the API down; start clean instead.
+  }
+}
+
+function saveToDisk(): void {
+  if (!persistenceEnabled) return;
+
+  try {
+    const payload: PersistedShape = {
+      version: 1,
+      sessions: [...memoriesBySession.entries()].map(([key, memories]) => ({ key, memories })),
+      audit: auditLog
+    };
+    mkdirSync(path.dirname(memoryFilePath), { recursive: true });
+    const tempPath = `${memoryFilePath}.tmp`;
+    writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
+    renameSync(tempPath, memoryFilePath);
+  } catch {
+    // Losing durability is bad; taking the request down with it is worse.
+  }
+}
+
+function recordAudit(
+  sessionKey: string,
+  memoryId: string | null,
+  action: MemoryAuditAction,
+  detail: string
+): void {
+  auditLog.push({
+    id: globalThis.crypto.randomUUID(),
+    sessionKey,
+    memoryId,
+    action,
+    detail,
+    createdAt: new Date().toISOString()
+  });
+
+  if (auditLog.length > maxAuditEntries) {
+    auditLog.splice(0, auditLog.length - maxAuditEntries);
+  }
+}
+
+/** Newest first. Scoped to a session when a key is given. */
+export function getMemoryAudit(sessionKey?: string, limit = 50): MemoryAuditEntry[] {
+  loadFromDisk();
+  const scoped = sessionKey ? auditLog.filter((entry) => entry.sessionKey === sessionKey) : auditLog;
+  return scoped.slice(-limit).reverse();
+}
+
+function evictOldestSessionIfNeeded(): void {
+  while (memoriesBySession.size > maxTrackedSessions) {
+    const oldestKey = memoriesBySession.keys().next().value;
+    if (oldestKey === undefined) {
+      return;
+    }
+    memoriesBySession.delete(oldestKey);
+  }
+}
+
+export function getSessionMemories(sessionKey: string): StoredMemory[] {
+  loadFromDisk();
+  return memoriesBySession.get(sessionKey) ?? [];
+}
+
+/**
+ * Extract memories from a message and persist the ones that are actually new.
+ * Returns only what was written, so callers can report real counts.
+ */
+export function recordMemoriesFromMessage(sessionKey: string, message: string): StoredMemory[] {
+  loadFromDisk();
+  const candidates = extractMemoryCandidates(message);
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  const existing = memoriesBySession.get(sessionKey) ?? [];
+  const fresh = suppressDuplicateMemories(candidates, existing.map((entry) => entry.body));
+  if (fresh.length === 0) {
+    return [];
+  }
+
+  const now = new Date().toISOString();
+  const stored: StoredMemory[] = fresh.map((candidate) => ({
+    id: globalThis.crypto.randomUUID(),
+    title: candidate.title,
+    body: candidate.body,
+    kind: candidate.kind,
+    confidence: candidate.confidence,
+    rule: candidate.rule,
+    createdAt: now,
+    pinned: false
+  }));
+
+  memoriesBySession.set(sessionKey, applyCap([...existing, ...stored]));
+  evictOldestSessionIfNeeded();
+
+  for (const entry of stored) {
+    recordAudit(sessionKey, entry.id, "recorded", `Recorded via ${entry.rule}: ${entry.title}`);
+  }
+
+  saveToDisk();
+  return stored;
+}
+
+/**
+ * Trim to the cap by dropping the oldest *unpinned* entries. Pinning is an explicit
+ * user instruction to keep something, so eviction must never override it.
+ */
+function applyCap(entries: StoredMemory[]): StoredMemory[] {
+  if (entries.length <= maxMemoriesPerSession) {
+    return entries;
+  }
+
+  const result = [...entries];
+  let overflow = result.length - maxMemoriesPerSession;
+
+  for (let index = 0; index < result.length && overflow > 0; ) {
+    if (result[index].pinned) {
+      index += 1;
+      continue;
+    }
+    result.splice(index, 1);
+    overflow -= 1;
+  }
+
+  // If everything is pinned the cap yields to the user's explicit intent.
+  return result;
+}
+
+/**
+ * Pinned entries first, then most recent. Recency is the only other signal
+ * available — there is no embedding model here to rank by relevance.
+ */
+export function retrieveSessionMemories(
+  sessionKey: string,
+  limit: number = memoryRetrievalLimit
+): StoredMemory[] {
+  loadFromDisk();
+  const entries = memoriesBySession.get(sessionKey) ?? [];
+  const newestFirst = [...entries].reverse();
+  const pinned = newestFirst.filter((entry) => entry.pinned);
+  const unpinned = newestFirst.filter((entry) => !entry.pinned);
+  return [...pinned, ...unpinned].slice(0, limit);
+}
+
+/** Newest first, for the memory controls UI. */
+export function listSessionMemories(sessionKey: string): StoredMemory[] {
+  loadFromDisk();
+  const entries = memoriesBySession.get(sessionKey) ?? [];
+  const newestFirst = [...entries].reverse();
+  const pinned = newestFirst.filter((entry) => entry.pinned);
+  const unpinned = newestFirst.filter((entry) => !entry.pinned);
+  return [...pinned, ...unpinned];
+}
+
+export function setMemoryPinned(sessionKey: string, memoryId: string, pinned: boolean): StoredMemory | null {
+  loadFromDisk();
+  const entries = memoriesBySession.get(sessionKey);
+  const target = entries?.find((entry) => entry.id === memoryId);
+  if (!entries || !target) {
+    return null;
+  }
+
+  target.pinned = pinned;
+  recordAudit(sessionKey, memoryId, pinned ? "pinned" : "unpinned", target.title);
+  saveToDisk();
+  return target;
+}
+
+export const maxMemoryTitleLength = 120;
+
+export function relabelMemory(sessionKey: string, memoryId: string, title: string): StoredMemory | null {
+  loadFromDisk();
+  const entries = memoriesBySession.get(sessionKey);
+  const target = entries?.find((entry) => entry.id === memoryId);
+  if (!entries || !target) {
+    return null;
+  }
+
+  const trimmed = title.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const previous = target.title;
+  target.title = trimmed.slice(0, maxMemoryTitleLength);
+  target.editedAt = new Date().toISOString();
+  recordAudit(sessionKey, memoryId, "relabeled", `"${previous}" -> "${target.title}"`);
+  saveToDisk();
+  return target;
+}
+
+/** Deletion takes effect immediately, so the next retrieval cannot return it. */
+export function forgetMemory(sessionKey: string, memoryId: string): boolean {
+  loadFromDisk();
+  const entries = memoriesBySession.get(sessionKey);
+  if (!entries) {
+    return false;
+  }
+
+  const index = entries.findIndex((entry) => entry.id === memoryId);
+  if (index === -1) {
+    return false;
+  }
+
+  const [removed] = entries.splice(index, 1);
+  recordAudit(sessionKey, memoryId, "forgotten", removed.title);
+  saveToDisk();
+  return true;
+}
+
+export function forgetAllMemories(sessionKey: string): number {
+  loadFromDisk();
+  const entries = memoriesBySession.get(sessionKey);
+  const count = entries?.length ?? 0;
+  if (count === 0) {
+    return 0;
+  }
+
+  memoriesBySession.set(sessionKey, []);
+  recordAudit(sessionKey, null, "cleared", `Cleared ${count} memories`);
+  saveToDisk();
+  return count;
+}
+
+/**
+ * Test seam. Marks state as loaded so a reset is not immediately undone by a
+ * lazy read of the file it was meant to clear.
+ */
+export function resetAssistMemory(sessionKey?: string): void {
+  loaded = true;
+  auditLog.length = 0;
+  if (sessionKey) {
+    memoriesBySession.delete(sessionKey);
+  } else {
+    memoriesBySession.clear();
+  }
+  saveToDisk();
+}
+
+/** Test seam: drop in-process state and re-read the file, simulating a restart. */
+export function reloadAssistMemoryFromDisk(): void {
+  memoriesBySession.clear();
+  auditLog.length = 0;
+  loaded = false;
+  loadFromDisk();
+}
+
+/** Test seam: run without touching disk. */
+export function setAssistMemoryPersistence(enabled: boolean): void {
+  persistenceEnabled = enabled;
+}

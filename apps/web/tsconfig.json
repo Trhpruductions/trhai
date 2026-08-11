@@ -5,9 +5,13 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "rootDir": "src",
     "outDir": "dist",
-    "types": ["vite/client"]
+    "noEmit": true,
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@ascend/shared": ["../../packages/shared/src/index.ts"]
+    }
   },
   "include": ["src"]
 }

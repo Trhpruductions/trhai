@@ -6,7 +6,9 @@
     "node": ">=20.0.0"
   },
   "workspaces": [
-    "apps/*",
+    "apps/api",
+    "apps/desktop",
+    "apps/web",
     "packages/*"
   ],
   "scripts": {
@@ -18,11 +20,13 @@
     "db:up": "docker compose -f infra/docker-compose.postgres.yml up -d",
     "db:down": "docker compose -f infra/docker-compose.postgres.yml down",
     "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces --if-present",
     "build:desktop": "npm run build --workspace @ascend/desktop",
     "dist:desktop": "npm run dist --workspace @ascend/desktop",
     "dist:desktop:win": "npm run dist:win --workspace @ascend/desktop",
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
-    "health:api": "curl -fsS http://localhost:4000/health"
+    "health:api": "curl -fsS http://localhost:4000/health",
+    "smoke:web-stack": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/smoke-web-stack.ps1"
   }
 }

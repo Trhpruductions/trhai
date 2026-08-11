@@ -56,6 +56,22 @@ declare global {
         ok?: boolean;
         error?: string;
       }>;
+      runWorkspaceCommand?: (payload: {
+        command: string;
+        cwd?: string;
+      }) => Promise<{
+        ok?: boolean;
+        runId?: string;
+        exitCode?: number;
+        error?: string;
+      }>;
+      onRuntimeEvent?: (listener: (event: {
+        runId: string;
+        kind: "start" | "stdout" | "stderr" | "exit";
+        line: string;
+        level: "info" | "ok" | "warn" | "error";
+        timestamp: number;
+      }) => void) => () => void;
     };
   }
 }

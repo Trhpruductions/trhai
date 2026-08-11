@@ -67,3 +67,4 @@ This repository contains the initial Sprint 1 scaffold for Project Ascend AI / T
 - Initial schema migration is in packages/db/migrations/001_core_init.sql.
 - Idempotency persistence migration is in packages/db/migrations/002_idempotency_keys.sql.
 - Docker database config lives in infra/docker-compose.postgres.yml.
+- Complete product vision is in docs/12-ascend-ai-complete-product-vision.md.

@@ -11,20 +11,22 @@ import { ensureActorUserWithClient } from "../services/actor.js";
 import { runAssistantOrchestrator } from "../services/orchestrator.js";
 
 const defaultTraceId = "trace-local";
+const assistantModes = ["general", "build", "code", "debug", "research", "plan", "coding", "business", "creator"] as const;
+type AssistantMode = typeof assistantModes[number];
 
 const createWorkspaceSchema = z.object({
   name: z.string().trim().min(2).max(80)
 });
 
 const createConversationSchema = z.object({
-  mode: z.enum(["general", "coding", "business", "creator"]),
+  mode: z.enum(assistantModes),
   title: z.string().trim().max(200).optional().nullable(),
   projectId: z.string().uuid().optional().nullable()
 });
 
 const sendMessageSchema = z.object({
   content: z.string().trim().min(1),
-  modeOverride: z.enum(["general", "coding", "business", "creator"]).optional(),
+  modeOverride: z.enum(assistantModes).optional(),
   stream: z.boolean().optional()
 });
 
@@ -158,7 +160,7 @@ v1Router.post(
         id: string;
         workspace_id: string;
         project_id: string | null;
-        mode: "general" | "coding" | "business" | "creator";
+        mode: AssistantMode;
         title: string | null;
       }>(
         `
@@ -201,7 +203,7 @@ v1Router.get(
       id: string;
       workspace_id: string;
       project_id: string | null;
-      mode: "general" | "coding" | "business" | "creator";
+      mode: AssistantMode;
       title: string | null;
     }>(
       `
@@ -262,7 +264,7 @@ v1Router.post(
     const result = await withTransaction(async (client) => {
       const actor = await ensureActorUserWithClient(client, req);
 
-      const conversationResult = await client.query<{ mode: "general" | "coding" | "business" | "creator" }>(
+      const conversationResult = await client.query<{ mode: AssistantMode }>(
         `
         SELECT mode
         FROM conversations

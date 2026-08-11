@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import net from "node:net";
 import { constants as fsConstants, existsSync, statfsSync } from "node:fs";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
@@ -349,6 +350,95 @@ ipcMain.handle("ascend:create-scaffold", async (_event, payload) => {
       error: error instanceof Error ? error.message : "Failed to create scaffold."
     };
   }
+});
+
+ipcMain.handle("ascend:run-command", async (event, payload) => {
+  const command = typeof payload?.command === "string" ? payload.command.trim() : "";
+  const requestedCwd = typeof payload?.cwd === "string" ? payload.cwd.trim() : "";
+  const runId = randomUUID();
+
+  if (!command) {
+    return { ok: false, runId, exitCode: -1, error: "Missing command." };
+  }
+
+  const candidateCwd = requestedCwd ? path.resolve(workspaceRoot, requestedCwd) : workspaceRoot;
+  const relativeCwd = path.relative(workspaceRoot, candidateCwd);
+  if (relativeCwd.startsWith("..") || path.isAbsolute(relativeCwd)) {
+    return { ok: false, runId, exitCode: -1, error: "Command cwd must be inside workspace." };
+  }
+
+  if (!existsSync(candidateCwd)) {
+    return { ok: false, runId, exitCode: -1, error: "Command cwd does not exist." };
+  }
+
+  const emitEvent = (kind: "start" | "stdout" | "stderr" | "exit", line: string, level: "info" | "ok" | "warn" | "error" = "info") => {
+    event.sender.send("ascend:runtime-event", {
+      runId,
+      kind,
+      line,
+      level,
+      timestamp: Date.now()
+    });
+  };
+
+  return await new Promise<{ ok: boolean; runId: string; exitCode: number; error?: string }>((resolve) => {
+    emitEvent("start", `[run:${runId}] ${command}`, "info");
+
+    const child = spawn("cmd.exe", ["/d", "/s", "/c", command], {
+      cwd: candidateCwd,
+      windowsHide: true,
+      env: process.env
+    });
+
+    let stdoutBuffer = "";
+    let stderrBuffer = "";
+
+    const flushLines = (buffer: string, kind: "stdout" | "stderr", level: "info" | "warn") => {
+      const parts = buffer.split(/\r?\n/);
+      const trailing = parts.pop() ?? "";
+      for (const line of parts) {
+        const trimmed = line.trimEnd();
+        if (!trimmed) continue;
+        emitEvent(kind, trimmed, level);
+      }
+      return trailing;
+    };
+
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      stdoutBuffer += chunk.toString();
+      stdoutBuffer = flushLines(stdoutBuffer, "stdout", "info");
+    });
+
+    child.stderr.on("data", (chunk: Buffer | string) => {
+      stderrBuffer += chunk.toString();
+      stderrBuffer = flushLines(stderrBuffer, "stderr", "warn");
+    });
+
+    child.on("error", (spawnError) => {
+      const message = spawnError instanceof Error ? spawnError.message : "Failed to start command.";
+      emitEvent("stderr", message, "error");
+      emitEvent("exit", `[run:${runId}] failed`, "error");
+      resolve({ ok: false, runId, exitCode: -1, error: message });
+    });
+
+    child.on("close", (code) => {
+      const safeCode = typeof code === "number" ? code : -1;
+
+      const trailingStdout = stdoutBuffer.trim();
+      if (trailingStdout) {
+        emitEvent("stdout", trailingStdout, "info");
+      }
+
+      const trailingStderr = stderrBuffer.trim();
+      if (trailingStderr) {
+        emitEvent("stderr", trailingStderr, "warn");
+      }
+
+      const ok = safeCode === 0;
+      emitEvent("exit", `[run:${runId}] exit ${safeCode}`, ok ? "ok" : "error");
+      resolve({ ok, runId, exitCode: safeCode, ...(ok ? {} : { error: `Command exited with code ${safeCode}` }) });
+    });
+  });
 });
 
 const singleInstanceLock = app.requestSingleInstanceLock();

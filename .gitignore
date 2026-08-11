@@ -11,3 +11,8 @@ apps/api/dist/
 apps/web/dist/
 packages/*/dist/
 *.log
+generated-projects/
+# Runtime state (assistant memory, generated app stores)
+data/
+# Desktop shell scratch (fallback HTML written at launch)
+.ascend-temp/
