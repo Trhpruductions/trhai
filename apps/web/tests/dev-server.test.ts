@@ -33,14 +33,19 @@ function killProcessTree(pid: number | undefined) {
 test('dev:web serves the app shell from the workspace root', async () => {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
   const npmCommand = isWindows ? 'npm.cmd' : 'npm';
+  // dev:web goes through run-web-dev.ps1, whose param() block takes no
+  // arguments — so trailing `-- --port N` was silently discarded and the test
+  // only hit 4173 because the script hardcoded it. ASCEND_WEB_PORT is the
+  // supported override, and a port distinct from the default keeps this test
+  // from colliding with a dev server the desktop app already started.
   const child = spawn(
     isWindows ? 'cmd.exe' : 'sh',
     isWindows
-      ? ['/d', '/s', '/c', `${npmCommand} run dev:web -- --host 127.0.0.1 --strictPort --port 4173`]
-      : ['-c', `${npmCommand} run dev:web -- --host 127.0.0.1 --strictPort --port 4173`],
+      ? ['/d', '/s', '/c', `${npmCommand} run dev:web`]
+      : ['-c', `${npmCommand} run dev:web`],
     {
       cwd: repoRoot,
-      env: { ...process.env, CI: '1' },
+      env: { ...process.env, CI: '1', ASCEND_WEB_PORT: '4173' },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: !isWindows
     }

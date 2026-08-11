@@ -1264,6 +1264,10 @@ svg {
   color: #d2f0fc;
   font-size: 0.8rem;
   line-height: 1.35;
+  /* Replies carry real paragraph breaks — a personality's mandatory disclaimer
+     is appended after a blank line. Collapsing that runs the disclaimer into the
+     end of the previous sentence, which is where it stops being noticeable. */
+  white-space: pre-wrap;
 }
 
 .chat-msg.user {
@@ -2900,8 +2904,97 @@ svg {
 /* When a destination takes the center stage, the legacy panels below it step
    aside — but the command surface stays, because §4 requires a single dominant
    prompt available everywhere. */
-.center-column.destination-focus > *:not(.destination-view):not(.prompt-bar) {
+.center-column.destination-focus > *:not(.destination-view):not(.prompt-bar):not(.prompt-suggestions) {
   display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Personality system (vision §5)
+--------------------------------------------------------------------------- */
+
+.prompt-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+.prompt-suggestions button {
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 11.5px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.prompt-suggestions button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.prompt-suggestions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.personality-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  overflow-y: auto;
+  max-height: 52vh;
+}
+
+.personality-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.personality-card:hover {
+  transform: translateY(-1px);
+  background: rgba(12, 32, 48, 0.75);
+}
+
+.personality-card.active {
+  box-shadow: 0 0 22px var(--core-glow, rgba(24, 199, 255, 0.35));
+  background: rgba(16, 44, 64, 0.7);
+}
+
+.personality-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 10px currentColor;
+}
+
+.personality-card strong {
+  font-size: 13px;
+}
+
+.personality-card small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.personality-note {
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 10.5px;
+  color: rgba(255, 200, 121, 0.9);
 }
 
 .destination-view {

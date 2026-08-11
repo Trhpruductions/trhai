@@ -20,6 +20,13 @@ import {
 } from "./accountClient";
 import { generateProject, planProject } from "@ascend/shared";
 import {
+  allPersonalities,
+  applyResponseStyle,
+  personalityById,
+  resolvePersonality,
+  type PersonalityId
+} from "./personalities";
+import {
   defaultDestination,
   destinationById,
   sidebarDestinations,
@@ -320,6 +327,7 @@ const actions: ActionTile[] = [
 
 const chatStateStorageKey = "ascend.chat.state.v2";
 const sidebarCollapsedStorageKey = "ascend.sidebar.collapsed.v1";
+const personalityStorageKey = "ascend.personality.v1";
 const runtimeAckSignatureStorageKey = "ascend.runtime.ack.signatures.v1";
 const triageTimelineStorageKey = "ascend.runtime.triage.timeline.v1";
 const incidentAuditStorageKey = "ascend.runtime.incident.audit.v1";
@@ -1053,6 +1061,9 @@ export function App() {
     () => window.localStorage.getItem(sidebarCollapsedStorageKey) === "1"
   );
   const [terminalCommand, setTerminalCommand] = useState("");
+  const [activePersonality, setActivePersonality] = useState<PersonalityId>(
+    () => resolvePersonality(window.localStorage.getItem(personalityStorageKey))
+  );
   const [showAllNotifications, setShowAllNotifications] = useState(false);
   const [actionStatus, setActionStatus] = useState("System nominal");
   const [actionLevel, setActionLevel] = useState<ActionLevel>("ok");
@@ -2115,12 +2126,17 @@ export function App() {
   }
 
   function pushChatMessage(role: ChatMessage["role"], text: string, provenance?: ResponseProvenance) {
+    // Every assistant reply goes through here, which is why the personality's
+    // response-style constraints are applied at this point: a mandatory
+    // disclaimer cannot be skipped by adding another call site later.
+    const styled = role === "assistant" ? applyResponseStyle(text, activePersonality) : text;
+
     setChatMessages((current) => [
       ...current,
       {
         id: crypto.randomUUID(),
         role,
-        text,
+        text: styled,
         createdAt: Date.now(),
         provenance
       }
@@ -2421,6 +2437,14 @@ export function App() {
     }
 
     setActionLine(`${destination.label} focused`, "ok");
+  }
+
+  function choosePersonality(id: PersonalityId) {
+    const personality = personalityById(id);
+    setActivePersonality(id);
+    window.localStorage.setItem(personalityStorageKey, id);
+    setActionLine(`Personality: ${personality.label}`, "ok");
+    pushNotification(`Personality set to ${personality.label}`);
   }
 
   function toggleSidebar() {
@@ -3434,6 +3458,41 @@ export function App() {
       );
     }
 
+    if (activeDestination === "settings") {
+      return (
+        <section className="destination-view card" aria-label="Settings">
+          <div className="destination-head">
+            <h2>Settings</h2>
+            <span className="destination-tag">{personalityById(activePersonality).label}</span>
+          </div>
+          <p className="destination-summary">
+            Personality changes how the assistant sounds, what it suggests, and how the core moves. It never
+            changes what the assistant is allowed to do.
+          </p>
+          <div className="personality-grid" role="radiogroup" aria-label="AI personality">
+            {allPersonalities().map((personality) => (
+              <button
+                key={personality.id}
+                type="button"
+                role="radio"
+                aria-checked={activePersonality === personality.id}
+                className={activePersonality === personality.id ? "personality-card active" : "personality-card"}
+                style={{ borderColor: activePersonality === personality.id ? personality.core.accent : undefined }}
+                onClick={() => choosePersonality(personality.id)}
+              >
+                <span className="personality-dot" style={{ background: personality.core.accent }} />
+                <strong>{personality.label}</strong>
+                <small>{personality.summary}</small>
+                {personality.responseStyle.mandatoryDisclaimer ? (
+                  <em className="personality-note">Always adds a professional-advice disclaimer</em>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </section>
+      );
+    }
+
     if (activeDestination === "memory") {
       return (
         <section className="destination-view card" aria-label="Memory">
@@ -3475,7 +3534,17 @@ export function App() {
   })();
 
   return (
-    <main className={desktopBridgeActive ? "ascend-shell desktop-mode" : "ascend-shell web-mode"}>
+    <main
+      className={desktopBridgeActive ? "ascend-shell desktop-mode" : "ascend-shell web-mode"}
+      style={{
+        // The personality drives the core's palette and how energetically its
+        // motion renders. These feed existing accent tokens, so every surface
+        // already keyed to them shifts together rather than one panel changing.
+        ["--accent" as string]: personalityById(activePersonality).core.accent,
+        ["--core-glow" as string]: personalityById(activePersonality).core.glow,
+        ["--core-energy" as string]: String(personalityById(activePersonality).core.energy)
+      }}
+    >
       <header className="top-nav card">
         <div className="brand">ASCEND AI</div>
         <nav className="menu-tabs" aria-label="Top menu">
@@ -4222,10 +4291,24 @@ export function App() {
             </article>
           )}
 
+          <div className="prompt-suggestions" aria-label="Suggested prompts">
+            {personalityById(activePersonality).suggestions.map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                onClick={() => setPrompt(suggestion)}
+                disabled={actionBusy || chatBusy}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+
           <div className="prompt-bar card" role="search">
             <input
               type="text"
               value={prompt}
+              placeholder="Ask anything..."
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
