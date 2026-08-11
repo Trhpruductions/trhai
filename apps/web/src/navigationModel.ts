@@ -92,16 +92,14 @@ const destinations: Destination[] = [
   {
     id: "calendar",
     label: "Calendar",
-    summary: "Schedule and upcoming commitments across workspaces.",
-    status: "planned",
-    plannedReason: "No calendar source is connected, and inventing events would make the panel lie."
+    summary: "Your schedule, kept on this machine. No connected account required.",
+    status: "live"
   },
   {
     id: "marketplace",
     label: "Marketplace",
     summary: "Browse and install agents that change how the assistant works.",
-    status: "planned",
-    plannedReason: "The agent catalog and install flow are still being built; nothing is installable yet."
+    status: "live"
   },
   {
     id: "plugins",
@@ -120,8 +118,7 @@ const destinations: Destination[] = [
     id: "agents",
     label: "Agents",
     summary: "Installed agents, their roles, and which one is active.",
-    status: "planned",
-    plannedReason: "Depends on the marketplace: with no install flow there is nothing to list here yet."
+    status: "live"
   },
   {
     id: "automation",

@@ -48,13 +48,8 @@ const definitions: WidgetDefinition[] = [
   { id: "ram", label: "RAM", source: "telemetry", defaultSize: "small" },
   { id: "network", label: "Network", source: "telemetry", defaultSize: "small" },
   { id: "recent-files", label: "Recent files", source: "workspace", defaultSize: "medium" },
-  {
-    id: "calendar",
-    label: "Calendar",
-    source: "unavailable",
-    unavailableReason: "No calendar account is connected.",
-    defaultSize: "medium"
-  },
+  // Backed by the local calendar store, so it needs no connected account.
+  { id: "calendar", label: "Calendar", source: "runtime", defaultSize: "medium" },
   {
     id: "stocks",
     label: "Stocks",

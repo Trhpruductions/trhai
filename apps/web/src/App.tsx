@@ -21,6 +21,30 @@ import {
 import { generateProject, planProject } from "@ascend/shared";
 import { buildLocalCapabilityReply, inferLocalIntent, type LocalIntent } from "./localAssistant";
 import {
+  addEvent,
+  formatEventTime,
+  formatRelative,
+  readEvents,
+  removeEvent,
+  toLocalInput,
+  upcomingEvents,
+  writeEvents,
+  type CalendarEvent
+} from "./localCalendar";
+import {
+  activateAgent,
+  activeAgent as resolveActiveAgent,
+  allAgents,
+  formatInstalls,
+  installAgent,
+  isInstalled,
+  latestVersion,
+  readMarketplaceState,
+  uninstallAgent,
+  writeMarketplaceState,
+  type MarketplaceState
+} from "./marketplace";
+import {
   addWidget,
   allWidgets,
   defaultLayout,
@@ -344,6 +368,8 @@ const chatStateStorageKey = "ascend.chat.state.v2";
 const sidebarCollapsedStorageKey = "ascend.sidebar.collapsed.v1";
 const personalityStorageKey = "ascend.personality.v1";
 const widgetLayoutStorageKey = "ascend.widgets.layout.v1";
+const calendarStorageKey = "ascend.calendar.events.v1";
+const marketplaceStorageKey = "ascend.marketplace.v1";
 const runtimeAckSignatureStorageKey = "ascend.runtime.ack.signatures.v1";
 const triageTimelineStorageKey = "ascend.runtime.triage.timeline.v1";
 const incidentAuditStorageKey = "ascend.runtime.incident.audit.v1";
@@ -1064,6 +1090,17 @@ export function App() {
   });
   const [widgetPickerOpen, setWidgetPickerOpen] = useState(false);
   const draggingWidgetRef = useRef<string | null>(null);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(
+    () => readEvents(window.localStorage, calendarStorageKey)
+  );
+  const [eventTitle, setEventTitle] = useState("");
+  const [eventStart, setEventStart] = useState("");
+  const [marketplace, setMarketplace] = useState<MarketplaceState>(
+    () => readMarketplaceState(window.localStorage, marketplaceStorageKey)
+  );
+  // Re-rendered once a minute so relative times ("in 45m") actually count down
+  // instead of freezing at whatever they were when the panel first mounted.
+  const [clockTick, setClockTick] = useState(() => Date.now());
   const [showAllNotifications, setShowAllNotifications] = useState(false);
   const [actionStatus, setActionStatus] = useState("System nominal");
   const [actionLevel, setActionLevel] = useState<ActionLevel>("ok");
@@ -2442,6 +2479,34 @@ export function App() {
     setActionLine(`${destination.label} focused`, "ok");
   }
 
+  function commitCalendar(next: CalendarEvent[]) {
+    setCalendarEvents(next);
+    writeEvents(window.localStorage, calendarStorageKey, next);
+  }
+
+  function submitEvent() {
+    const next = addEvent(calendarEvents, {
+      id: crypto.randomUUID(),
+      title: eventTitle,
+      startsAt: eventStart
+    });
+
+    if (next === calendarEvents) {
+      setActionLine("An event needs a title and a valid date and time", "warn");
+      return;
+    }
+
+    commitCalendar(next);
+    setEventTitle("");
+    setEventStart("");
+    setActionLine(`Event added · ${eventTitle.trim()}`, "ok");
+  }
+
+  function commitMarketplace(next: MarketplaceState) {
+    setMarketplace(next);
+    writeMarketplaceState(window.localStorage, marketplaceStorageKey, next);
+  }
+
   function commitWidgetLayout(next: WidgetPlacement[]) {
     setWidgetLayout(next);
     writeLayout(window.localStorage, widgetLayoutStorageKey, next);
@@ -2507,6 +2572,20 @@ export function App() {
           {personalityById(activePersonality).suggestions.map((suggestion) => (
             <li key={suggestion}>
               <button type="button" onClick={() => setPrompt(suggestion)}>{suggestion}</button>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    if (id === "calendar") {
+      return nextEvents.length === 0 ? (
+        <p className="widget-empty">Nothing scheduled.</p>
+      ) : (
+        <ul className="widget-list">
+          {nextEvents.slice(0, 4).map((event) => (
+            <li key={event.id}>
+              <span>{formatEventTime(event.startsAt)} · {event.title}</span>
             </li>
           ))}
         </ul>
@@ -3477,10 +3556,18 @@ export function App() {
     return () => window.cancelAnimationFrame(frameHandle);
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockTick(Date.now()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   // Destinations that take over the center stage. Home, Projects and Settings
   // are absent on purpose: they already have their lane in the legacy screen
   // hub, so overlaying a second panel would duplicate what is below it.
   const activeDestinationEntry = destinationById(activeDestination);
+  const now = new Date(clockTick);
+  const nextEvents = upcomingEvents(calendarEvents, now, 4);
+  const installedAgent = resolveActiveAgent(marketplace);
   const destinationView = (() => {
     if (activeDestinationEntry.status === "planned") {
       return <PlannedDestination destination={activeDestinationEntry} />;
@@ -3547,6 +3634,147 @@ export function App() {
               </div>
             ))}
           </div>
+        </section>
+      );
+    }
+
+    if (activeDestination === "calendar") {
+      return (
+        <section className="destination-view card" aria-label="Calendar">
+          <div className="destination-head">
+            <h2>Calendar</h2>
+            <span className="destination-tag">{calendarEvents.length} events</span>
+          </div>
+          <p className="destination-summary">{activeDestinationEntry.summary}</p>
+          <div className="event-form">
+            <input
+              type="text"
+              value={eventTitle}
+              placeholder="Event title"
+              aria-label="Event title"
+              onChange={(event) => setEventTitle(event.target.value)}
+            />
+            <input
+              type="datetime-local"
+              value={eventStart}
+              aria-label="Event start"
+              onChange={(event) => setEventStart(event.target.value)}
+            />
+            <button type="button" onClick={submitEvent} disabled={!eventTitle.trim() || !eventStart}>
+              Add
+            </button>
+          </div>
+          {calendarEvents.length === 0 ? (
+            <p className="destination-reason">
+              No events yet. Anything you add stays on this machine — the calendar needs no connected account.
+            </p>
+          ) : (
+            <ul className="destination-list">
+              {calendarEvents.map((event) => (
+                <li key={event.id}>
+                  <div>
+                    <strong>{event.title}</strong>
+                    <small>
+                      {event.startsAt.slice(0, 10)} · {formatEventTime(event.startsAt)} ·{" "}
+                      {formatRelative(event.startsAt, now)}
+                    </small>
+                  </div>
+                  <button type="button" onClick={() => commitCalendar(removeEvent(calendarEvents, event.id))}>
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      );
+    }
+
+    if (activeDestination === "marketplace" || activeDestination === "agents") {
+      const showingInstalled = activeDestination === "agents";
+      const listed = showingInstalled
+        ? allAgents().filter((agent) => isInstalled(marketplace, agent.id))
+        : allAgents();
+
+      return (
+        <section className="destination-view card" aria-label={activeDestinationEntry.label}>
+          <div className="destination-head">
+            <h2>{activeDestinationEntry.label}</h2>
+            <span className="destination-tag">
+              {showingInstalled ? `${marketplace.installed.length} installed` : `${listed.length} agents`}
+            </span>
+          </div>
+          <p className="destination-summary">{activeDestinationEntry.summary}</p>
+
+          {showingInstalled && listed.length === 0 ? (
+            <p className="destination-reason">
+              No agents installed yet. Open the Marketplace to add one.
+            </p>
+          ) : (
+            <div className="agent-grid">
+              {listed.map((agent) => {
+                const installed = isInstalled(marketplace, agent.id);
+                const active = marketplace.activeAgentId === agent.id;
+                const version = latestVersion(agent);
+
+                return (
+                  <article key={agent.id} className={active ? "agent-card active" : "agent-card"}>
+                    <header>
+                      <span className="agent-avatar" aria-hidden="true">{agent.avatar}</span>
+                      <div>
+                        <strong>{agent.name}</strong>
+                        <small>{agent.role}</small>
+                      </div>
+                      {active ? <span className="agent-active-tag">Active</span> : null}
+                    </header>
+                    <p className="agent-description">{agent.description}</p>
+                    <p className="agent-signal">
+                      ★ {agent.rating.toFixed(1)} · {formatInstalls(agent.installs)} installs
+                      <em> · catalog figures, not measured here</em>
+                    </p>
+                    <details className="agent-versions">
+                      <summary>v{version.version} · {version.releasedOn}</summary>
+                      <ul>
+                        {agent.versions.map((entry) => (
+                          <li key={entry.version}>
+                            <strong>v{entry.version}</strong> <small>{entry.releasedOn}</small>
+                            <span>{entry.notes}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                    <div className="agent-actions">
+                      {installed ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={active}
+                            onClick={() => commitMarketplace(activateAgent(marketplace, agent.id))}
+                          >
+                            {active ? "Active" : "Make active"}
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => commitMarketplace(uninstallAgent(marketplace, agent.id))}
+                          >
+                            Uninstall
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => commitMarketplace(installAgent(marketplace, agent.id))}
+                        >
+                          Install
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </section>
       );
     }
@@ -3989,11 +4217,21 @@ export function App() {
             <div className="panel-head">
               <h2>UPCOMING EVENTS</h2>
             </div>
-            <div className="timeline">
-              <div><span>10:00 AM</span><p>Team Standup</p><small>in 45m</small></div>
-              <div><span>1:00 PM</span><p>Project Phoenix Review</p><small>in 3h 45m</small></div>
-              <div><span>6:00 PM</span><p>Workout</p><small>in 8h 45m</small></div>
-            </div>
+            {nextEvents.length === 0 ? (
+              <p className="widget-empty">
+                Nothing scheduled. Add events in Calendar — they stay on this machine.
+              </p>
+            ) : (
+              <div className="timeline">
+                {nextEvents.map((event) => (
+                  <div key={event.id}>
+                    <span>{formatEventTime(event.startsAt)}</span>
+                    <p>{event.title}</p>
+                    <small>{formatRelative(event.startsAt, now)}</small>
+                  </div>
+                ))}
+              </div>
+            )}
           </article>
         </div>
 
@@ -4460,7 +4698,12 @@ export function App() {
           )}
 
           <div className="prompt-suggestions" aria-label="Suggested prompts">
-            {personalityById(activePersonality).suggestions.map((suggestion) => (
+            {installedAgent ? (
+              <span className="suggestion-source" title={installedAgent.focus}>
+                {installedAgent.avatar} {installedAgent.name}
+              </span>
+            ) : null}
+            {(installedAgent ? installedAgent.suggestions : personalityById(activePersonality).suggestions).map((suggestion) => (
               <button
                 key={suggestion}
                 type="button"
