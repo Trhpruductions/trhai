@@ -21,8 +21,22 @@ import {
 import { generateProject, planProject } from "@ascend/shared";
 import { buildLocalCapabilityReply, inferLocalIntent, type LocalIntent } from "./localAssistant";
 import {
+  addWidget,
+  allWidgets,
+  defaultLayout,
+  moveWidget,
+  readLayout,
+  removeWidget,
+  resizeWidget,
+  widgetById,
+  widgetSpan,
+  writeLayout,
+  type WidgetPlacement
+} from "./widgets";
+import {
   allPersonalities,
   applyResponseStyle,
+  orderWidgets,
   personalityById,
   resolvePersonality,
   type PersonalityId
@@ -329,6 +343,7 @@ const actions: ActionTile[] = [
 const chatStateStorageKey = "ascend.chat.state.v2";
 const sidebarCollapsedStorageKey = "ascend.sidebar.collapsed.v1";
 const personalityStorageKey = "ascend.personality.v1";
+const widgetLayoutStorageKey = "ascend.widgets.layout.v1";
 const runtimeAckSignatureStorageKey = "ascend.runtime.ack.signatures.v1";
 const triageTimelineStorageKey = "ascend.runtime.triage.timeline.v1";
 const incidentAuditStorageKey = "ascend.runtime.incident.audit.v1";
@@ -1035,6 +1050,20 @@ export function App() {
   const [activePersonality, setActivePersonality] = useState<PersonalityId>(
     () => resolvePersonality(window.localStorage.getItem(personalityStorageKey))
   );
+  const [widgetLayout, setWidgetLayout] = useState<WidgetPlacement[]>(() => {
+    const stored = readLayout(window.localStorage, widgetLayoutStorageKey);
+    // A user who has arranged their dashboard keeps that arrangement. Personality
+    // priority only orders the starting set — otherwise switching personality
+    // would silently discard a layout the user built by hand.
+    const hasCustomLayout = window.localStorage.getItem(widgetLayoutStorageKey) !== null;
+    if (hasCustomLayout) return stored;
+
+    const personality = resolvePersonality(window.localStorage.getItem(personalityStorageKey));
+    const ranked = orderWidgets(stored.map((entry) => entry.id), personality);
+    return ranked.map((id) => stored.find((entry) => entry.id === id)!);
+  });
+  const [widgetPickerOpen, setWidgetPickerOpen] = useState(false);
+  const draggingWidgetRef = useRef<string | null>(null);
   const [showAllNotifications, setShowAllNotifications] = useState(false);
   const [actionStatus, setActionStatus] = useState("System nominal");
   const [actionLevel, setActionLevel] = useState<ActionLevel>("ok");
@@ -2411,6 +2440,96 @@ export function App() {
     }
 
     setActionLine(`${destination.label} focused`, "ok");
+  }
+
+  function commitWidgetLayout(next: WidgetPlacement[]) {
+    setWidgetLayout(next);
+    writeLayout(window.localStorage, widgetLayoutStorageKey, next);
+  }
+
+  function onWidgetDrop(targetId: string) {
+    const draggedId = draggingWidgetRef.current;
+    draggingWidgetRef.current = null;
+    if (!draggedId) return;
+    commitWidgetLayout(moveWidget(widgetLayout, draggedId, targetId));
+  }
+
+  /**
+   * Widget bodies. Every branch either shows a real reading or says it has no
+   * source — there is no branch that invents a number.
+   */
+  function renderWidgetBody(id: string) {
+    const metric = (label: string) => liveMetrics.find((row) => row.label === label);
+
+    if (id === "cpu" || id === "ram" || id === "network") {
+      const row = metric(id === "cpu" ? "CPU Usage" : id === "ram" ? "Memory" : "Network");
+      return (
+        <div className="widget-metric">
+          <strong>{row?.value ?? "--"}</strong>
+          <div className="widget-bar">
+            <span style={{ width: `${row?.width ?? 0}%` }} />
+          </div>
+          <small>{desktopBridgeActive ? "Host telemetry" : "Browser estimate"}</small>
+        </div>
+      );
+    }
+
+    if (id === "recent-files") {
+      return hostProjects.length === 0 ? (
+        <p className="widget-empty">{inventoryStatus}</p>
+      ) : (
+        <ul className="widget-list">
+          {hostProjects.slice(0, 5).map((project) => (
+            <li key={project.path}>
+              <button type="button" onClick={() => void openHostPath(project.path)}>
+                {project.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    if (id === "automations") {
+      const running = runtimeLogs.filter((entry) => entry.kind === "start").length;
+      const finished = runtimeLogs.filter((entry) => entry.kind === "exit").length;
+      return (
+        <div className="widget-metric">
+          <strong>{Math.max(0, running - finished)}</strong>
+          <small>{running === 0 ? "Nothing has run this session" : `${finished} of ${running} finished`}</small>
+        </div>
+      );
+    }
+
+    if (id === "suggestions") {
+      return (
+        <ul className="widget-list">
+          {personalityById(activePersonality).suggestions.map((suggestion) => (
+            <li key={suggestion}>
+              <button type="button" onClick={() => setPrompt(suggestion)}>{suggestion}</button>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    if (id === "goals" || id === "daily-focus") {
+      const pinned = memories.filter((item) => item.pinned);
+      return pinned.length === 0 ? (
+        <p className="widget-empty">
+          Nothing pinned yet. Pin a memory and it shows here.
+        </p>
+      ) : (
+        <ul className="widget-list">
+          {pinned.slice(0, 4).map((item) => (
+            <li key={item.id}><span>{item.title}</span></li>
+          ))}
+        </ul>
+      );
+    }
+
+    const definition = widgetById(id);
+    return <p className="widget-empty">{definition?.unavailableReason ?? "No data source."}</p>;
   }
 
   function choosePersonality(id: PersonalityId) {
@@ -3880,6 +3999,81 @@ export function App() {
 
         <section className={destinationView ? "center-column destination-focus" : "center-column"}>
           {destinationView}
+
+          {activeDestination === "home" && activeTopTab === "HOME" ? (
+            <section className="widget-board card" aria-label="Dashboard widgets">
+              <div className="widget-board-head">
+                <h2>WIDGETS</h2>
+                <button type="button" className="ghost" onClick={() => setWidgetPickerOpen((open) => !open)}>
+                  {widgetPickerOpen ? "Done" : "Add widget"}
+                </button>
+              </div>
+
+              {widgetPickerOpen ? (
+                <div className="widget-picker">
+                  {allWidgets()
+                    .filter((definition) => !widgetLayout.some((entry) => entry.id === definition.id))
+                    .map((definition) => (
+                      <button
+                        key={definition.id}
+                        type="button"
+                        title={definition.unavailableReason}
+                        onClick={() => commitWidgetLayout(addWidget(widgetLayout, definition.id))}
+                      >
+                        {definition.label}
+                        {definition.source === "unavailable" ? <em> · no data</em> : null}
+                      </button>
+                    ))}
+                </div>
+              ) : null}
+
+              <div className="widget-grid">
+                {widgetLayout.map((placement) => {
+                  const definition = widgetById(placement.id);
+                  if (!definition) return null;
+
+                  return (
+                    <article
+                      key={placement.id}
+                      className={`widget widget-${placement.size}`}
+                      style={{ gridColumn: `span ${widgetSpan(placement.size)}` }}
+                      draggable
+                      onDragStart={() => { draggingWidgetRef.current = placement.id; }}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => { event.preventDefault(); onWidgetDrop(placement.id); }}
+                      aria-label={definition.label}
+                    >
+                      <header>
+                        <h3>{definition.label}</h3>
+                        <div className="widget-actions">
+                          <button
+                            type="button"
+                            aria-label={`Resize ${definition.label}`}
+                            onClick={() => commitWidgetLayout(resizeWidget(widgetLayout, placement.id))}
+                          >
+                            ⤢
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${definition.label}`}
+                            onClick={() => commitWidgetLayout(removeWidget(widgetLayout, placement.id))}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </header>
+                      {renderWidgetBody(placement.id)}
+                    </article>
+                  );
+                })}
+                {widgetLayout.length === 0 ? (
+                  <p className="widget-empty">
+                    No widgets. Use “Add widget” to choose what this dashboard shows.
+                  </p>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
           {activeTopTab === "ASSISTANT" ? (
             showLiveCodingWorkspace ? (
               <section className="live-coding card" aria-label="Live coding workspace">
