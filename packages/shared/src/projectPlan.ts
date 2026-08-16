@@ -203,8 +203,16 @@ const fieldListStopWords = new Set([
  * "storing", which introduce *records*: "tracking customers and agents" names
  * entities, while "with email and phone" names fields. Without this split the
  * two collapse and related entities turn into columns.
+ *
+ * A cardinality word after the lead-in means the clause describes a
+ * *relationship*, not attributes: "projects have many tasks" states how two
+ * records relate, and reading it as a field list produced a literal
+ * `manyTasks: string` column alongside the correct `projectId` reference.
+ * Refusing the match here lets the scan continue to the next lead-in, so the
+ * genuine fields later in the sentence are still picked up.
  */
-const fieldListLeadIn = /\b(?:with|having|has|have|including|containing|fields?)\s+([^.;!?]+)/gi;
+const fieldListLeadIn =
+  /\b(?:with|having|has|have|including|containing|fields?)\s+(?!many\b|multiple\b|several\b|lots\s+of\b)([^.;!?]+)/gi;
 
 /** Lead-ins that switch back from listing attributes to naming records. */
 const entityLeadIn = /\s+(?:tracking|storing|linked\s+to|related\s+to)\s+/i;

@@ -18,6 +18,52 @@ test("drops a dangling particle after a phrasal verb", () => {
   assert.equal(extractSubject("Set up the deployment pipeline"), "the deployment pipeline");
 });
 
+test("drops the pronoun naming who the work is for", () => {
+  // "Build me a task tracker" is about the tracker, not about me. Leaving the
+  // pronoun in produced "what done looks like for me a task tracker".
+  assert.equal(extractSubject("Build me a task tracker"), "the task tracker");
+  assert.equal(extractSubject("Show me the logs"), "the logs");
+  assert.equal(extractSubject("Make us a landing page"), "the landing page");
+});
+
+test("a long request is cut at a clause boundary, not mid-phrase", () => {
+  // The regression: a hard 12-word slice ended the subject on "have a", so the
+  // step read "...for me a task tracker where projects have many tasks, tasks
+  // have a, and the smallest version that delivers it."
+  const subject = extractSubject(
+    "Build me a task tracker where projects have many tasks, tasks have a title, status and due date"
+  );
+
+  assert.equal(subject, "the task tracker where projects have many tasks");
+});
+
+test("a subject never ends on a word that leaves it hanging", () => {
+  const danglers = /\b(a|an|the|and|or|with|of|to|that|where|have|has|is|are|for|in|on)$/i;
+
+  for (const request of [
+    "Build me a task tracker where projects have many tasks, tasks have a title, status and due date",
+    "Create a reporting service that aggregates revenue by region and by product and by month for the",
+    "Design a settings page with tabs for profile, billing, notifications and the"
+  ]) {
+    const subject = extractSubject(request);
+    assert.doesNotMatch(subject, danglers, `subject ends on a dangling word: "${subject}"`);
+    assert.doesNotMatch(subject, /,$/, `subject ends on a comma: "${subject}"`);
+  }
+});
+
+test("the plan step reads as a whole sentence", () => {
+  const plan = buildTaskPlan(
+    "Build me a task tracker where projects have many tasks, tasks have a title, status and due date",
+    "general"
+  );
+
+  assert.equal(
+    plan.steps[0],
+    "Write down what done looks like for the task tracker where projects have many tasks, and the smallest version that delivers it."
+  );
+  assert.doesNotMatch(plan.steps[0], /\bfor me a\b/);
+});
+
 test("keeps the original wording rather than stemmed tokens", () => {
   const subject = extractSubject("Build a revenue reporting dashboard");
 

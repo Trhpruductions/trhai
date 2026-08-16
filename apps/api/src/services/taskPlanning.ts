@@ -61,6 +61,61 @@ export function detectTaskType(message: string): TaskType {
 }
 
 const maxSubjectWords = 12;
+/** Below this a clause is too short to stand in for the request. */
+const minSubjectWords = 2;
+
+/**
+ * Pronouns naming who the work is for, not what it is about: "build me a task
+ * tracker" is about the tracker. Left in, they produced "for me a task tracker".
+ */
+const beneficiaryPronouns = new Set(["me", "us"]);
+
+/**
+ * Words that cannot end a subject without leaving it hanging. The subject is
+ * dropped into the middle of a sentence, so a trailing "a" or "have" reads as a
+ * truncation — which is exactly what it was.
+ */
+const danglingTailWords = new Set([
+  "a", "an", "the", "and", "or", "but", "with", "without", "for", "to", "of",
+  "in", "on", "at", "by", "from", "into", "that", "which", "where", "when",
+  "have", "has", "had", "is", "are", "was", "were", "be", "being", "been",
+  "so", "as", "than", "then", "plus", "per", "its", "their"
+]);
+
+function bareWord(word: string): string {
+  return word.toLowerCase().replace(/[^a-z]/g, "");
+}
+
+function trimDanglingTail(words: string[]): string[] {
+  const kept = [...words];
+  while (kept.length > 1 && danglingTailWords.has(bareWord(kept[kept.length - 1]))) {
+    kept.pop();
+  }
+  return kept;
+}
+
+/**
+ * Keep the subject inside the word budget without cutting mid-phrase.
+ *
+ * A hard slice turned "...where projects have many tasks, tasks have a title,
+ * status and due date" into "...tasks have a", which then read as
+ * "what done looks like for ... tasks have a, and the smallest version".
+ * Ending at a clause boundary keeps the phrase whole and usually shorter.
+ */
+function clampToClause(words: string[]): string[] {
+  if (words.length <= maxSubjectWords) {
+    return trimDanglingTail(words);
+  }
+
+  const limit = Math.min(maxSubjectWords, words.length);
+  for (let i = minSubjectWords - 1; i < limit; i += 1) {
+    if (words[i].endsWith(",")) {
+      return trimDanglingTail(words.slice(0, i + 1));
+    }
+  }
+
+  return trimDanglingTail(words.slice(0, maxSubjectWords));
+}
 
 /**
  * The phrase the user actually wrote, minus framing and the leading verb. Keeps
@@ -87,9 +142,13 @@ export function extractSubject(message: string): string {
     if (words.length > 1 && /^(up|out|on|off)$/i.test(words[0])) {
       words.shift();
     }
+    // "build me a task tracker" -> "a task tracker".
+    if (words.length > 1 && beneficiaryPronouns.has(bareWord(words[0]))) {
+      words.shift();
+    }
   }
 
-  const subject = words.slice(0, maxSubjectWords).join(" ").trim();
+  const subject = clampToClause(words).join(" ").trim().replace(/,+$/, "");
   if (!subject) {
     return "";
   }

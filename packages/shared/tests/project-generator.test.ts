@@ -664,3 +664,51 @@ test("every generated file has content", () => {
     assert.ok(!file.path.startsWith("/"), `${file.path} must be relative`);
   }
 });
+
+test("a 'have many' clause is a relationship, not a field", () => {
+  // The regression: "projects have many tasks" was read as a field list, so the
+  // task entity gained a literal `manyTasks: string` column beside the correct
+  // projectId reference.
+  const spec = planProject(
+    "Build me a task tracker where projects have many tasks, tasks have a title, status and due date"
+  );
+
+  const task = spec.entities.find((entity) => entity.name === "task");
+  assert.ok(task, "expected a task entity");
+
+  const fieldNames = task.fields.map((field) => field.name);
+  assert.ok(!fieldNames.includes("manyTasks"), `cardinality leaked into fields: ${fieldNames.join(", ")}`);
+
+  // The relationship itself is still captured, and the real fields survive.
+  assert.ok(fieldNames.includes("projectId"), "expected the relation to remain");
+  assert.ok(fieldNames.includes("dueDate"), "expected the fields after the clause to survive");
+});
+
+test("cardinality words never become fields", () => {
+  for (const request of [
+    "Build a blog where posts have many comments, posts have a title and body",
+    "Build a store where orders have multiple line items, orders have a total",
+    "Build a team tool where teams have several members, members have a name"
+  ]) {
+    const spec = planProject(request);
+    for (const entity of spec.entities) {
+      for (const field of entity.fields) {
+        assert.doesNotMatch(
+          field.name,
+          /^(many|multiple|several)/i,
+          `"${request}" produced field ${entity.name}.${field.name}`
+        );
+      }
+    }
+  }
+});
+
+test("an ordinary 'with' field list is still read", () => {
+  // The guard must not cost us the common case.
+  const spec = planProject("Create a CRM with email, phone and company");
+  const fieldNames = spec.entities[0].fields.map((field) => field.name);
+
+  assert.ok(fieldNames.includes("email"));
+  assert.ok(fieldNames.includes("phone"));
+  assert.ok(fieldNames.includes("company"));
+});
