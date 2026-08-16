@@ -51,6 +51,22 @@ const structuralWords = new Set([
   "control", "controls", "access", "based", "with", "and", "for", "the", "that", "build",
   "create", "make", "generate", "need", "want", "help", "please", "full", "complete",
   "support", "supports", "including", "include", "manage", "handle", "track", "store",
+  "have", "has", "had", "having", "contain", "contains", "belong", "belongs",
+  // Interrogatives, pronouns and determiners. Prose describing behaviour is full
+  // of them — "an app that reminds me when to water each plant" was producing
+  // entities named "remind" and "when" — and none can ever name a record type.
+  "when", "where", "why", "how", "who", "whom", "whose", "which", "what",
+  "each", "every", "some", "any", "all", "both", "either", "neither",
+  "me", "my", "mine", "you", "your", "yours", "our", "ours", "us", "they",
+  "them", "their", "theirs", "its", "this", "these", "those", "there", "here",
+  "then", "than", "about", "into", "onto", "from", "upon", "while", "whether",
+  "also", "just", "only", "very", "more", "most", "less", "least", "much",
+  "many", "few", "several", "multiple", "other", "another", "same", "such",
+  // Verbs that describe what the app does rather than what it stores.
+  "remind", "reminds", "let", "lets", "allow", "allows", "show", "shows",
+  "send", "sends", "keep", "keeps", "record", "records", "list", "lists",
+  "view", "views", "see", "sees", "get", "gets", "put", "puts", "use", "uses",
+  "log", "logs", "save", "saves", "share", "shares", "find", "finds",
   // Placeholders and adjectives that are never the thing being stored.
   "something", "anything", "everything", "thing", "things", "stuff", "useful", "nice",
   "good", "great", "better", "best", "cool", "awesome", "proper", "real", "little",
@@ -92,7 +108,9 @@ const compoundHeadWords = new Set(["application", "project", "product"]);
  * that sense, so a run ending in one of these drops it and keeps the modifier.
  * Leading, they are ordinary nouns: a "book tracker" really does track books.
  */
-const containerTailWords = new Set(["book", "binder", "album", "collection", "library"]);
+const containerTailWords = new Set([
+  "book", "binder", "album", "collection", "library", "box", "shelf", "folder", "bin"
+]);
 
 /** Nouns that are features of an app rather than stored records. */
 const featureNouns = new Set([
@@ -118,11 +136,32 @@ const featurePatterns: Array<{ feature: ProjectFeature; pattern: RegExp }> = [
   { feature: "calendar", pattern: /\b(calendar|schedule|scheduling|timetable|agenda|planner|booking|appointments?)\w*\b/i }
 ];
 
+/** Singulars that already end in "s", so their plural really does add "es". */
+const sStemPlurals = new Set([
+  "buses", "statuses", "gases", "lenses", "campuses", "viruses", "bonuses",
+  "focuses", "aliases", "atlases", "canvases", "biases", "surpluses"
+]);
+
 export function singularize(word: string): string {
   if (word.length > 4 && word.endsWith("ies")) return `${word.slice(0, -3)}y`;
-  if (word.length > 4 && (word.endsWith("ses") || word.endsWith("xes") || word.endsWith("ches"))) {
+
+  // "class/classes", "address/addresses": the stem already ends in a double s.
+  if (word.length > 5 && word.endsWith("sses")) return word.slice(0, -2);
+
+  // Sibilant plurals genuinely add "es": box/boxes, match/matches, dish/dishes.
+  if (word.length > 4 && (word.endsWith("xes") || word.endsWith("ches") || word.endsWith("shes") || word.endsWith("zes"))) {
     return word.slice(0, -2);
   }
+
+  // "-ses" is genuinely ambiguous: "statuses" comes from "status" but
+  // "exercises" comes from "exercise", and the two are structurally identical.
+  // No rule separates them, so the rarer "-s" stems are listed and everything
+  // else takes the far more common "-se" reading. Resolving it the other way
+  // round is what produced "exercis", "hous", "databas" and "respons".
+  if (word.length > 4 && word.endsWith("ses") && sStemPlurals.has(word)) {
+    return word.slice(0, -2);
+  }
+
   if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
   return word;
 }
@@ -309,12 +348,35 @@ export function detectFeatures(request: string): ProjectFeature[] {
 const maxEntities = 3;
 
 /** Candidate record nouns, in the order the user mentioned them. */
+/**
+ * Verbs that open a request. Handled by position rather than by adding them to
+ * the structural stop list, because several are ordinary nouns elsewhere: a
+ * workout has a "set", a release has a "build", a game has a "design".
+ */
+const openingVerbs = new Set([
+  "build", "create", "make", "generate", "add", "write", "implement", "design",
+  "set", "setup", "configure", "scaffold", "draft", "plan", "start", "spin", "put", "give"
+]);
+
+function stripLeadingVerb(words: string[]): string[] {
+  if (words.length < 2 || !openingVerbs.has(words[0])) return words;
+
+  const rest = words.slice(1);
+  // "set up", "spin up", "put together" leave a particle behind.
+  if (rest.length > 1 && /^(up|out|together|off|on)$/.test(rest[0])) {
+    return rest.slice(1);
+  }
+  return rest;
+}
+
 export function extractEntityNames(request: string): string[] {
-  const words = request
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
+  const words = stripLeadingVerb(
+    request
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+  );
 
   // Consecutive candidate nouns form one compound. English compounds are
   // head-final — "gym membership" is a membership, "job application" is an
@@ -331,14 +393,22 @@ export function extractEntityNames(request: string): string[] {
     }
   };
 
-  for (const word of words) {
+  for (const [index, word] of words.entries()) {
     const singular = singularize(word);
+    // "projects have many tasks": whatever owns a relationship is a record type,
+    // whatever else the word usually means. Without this, a word like "project"
+    // that normally names a kind of app is dropped even when the request is
+    // plainly describing it as a thing being stored.
+    const ownsRelationship = /^(have|has|own|owns|contain|contains|hold|holds)$/.test(words[index + 1] ?? "");
+
     const usable = word.length >= 3
       && singular.length >= 3
-      && !structuralWords.has(word)
-      && !structuralWords.has(singular)
-      && !featureNouns.has(word)
-      && !featureNouns.has(singular);
+      && (ownsRelationship || (
+        !structuralWords.has(word)
+        && !structuralWords.has(singular)
+        && !featureNouns.has(word)
+        && !featureNouns.has(singular)
+      ));
 
     if (usable && current.length > 0 && containerTailWords.has(singular)) {
       // "recipe book": the container ends the compound without becoming it.

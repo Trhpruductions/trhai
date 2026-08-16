@@ -712,3 +712,83 @@ test("an ordinary 'with' field list is still read", () => {
   assert.ok(fieldNames.includes("phone"));
   assert.ok(fieldNames.includes("company"));
 });
+
+test("plurals ending in -ses singularize to the right stem", () => {
+  // The regression: "exercises" became "exercis" and "houses" became "hous",
+  // which then appeared verbatim in entity names, routes and generated code.
+  assert.equal(singularize("exercises"), "exercise");
+  assert.equal(singularize("houses"), "house");
+  assert.equal(singularize("purchases"), "purchase");
+  assert.equal(singularize("databases"), "database");
+  assert.equal(singularize("responses"), "response");
+  assert.equal(singularize("licenses"), "license");
+});
+
+test("the genuinely -s stems still take -es", () => {
+  // "statuses" really does come from "status"; these are the exceptions the
+  // -se default cannot detect on its own.
+  assert.equal(singularize("statuses"), "status");
+  assert.equal(singularize("buses"), "bus");
+  assert.equal(singularize("gases"), "gas");
+});
+
+test("sibilant and double-s plurals are unaffected", () => {
+  assert.equal(singularize("classes"), "class");
+  assert.equal(singularize("addresses"), "address");
+  assert.equal(singularize("boxes"), "box");
+  assert.equal(singularize("matches"), "match");
+  assert.equal(singularize("dishes"), "dish");
+  assert.equal(singularize("categories"), "category");
+});
+
+test("a leading phrasal verb never becomes the entity", () => {
+  // "Set up a habit tracker" was producing an entity literally named "set".
+  const names = extractEntityNames("Set up a habit tracker with daily streaks");
+  assert.ok(!names.includes("set"), `got ${names.join(", ")}`);
+  assert.ok(names.includes("habit"), `got ${names.join(", ")}`);
+
+  assert.deepEqual(extractEntityNames("Spin up a booking service for rooms"), ["booking", "room"]);
+  // "set" is only stripped in the opening verb position; elsewhere it is a noun.
+  assert.ok(extractEntityNames("Build a workout log where a set has reps").includes("set"));
+});
+
+test("interrogatives, pronouns and behaviour verbs are never entities", () => {
+  const names = extractEntityNames("Create a plant care app that reminds me when to water each plant");
+
+  for (const junk of ["remind", "reminds", "when", "me", "each", "that"]) {
+    assert.ok(!names.includes(junk), `"${junk}" must not be an entity, got ${names.join(", ")}`);
+  }
+  assert.ok(names.includes("plant"), `expected plant among ${names.join(", ")}`);
+});
+
+test("a relationship verb is not mistaken for a record type", () => {
+  // "students have many grades" was yielding an entity named "have".
+  const names = extractEntityNames("Build a school gradebook where students have many grades");
+
+  assert.ok(!names.includes("have"), `got ${names.join(", ")}`);
+  assert.ok(names.includes("student"), `expected student among ${names.join(", ")}`);
+  assert.ok(names.includes("grade"), `expected grade among ${names.join(", ")}`);
+});
+
+test("a container noun names the app, not the record", () => {
+  // A recipe box stores recipes; the box is the app.
+  assert.equal(planProject("Build a recipe box where recipes have a name and servings").entities[0].name, "recipe");
+});
+
+test("entity names never contain a mangled stem", () => {
+  const requests = [
+    "Build a gym log where workouts have many exercises, exercises have reps and weight",
+    "Build a property site where houses have a price and address",
+    "Create a shop where purchases have a total"
+  ];
+
+  for (const request of requests) {
+    for (const entity of planProject(request).entities) {
+      assert.doesNotMatch(
+        entity.name,
+        /(exercis|hous|purchas|databas|respons|licens)$/,
+        `"${request}" produced a mangled entity name: ${entity.name}`
+      );
+    }
+  }
+});
