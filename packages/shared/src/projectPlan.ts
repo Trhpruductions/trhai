@@ -526,6 +526,59 @@ function fieldsFor(features: ProjectFeature[], primary: boolean, requested: stri
   return fields;
 }
 
+/** Framing that opens a request without being part of what is being built. */
+const requestOpeners = [
+  /^(?:i|we)\s+(?:need|want|would\s+like)\s+(?:you\s+to\s+)?/i,
+  /^(?:can|could|would)\s+you\s+(?:please\s+)?/i,
+  /^help\s+(?:me|us)\s+(?:to\s+)?/i,
+  /^let'?s\s+/i,
+  /^please\s+/i
+];
+
+/** "build me a ...", "make us a ..." — who it is for, not what it is. */
+const beneficiaryPronouns = new Set(["me", "us"]);
+
+/** Words that begin a describing clause, so the name has ended. */
+const titleClauseWords = new Set([
+  "where", "with", "that", "which", "for", "tracking", "storing", "containing",
+  "including", "having", "has", "have", "so", "to", "and", "plus"
+]);
+
+const maxTitleWords = 5;
+
+/**
+ * A name for the generated app.
+ *
+ * Without this the whole request became the title, so a support desk was called
+ * "Build a support desk where tickets have a title, status, priority and due
+ * date, tracking customers" — in the browser tab, the page heading, the health
+ * endpoint and the folder name. The name is the first thing anyone sees of the
+ * generated app, and a sentence is not a name.
+ */
+export function deriveTitle(request: string): string {
+  let text = request.trim().replace(/[.!?]+$/, "");
+  for (const opener of requestOpeners) text = text.replace(opener, "");
+
+  // Commas survive the clean: they end a name just as a clause word does.
+  let words = stripLeadingVerb(
+    text.toLowerCase().replace(/[^a-z0-9\s,]/g, " ").split(/\s+/).filter(Boolean)
+  );
+
+  if (words.length > 1 && beneficiaryPronouns.has(words[0])) words = words.slice(1);
+  if (words.length > 1 && /^(a|an|the)$/.test(words[0])) words = words.slice(1);
+
+  const kept: string[] = [];
+  for (const word of words) {
+    const bare = word.replace(/,+$/, "");
+    if (titleClauseWords.has(bare)) break;
+    if (bare) kept.push(bare);
+    if (word.endsWith(",") || kept.length >= maxTitleWords) break;
+  }
+
+  if (kept.length === 0) return "Generated Project";
+  return kept.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
 export function planProject(request: string, title?: string): ProjectSpec {
   const trimmed = request.trim();
   const features = detectFeatures(trimmed);
@@ -585,7 +638,7 @@ export function planProject(request: string, title?: string): ProjectSpec {
     }
   }
 
-  const resolvedTitle = (title ?? trimmed).trim() || "Generated Project";
+  const resolvedTitle = title?.trim() || deriveTitle(trimmed);
 
   return {
     title: resolvedTitle,

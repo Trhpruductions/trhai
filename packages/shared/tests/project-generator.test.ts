@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { planProject, extractEntityNames, detectFeatures, pluralize, singularize, isCollectionLabel } from "../src/projectPlan.js";
+import { planProject, extractEntityNames, detectFeatures, pluralize, singularize, isCollectionLabel, deriveTitle } from "../src/projectPlan.js";
 import { generateProject } from "../src/projectGenerator.js";
 
 test("derives the entity from the request rather than a fixed template", () => {
@@ -853,4 +853,37 @@ test("collection labels are recognized precisely", () => {
   assert.equal(isCollectionLabel("quantity in stock"), false);
   assert.equal(isCollectionLabel("email"), false);
   assert.equal(isCollectionLabel("status"), false);
+});
+
+test("a generated app gets a name, not the request sentence", () => {
+  // The regression: the whole request became the browser title, the page
+  // heading, the /health service name and the folder slug.
+  assert.equal(deriveTitle("Build a support desk where tickets have a title, status and priority"), "Support Desk");
+  assert.equal(deriveTitle("I need a client portal with invoices and payments"), "Client Portal");
+  assert.equal(deriveTitle("Build me a task tracker where projects have many tasks"), "Task Tracker");
+  assert.equal(deriveTitle("Create an expense tracker with amount, category and notes"), "Expense Tracker");
+  assert.equal(deriveTitle("Make a reading list app"), "Reading List App");
+});
+
+test("the derived title produces a usable slug", () => {
+  const spec = planProject("Build a support desk where tickets have a title, status and priority");
+
+  assert.equal(spec.title, "Support Desk");
+  assert.equal(spec.slug, "support-desk");
+});
+
+test("an explicit title still wins", () => {
+  assert.equal(planProject("Build a support desk", "Helpdesk").title, "Helpdesk");
+});
+
+test("a title is never empty and never a whole sentence", () => {
+  for (const request of [
+    "Build something useful",
+    "app",
+    "Build a really long thing where many words follow on and on and on forever"
+  ]) {
+    const title = deriveTitle(request);
+    assert.ok(title.length > 0, `empty title for "${request}"`);
+    assert.ok(title.split(/\s+/).length <= 5, `title too long: "${title}"`);
+  }
 });
