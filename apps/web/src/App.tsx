@@ -21,6 +21,25 @@ import {
 import { generateProject, planProject } from "@ascend/shared";
 import { buildLocalCapabilityReply, inferLocalIntent, type LocalIntent } from "./localAssistant";
 import {
+  appendNode,
+  capabilityReason,
+  describeFlow,
+  executeFlow,
+  moveNode,
+  nodeCapability,
+  nodeLabels,
+  nodeSummary,
+  readFlow,
+  removeNode,
+  rewindPoint,
+  updateNodeConfig,
+  validateFlow,
+  writeFlow,
+  type Flow,
+  type NodeType,
+  type RunResult
+} from "./automation";
+import {
   addEvent,
   formatEventTime,
   formatRelative,
@@ -369,6 +388,49 @@ const sidebarCollapsedStorageKey = "ascend.sidebar.collapsed.v1";
 const personalityStorageKey = "ascend.personality.v1";
 const widgetLayoutStorageKey = "ascend.widgets.layout.v1";
 const calendarStorageKey = "ascend.calendar.events.v1";
+const flowStorageKey = "ascend.automation.flow.v1";
+
+/**
+ * A starter flow that demonstrates the one genuinely useful thing this build can
+ * automate end to end: run a command, then branch on whether it passed.
+ */
+const starterFlow: Flow = {
+  id: "flow-1",
+  name: "Test and report",
+  nodes: [
+    { id: "n1", type: "run-script", config: { command: "npm test" } },
+    { id: "n2", type: "if", config: { left: "ok", op: "==", right: "true" } },
+    { id: "n3", type: "discord-message", config: { channel: "builds" } },
+    { id: "n4", type: "else", config: {} },
+    { id: "n5", type: "email", config: { to: "me@example.com" } },
+    { id: "n6", type: "end-if", config: {} }
+  ]
+};
+
+/** The palette, in the order the vision lists the primitives. */
+const paletteTypes: NodeType[] = [
+  "if", "else", "end-if", "wait", "run-script",
+  "open-website", "email", "call-api", "generate-image", "discord-message"
+];
+
+/** Which config field each primitive edits, and how to label it. */
+const nodeConfigFields: Partial<Record<NodeType, Array<{ key: string; label: string; placeholder: string }>>> = {
+  if: [
+    { key: "left", label: "Variable", placeholder: "ok" },
+    { key: "op", label: "Test", placeholder: "==" },
+    { key: "right", label: "Value", placeholder: "true" }
+  ],
+  wait: [{ key: "seconds", label: "Seconds", placeholder: "30" }],
+  "run-script": [{ key: "command", label: "Command", placeholder: "npm test" }],
+  "open-website": [{ key: "url", label: "URL", placeholder: "https://example.com" }],
+  email: [{ key: "to", label: "To", placeholder: "me@example.com" }],
+  "call-api": [
+    { key: "method", label: "Method", placeholder: "GET" },
+    { key: "url", label: "URL", placeholder: "https://api.example.com" }
+  ],
+  "generate-image": [{ key: "prompt", label: "Prompt", placeholder: "a red bicycle" }],
+  "discord-message": [{ key: "channel", label: "Channel", placeholder: "builds" }]
+};
 const marketplaceStorageKey = "ascend.marketplace.v1";
 const runtimeAckSignatureStorageKey = "ascend.runtime.ack.signatures.v1";
 const triageTimelineStorageKey = "ascend.runtime.triage.timeline.v1";
@@ -1093,6 +1155,11 @@ export function App() {
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(
     () => readEvents(window.localStorage, calendarStorageKey)
   );
+  const [flow, setFlow] = useState<Flow>(
+    () => readFlow(window.localStorage, flowStorageKey) ?? starterFlow
+  );
+  const [flowRun, setFlowRun] = useState<RunResult | null>(null);
+  const [flowRunning, setFlowRunning] = useState(false);
   const [eventTitle, setEventTitle] = useState("");
   const [eventStart, setEventStart] = useState("");
   const [marketplace, setMarketplace] = useState<MarketplaceState>(
@@ -2479,6 +2546,56 @@ export function App() {
     setActionLine(`${destination.label} focused`, "ok");
   }
 
+  function commitFlow(next: Flow) {
+    setFlow(next);
+    writeFlow(window.localStorage, flowStorageKey, next);
+  }
+
+  /**
+   * Run the flow.
+   *
+   * A dry run never touches the bridge. A live run gets the real command runner
+   * only when the desktop bridge is present; without it RUN SCRIPT reports that
+   * it was skipped rather than appearing to succeed.
+   */
+  async function runFlow(dryRun: boolean, stopAfter?: number) {
+    if (flowRunning) return;
+    setFlowRunning(true);
+
+    try {
+      const runner = window.ascendDesktop?.runWorkspaceCommand;
+      const result = await executeFlow(flow, {
+        dryRun,
+        stopAfter,
+        runScript: !dryRun && runner
+          ? async (command) => {
+            const outcome = await runner({ command });
+            return {
+              ok: Boolean(outcome?.ok),
+              exitCode: outcome?.ok ? 0 : 1,
+              output: outcome?.error ?? ""
+            };
+          }
+          : undefined
+      });
+
+      setFlowRun(result);
+      if (result.failed) {
+        setActionLine(dryRun ? "Flow has errors" : "Flow failed", "warn");
+      } else {
+        setActionLine(dryRun ? "Dry run complete — nothing was executed" : "Flow finished", "ok");
+      }
+    } finally {
+      setFlowRunning(false);
+    }
+  }
+
+  /** Re-run from the start, stopping just before the step that failed. */
+  async function replayToFailure() {
+    if (!flowRun) return;
+    await runFlow(false, rewindPoint(flowRun).keepSteps);
+  }
+
   function commitCalendar(next: CalendarEvent[]) {
     setCalendarEvents(next);
     writeEvents(window.localStorage, calendarStorageKey, next);
@@ -3634,6 +3751,135 @@ export function App() {
               </div>
             ))}
           </div>
+        </section>
+      );
+    }
+
+    if (activeDestination === "automation") {
+      const issues = validateFlow(flow);
+      const outline = describeFlow(flow);
+      const stepFor = (nodeId: string) => flowRun?.steps.find((step) => step.nodeId === nodeId);
+      const rewind = flowRun ? rewindPoint(flowRun) : null;
+
+      return (
+        <section className="destination-view card" aria-label="Automation">
+          <div className="destination-head">
+            <h2>{flow.name}</h2>
+            <span className="destination-tag">{flow.nodes.length} steps</span>
+          </div>
+          <p className="destination-summary">{activeDestinationEntry.summary}</p>
+
+          <div className="flow-actions">
+            <button type="button" onClick={() => void runFlow(true)} disabled={flowRunning}>
+              Dry run
+            </button>
+            <button
+              type="button"
+              onClick={() => void runFlow(false)}
+              disabled={flowRunning || issues.length > 0}
+              title={issues.length > 0 ? "Fix the errors first" : "Executes real steps"}
+            >
+              Run
+            </button>
+            {rewind?.resumeNodeId ? (
+              <button type="button" className="ghost" onClick={() => void replayToFailure()} disabled={flowRunning}>
+                Replay to failure
+              </button>
+            ) : null}
+            {flowRun ? (
+              <span className="flow-run-tag">
+                {flowRun.dryRun ? "Dry run — nothing executed" : "Live run"}
+              </span>
+            ) : null}
+          </div>
+
+          {issues.length > 0 ? (
+            <ul className="flow-issues">
+              {issues.map((issue, index) => (
+                <li key={`${issue.nodeId}-${index}`}>{issue.message}</li>
+              ))}
+            </ul>
+          ) : null}
+
+          <ol className="flow-list">
+            {flow.nodes.map((entry, index) => {
+              const step = stepFor(entry.id);
+              const gated = nodeCapability(entry.type) === "needs-credentials";
+              const fields = nodeConfigFields[entry.type] ?? [];
+
+              return (
+                <li key={entry.id} className={`flow-node${step ? ` step-${step.status}` : ""}`}>
+                  <div className="flow-node-head">
+                    <code>{outline[index]?.match(/^\s*/)?.[0].length ? "└─" : ""}</code>
+                    <strong>{nodeLabels[entry.type]}</strong>
+                    {gated ? (
+                      <span className="flow-gated" title={capabilityReason(entry.type)}>
+                        dry-run only
+                      </span>
+                    ) : null}
+                    {step ? <span className={`flow-status ${step.status}`}>{step.status}</span> : null}
+                    <div className="flow-node-actions">
+                      <button type="button" aria-label={`Move ${nodeLabels[entry.type]} up`}
+                        onClick={() => commitFlow(moveNode(flow, entry.id, -1))}>↑</button>
+                      <button type="button" aria-label={`Move ${nodeLabels[entry.type]} down`}
+                        onClick={() => commitFlow(moveNode(flow, entry.id, 1))}>↓</button>
+                      <button type="button" aria-label={`Remove ${nodeLabels[entry.type]}`}
+                        onClick={() => commitFlow(removeNode(flow, entry.id))}>×</button>
+                    </div>
+                  </div>
+
+                  {fields.length > 0 ? (
+                    <div className="flow-node-config">
+                      {fields.map((field) => (
+                        <label key={field.key}>
+                          <span>{field.label}</span>
+                          <input
+                            type="text"
+                            value={entry.config[field.key] ?? ""}
+                            placeholder={field.placeholder}
+                            aria-label={`${nodeLabels[entry.type]} ${field.label}`}
+                            onChange={(event) =>
+                              commitFlow(updateNodeConfig(flow, entry.id, field.key, event.target.value))}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {step ? <p className="flow-step-log">{step.message}</p> : null}
+                </li>
+              );
+            })}
+          </ol>
+
+          <div className="flow-palette">
+            {paletteTypes.map((type) => (
+              <button
+                key={type}
+                type="button"
+                title={capabilityReason(type)}
+                onClick={() =>
+                  commitFlow(appendNode(flow, { id: crypto.randomUUID(), type, config: {} }))}
+              >
+                {nodeLabels[type]}
+                {nodeCapability(type) === "needs-credentials" ? <em> ·</em> : null}
+              </button>
+            ))}
+          </div>
+
+          {flowRun && flowRun.steps.length > 0 ? (
+            <details className="flow-log" open>
+              <summary>Run log · {flowRun.steps.length} steps</summary>
+              <ol>
+                {flowRun.steps.map((step, index) => (
+                  <li key={`${step.nodeId}-${index}`} className={`step-${step.status}`}>
+                    <strong>{step.label}</strong> <span>{step.status}</span>
+                    <em>{step.message}</em>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          ) : null}
         </section>
       );
     }

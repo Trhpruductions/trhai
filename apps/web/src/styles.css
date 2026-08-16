@@ -2998,6 +2998,259 @@ svg {
 }
 
 /* ---------------------------------------------------------------------------
+   Automation canvas (vision §11)
+--------------------------------------------------------------------------- */
+
+.flow-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.flow-actions button {
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: rgba(34, 219, 255, 0.14);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 15px;
+  cursor: pointer;
+}
+
+.flow-actions button.ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.flow-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.flow-run-tag {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.flow-issues {
+  list-style: none;
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 138, 138, 0.4);
+  background: rgba(255, 90, 90, 0.08);
+  color: #ffb3b3;
+  font-size: 11.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.flow-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow-y: auto;
+  max-height: 42vh;
+}
+
+.flow-node {
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* A run paints its outcome onto the step, so the canvas doubles as the log. */
+.flow-node.step-ok { border-color: rgba(96, 245, 178, 0.5); }
+.flow-node.step-failed { border-color: rgba(255, 138, 138, 0.6); }
+.flow-node.step-skipped { border-color: rgba(255, 200, 121, 0.45); }
+.flow-node.step-dry-run { border-color: rgba(120, 190, 255, 0.4); }
+
+.flow-node-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.flow-node-head strong {
+  font-family: "Orbitron", "Manrope", sans-serif;
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+}
+
+.flow-node-head code {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.flow-gated {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 200, 121, 0.95);
+  border: 1px solid rgba(255, 200, 121, 0.35);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.flow-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.flow-status.ok { color: #60f5b2; }
+.flow-status.failed { color: #ff8a8a; }
+.flow-status.skipped { color: #ffc879; }
+
+.flow-node-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+
+.flow-node-actions button {
+  width: 21px;
+  height: 21px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.flow-node-actions button:hover {
+  background: rgba(34, 219, 255, 0.16);
+  color: var(--text);
+}
+
+.flow-node-config {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.flow-node-config label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.flow-node-config input {
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(3, 12, 20, 0.8);
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 9px;
+  text-transform: none;
+  letter-spacing: 0;
+  min-width: 150px;
+}
+
+.flow-node-config input:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+}
+
+.flow-step-log {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.flow-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.flow-palette button {
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 11px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+
+.flow-palette button:hover {
+  border-color: var(--line-strong);
+}
+
+/* Marks a primitive that cannot really run here. */
+.flow-palette em {
+  font-style: normal;
+  color: rgba(255, 200, 121, 0.95);
+}
+
+.flow-log summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.flow-log ol {
+  list-style: none;
+  margin: 7px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 22vh;
+  overflow-y: auto;
+}
+
+.flow-log li {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.flow-log li strong {
+  color: var(--text);
+  min-width: 130px;
+}
+
+.flow-log li span {
+  text-transform: uppercase;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  min-width: 52px;
+}
+
+.flow-log li em {
+  font-style: normal;
+}
+
+.flow-log li.step-ok span { color: #60f5b2; }
+.flow-log li.step-failed span { color: #ff8a8a; }
+.flow-log li.step-skipped span { color: #ffc879; }
+
+/* ---------------------------------------------------------------------------
    Calendar and agent marketplace (vision §10, §16)
 --------------------------------------------------------------------------- */
 

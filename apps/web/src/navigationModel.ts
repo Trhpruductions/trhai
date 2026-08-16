@@ -123,9 +123,8 @@ const destinations: Destination[] = [
   {
     id: "automation",
     label: "Automation",
-    summary: "Build flows from blocks and run them against real steps.",
-    status: "planned",
-    plannedReason: "The block canvas and its dry-run executor are still being built."
+    summary: "Build flows from blocks. Control flow and scripts run for real; steps needing credentials are dry-run only.",
+    status: "live"
   },
   {
     id: "knowledge",
