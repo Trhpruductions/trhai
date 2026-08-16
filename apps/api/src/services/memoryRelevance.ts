@@ -107,6 +107,26 @@ const expandedMatchWeight = 0.7;
  */
 export const relevanceThreshold = 0.28;
 
+/**
+ * The joined form of each adjacent term pair.
+ *
+ * English writes the same technical concept open or closed almost at random —
+ * "roll back" and "rollback", "set up" and "setup", "log in" and "login". Pure
+ * term overlap treats those as unrelated words, so a runbook headed "Rollback"
+ * could not be found by asking how to "roll back" a deploy.
+ *
+ * These are used for *lookup only*, never added to the term lists the score is
+ * divided by. A junk pairing like "thedatabase" matches nothing, so a wrong join
+ * costs nothing rather than producing a false hit.
+ */
+function compoundForms(terms: string[]): string[] {
+  const joined: string[] = [];
+  for (let index = 0; index < terms.length - 1; index += 1) {
+    joined.push(`${terms[index]}${terms[index + 1]}`);
+  }
+  return joined;
+}
+
 export function scoreMemories<T extends ScorableMemory>(
   query: string,
   memories: T[]
@@ -120,6 +140,9 @@ export function scoreMemories<T extends ScorableMemory>(
 
   for (const memory of memories) {
     const memoryTerms = new Set(extractTopics(`${memory.title} ${memory.body}`));
+    // Lookup set only. Compound forms must never enter `memoryTerms` itself:
+    // they would inflate the density denominator and drag every score down.
+    const memoryLookup = new Set([...memoryTerms, ...compoundForms([...memoryTerms])]);
     if (memoryTerms.size === 0) {
       continue;
     }
@@ -128,16 +151,25 @@ export function scoreMemories<T extends ScorableMemory>(
     let matchWeight = 0;
 
     for (const term of queryTerms) {
-      if (memoryTerms.has(term)) {
+      if (memoryLookup.has(term)) {
         matchedTerms.push(term);
         matchWeight += 1;
         continue;
       }
       // Related concept: "database" reaching a memory that says "Postgres".
-      const related = expandTerm(term).find((candidate) => memoryTerms.has(candidate));
+      const related = expandTerm(term).find((candidate) => memoryLookup.has(candidate));
       if (related) {
         matchedTerms.push(`${term}~${related}`);
         matchWeight += expandedMatchWeight;
+      }
+    }
+
+    // "roll back" in the question reaching "Rollback" in the document. Counted
+    // as one full match: the two words are one concept, which is the whole point.
+    for (const joined of compoundForms(queryTerms)) {
+      if (memoryLookup.has(joined) && !matchedTerms.includes(joined)) {
+        matchedTerms.push(joined);
+        matchWeight += 1;
       }
     }
 

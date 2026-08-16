@@ -36,6 +36,13 @@ import {
   recoveryIpRule,
   registerIpRule
 } from "./services/rateLimit.js";
+import {
+  addDocument,
+  listDocuments,
+  maxDocumentChars,
+  removeDocument,
+  retrieveKnowledgePassages
+} from "./services/knowledgeStore.js";
 import { attachAuthIdentity } from "./middleware/auth.js";
 import { v1MemoryRouter } from "./routes/v1Memory.js";
 import { v1Router } from "./routes/v1.js";
@@ -146,7 +153,8 @@ export function createApp() {
         // Reported so the reply can only confirm a save that actually happened.
         // Without a session there is nowhere to write, and the user must be told
         // that rather than reassured.
-        memoryWrite: { available: sessionId !== null, saved: savedMemories.length }
+        memoryWrite: { available: sessionId !== null, saved: savedMemories.length },
+        knowledge: sessionId ? retrieveKnowledgePassages(sessionId) : []
       });
 
       // Recorded after a successful reply so a failed request leaves no orphan turn.
@@ -391,6 +399,61 @@ export function createApp() {
       },
       traceId: "trace-local"
     });
+  });
+
+  app.get("/v1/knowledge", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId, res, req);
+    if (!sessionId) return;
+
+    res.json({ data: { documents: listDocuments(sessionId) }, traceId: "trace-local" });
+  });
+
+  app.post("/v1/knowledge", (req, res) => {
+    const sessionId = requireSessionId(req.body?.sessionId, res, req);
+    if (!sessionId) return;
+
+    const title = typeof req.body?.title === "string" ? req.body.title : "";
+    const body = typeof req.body?.body === "string" ? req.body.body : "";
+
+    const document = addDocument(sessionId, {
+      id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title,
+      body
+    });
+
+    if (!document) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "A document needs a title and a body",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    res.status(201).json({
+      data: {
+        document,
+        // Disclosed so a silently shortened paste is visible rather than assumed intact.
+        truncated: body.trim().length > maxDocumentChars
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  app.delete("/v1/knowledge/:documentId", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId, res, req);
+    if (!sessionId) return;
+
+    if (!removeDocument(sessionId, req.params.documentId)) {
+      res.status(404).json({
+        code: "NOT_FOUND",
+        message: "Document not found",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    res.status(204).end();
   });
 
   app.patch("/v1/assist/memory/:memoryId", (req, res) => {

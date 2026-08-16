@@ -1159,6 +1159,10 @@ export function App() {
     () => readFlow(window.localStorage, flowStorageKey) ?? starterFlow
   );
   const [flowRun, setFlowRun] = useState<RunResult | null>(null);
+  const [documents, setDocuments] = useState<Array<{ id: string; title: string; body: string; createdAt: string }>>([]);
+  const [docTitle, setDocTitle] = useState("");
+  const [docBody, setDocBody] = useState("");
+  const [docBusy, setDocBusy] = useState(false);
   const [flowRunning, setFlowRunning] = useState(false);
   const [eventTitle, setEventTitle] = useState("");
   const [eventStart, setEventStart] = useState("");
@@ -2546,6 +2550,69 @@ export function App() {
     setActionLine(`${destination.label} focused`, "ok");
   }
 
+  async function loadDocuments() {
+    try {
+      const response = await fetch(
+        `${webEnv.apiBaseUrl}/v1/knowledge?sessionId=${encodeURIComponent(resolveAssistSessionId())}`
+      );
+      if (!response.ok) return;
+      const payload = await response.json();
+      setDocuments(payload?.data?.documents ?? []);
+    } catch {
+      // The knowledge panel is additive; a fetch failure must not break the view.
+    }
+  }
+
+  async function submitDocument() {
+    if (docBusy || !docTitle.trim() || !docBody.trim()) return;
+    setDocBusy(true);
+
+    try {
+      const response = await fetch(`${webEnv.apiBaseUrl}/v1/knowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: resolveAssistSessionId(),
+          title: docTitle,
+          body: docBody
+        })
+      });
+
+      if (!response.ok) {
+        setActionLine("A document needs a title and a body", "warn");
+        return;
+      }
+
+      const payload = await response.json();
+      setDocTitle("");
+      setDocBody("");
+      await loadDocuments();
+      setActionLine(
+        payload?.data?.truncated
+          ? "Document added — it was long, so the tail was trimmed"
+          : `Document added · ${payload?.data?.document?.title ?? ""}`,
+        "ok"
+      );
+    } catch {
+      setActionLine("Could not reach the API", "warn");
+    } finally {
+      setDocBusy(false);
+    }
+  }
+
+  async function deleteDocument(documentId: string) {
+    try {
+      await fetch(
+        `${webEnv.apiBaseUrl}/v1/knowledge/${encodeURIComponent(documentId)}?sessionId=${encodeURIComponent(resolveAssistSessionId())}`,
+        { method: "DELETE" }
+      );
+      await loadDocuments();
+      setActionLine("Document removed", "ok");
+    } catch {
+      setActionLine("Could not reach the API", "warn");
+    }
+  }
+
   function commitFlow(next: Flow) {
     setFlow(next);
     writeFlow(window.localStorage, flowStorageKey, next);
@@ -3678,6 +3745,11 @@ export function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (activeDestination === "knowledge") void loadDocuments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDestination]);
+
   // Destinations that take over the center stage. Home, Projects and Settings
   // are absent on purpose: they already have their lane in the legacy screen
   // hub, so overlaying a second panel would duplicate what is below it.
@@ -3751,6 +3823,66 @@ export function App() {
               </div>
             ))}
           </div>
+        </section>
+      );
+    }
+
+    if (activeDestination === "knowledge") {
+      return (
+        <section className="destination-view card" aria-label="Knowledge">
+          <div className="destination-head">
+            <h2>Knowledge</h2>
+            <span className="destination-tag">
+              {documents.length} document{documents.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <p className="destination-summary">{activeDestinationEntry.summary}</p>
+
+          <div className="doc-form">
+            <input
+              type="text"
+              value={docTitle}
+              placeholder="Document title"
+              aria-label="Document title"
+              onChange={(event) => setDocTitle(event.target.value)}
+            />
+            <textarea
+              value={docBody}
+              rows={5}
+              placeholder="Paste notes, a runbook, a spec — blank lines separate passages."
+              aria-label="Document body"
+              onChange={(event) => setDocBody(event.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => void submitDocument()}
+              disabled={docBusy || !docTitle.trim() || !docBody.trim()}
+            >
+              {docBusy ? "Adding…" : "Add document"}
+            </button>
+          </div>
+
+          {documents.length === 0 ? (
+            <p className="destination-reason">
+              No documents yet. Anything you add here can be quoted back when you ask a
+              question that matches its wording. Matching is on words, not meaning — there
+              is no language model in this build.
+            </p>
+          ) : (
+            <ul className="destination-list">
+              {documents.map((document) => (
+                <li key={document.id}>
+                  <div>
+                    <strong>{document.title}</strong>
+                    <small>{document.body.slice(0, 110)}{document.body.length > 110 ? "…" : ""}</small>
+                  </div>
+                  <button type="button" onClick={() => void deleteDocument(document.id)}>
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       );
     }

@@ -1,4 +1,4 @@
-import { ModelRouter, type MemoryWriteOutcome } from "./modelRouter.js";
+import { ModelRouter, type ComposerKnowledge, type MemoryWriteOutcome } from "./modelRouter.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
@@ -7,6 +7,8 @@ export type OrchestratorInput = {
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   /** What actually happened to memory this turn; see MemoryWriteOutcome. */
   memoryWrite?: MemoryWriteOutcome;
+  /** Knowledge passages available to ground an answer. */
+  knowledge?: ComposerKnowledge[];
 };
 
 export type OrchestratorResult = {
@@ -34,7 +36,8 @@ export async function runAssistantOrchestrator(
     userMessage: input.userMessage,
     memoryContext: input.memoryContext,
     history: input.history,
-    memoryWrite: input.memoryWrite
+    memoryWrite: input.memoryWrite,
+    knowledge: input.knowledge
   });
 
   return {

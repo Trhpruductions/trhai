@@ -57,6 +57,14 @@ export type ComposerInput = {
    * save rather than assuming one.
    */
   memoryWrite?: MemoryWriteOutcome;
+  /** Passages from the session's knowledge documents, already chunked. */
+  knowledge?: ComposerKnowledge[];
+};
+
+/** A knowledge passage the reply may quote, carrying the document it came from. */
+export type ComposerKnowledge = ScorableMemory & {
+  documentId: string;
+  documentTitle: string;
 };
 
 export type ComposedReply = {
@@ -180,6 +188,26 @@ export function composeReply(input: ComposerInput): ComposedReply {
       };
     }
 
+    // Nothing the user dictated matches, but a document they added might.
+    // Ranked below saved memory: a fact stated deliberately outranks a passage
+    // that merely shares vocabulary with the question.
+    const fromKnowledge = selectRelevantMemories(query, input.knowledge ?? [], 2);
+    if (fromKnowledge.length > 0) {
+      // Quoted verbatim with its source named. Matching here is lexical, so the
+      // passage is evidence, not an interpretation — presenting it as a settled
+      // answer would overstate what a term-overlap match establishes.
+      const quoted = fromKnowledge
+        .map((entry) => `- "${entry.memory.body}"\n  — ${entry.memory.documentTitle}`)
+        .join("\n\n");
+
+      return {
+        text: `From your knowledge base:\n\n${quoted}\n\nThat is quoted from the document, not interpreted. If it doesn't answer the question, the wording may just not match.`,
+        strategy: "answer",
+        groundedOn: fromKnowledge.map((entry) => entry.memory.id),
+        groundedOnHistory: 0
+      };
+    }
+
     // Nothing saved matches, but the answer may simply have been said earlier.
     const fromHistory = selectRelevantMemories(query, searchableHistory(history), 2);
     if (fromHistory.length > 0) {
@@ -193,11 +221,21 @@ export function composeReply(input: ComposerInput): ComposedReply {
     }
 
     const stored = input.memories.length;
+    const documents = new Set((input.knowledge ?? []).map((entry) => entry.documentId)).size;
     const nothingStored = "I don't have anything saved that answers that yet.";
-    const storedButUnmatched = `I have ${stored} saved memor${stored === 1 ? "y" : "ies"}, but none of them match that question.`;
+
+    // Naming what was searched matters: "nothing matches" reads as "you have
+    // nothing", which is wrong and misleading when a document is sitting there
+    // that simply uses different words.
+    const searched = [
+      stored > 0 ? `${stored} saved memor${stored === 1 ? "y" : "ies"}` : "",
+      documents > 0 ? `${documents} document${documents === 1 ? "" : "s"}` : ""
+    ].filter(Boolean).join(" and ");
+
+    const storedButUnmatched = `I searched ${searched} and nothing matched that question. Matching is on wording, so it may be phrased differently in there.`;
 
     return {
-      text: `${stored === 0 ? nothingStored : storedButUnmatched}\n\nTell me the answer and I'll remember it — start with "remember that ..." and it will be saved for next time.`,
+      text: `${searched === "" ? nothingStored : storedButUnmatched}\n\nTell me the answer and I'll remember it — start with "remember that ..." and it will be saved for next time.`,
       strategy: "no-answer",
       groundedOn: [],
       groundedOnHistory: 0

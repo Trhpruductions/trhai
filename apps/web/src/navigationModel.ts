@@ -129,10 +129,8 @@ const destinations: Destination[] = [
   {
     id: "knowledge",
     label: "Knowledge",
-    summary: "Documents and references the assistant can draw on.",
-    status: "planned",
-    plannedReason:
-      "Needs per-workspace document indexing (backlog E5-S1) before it can answer from anything real."
+    summary: "Documents the assistant can quote from. Matching is on wording, not meaning.",
+    status: "live"
   }
 ];
 

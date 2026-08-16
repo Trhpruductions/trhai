@@ -1,6 +1,11 @@
-import { composeReply, type ComposerMemory, type MemoryWriteOutcome } from "./replyComposer.js";
+import {
+  composeReply,
+  type ComposerKnowledge,
+  type ComposerMemory,
+  type MemoryWriteOutcome
+} from "./replyComposer.js";
 
-export type { MemoryWriteOutcome };
+export type { MemoryWriteOutcome, ComposerKnowledge };
 
 type RouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -39,6 +44,8 @@ export type ModelPrompt = {
   history?: ConversationTurn[];
   /** What actually happened to memory this turn; see MemoryWriteOutcome. */
   memoryWrite?: MemoryWriteOutcome;
+  /** Knowledge passages available to ground an answer. */
+  knowledge?: ComposerKnowledge[];
 };
 
 export class ModelRouter {
@@ -50,7 +57,8 @@ export class ModelRouter {
       message: normalized,
       memories: toComposerMemories(prompt.memoryContext ?? []),
       history: prompt.history ?? [],
-      memoryWrite: prompt.memoryWrite
+      memoryWrite: prompt.memoryWrite,
+      knowledge: prompt.knowledge ?? []
     });
 
     return {

@@ -2998,6 +2998,52 @@ svg {
 }
 
 /* ---------------------------------------------------------------------------
+   Knowledge documents
+--------------------------------------------------------------------------- */
+
+.doc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-form input,
+.doc-form textarea {
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(3, 12, 20, 0.8);
+  color: var(--text);
+  font-size: 12px;
+  padding: 8px 11px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.doc-form input:focus-visible,
+.doc-form textarea:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  box-shadow: 0 0 14px rgba(24, 199, 255, 0.24);
+}
+
+.doc-form button {
+  align-self: flex-start;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: rgba(34, 219, 255, 0.14);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.doc-form button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
    Automation canvas (vision §11)
 --------------------------------------------------------------------------- */
 

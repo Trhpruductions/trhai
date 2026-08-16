@@ -149,7 +149,9 @@ test("admits when no stored memory answers the question", () => {
 
   assert.equal(reply.strategy, "no-answer");
   assert.deepEqual(reply.groundedOn, []);
-  assert.match(reply.text, /none of them match/i);
+  assert.match(reply.text, /nothing matched that question/i);
+  // Says what it looked through, so "no answer" does not read as "you have nothing".
+  assert.match(reply.text, /1 saved memory/i);
   // Must not fabricate an answer out of an unrelated memory.
   assert.doesNotMatch(reply.text, /Postgres/);
 });
