@@ -162,7 +162,12 @@ export function singularize(word: string): string {
     return word.slice(0, -2);
   }
 
-  if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
+  // Singular words that simply end in "s". Without this the generic rule below
+  // strips the last letter of a word that was never plural: "status" became
+  // "statu", "analysis" became "analysi".
+  if (word.endsWith("us") || word.endsWith("is") || word.endsWith("ss")) return word;
+
+  if (word.length > 3 && word.endsWith("s")) return word.slice(0, -1);
   return word;
 }
 
@@ -293,6 +298,34 @@ const maxInferredFields = 8;
  * lists are read — inventing fields from loose prose would produce a data model
  * the user never asked for.
  */
+/**
+ * Plurals that really are one scalar value rather than a collection of records.
+ * "notes" and "comments" are a block of text on the record; "invoices" are not.
+ */
+const scalarPlurals = new Set([
+  "notes", "comments", "details", "instructions", "remarks", "contents",
+  "directions", "credentials", "settings", "preferences"
+]);
+
+/**
+ * A label naming a collection of records rather than a value on this record.
+ *
+ * "a client portal with invoices and payments" was producing
+ * `invoices: string` — a field that cannot hold what its name promises. A
+ * single-word plural is the signal: one client has many invoices, and an
+ * invoice is plainly its own record with its own fields.
+ *
+ * Multi-word labels are excluded because they are almost always genuine
+ * attributes — "quantity in stock" and "reorder level" describe the record.
+ */
+export function isCollectionLabel(label: string): boolean {
+  const trimmed = label.trim().toLowerCase();
+  if (!trimmed || trimmed.includes(" ")) return false;
+  if (scalarPlurals.has(trimmed)) return false;
+
+  return singularize(trimmed) !== trimmed;
+}
+
 export function extractFieldLabels(request: string): string[] {
   const labels: string[] = [];
   const seen = new Set<string>();
@@ -500,18 +533,35 @@ export function planProject(request: string, title?: string): ProjectSpec {
   // Entities are read from the request with the field lists removed, so
   // "customers with email and phone" yields the customer entity and three
   // fields, not four entities.
+  const labels = extractFieldLabels(trimmed);
+  // A plural in the list names records, not a value, so it has to survive into
+  // entity extraction instead of being stripped with the rest of the segment.
+  const collectionLabels = labels.filter(isCollectionLabel);
+
   const withoutFieldLists = trimmed.replace(new RegExp(fieldListLeadIn), (_full, segment: string) => {
     // Drop only the attribute portion; anything after a "tracking" clause names
     // records and must survive for entity extraction.
     const remainder = segment.slice(fieldPortionOf(segment).length);
     return remainder ? ` ${remainder}` : " ";
   });
+
+  // Collections join the entity list directly rather than being fed back through
+  // the text. Re-inserting them let the compound rule read "invoices payments"
+  // as one noun and collapse it to a single "payment"; and a word like "product"
+  // sits in the structural list, so it would be dropped on the way back in even
+  // though the request plainly names it as something the app holds.
   const names = extractEntityNames(withoutFieldLists);
+  for (const label of collectionLabels) {
+    const singular = singularize(label.trim().toLowerCase());
+    if (singular.length >= 3 && !names.includes(singular)) names.push(singular);
+  }
+
   const entityNames = names.length > 0 ? names : ["item"];
 
   // Fields the request named explicitly, e.g. "customers with email and phone".
   const entityNameSet = new Set(entityNames);
-  const requestedFields = extractFieldLabels(trimmed)
+  const requestedFields = labels
+    .filter((label) => !isCollectionLabel(label))
     .filter((label) => !entityNameSet.has(singularize(label)));
 
   const entities: Entity[] = entityNames.map((name, index) => ({

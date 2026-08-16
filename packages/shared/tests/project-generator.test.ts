@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { planProject, extractEntityNames, detectFeatures, pluralize, singularize } from "../src/projectPlan.js";
+import { planProject, extractEntityNames, detectFeatures, pluralize, singularize, isCollectionLabel } from "../src/projectPlan.js";
 import { generateProject } from "../src/projectGenerator.js";
 
 test("derives the entity from the request rather than a fixed template", () => {
@@ -791,4 +791,66 @@ test("entity names never contain a mangled stem", () => {
       );
     }
   }
+});
+
+test("a plural in a field list becomes a record type, not a string column", () => {
+  // The regression: "with invoices and payments" produced client.invoices:string
+  // and client.payments:string — fields that cannot hold what they name.
+  const spec = planProject("I need a client portal with invoices and payments");
+  const names = spec.entities.map((entity) => entity.name);
+
+  assert.ok(names.includes("invoice"), `got ${names.join(", ")}`);
+  assert.ok(names.includes("payment"), `got ${names.join(", ")}`);
+
+  const client = spec.entities.find((entity) => entity.name === "client");
+  assert.ok(client);
+  for (const field of client.fields) {
+    assert.ok(!/^(invoices|payments)$/.test(field.name), `${field.name} should be a relation`);
+  }
+  // And they are linked, not merely present.
+  assert.ok(client.fields.some((field) => field.name === "invoiceId" && field.type === "reference"));
+});
+
+test("scalar plurals stay fields", () => {
+  // "notes" and "comments" are a block of text on the record, not a collection.
+  const expense = planProject("Create an expense tracker with amount, category, date and notes");
+  const fields = expense.entities[0].fields.map((field) => field.name);
+
+  assert.ok(fields.includes("notes"), `got ${fields.join(", ")}`);
+  assert.ok(!expense.entities.some((entity) => entity.name === "note"));
+
+  const blog = planProject("Build a blog with posts and comments");
+  const blogFields = blog.entities[0].fields.map((field) => field.name);
+  assert.ok(blogFields.includes("comments"));
+  // ...while "posts" is plainly its own record.
+  assert.ok(blog.entities.some((entity) => entity.name === "post"));
+});
+
+test("a multi-word label is an attribute, not a collection", () => {
+  // "quantity in stock" describes the record; only bare plurals name records.
+  const spec = planProject("Build an inventory system with products, quantity in stock and reorder level");
+  const product = spec.entities.find((entity) => entity.name === "product");
+
+  assert.ok(product, `expected a product entity, got ${spec.entities.map((e) => e.name).join(", ")}`);
+  const fields = product.fields.map((field) => field.name);
+  assert.ok(fields.includes("quantityStock"), `got ${fields.join(", ")}`);
+  assert.ok(fields.includes("reorderLevel"), `got ${fields.join(", ")}`);
+});
+
+test("singular field lists are unchanged", () => {
+  const fields = planProject("Create a CRM with email, phone and company").entities[0].fields.map((f) => f.name);
+
+  for (const expected of ["email", "phone", "company"]) {
+    assert.ok(fields.includes(expected), `got ${fields.join(", ")}`);
+  }
+});
+
+test("collection labels are recognized precisely", () => {
+  assert.equal(isCollectionLabel("invoices"), true);
+  assert.equal(isCollectionLabel("payments"), true);
+  assert.equal(isCollectionLabel("notes"), false);
+  assert.equal(isCollectionLabel("comments"), false);
+  assert.equal(isCollectionLabel("quantity in stock"), false);
+  assert.equal(isCollectionLabel("email"), false);
+  assert.equal(isCollectionLabel("status"), false);
 });
