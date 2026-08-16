@@ -3043,6 +3043,54 @@ svg {
   cursor: not-allowed;
 }
 
+.doc-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.doc-form-actions button {
+  align-self: auto;
+}
+
+.doc-form-actions small {
+  color: var(--muted);
+  font-size: 10.5px;
+  flex: 1 1 220px;
+}
+
+/* The native file input is unstyleable, so the label carries the appearance. */
+.doc-import input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.doc-import span {
+  display: inline-block;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.doc-import span:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.doc-import:focus-within span {
+  border-color: var(--line-strong);
+  box-shadow: 0 0 14px rgba(24, 199, 255, 0.24);
+}
+
 /* ---------------------------------------------------------------------------
    Automation canvas (vision §11)
 --------------------------------------------------------------------------- */

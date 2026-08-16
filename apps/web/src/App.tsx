@@ -20,6 +20,7 @@ import {
 } from "./accountClient";
 import { generateProject, planProject } from "@ascend/shared";
 import { buildLocalCapabilityReply, inferLocalIntent, type LocalIntent } from "./localAssistant";
+import { prepareImport, summarizeImport, type ImportResult } from "./knowledgeImport";
 import {
   appendNode,
   capabilityReason,
@@ -2600,6 +2601,47 @@ export function App() {
     }
   }
 
+  /**
+   * Import files chosen from the picker.
+   *
+   * Every file is judged before any is sent, and the summary reports rejects and
+   * truncations alongside successes — a batch where two of three files were
+   * skipped must not read as a clean import.
+   */
+  async function importDocuments(files: FileList | null) {
+    if (!files || files.length === 0 || docBusy) return;
+    setDocBusy(true);
+
+    try {
+      const results: ImportResult[] = [];
+
+      for (const file of Array.from(files)) {
+        const contents = await file.text().catch(() => "");
+        const prepared = prepareImport(file.name, contents, file.size);
+        results.push(prepared);
+        if (!prepared.ok) continue;
+
+        await fetch(`${webEnv.apiBaseUrl}/v1/knowledge`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: resolveAssistSessionId(),
+            title: prepared.title,
+            body: prepared.body
+          })
+        });
+      }
+
+      await loadDocuments();
+      const summary = summarizeImport(results);
+      setActionLine(summary, results.some((entry) => entry.ok) ? "ok" : "warn");
+    } catch {
+      setActionLine("Could not reach the API", "warn");
+    } finally {
+      setDocBusy(false);
+    }
+  }
+
   async function deleteDocument(documentId: string) {
     try {
       await fetch(
@@ -3853,13 +3895,29 @@ export function App() {
               aria-label="Document body"
               onChange={(event) => setDocBody(event.target.value)}
             />
-            <button
-              type="button"
-              onClick={() => void submitDocument()}
-              disabled={docBusy || !docTitle.trim() || !docBody.trim()}
-            >
-              {docBusy ? "Adding…" : "Add document"}
-            </button>
+            <div className="doc-form-actions">
+              <button
+                type="button"
+                onClick={() => void submitDocument()}
+                disabled={docBusy || !docTitle.trim() || !docBody.trim()}
+              >
+                {docBusy ? "Working…" : "Add document"}
+              </button>
+              <label className="doc-import">
+                <input
+                  type="file"
+                  multiple
+                  aria-label="Import text files"
+                  onChange={(event) => {
+                    void importDocuments(event.target.files);
+                    // Cleared so re-picking the same file fires change again.
+                    event.target.value = "";
+                  }}
+                />
+                <span>Import files…</span>
+              </label>
+              <small>Text formats only — a PDF or image is refused rather than indexed as noise.</small>
+            </div>
           </div>
 
           {documents.length === 0 ? (
