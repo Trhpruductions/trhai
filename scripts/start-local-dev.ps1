@@ -32,9 +32,15 @@ if (-not $SkipApi) {
 }
 
 if (-not $SkipWeb) {
-  Start-DetachedProcess -Name 'ascend-web' -WorkingDirectory $webScript -Arguments @('npm.cmd','run','dev','--','--host','127.0.0.1','--strictPort','--port','4173')
+  # Must match apps/web/vite.config.ts and the port the desktop shell waits on
+  # (apps/desktop/src/main.ts reads ASCEND_WEB_PORT, defaulting to 5173). This
+  # script used to force 4173, so starting everything with dev:all and then
+  # launching the desktop shell left it waiting on an empty port and falling
+  # back to the placeholder window.
+  $webPort = if ($env:ASCEND_WEB_PORT) { [int]$env:ASCEND_WEB_PORT } else { 5173 }
+  Start-DetachedProcess -Name 'ascend-web' -WorkingDirectory $webScript -Arguments @('npm.cmd','run','dev','--','--host','127.0.0.1','--strictPort','--port',"$webPort")
 }
 
 Write-Host 'Started local services.'
-Write-Host 'Web: http://127.0.0.1:4173/'
+Write-Host "Web: http://127.0.0.1:$webPort/"
 Write-Host 'API: http://127.0.0.1:4000/health'

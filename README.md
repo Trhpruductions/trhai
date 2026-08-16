@@ -1,70 +1,135 @@
-# Ascend AI Monorepo
+# Ascend AI
 
-This repository contains the initial Sprint 1 scaffold for Project Ascend AI / TRH AI.
+A local-first AI workspace: a desktop/web shell that builds working software from a
+description, remembers what you tell it, answers from documents you add, and runs
+automation flows.
+
+## Read this first
+
+**There is no language model in this build.** Nothing here calls an LLM API, and no
+API key will make one appear — that is a deliberate constraint, not a missing step.
+
+What follows from that:
+
+- It **cannot** answer general questions. Ask it the capital of France and it will say
+  it has nothing saved that answers you, because it genuinely does not know.
+- It **can** do a specific set of things very concretely — build real apps, retrieve
+  what you told it, quote your documents, and run flows.
+
+Everything it does is deterministic: parsing, templating and lexical search. Where a
+feature would need a credential or a model it does not have, it says so in the UI
+rather than pretending.
+
+## What works today
+
+| Area | What it does |
+| --- | --- |
+| **Build** | Turns "build a task tracker where projects have many tasks" into a running REST API with JSON persistence, validation, referential integrity and a smoke suite. Reads the request for entities, fields and relations, and adds a dashboard, kanban board or calendar view when the request calls for one. |
+| **Assistant** | Answers from saved memory, your documents, or earlier in the conversation — and says plainly when nothing matches. Never invents an answer. |
+| **Memory** | "remember that ..." stores a fact; pin, rename and forget from the Memory panel. Survives restarts. |
+| **Knowledge** | Paste or import text files; questions are answered by quoting the matching passage with its source. |
+| **Automation** | Block canvas — IF / ELSE / WAIT / RUN SCRIPT and more. Dry run performs nothing; a live run executes control flow and scripts, and skips anything needing credentials with the reason stated. |
+| **Marketplace / Agents** | Ten agents with ratings, version history and install. The active agent changes the assistant's suggestions and focus. |
+| **Personalities** | Ten profiles that change tone and suggestions. Safety constraints on the medical, legal and financial profiles are enforced, not advisory. |
+| **Widgets** | Draggable, resizable dashboard widgets. Widgets with no real data source say so instead of showing a plausible number. |
+| **Calendar** | Local events with live relative times. No connected account needed. |
+| **Projects / Files / Terminal** | Real host inventory and command execution, through the desktop shell. |
+
+## What does not work, and why
+
+Three destinations are visible but disclosed as planned, because each needs a
+capability this build does not have:
+
+- **Browser** — needs an embedded browsing engine with its own permission gate.
+- **Email** — needs a connected mail account.
+- **Plugins** — needs the Plugin SDK.
+
+They explain themselves in the UI rather than presenting a dead link.
+
+## Quick start
+
+No database and no Docker required — the API defaults to in-memory storage with a
+JSON file for anything that must survive a restart.
+
+```bash
+npm install
+```
+
+```bash
+npm run dev:all
+```
+
+That starts the API on `http://127.0.0.1:4000` and the web app on
+`http://127.0.0.1:5173`. To run them separately use `npm run dev:api` and
+`npm run dev:web`; for the desktop shell use `npm run dev:desktop`, which loads
+the same web port.
+
+Set `ASCEND_WEB_PORT` to move the web app; the desktop shell reads the same
+variable, so the two stay in step.
+
+Check the API is up:
+
+```bash
+npm run health:api
+```
+
+## Tests
+
+```bash
+npm test
+```
+
+489 tests across the API, web app and shared packages. Also available:
+`npm run typecheck`, `npm run lint`, `npm run build`.
 
 ## Structure
-- apps/api: TypeScript API service
-- apps/web: React + Vite web shell
-- packages/shared: shared types and helpers
-- packages/db: SQL migrations
-- docs: architecture, roadmap, PRD, backlog, contracts
 
-## Quick Start
-1. Copy the app env template to a local env file if needed: copy apps/api/.env.example apps/api/.env.
-2. Run npm install.
-3. Run npm run db:up.
-4. Run your SQL migration tool against packages/db/migrations/001_core_init.sql and then packages/db/migrations/002_idempotency_keys.sql.
-5. Run npm run dev:api.
-6. Run npm run dev:web.
-7. Optional desktop shell: npm run dev:desktop.
-8. Silent desktop launch on Windows: double-click Launch-AscendAI.vbs.
-9. Health check the API: npm run health:api.
-10. Run the web regression test: npm run test --workspace @ascend/web.
+- `apps/api` — API service. Assistant, memory, knowledge, accounts.
+- `apps/web` — React + Vite shell. All destinations and the widget dashboard.
+- `apps/desktop` — Electron shell providing host telemetry, file and command access.
+- `packages/shared` — project planner and generator; the code that writes code.
+- `packages/db` — SQL migrations, used only in the optional Postgres mode.
+- `docs` — architecture, roadmap, PRD, backlog, contracts, product vision.
+- `generated-projects` — output of the build engine, deliberately outside the workspaces.
 
-## Desktop Packaging
-- Build desktop distributables: npm run dist:desktop
-- Build Windows artifacts: npm run dist:desktop:win
-- Output folder: apps/desktop/release
+## Optional Postgres mode
 
-## Silent Launch (Windows)
-- Use Launch-AscendAI.vbs for a fully hidden startup path (no visible command prompt window).
-- Launch-AscendAI.bat supports a hidden bootstrap flag (__hidden__) and is invoked by the VBS wrapper.
+The default `API_STORAGE_BACKEND=memory` needs no external services. To use Postgres
+instead:
 
-## Release Notes
-### 0.1.4
-- Desktop app version bumped to 0.1.4 so packaged installers and renderer runtime metadata are in sync with the latest UI/AI upgrades.
+```bash
+npm run db:up
+```
 
-### 0.1.2
-- Command Center actions now execute real task dispatch flows instead of only updating command text state.
-- Added rapid duplicate-command suppression to prevent burst-click task queue spam.
-- Added deterministic, load-aware agent assignment for command-routed tasks.
-- Added voice auto-submit duplicate suppression so repeated ASR retries do not flood message sends.
-- Windows desktop artifacts rebuilt and validated:
-	- Portable smoke launch passed.
-	- Silent setup installer smoke test passed (install, launch, no cmd.exe child process, cleanup).
+Then apply `packages/db/migrations/001_core_init.sql` and `002_idempotency_keys.sql`,
+set `DATABASE_URL`, and set `API_STORAGE_BACKEND=postgres`.
 
-## Dev Identity Headers
-- API resolves actor identity from optional request headers:
-	- x-ascend-user-email
-	- x-ascend-user-name
-- If omitted, DEV_USER_EMAIL and DEV_USER_DISPLAY_NAME from .env are used.
+## Configuration
 
-## Auth Modes
-- AUTH_MODE=dev: accepts optional bearer token and falls back to dev identity headers/env.
-- AUTH_MODE=jwt: requires Authorization Bearer token and validates it with AUTH_JWT_SECRET.
-- Optional JWT constraints: AUTH_JWT_ISSUER and AUTH_JWT_AUDIENCE.
+Copy `apps/api/.env.example` to `apps/api/.env` to change any of these.
 
-## API Storage Backends
-- API_STORAGE_BACKEND=memory: runs fully local without Postgres (best for rapid UI iteration/live preview).
-- API_STORAGE_BACKEND=postgres: uses database-backed routes and migrations.
-- If using postgres mode, ensure DATABASE_URL and migrations are applied.
+- `PORT` — API port, default 4000.
+- `API_STORAGE_BACKEND` — `memory` (default) or `postgres`.
+- `AUTH_MODE` — `dev` accepts optional bearer tokens and falls back to dev identity;
+  `jwt` requires a bearer token validated with `AUTH_JWT_SECRET`, optionally
+  constrained by `AUTH_JWT_ISSUER` and `AUTH_JWT_AUDIENCE`.
+- `DEV_USER_EMAIL`, `DEV_USER_DISPLAY_NAME` — identity used in dev mode when the
+  `x-ascend-user-email` and `x-ascend-user-name` headers are absent.
+- `ASSIST_MEMORY_FILE`, `ASSIST_KNOWLEDGE_FILE` — where assistant memory and knowledge
+  documents persist. Set `ASSIST_MEMORY_PERSIST=off` to keep memory in RAM only.
 
-## Security Validation
-- RBAC and idempotency integration checklist: apps/api/tests/rbac-idempotency-checklist.md
+## Desktop packaging
+
+```bash
+npm run dist:desktop:win
+```
+
+Artifacts land in `apps/desktop/release`. `npm run dist:desktop` builds for the
+current platform. On Windows, `Launch-AscendAI.vbs` starts the packaged app with no
+visible console window.
 
 ## Notes
-- API route stubs are aligned with docs/08-openapi-v1.yaml.
-- Initial schema migration is in packages/db/migrations/001_core_init.sql.
-- Idempotency persistence migration is in packages/db/migrations/002_idempotency_keys.sql.
-- Docker database config lives in infra/docker-compose.postgres.yml.
-- Complete product vision is in docs/12-ascend-ai-complete-product-vision.md.
+
+- Route stubs are aligned with `docs/08-openapi-v1.yaml`.
+- The complete product vision is `docs/12-ascend-ai-complete-product-vision.md`.
+- RBAC and idempotency checklist: `apps/api/tests/rbac-idempotency-checklist.md`.
