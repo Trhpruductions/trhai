@@ -70,7 +70,9 @@ export type ComposerKnowledge = ScorableMemory & {
 export type ComposedReply = {
   text: string;
   /** What the composer decided to do — surfaced for telemetry and tests. */
-  strategy: "answer" | "no-answer" | "plan" | "clarify" | "acknowledge" | "clarify-build" | "not-saved";
+  strategy:
+    | "answer" | "no-answer" | "plan" | "clarify" | "acknowledge" | "clarify-build"
+    | "not-saved" | "smalltalk" | "capability";
   /**
    * For a build request, the text the plan should actually be built from — the
    * original request merged with any clarifying answer. Absent when the turn was
@@ -120,6 +122,12 @@ function resolveQuery(message: string, history: ConversationTurn[]): string {
 function searchableHistory(history: ConversationTurn[]): ComposerMemory[] {
   return history
     .filter((turn) => turn.role === "user" && turn.content.trim().length > 0)
+    // A question holds no answer, so quoting one back can never answer anything.
+    // It also closes a loop that produced nonsense: resolveQuery appends the
+    // previous user turn to the query, and if that turn is searchable it matches
+    // itself perfectly — "what time is it?" was answered with the unrelated
+    // "how do I center a div in CSS?" purely because it had just been asked.
+    .filter((turn) => analyzeRequest(turn.content).shape !== "question")
     .map((turn, index) => ({
       id: `turn-${index}`,
       title: "earlier in this conversation",
@@ -159,10 +167,63 @@ function answerLead(analysis: RequestAnalysis): string {
   }
 }
 
+/** Openers and acknowledgements that are conversation, not a request for work. */
+const greetingPattern = /^(hi|hey|hello|yo|howdy|sup|good\s+(morning|afternoon|evening))\b[\s!.,]*$/i;
+const thanksPattern = /^(thanks|thank\s+you|ty|cheers|appreciate\s+it|nice|cool|great|awesome|perfect)\b[\s!.,]*$/i;
+const acknowledgementPattern = /^(ok|okay|k|sure|right|got\s+it|fine|yep|yes|no|nope|never\s*mind|nvm|forget\s+it)\b[\s!.,]*$/i;
+
+/** Asking what this thing is. The most common opening message there is. */
+const capabilityPattern =
+  /^(?:so\s+)?(?:hi|hey|hello)?[\s,]*(?:what|who)\s+(?:can|do|are)\s+you(?:\s+do|\s+for\s+me)?\b|^what(?:'s| is)\s+this\b|^help$|^what\s+are\s+your\s+(?:capabilities|features)\b/i;
+
+/**
+ * What this build can actually do, stated plainly.
+ *
+ * Worth being exact rather than encouraging: there is no language model here, so
+ * a user who expects one will otherwise discover it by asking something ordinary
+ * and getting "I don't have anything saved". Saying so up front is the whole
+ * difference between a tool with limits and a tool that seems broken.
+ */
+const capabilityReply = [
+  "I run locally, with no language model behind me — so I can't answer general questions from world knowledge, and I won't pretend to.",
+  "",
+  "What I can actually do:",
+  "- Build a working app from a description. \"Build a task tracker where projects have many tasks\" produces a real REST API with storage, validation and tests.",
+  "- Remember things you tell me. Start with \"remember that ...\" and I'll use it later.",
+  "- Answer from your documents. Add them under Knowledge and I'll quote the relevant passage back with its source.",
+  "- Run flows you build under Automation, and keep your schedule under Calendar.",
+  "",
+  "Ask me to build something, or tell me a fact to remember."
+].join("\n");
+
 export function composeReply(input: ComposerInput): ComposedReply {
   const message = input.message.trim();
   const analysis = analyzeRequest(message);
   const history = input.history ?? [];
+
+  // Handled before anything else: these are short and topic-free, so every later
+  // branch reads them as a vague work request and answers "tell me your stack
+  // and deadline", which is a strange reply to "thanks".
+  if (capabilityPattern.test(message)) {
+    return { text: capabilityReply, strategy: "capability", groundedOn: [], groundedOnHistory: 0 };
+  }
+
+  if (greetingPattern.test(message)) {
+    return {
+      text: "Hello. Ask me to build something, tell me a fact to remember, or ask what I can do.",
+      strategy: "smalltalk",
+      groundedOn: [],
+      groundedOnHistory: 0
+    };
+  }
+
+  if (thanksPattern.test(message)) {
+    return { text: "Any time.", strategy: "smalltalk", groundedOn: [], groundedOnHistory: 0 };
+  }
+
+  if (acknowledgementPattern.test(message)) {
+    return { text: "Noted — say the word when you want something done.", strategy: "smalltalk", groundedOn: [], groundedOnHistory: 0 };
+  }
 
   // Was the previous turn a build clarification? If so this message is the
   // answer, and must reach the build path whatever its grammatical shape —

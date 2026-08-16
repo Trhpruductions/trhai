@@ -505,3 +505,70 @@ test("never grounds an answer on a memory it did not retrieve", () => {
     assert.ok(reply.groundedOn.length > 0);
   }
 });
+
+test("an earlier question is never quoted back as an answer", () => {
+  // The regression: resolveQuery appends the previous user turn to the query,
+  // and searchableHistory then searched that same turn, so it matched itself.
+  // "what time is it?" was answered with "how do I center a div in CSS?".
+  const reply = composeReply({
+    mode: "general",
+    message: "what time is it?",
+    memories: [],
+    history: [
+      { role: "user", content: "how do I center a div in CSS?" },
+      { role: "assistant", content: "I don't have anything saved that answers that yet." }
+    ]
+  });
+
+  assert.notEqual(reply.strategy, "answer");
+  assert.doesNotMatch(reply.text, /center a div/);
+  assert.equal(reply.groundedOnHistory, 0);
+});
+
+test("a statement said earlier can still ground a follow-up", () => {
+  // The fix must not cost the feature it sits next to: a statement carries
+  // information and remains quotable.
+  const reply = composeReply({
+    mode: "general",
+    message: "why did it fail?",
+    memories: [],
+    history: [{ role: "user", content: "the deploy failed again" }]
+  });
+
+  assert.equal(reply.strategy, "answer");
+  assert.match(reply.text, /the deploy failed again/);
+});
+
+test("a greeting gets a greeting, not a request for a stack and deadline", () => {
+  for (const greeting of ["hi", "Hello!", "hey", "good morning"]) {
+    const reply = composeReply({ mode: "general", message: greeting, memories: [], history: [] });
+
+    assert.equal(reply.strategy, "smalltalk", `"${greeting}" produced ${reply.strategy}`);
+    assert.doesNotMatch(reply.text, /deadline|stack/i);
+  }
+});
+
+test("thanks and acknowledgements are not treated as work requests", () => {
+  assert.equal(composeReply({ mode: "general", message: "thanks!", memories: [], history: [] }).strategy, "smalltalk");
+  assert.equal(composeReply({ mode: "general", message: "ok", memories: [], history: [] }).strategy, "smalltalk");
+  assert.equal(composeReply({ mode: "general", message: "nevermind", memories: [], history: [] }).strategy, "smalltalk");
+});
+
+test("asking what it can do gets an honest capability answer", () => {
+  for (const question of ["what can you do?", "hi, what can you do", "who are you?", "help"]) {
+    const reply = composeReply({ mode: "general", message: question, memories: [], history: [] });
+
+    assert.equal(reply.strategy, "capability", `"${question}" produced ${reply.strategy}`);
+    // It must state the limit rather than let the user find it by being disappointed.
+    assert.match(reply.text, /no language model/i);
+    // And it must name what actually works.
+    assert.match(reply.text, /remember that/i);
+    assert.match(reply.text, /Knowledge/);
+  }
+});
+
+test("the capability answer does not claim knowledge it lacks", () => {
+  const reply = composeReply({ mode: "general", message: "what can you do?", memories: [], history: [] });
+
+  assert.doesNotMatch(reply.text, /I know|ask me anything|any question/i);
+});
