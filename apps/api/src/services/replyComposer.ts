@@ -30,17 +30,39 @@ export type ConversationTurn = {
   content: string;
 };
 
+/**
+ * What actually happened to memory on this turn.
+ *
+ * The composer used to answer "Saved." purely because the message began with
+ * "remember", with no idea whether a write had occurred — so an anonymous
+ * request with nowhere to save to was still told its fact was stored. A reply
+ * may only claim a save when it has evidence of one, which is why this is a
+ * report of an outcome rather than an intent.
+ */
+export type MemoryWriteOutcome = {
+  /** Whether this request had somewhere to save at all (a session or account). */
+  available: boolean;
+  /** How many memories were actually written from this message. */
+  saved: number;
+};
+
 export type ComposerInput = {
   mode: ComposerMode;
   message: string;
   memories: ComposerMemory[];
   history?: ConversationTurn[];
+  /**
+   * Omitted only by tests that are not exercising memory writes. Production
+   * always supplies it, and when it is missing the composer declines to claim a
+   * save rather than assuming one.
+   */
+  memoryWrite?: MemoryWriteOutcome;
 };
 
 export type ComposedReply = {
   text: string;
   /** What the composer decided to do — surfaced for telemetry and tests. */
-  strategy: "answer" | "no-answer" | "plan" | "clarify" | "acknowledge" | "clarify-build";
+  strategy: "answer" | "no-answer" | "plan" | "clarify" | "acknowledge" | "clarify-build" | "not-saved";
   /**
    * For a build request, the text the plan should actually be built from — the
    * original request merged with any clarifying answer. Absent when the turn was
@@ -193,9 +215,33 @@ export function composeReply(input: ComposerInput): ComposedReply {
   }
 
   if (/^(remember|note)\b/i.test(message)) {
+    const write = input.memoryWrite;
+
+    // Only a confirmed write earns the confirmation.
+    if (write && write.saved > 0) {
+      return {
+        text: "Saved. I'll use that as context from here on — you can review or remove it in the Memory panel.",
+        strategy: "acknowledge",
+        groundedOn: [],
+        groundedOnHistory: 0
+      };
+    }
+
+    // Nowhere to save to. Saying "Saved" here is how the user loses a fact they
+    // believe is stored, so it names the reason and what to do about it.
+    if (write && !write.available) {
+      return {
+        text: "I can't save that — this request has no session or account to store it against, so it would be lost. Sign in (or send a session id) and tell me again, and it will stick.",
+        strategy: "not-saved",
+        groundedOn: [],
+        groundedOnHistory: 0
+      };
+    }
+
+    // A session exists but nothing could be pulled out of the sentence.
     return {
-      text: "Saved. I'll use that as context from here on — you can review or remove it in the Memory panel.",
-      strategy: "acknowledge",
+      text: "Nothing was saved — I couldn't pick a clear fact out of that. Try \"remember that <subject> is <fact>\", for example \"remember that the deploy server is rack-4\".",
+      strategy: "not-saved",
       groundedOn: [],
       groundedOnHistory: 0
     };

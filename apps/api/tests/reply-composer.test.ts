@@ -412,11 +412,71 @@ test("acknowledges a remember statement without inventing work", () => {
     mode: "general",
     message: "Remember that we standardized on Postgres",
     memories: [],
-    history: []
+    history: [],
+    memoryWrite: { available: true, saved: 1 }
   });
 
   assert.equal(reply.strategy, "acknowledge");
   assert.match(reply.text, /Saved/i);
+});
+
+test("does not claim a save when there was nowhere to save to", () => {
+  // The regression: an anonymous request with no session was told "Saved. I'll
+  // use that as context from here on" while nothing was written, so the user
+  // walked away believing a fact was stored that had been dropped.
+  const reply = composeReply({
+    mode: "general",
+    message: "Remember that my deploy server is rack-4 in the basement",
+    memories: [],
+    history: [],
+    memoryWrite: { available: false, saved: 0 }
+  });
+
+  assert.equal(reply.strategy, "not-saved");
+  assert.doesNotMatch(reply.text, /\bSaved\./i);
+  assert.match(reply.text, /can't save/i);
+  // Tells the user how to make it stick, not just that it failed.
+  assert.match(reply.text, /sign in|session id/i);
+});
+
+test("does not claim a save when nothing could be extracted", () => {
+  const reply = composeReply({
+    mode: "general",
+    message: "Remember that whatever happens next is probably going to happen again",
+    memories: [],
+    history: [],
+    memoryWrite: { available: true, saved: 0 }
+  });
+
+  assert.equal(reply.strategy, "not-saved");
+  assert.doesNotMatch(reply.text, /\bSaved\./i);
+  assert.match(reply.text, /nothing was saved/i);
+});
+
+test("a too-vague remember asks for more instead of confirming a save", () => {
+  const reply = composeReply({
+    mode: "general",
+    message: "Remember that",
+    memories: [],
+    history: [],
+    memoryWrite: { available: true, saved: 0 }
+  });
+
+  assert.equal(reply.strategy, "clarify");
+  assert.doesNotMatch(reply.text, /\bSaved\./i);
+});
+
+test("never claims a save when the caller reported no outcome", () => {
+  // Absent evidence is not evidence of a write.
+  const reply = composeReply({
+    mode: "general",
+    message: "Remember that we standardized on Postgres",
+    memories: [],
+    history: []
+  });
+
+  assert.equal(reply.strategy, "not-saved");
+  assert.doesNotMatch(reply.text, /\bSaved\./i);
 });
 
 test("a pinned memory outranks an unpinned one on an equal match", () => {

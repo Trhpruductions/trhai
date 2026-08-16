@@ -1,10 +1,12 @@
-import { ModelRouter } from "./modelRouter.js";
+import { ModelRouter, type MemoryWriteOutcome } from "./modelRouter.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
   userMessage: string;
   memoryContext?: Array<{ id?: string; title: string; body: string; pinned?: boolean; createdAt?: string }>;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
+  /** What actually happened to memory this turn; see MemoryWriteOutcome. */
+  memoryWrite?: MemoryWriteOutcome;
 };
 
 export type OrchestratorResult = {
@@ -31,7 +33,8 @@ export async function runAssistantOrchestrator(
     mode: input.mode,
     userMessage: input.userMessage,
     memoryContext: input.memoryContext,
-    history: input.history
+    history: input.history,
+    memoryWrite: input.memoryWrite
   });
 
   return {

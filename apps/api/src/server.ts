@@ -142,7 +142,11 @@ export function createApp() {
           body: entry.body,
           pinned: entry.pinned,
           createdAt: entry.createdAt
-        }))
+        })),
+        // Reported so the reply can only confirm a save that actually happened.
+        // Without a session there is nowhere to write, and the user must be told
+        // that rather than reassured.
+        memoryWrite: { available: sessionId !== null, saved: savedMemories.length }
       });
 
       // Recorded after a successful reply so a failed request leaves no orphan turn.
