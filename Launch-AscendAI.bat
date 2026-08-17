@@ -21,9 +21,10 @@ REM able to do that, so a failure to write one is also survivable below.
 set "LOGDIR=%LOCALAPPDATA%\Ascend"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>&1
 set "LOG=%LOGDIR%\launch.log"
-echo [%date% %time%] launch requested> "%LOG%" 2>nul
-if errorlevel 1 set "LOG=%TEMP%\ascend-launch.log"
-echo [%date% %time%] launch requested> "%LOG%" 2>nul
+REM `||` not errorlevel: a failed redirection does not set errorlevel, so the
+REM earlier check never fired and a locked log still killed the launch.
+(echo [%date% %time%] launch requested)> "%LOG%" 2>nul || set "LOG=%TEMP%\ascend-launch.log"
+(echo [%date% %time%] launch requested)> "%LOG%" 2>nul || set "LOG=nul"
 
 REM Stop a previous instance of this app only. The command line match keeps it
 REM from touching any other Electron app the user happens to be running.
@@ -66,7 +67,9 @@ if not exist "apps\desktop\dist\main.js" (
 )
 
 echo [%time%] starting desktop shell>> "%LOG%"
-call "%~dp0apps\desktop\node_modules\.bin\electron.cmd" "%~dp0apps\desktop\dist\main.js" >>"%LOG%" 2>&1
+REM Electron output is not redirected into the log: doing so held the file open
+REM for as long as the app ran, so a second launch could not write it at all.
+call "%~dp0apps\desktop\node_modules\.bin\electron.cmd" "%~dp0apps\desktop\dist\main.js" >nul 2>&1
 echo [%time%] desktop shell exited with code %errorlevel%>> "%LOG%"
 endlocal
 exit /b 0
