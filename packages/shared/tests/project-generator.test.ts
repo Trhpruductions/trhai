@@ -982,3 +982,44 @@ test("slugify is stable for ordinary names", () => {
   assert.equal(slugify("Ops Runbook v2"), "ops-runbook-v2");
   assert.equal(slugify("  Client   Portal  "), "client-portal");
 });
+
+test("a generated server caps the request body it will buffer", () => {
+  // Every generated app buffers a body in memory before parsing it. Without a
+  // ceiling a single large POST is enough to exhaust the process.
+  const server = generateProject(planProject("Build a support desk where tickets have a title and status"))
+    .find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  assert.match(server.content, /maxBodyBytes/);
+  assert.match(server.content, /413/);
+  assert.match(server.content, /Request body too large/);
+});
+
+test("an oversized body is drained rather than abandoned", () => {
+  // Bailing out of the stream closes the socket, and the client sees a
+  // connection reset instead of the 413 that explains the problem. The loop
+  // must keep reading while it stops buffering.
+  const server = generateProject(planProject("Build a support desk where tickets have a title and status"))
+    .find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  assert.doesNotMatch(server.content, /request\.destroy\(\)/);
+  assert.match(server.content, /tooLarge = true/);
+  assert.match(server.content, /continue;/);
+});
+
+test("both write paths check the size before the JSON", () => {
+  // POST and PATCH both read a body, so both need the guard; checking the
+  // JSON first would report "Invalid JSON body" for a body that was simply
+  // too large to buffer.
+  const server = generateProject(planProject("Build a support desk where tickets have a title and status"))
+    .find((file) => file.path === "server.js");
+
+  assert.ok(server);
+  const tooLargeChecks = server.content.match(/body === bodyTooLarge/g) ?? [];
+  assert.equal(tooLargeChecks.length, 2, "expected the guard on both POST and PATCH");
+
+  const tooLargeIndex = server.content.indexOf("body === bodyTooLarge");
+  const nullIndex = server.content.indexOf("body === null");
+  assert.ok(tooLargeIndex < nullIndex, "size must be checked before JSON validity");
+});
