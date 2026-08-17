@@ -26,6 +26,15 @@ export type Entity = {
   plural: string;
   /** Capitalized for display: "Incident". */
   label: string;
+  /**
+   * Capitalized plural for display: "Incidents", "Deliveries".
+   *
+   * Held on the entity rather than derived at each use site: the generated UI
+   * built its own by appending "s" to the label, which rendered a delivery
+   * entity as "Deliverys" in the tabs and dashboard while the search box beside
+   * it correctly said "deliveries".
+   */
+  labelPlural: string;
   fields: EntityField[];
 };
 
@@ -621,6 +630,7 @@ export function planProject(request: string, title?: string): ProjectSpec {
     name,
     plural: pluralize(name),
     label: capitalize(name),
+    labelPlural: capitalize(pluralize(name)),
     fields: fieldsFor(features, index === 0, requestedFields)
   }));
 

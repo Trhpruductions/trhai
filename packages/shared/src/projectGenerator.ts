@@ -317,6 +317,7 @@ function serverFile(spec: ProjectSpec): string {
     lines.push("  {");
     lines.push("    collection: " + JSON.stringify(entity.plural) + ",");
     lines.push("    label: " + JSON.stringify(entity.label) + ",");
+    lines.push("    labelPlural: " + JSON.stringify(entity.labelPlural) + ",");
     lines.push("    validate: validate" + entity.label + ",");
     lines.push("    fields: " + JSON.stringify(entity.fields.map((field) => field.name)) + ",");
     // Typed subsets, so the summary can group and total without re-deriving them.
@@ -367,6 +368,7 @@ function serverFile(spec: ProjectSpec): string {
         "      return {",
         "        collection: route.collection,",
         "        label: route.label,",
+        "        labelPlural: route.labelPlural,",
         "        total: rows.length,",
         "        breakdowns: route.enumFields.map((field) => ({",
         "          field: field.name,",
@@ -627,7 +629,7 @@ function uiFile(spec: ProjectSpec): string {
       '  <nav class="tabs">',
       ...spec.entities.map((entity, index) =>
         '    <button data-tab="' + entity.plural + '"' + (index === 0 ? ' class="active"' : "")
-        + ">" + entity.label + "s</button>"),
+        + ">" + entity.labelPlural + "</button>"),
       "  </nav>"
     ].join("\n")
     : "";
@@ -777,7 +779,7 @@ function uiFile(spec: ProjectSpec): string {
         "        const card = document.createElement('div');",
         "        card.className = 'summary-card';",
         "        const heading = document.createElement('h3');",
-        "        heading.textContent = entry.label + 's';",
+        "        heading.textContent = entry.labelPlural;",
         "        const total = document.createElement('div');",
         "        total.className = 'summary-total';",
         "        total.textContent = entry.total;",

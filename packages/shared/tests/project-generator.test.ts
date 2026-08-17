@@ -887,3 +887,47 @@ test("a title is never empty and never a whole sentence", () => {
     assert.ok(title.split(/\s+/).length <= 5, `title too long: "${title}"`);
   }
 });
+
+test("the display plural is not the label with an s stuck on", () => {
+  // The generated UI showed "Deliverys" in its tabs and dashboard while the
+  // search box beside it correctly said "deliveries".
+  const spec = planProject("Build a delivery board where jobs have a title and status");
+  const delivery = spec.entities.find((entity) => entity.name === "delivery");
+
+  assert.ok(delivery);
+  assert.equal(delivery.labelPlural, "Deliveries");
+  assert.notEqual(delivery.labelPlural, `${delivery.label}s`);
+});
+
+test("every entity carries a display plural matching its collection", () => {
+  for (const request of [
+    "Build a delivery board where jobs have a title",
+    "Build a class scheduler where classes have a room",
+    "Build a company directory with an address"
+  ]) {
+    for (const entity of planProject(request).entities) {
+      assert.equal(
+        entity.labelPlural.toLowerCase(),
+        entity.plural,
+        `${entity.name}: labelPlural must match the route collection`
+      );
+    }
+  }
+});
+
+test("the generated UI never builds its own plural", () => {
+  // Guards the two sites that used to append "s": the tab buttons and the
+  // dashboard summary heading.
+  const files = generateProject(planProject("Build a delivery board where jobs have a title and status"));
+  const html = files.find((file) => file.path.endsWith("index.html"));
+
+  assert.ok(html);
+  assert.ok(html.content.includes("Deliveries"), "tab should use the display plural");
+
+  // No generated file may contain the hand-built plural, or the code that
+  // produces one at runtime.
+  for (const file of files) {
+    assert.ok(!file.content.includes("Deliverys"), `${file.path} contains a hand-built plural`);
+    assert.ok(!/label \+ 's'/.test(file.content), `${file.path} appends s to a label`);
+  }
+});
