@@ -21,6 +21,7 @@ import {
 import { deriveTitle, generateProject, planProject, slugify } from "@ascend/shared";
 import { buildLocalCapabilityReply, inferLocalIntent, type LocalIntent } from "./localAssistant";
 import { prepareImport, summarizeImport, type ImportResult } from "./knowledgeImport";
+import { clampPercent } from "./dashboardStatus";
 import { memoryBodyAddsInfo } from "./memoryView";
 import {
   appendNode,
@@ -755,10 +756,6 @@ function buildBlueprintMarkdown(blueprint: BuildBlueprint): string {
     deliverables,
     ""
   ].join("\n");
-}
-
-function clampPercent(value: number): number {
-  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 function formatAge(createdAt: number, nowMs: number): string {
@@ -2996,7 +2993,15 @@ export function App() {
 
     if (actionId === "projects-refresh") {
       await onTopActionSync();
-      setActionLine("Project lane refreshed", "ok");
+      // Without the bridge there is no inventory to re-read, so "refreshed"
+      // would claim work that did not happen — and it contradicted the panel
+      // beside it, which already says the list needs desktop mode.
+      setActionLine(
+        desktopBridgeActive
+          ? "Project lane refreshed"
+          : "Nothing to refresh — the project inventory needs desktop mode",
+        desktopBridgeActive ? "ok" : "warn"
+      );
       return;
     }
 
