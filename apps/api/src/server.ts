@@ -44,6 +44,7 @@ import {
   retrieveKnowledgePassages
 } from "./services/knowledgeStore.js";
 import { isAllowedOrigin } from "./services/originPolicy.js";
+import { checkAvailability, readLocalModelConfig } from "./services/localModel.js";
 import { attachAuthIdentity } from "./middleware/auth.js";
 import { v1MemoryRouter } from "./routes/v1Memory.js";
 import { v1Router } from "./routes/v1.js";
@@ -407,6 +408,20 @@ export function createApp() {
         memories: listSessionMemories(sessionId),
         audit: getMemoryAudit(sessionId, 20)
       },
+      traceId: "trace-local"
+    });
+  });
+
+  // What the assistant can currently do. The client shows a live indicator from
+  // this, because whether a model is answering changes what the app is capable
+  // of and the user should not have to discover that by asking a question.
+  app.get("/v1/assist/model", async (_req, res) => {
+    const availability = await checkAvailability(readLocalModelConfig());
+
+    res.json({
+      data: availability.available
+        ? { available: true, model: availability.model }
+        : { available: false, model: null, reason: availability.reason },
       traceId: "trace-local"
     });
   });

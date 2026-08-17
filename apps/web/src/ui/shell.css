@@ -1,0 +1,149 @@
+/* The shell: a rail and one stage. */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail-width) 1fr;
+  height: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+/* ---- Rail ---------------------------------------------------------------
+   Icons only. The labels live in tooltips and aria-labels: eight words stacked
+   vertically in a 60px column is unreadable, and widening the rail takes space
+   from the thing the app is for. */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  background: var(--surface-1);
+  border-right: 1px solid var(--line-subtle);
+}
+
+.rail-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 700;
+}
+
+.rail-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--text-lg);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+
+.rail-btn:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+/* The active section is the only glowing thing in the rail, so it is findable
+   at a glance rather than by reading every icon. */
+.rail-btn.active {
+  color: var(--accent-strong);
+  background: var(--accent-quiet);
+  border-color: var(--line-strong);
+  box-shadow: var(--glow);
+}
+
+.rail-foot {
+  margin-top: auto;
+  display: grid;
+  place-items: center;
+  padding-bottom: var(--space-2);
+}
+
+/* A single dot: lit when a local model is answering, dim when the assistant is
+   limited to notes and documents. It is the one fact that changes what the app
+   can do, so it earns a permanent place. */
+.rail-status {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--text-faint);
+  cursor: help;
+}
+
+.rail-status.live {
+  background: var(--accent);
+  box-shadow: var(--glow);
+}
+
+/* ---- Stage -------------------------------------------------------------- */
+
+.stage {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A surface is a full screen with its own header and scroll region. Panels do
+   not nest inside panels here — that stacking is what made the old shell read
+   as clutter. */
+.surface {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  min-height: 0;
+}
+
+.surface-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.surface-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.surface-title h2 {
+  font-size: var(--text-lg);
+}
+
+.surface-body {
+  padding: var(--space-5);
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* Long-form reading (documents, answers) is capped; tables and boards are not,
+   because they use the width. */
+.surface-body.readable > * {
+  max-width: var(--measure);
+}
+
+@media (max-width: 720px) {
+  .shell { grid-template-columns: 48px 1fr; }
+  :root { --rail-width: 48px; }
+  .surface-body, .conversation-scroll { padding: var(--space-4); }
+}

@@ -1,0 +1,111 @@
+/*
+ * Design tokens.
+ *
+ * The old stylesheet had no scale: 3,900 lines of one-off colours, paddings and
+ * shadows, so every new panel invented its own spacing and nothing lined up.
+ * Everything below is a fixed step on a scale, and components may only use
+ * these — a raw hex or a stray 13px in a component is a bug, not a shortcut.
+ *
+ * The identity stays what it was: a dark HUD with a cyan signal colour. What
+ * changes is discipline. One accent, used for the thing that matters on a
+ * screen; glow reserved for live state rather than sprayed on every border.
+ */
+
+:root {
+  /* ---- Surfaces ---------------------------------------------------------
+     Four steps only. Deeper number means closer to the viewer, so a panel on a
+     panel is always legible without a border doing the work. */
+  --surface-0: #05090f;
+  --surface-1: #0a121c;
+  --surface-2: #101c29;
+  --surface-3: #17283a;
+
+  /* ---- Lines ------------------------------------------------------------ */
+  --line-subtle: rgba(120, 180, 220, 0.10);
+  --line: rgba(120, 190, 235, 0.18);
+  --line-strong: rgba(90, 220, 255, 0.42);
+
+  /* ---- Text -------------------------------------------------------------
+     Three weights of emphasis. Anything quieter than `--text-faint` is not
+     worth rendering. */
+  --text: #e8f4ff;
+  --text-muted: #90aac4;
+  --text-faint: #5d7590;
+
+  /* ---- Accent -----------------------------------------------------------
+     One signal colour. `--accent-quiet` is for fills behind text, `--accent`
+     for the text and strokes on top of them. */
+  --accent: #3ddcff;
+  --accent-strong: #7ceaff;
+  --accent-quiet: rgba(61, 220, 255, 0.12);
+
+  /* ---- Status -----------------------------------------------------------
+     Reserved for outcomes. Never decorative. */
+  --ok: #5ef0b0;
+  --warn: #ffc266;
+  --danger: #ff8080;
+  --ok-quiet: rgba(94, 240, 176, 0.12);
+  --warn-quiet: rgba(255, 194, 102, 0.12);
+  --danger-quiet: rgba(255, 128, 128, 0.12);
+
+  /* ---- Spacing ----------------------------------------------------------
+     A 4px base. Components pick a step; they never write a pixel value. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ---- Type -------------------------------------------------------------
+     Orbitron is the HUD voice and is used only for labels and headings, never
+     for body text — it is unreadable in paragraphs. */
+  --font-display: "Orbitron", "Manrope", system-ui, sans-serif;
+  --font-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text-md: 14px;
+  --text-lg: 17px;
+  --text-xl: 22px;
+  --text-2xl: 30px;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.6;
+
+  /* ---- Shape ------------------------------------------------------------ */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* ---- Depth ------------------------------------------------------------
+     Shadow for lift, glow for life. A glow means something is live: a running
+     command, an active connection. It never means "this is a box". */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --glow: 0 0 18px rgba(61, 220, 255, 0.28);
+
+  /* ---- Motion -----------------------------------------------------------
+     Two durations. Anything slower than `--slow` reads as lag. */
+  --fast: 120ms;
+  --slow: 240ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ---- Layout ----------------------------------------------------------- */
+  --rail-width: 60px;
+  --panel-width: 340px;
+  --measure: 68ch;
+}
+
+/* Someone running with reduced motion gets none of the transitions, including
+   the live-state pulses, which are the most distracting part of a HUD. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fast: 1ms;
+    --slow: 1ms;
+  }
+}

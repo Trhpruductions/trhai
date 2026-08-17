@@ -1,0 +1,133 @@
+/* The conversation screen. Only tokens — no raw colours or pixel values. */
+
+.conversation {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  min-height: 0;
+}
+
+.conversation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.conversation-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5);
+}
+
+.conversation-empty {
+  margin: auto;
+  max-width: 52ch;
+}
+
+.conversation-suggestions {
+  justify-content: center;
+  margin-top: var(--space-3);
+}
+
+/* ---- Turns --------------------------------------------------------------
+   Both sides share one column rather than being pushed to opposite edges: the
+   replies are long and technical, and a chat-bubble layout wastes half the
+   width on every one of them. The speaker is named instead. */
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: var(--measure);
+}
+
+.turn-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.turn-body {
+  /* The assistant answers in lists and quoted passages; collapsing whitespace
+     turned every one of them into a paragraph. */
+  white-space: pre-wrap;
+  line-height: var(--leading-normal);
+}
+
+.turn-user .turn-body {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-subtle);
+  background: var(--surface-1);
+  color: var(--text-muted);
+}
+
+.turn-assistant .turn-body {
+  color: var(--text);
+}
+
+.turn-action {
+  align-self: flex-start;
+  margin-top: var(--space-1);
+}
+
+/* ---- Thinking ----------------------------------------------------------- */
+
+.thinking {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.thinking-dots {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+.thinking-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  animation: thinking 1s var(--ease) infinite;
+}
+
+.thinking-dots i:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dots i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes thinking {
+  0%, 60%, 100% { opacity: 0.25; }
+  30% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-dots i { animation: none; opacity: 0.6; }
+}
+
+/* ---- Composer ----------------------------------------------------------- */
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--line-subtle);
+  background: var(--surface-1);
+}
+
+.composer-field {
+  /* Grows with the message up to a point, then scrolls, so a long paste does
+     not push the send button off screen. */
+  min-height: 44px;
+  max-height: 180px;
+  resize: none;
+}
+
+.composer-send {
+  height: 44px;
+  min-width: 84px;
+}

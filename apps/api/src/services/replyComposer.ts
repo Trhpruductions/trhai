@@ -128,12 +128,16 @@ function resolveQuery(message: string, history: ConversationTurn[]): string {
 function searchableHistory(history: ConversationTurn[]): ComposerMemory[] {
   return history
     .filter((turn) => turn.role === "user" && turn.content.trim().length > 0)
-    // A question holds no answer, so quoting one back can never answer anything.
-    // It also closes a loop that produced nonsense: resolveQuery appends the
-    // previous user turn to the query, and if that turn is searchable it matches
-    // itself perfectly — "what time is it?" was answered with the unrelated
-    // "how do I center a div in CSS?" purely because it had just been asked.
-    .filter((turn) => analyzeRequest(turn.content).shape !== "question")
+    // Only what the user asserted. A question holds no answer, and neither does
+    // a request for work — "In one sentence, what is TypeScript?" was answered
+    // by quoting the earlier "Explain what a REST API is in two sentences",
+    // which is the user's own instruction handed back to them.
+    //
+    // Excluding questions alone was not enough: "Explain ..." is command-shaped,
+    // so it passed the earlier filter. Statements are the only turns that carry
+    // information, which is also what closes the loop where resolveQuery appends
+    // the previous turn and it then matches itself.
+    .filter((turn) => analyzeRequest(turn.content).shape === "statement")
     .map((turn, index) => ({
       id: `turn-${index}`,
       title: "earlier in this conversation",

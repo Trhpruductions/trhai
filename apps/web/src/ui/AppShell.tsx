@@ -1,0 +1,140 @@
+import { useEffect, useState } from "react";
+import { Conversation } from "./Conversation";
+import { resolvePersonality, type PersonalityId } from "../personalities";
+import "./shell.css";
+
+// The shell.
+//
+// One rail, one screen at a time. The previous layout ran seven top tabs and
+// thirteen sidebar entries at once, and the effect was that nothing looked more
+// important than anything else — including the conversation, which is what the
+// app is actually for.
+
+export type SurfaceId =
+  | "chat"
+  | "build"
+  | "knowledge"
+  | "memory"
+  | "automation"
+  | "calendar"
+  | "agents"
+  | "settings";
+
+type Surface = {
+  id: SurfaceId;
+  label: string;
+  /** Single glyph; the rail is too narrow for words and a tooltip carries them. */
+  glyph: string;
+  hint: string;
+};
+
+/**
+ * The rail, in the order it is used.
+ *
+ * Deliberately short. Everything that used to be its own destination and is
+ * really a view of something else — projects, files, terminal, marketplace —
+ * now lives inside the surface it belongs to, rather than competing for a slot.
+ */
+const surfaces: Surface[] = [
+  { id: "chat", label: "Chat", glyph: "◉", hint: "Talk to the assistant" },
+  { id: "build", label: "Build", glyph: "◈", hint: "Generate a working app" },
+  { id: "knowledge", label: "Knowledge", glyph: "▤", hint: "Documents it can quote" },
+  { id: "memory", label: "Memory", glyph: "◇", hint: "What it remembers" },
+  { id: "automation", label: "Automation", glyph: "⟲", hint: "Flows you can run" },
+  { id: "calendar", label: "Calendar", glyph: "▦", hint: "Your schedule" },
+  { id: "agents", label: "Agents", glyph: "◐", hint: "Installed agents" },
+  { id: "settings", label: "Settings", glyph: "⚙", hint: "Personality and defaults" }
+];
+
+const personalityStorageKey = "ascend.personality.v1";
+const surfaceStorageKey = "ascend.surface.v1";
+
+function isSurfaceId(value: string | null): value is SurfaceId {
+  return surfaces.some((surface) => surface.id === value);
+}
+
+export type SurfaceContext = {
+  personality: PersonalityId;
+  setPersonality: (id: PersonalityId) => void;
+  /** A request handed over from chat, for the build surface to start from. */
+  buildSeed: string | null;
+  clearBuildSeed: () => void;
+};
+
+type Props = {
+  /** Rendered for surfaces beyond chat; supplied by the app so the shell stays presentational. */
+  renderSurface: (id: SurfaceId, context: SurfaceContext) => React.ReactNode;
+  /** Whether the local model is reachable, for the status line. */
+  modelLabel: string | null;
+};
+
+export function AppShell({ renderSurface, modelLabel }: Props) {
+  const [surface, setSurface] = useState<SurfaceId>(() => {
+    const stored = window.localStorage.getItem(surfaceStorageKey);
+    // Chat is the default even when something else was open last: the app is a
+    // conversation first, and reopening into a settings screen is disorienting.
+    return isSurfaceId(stored) ? stored : "chat";
+  });
+
+  const [personality, setPersonality] = useState<PersonalityId>(
+    () => resolvePersonality(window.localStorage.getItem(personalityStorageKey))
+  );
+
+  useEffect(() => {
+    window.localStorage.setItem(surfaceStorageKey, surface);
+  }, [surface]);
+
+  useEffect(() => {
+    window.localStorage.setItem(personalityStorageKey, personality);
+  }, [personality]);
+
+  const [buildSeed, setBuildSeed] = useState<string | null>(null);
+
+  return (
+    <div className="shell">
+      <nav className="rail" aria-label="Sections">
+        <div className="rail-mark" aria-hidden="true">A</div>
+
+        {surfaces.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            className={`rail-btn${surface === entry.id ? " active" : ""}`}
+            aria-label={entry.label}
+            aria-current={surface === entry.id ? "page" : undefined}
+            title={`${entry.label} — ${entry.hint}`}
+            onClick={() => setSurface(entry.id)}
+          >
+            <span aria-hidden="true">{entry.glyph}</span>
+          </button>
+        ))}
+
+        <div className="rail-foot">
+          {/* The one piece of always-on status worth a permanent slot: whether
+              there is a model, because it decides what the assistant can do. */}
+          <span
+            className={`rail-status${modelLabel ? " live" : ""}`}
+            title={modelLabel ? `Local model: ${modelLabel}` : "No local model — answers come from your notes and documents only"}
+            aria-label={modelLabel ? `Local model ${modelLabel}` : "No local model"}
+          />
+        </div>
+      </nav>
+
+      <main className="stage">
+        {surface === "chat" ? (
+          <Conversation
+            personality={personality}
+            onBuildRequest={(request) => { setBuildSeed(request); setSurface("build"); }}
+          />
+        ) : (
+          renderSurface(surface, {
+            personality,
+            setPersonality,
+            buildSeed,
+            clearBuildSeed: () => setBuildSeed(null)
+          })
+        )}
+      </main>
+    </div>
+  );
+}

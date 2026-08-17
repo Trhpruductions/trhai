@@ -594,3 +594,32 @@ test("both capability replies still describe what the app does", () => {
     assert.match(reply, /Build a working app/i);
   }
 });
+
+test("an earlier instruction is never quoted back as an answer", () => {
+  // Found in the rebuilt UI: "In one sentence, what is TypeScript?" was answered
+  // with the user's own earlier "Explain what a REST API is in two sentences".
+  // Excluding questions was not enough — "Explain ..." is command-shaped.
+  const reply = composeReply({
+    mode: "general",
+    message: "In one sentence, what is TypeScript?",
+    memories: [],
+    history: [{ role: "user", content: "Explain what a REST API is in two sentences." }]
+  });
+
+  assert.doesNotMatch(reply.text, /REST API/);
+  assert.equal(reply.groundedOnHistory, 0);
+});
+
+test("a statement said earlier is still quotable", () => {
+  // The feature next door must survive: facts the user asserted still ground a
+  // follow-up, which is the whole point of searching the conversation.
+  const reply = composeReply({
+    mode: "general",
+    message: "why did it fail?",
+    memories: [],
+    history: [{ role: "user", content: "the deploy failed again" }]
+  });
+
+  assert.equal(reply.strategy, "answer");
+  assert.match(reply.text, /the deploy failed again/);
+});
