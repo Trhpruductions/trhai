@@ -931,3 +931,32 @@ test("the generated UI never builds its own plural", () => {
     assert.ok(!/label \+ 's'/.test(file.content), `${file.path} appends s to a label`);
   }
 });
+
+test("a second field list is not swallowed by the first lead-in", () => {
+  // The regression: "with a calendar of appointments" ran to the end of the
+  // sentence, so "have a patient, start date and status" was never matched and
+  // "patient" appeared nowhere in the result — named by the user, silently lost.
+  const spec = planProject(
+    "Build a clinic booking app with a calendar of appointments where visits have a patient, start date and status"
+  );
+  const fields = spec.entities[0].fields.map((field) => field.name);
+
+  assert.ok(fields.includes("patient"), `patient was dropped; got ${fields.join(", ")}`);
+  assert.ok(fields.includes("startDate"), `got ${fields.join(", ")}`);
+});
+
+test("a view described in the request is not stored as a column", () => {
+  // "a calendar of appointments" asks for a screen. It must not become a
+  // calendarAppointments string beside the real fields.
+  const spec = planProject(
+    "Build a clinic booking app with a calendar of appointments where visits have a patient and start date"
+  );
+
+  for (const entity of spec.entities) {
+    for (const field of entity.fields) {
+      assert.doesNotMatch(field.name, /^calendar/i, `${entity.name}.${field.name} is a view, not a field`);
+    }
+  }
+  // The view itself is still recognised.
+  assert.ok(spec.features.includes("calendar"));
+});

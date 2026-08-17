@@ -263,9 +263,15 @@ const fieldListStopWords = new Set([
  * `manyTasks: string` column alongside the correct `projectId` reference.
  * Refusing the match here lets the scan continue to the next lead-in, so the
  * genuine fields later in the sentence are still picked up.
+ *
+ * The capture also stops at "where" and "when", which open a clause about a
+ * different record. Without that the "with" in "a clinic booking app with a
+ * calendar of appointments where visits have a patient, start date and status"
+ * ran to the end of the sentence, so the later "have ..." list was never reached
+ * and "patient" vanished — named by the user, present nowhere in the result.
  */
 const fieldListLeadIn =
-  /\b(?:with|having|has|have|including|containing|fields?)\s+(?!many\b|multiple\b|several\b|lots\s+of\b)([^.;!?]+)/gi;
+  /\b(?:with|having|has|have|including|containing|fields?)\s+(?!many\b|multiple\b|several\b|lots\s+of\b)((?:(?!\bwhere\b|\bwhen\b)[^.;!?])+)/gi;
 
 /** Lead-ins that switch back from listing attributes to naming records. */
 const entityLeadIn = /\s+(?:tracking|storing|linked\s+to|related\s+to)\s+/i;
@@ -284,6 +290,16 @@ function inferFieldType(name: string): FieldType {
   }
   return "string";
 }
+
+/**
+ * Words that head a phrase naming a *screen*: "a calendar of appointments",
+ * "a board of tickets". "summary" and "report" are deliberately absent — both
+ * are ordinary fields on a record.
+ */
+const viewHeadWords = new Set([
+  "calendar", "dashboard", "board", "kanban", "swimlane", "timeline",
+  "chart", "graph", "overview", "analytics", "view", "screen", "grid", "table", "list"
+]);
 
 /** Prepositions inside a field label add nothing to the identifier. */
 const labelFillerWords = new Set(["in", "of", "on", "at", "to", "per"]);
@@ -353,6 +369,15 @@ export function extractFieldLabels(request: string): string[] {
       if (words.length > 3) continue;
       if (words.some((word) => !/^[a-z][a-z0-9-]*$/i.test(word))) continue;
       if (words.every((word) => fieldListStopWords.has(word.toLowerCase()))) continue;
+      // A label headed by a view word describes a screen, not a column: "a
+      // calendar of appointments" asks for the calendar view, and storing it as
+      // a `calendarAppointments` string would be nonsense. The calendar feature
+      // and the appointment entity are picked up separately.
+      //
+      // Deliberately its own short list rather than structuralWords, which holds
+      // plenty of legitimate field names — testing against that set dropped
+      // "website" from a contact tracker.
+      if (viewHeadWords.has(words[0].toLowerCase())) continue;
       // A single stop word on its own is never a field.
       if (words.length === 1 && fieldListStopWords.has(words[0].toLowerCase())) continue;
 
