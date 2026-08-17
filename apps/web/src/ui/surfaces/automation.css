@@ -1,0 +1,81 @@
+/* The flow canvas. */
+
+.flow-issues {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--danger);
+  background: var(--danger-quiet);
+  color: var(--danger);
+  font-size: var(--text-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.flow {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.flow-node {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
+/* A run paints its outcome onto the step itself, so the flow doubles as the
+   log rather than making you read a separate list to find what happened. */
+.flow-node.step-ok { border-color: var(--ok); }
+.flow-node.step-failed { border-color: var(--danger); }
+.flow-node.step-skipped { border-color: var(--warn); }
+.flow-node.step-dry-run { border-color: var(--line-strong); }
+
+.flow-node-label {
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  letter-spacing: 0.06em;
+}
+
+.flow-node-actions {
+  margin-left: auto;
+  gap: 0;
+}
+
+.flow-config { gap: var(--space-3); }
+
+.flow-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.flow-field .field {
+  width: auto;
+  min-width: 160px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.flow-step-log {
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.flow-palette {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line-subtle);
+  gap: var(--space-2);
+}
+
+/* Marks a block that cannot really run here, while you are choosing it. */
+.flow-gated-mark {
+  color: var(--warn);
+  margin-left: var(--space-1);
+}

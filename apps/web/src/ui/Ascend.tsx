@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { AppShell, type SurfaceContext, type SurfaceId } from "./AppShell";
-import { Surface, Empty } from "./Surface";
 import { BuildSurface } from "./surfaces/BuildSurface";
 import { KnowledgeSurface } from "./surfaces/KnowledgeSurface";
 import { MemorySurface } from "./surfaces/MemorySurface";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
 import { CalendarSurface } from "./surfaces/CalendarSurface";
 import { AgentsSurface } from "./surfaces/AgentsSurface";
+import { AutomationSurface } from "./surfaces/AutomationSurface";
+import { WorkspaceSurface } from "./surfaces/WorkspaceSurface";
 import { webEnv } from "../env";
 import "../design/tokens.css";
 import "../design/base.css";
@@ -67,21 +68,9 @@ function renderSurface(id: SurfaceId, context: SurfaceContext) {
     case "settings":
       return <SettingsSurface context={context} />;
     case "automation":
-      // The flow canvas is the one screen still on the old shell. Said plainly
-      // rather than shown as an empty panel, which is indistinguishable from a
-      // broken one.
-      return (
-        <Surface
-          title="Automation"
-          summary="Block-based flows: control flow and scripts run for real, steps needing credentials are dry-run only."
-        >
-          <Empty title="Still on the previous interface">
-            The flow engine is unchanged and covered by tests — only this screen has yet to be
-            rebuilt. Open the app with <span className="mono">?ui=classic</span> to use it in the
-            meantime.
-          </Empty>
-        </Surface>
-      );
+      return <AutomationSurface />;
+    case "workspace":
+      return <WorkspaceSurface />;
     default:
       return null;
   }

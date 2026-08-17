@@ -18,6 +18,7 @@ export type SurfaceId =
   | "automation"
   | "calendar"
   | "agents"
+  | "workspace"
   | "settings";
 
 type Surface = {
@@ -43,6 +44,7 @@ const surfaces: Surface[] = [
   { id: "automation", label: "Automation", glyph: "⟲", hint: "Flows you can run" },
   { id: "calendar", label: "Calendar", glyph: "▦", hint: "Your schedule" },
   { id: "agents", label: "Agents", glyph: "◐", hint: "Installed agents" },
+  { id: "workspace", label: "Workspace", glyph: "▣", hint: "Projects, host readings and a shell" },
   { id: "settings", label: "Settings", glyph: "⚙", hint: "Personality and defaults" }
 ];
 

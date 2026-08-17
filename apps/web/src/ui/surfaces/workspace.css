@@ -1,0 +1,68 @@
+/* Workspace: readings, projects and a shell. */
+
+.readings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3);
+}
+
+.reading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+
+.reading-value {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+}
+
+.reading-bar {
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.reading-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--slow) var(--ease);
+}
+
+/* Projects and terminal side by side on a wide screen, stacked when there is
+   not room — the terminal is unusable in a narrow column. */
+.workspace-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .workspace-split { grid-template-columns: 1fr; }
+}
+
+.term-log {
+  padding: var(--space-3);
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  /* Newest first: a long run pushes the interesting line off the bottom
+     otherwise, and the interesting line is usually the last one. */
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-xs);
+}
+
+.term-line {
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.term-warn { color: var(--warn); }
+.term-error { color: var(--danger); }
+.term-ok { color: var(--ok); }
