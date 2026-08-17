@@ -47,11 +47,6 @@ const surfaces: Surface[] = [
 ];
 
 const personalityStorageKey = "ascend.personality.v1";
-const surfaceStorageKey = "ascend.surface.v1";
-
-function isSurfaceId(value: string | null): value is SurfaceId {
-  return surfaces.some((surface) => surface.id === value);
-}
 
 export type SurfaceContext = {
   personality: PersonalityId;
@@ -69,20 +64,15 @@ type Props = {
 };
 
 export function AppShell({ renderSurface, modelLabel }: Props) {
-  const [surface, setSurface] = useState<SurfaceId>(() => {
-    const stored = window.localStorage.getItem(surfaceStorageKey);
-    // Chat is the default even when something else was open last: the app is a
-    // conversation first, and reopening into a settings screen is disorienting.
-    return isSurfaceId(stored) ? stored : "chat";
-  });
+  // Always the conversation, whatever was open last. The app is a conversation
+  // first, and reopening into whichever screen you happened to close on — a
+  // settings page, a half-finished build — buries the thing it is for. The
+  // comment here used to say this while the code restored the last surface.
+  const [surface, setSurface] = useState<SurfaceId>("chat");
 
   const [personality, setPersonality] = useState<PersonalityId>(
     () => resolvePersonality(window.localStorage.getItem(personalityStorageKey))
   );
-
-  useEffect(() => {
-    window.localStorage.setItem(surfaceStorageKey, surface);
-  }, [surface]);
 
   useEffect(() => {
     window.localStorage.setItem(personalityStorageKey, personality);

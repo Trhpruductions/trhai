@@ -1,0 +1,69 @@
+.build-input textarea { min-height: 84px; }
+
+.build-meta { gap: var(--space-2); }
+
+.build-note { align-self: flex-start; white-space: normal; max-width: var(--measure); }
+
+/* ---- Entities -----------------------------------------------------------
+   The data model is the point of this screen, so it gets the most weight: a
+   panel per record type, fields listed plainly with their inferred type. */
+
+.entity { padding: var(--space-4); }
+
+.entity-head {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+  margin-bottom: var(--space-3);
+}
+
+.field-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.field-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+/* ---- Generated files ---------------------------------------------------- */
+
+.file-list {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.file-list-head { padding-bottom: var(--space-2); }
+
+.file-list summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  padding: var(--space-1) 0;
+  color: var(--text-muted);
+}
+
+.file-list summary:hover { color: var(--text); }
+
+.file-body {
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-0);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  /* Generated code has long lines; it scrolls rather than wrapping, because
+     wrapped code is harder to read than scrolled code. */
+  overflow-x: auto;
+  max-height: 340px;
+  overflow-y: auto;
+}

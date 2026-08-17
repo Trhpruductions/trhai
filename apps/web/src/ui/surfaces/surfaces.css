@@ -1,0 +1,120 @@
+/* Shapes shared by more than one surface. Anything used by exactly one screen
+   lives with that screen instead. */
+
+.surface-summary {
+  font-size: var(--text-sm);
+  max-width: var(--measure);
+}
+
+/* ---- Lists --------------------------------------------------------------
+   One row shape for documents, memories and events. They are the same thing
+   structurally — a label, a detail line, and actions — and giving each its own
+   layout is what made the old panels look unrelated to each other. */
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
+.list-excerpt {
+  font-size: var(--text-sm);
+  margin-top: 2px;
+  /* One line: these are excerpts, and a wrapped paragraph in a list row makes
+     the rows different heights and the list hard to scan. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-row.pinned { border-color: var(--line-strong); }
+
+/* The title doubles as the rename control, so it has to read as text until you
+   approach it. */
+.rename {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  cursor: text;
+  border-bottom: 1px dashed transparent;
+}
+
+.rename:hover,
+.rename:focus-visible { border-bottom-color: var(--line-strong); }
+
+/* ---- Personalities ------------------------------------------------------ */
+
+.personality-grid,
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+
+.personality {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--fast) var(--ease);
+}
+
+.personality:hover { border-color: var(--line-strong); }
+
+.personality.selected {
+  border-color: var(--line-strong);
+  box-shadow: var(--glow);
+}
+
+.personality-desc { font-size: var(--text-sm); }
+.personality-note { align-self: flex-start; white-space: normal; }
+
+/* ---- Agents ------------------------------------------------------------- */
+
+.agent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.agent.active { border-color: var(--line-strong); box-shadow: var(--glow); }
+
+.agent-avatar { font-size: var(--text-xl); line-height: 1; }
+.agent-desc { font-size: var(--text-sm); }
+.agent-signal { gap: var(--space-2); font-size: var(--text-xs); }
+
+.agent-versions summary { cursor: pointer; font-size: var(--text-xs); }
+
+.agent-versions ul {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.agent-actions { margin-top: auto; }
+
+/* ---- Calendar ----------------------------------------------------------- */
+
+.calendar-form { align-items: stretch; }
+.calendar-form .field { width: auto; }

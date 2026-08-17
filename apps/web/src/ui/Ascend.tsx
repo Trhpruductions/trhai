@@ -1,23 +1,31 @@
 import { useEffect, useState } from "react";
 import { AppShell, type SurfaceContext, type SurfaceId } from "./AppShell";
+import { Surface, Empty } from "./Surface";
+import { BuildSurface } from "./surfaces/BuildSurface";
+import { KnowledgeSurface } from "./surfaces/KnowledgeSurface";
+import { MemorySurface } from "./surfaces/MemorySurface";
+import { SettingsSurface } from "./surfaces/SettingsSurface";
+import { CalendarSurface } from "./surfaces/CalendarSurface";
+import { AgentsSurface } from "./surfaces/AgentsSurface";
 import { webEnv } from "../env";
 import "../design/tokens.css";
 import "../design/base.css";
+import "./surfaces/surfaces.css";
 
 // Composition root for the rebuilt UI.
 //
-// Deliberately thin: it owns nothing but the model-status probe and the mapping
-// from a surface id to a screen. The previous entry point was a single 5,600
-// line component that owned every piece of state in the app, which is how a
-// prompt box ended up wired to the wrong subsystem.
+// Deliberately thin: it owns the model-status probe and the mapping from a
+// surface id to a screen, and nothing else. The previous entry point was one
+// 5,600-line component that owned every piece of state in the app, which is
+// how a prompt box ended up wired to the wrong subsystem.
 
 /**
  * Whether a local model is answering.
  *
- * Asked once at startup and then on a slow interval, because the user can start
- * or stop Ollama at any time and a stale "no model" indicator would misreport
- * what the assistant is capable of. The probe is a question to our own API, not
- * to Ollama, so the browser never needs to reach a second origin.
+ * Asked at startup and then on a slow interval, because the user can start or
+ * stop Ollama at any time and a stale indicator would misreport what the
+ * assistant can do. The question goes to our own API, so the browser never has
+ * to reach a second origin.
  */
 function useModelStatus(): string | null {
   const [label, setLabel] = useState<string | null>(null);
@@ -44,42 +52,43 @@ function useModelStatus(): string | null {
   return label;
 }
 
-/**
- * Screens beyond the conversation.
- *
- * Each is loaded as it is first opened. The build and automation surfaces pull
- * in the project generator and the flow engine, which are large and are not
- * needed to start a conversation — the screen the app opens on.
- */
-function Surface({ id, context }: { id: SurfaceId; context: SurfaceContext }) {
-  return (
-    <section className="surface" aria-label={id}>
-      <header className="surface-head">
-        <div className="surface-title">
-          <h2>{id.charAt(0).toUpperCase() + id.slice(1)}</h2>
-        </div>
-      </header>
-      <div className="surface-body readable">
-        <div className="empty">
-          <strong>Not rebuilt yet</strong>
-          <p>
-            This screen is being rebuilt. Its behaviour is unchanged and still
-            covered by tests — only the interface is being replaced, one surface
-            at a time, so the app keeps working while it happens.
-          </p>
-        </div>
-      </div>
-    </section>
-  );
+function renderSurface(id: SurfaceId, context: SurfaceContext) {
+  switch (id) {
+    case "build":
+      return <BuildSurface context={context} />;
+    case "knowledge":
+      return <KnowledgeSurface />;
+    case "memory":
+      return <MemorySurface />;
+    case "calendar":
+      return <CalendarSurface />;
+    case "agents":
+      return <AgentsSurface />;
+    case "settings":
+      return <SettingsSurface context={context} />;
+    case "automation":
+      // The flow canvas is the one screen still on the old shell. Said plainly
+      // rather than shown as an empty panel, which is indistinguishable from a
+      // broken one.
+      return (
+        <Surface
+          title="Automation"
+          summary="Block-based flows: control flow and scripts run for real, steps needing credentials are dry-run only."
+        >
+          <Empty title="Still on the previous interface">
+            The flow engine is unchanged and covered by tests — only this screen has yet to be
+            rebuilt. Open the app with <span className="mono">?ui=classic</span> to use it in the
+            meantime.
+          </Empty>
+        </Surface>
+      );
+    default:
+      return null;
+  }
 }
 
 export function Ascend() {
   const modelLabel = useModelStatus();
 
-  return (
-    <AppShell
-      modelLabel={modelLabel}
-      renderSurface={(id, context) => <Surface id={id} context={context} />}
-    />
-  );
+  return <AppShell modelLabel={modelLabel} renderSurface={renderSurface} />;
 }
