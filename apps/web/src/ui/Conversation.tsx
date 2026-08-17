@@ -3,6 +3,8 @@ import { useAssistant, type ChatMessage } from "../state/useAssistant";
 import { personalityById, resolvePersonality, type PersonalityId } from "../personalities";
 import { readEvents } from "../localCalendar";
 import { webEnv } from "../env";
+import { Core } from "./Core";
+import { greetingFor } from "../greeting";
 import "./conversation.css";
 
 // The home screen: a conversation.
@@ -28,7 +30,9 @@ type Props = {
 function provenanceOf(message: ChatMessage): { label: string; tone: string } | null {
   switch (message.strategy) {
     case "generated":
-      return { label: message.model?.replace(/^ollama\//, "") ?? "local model", tone: "chip-live" };
+      // Same shape as the status bar shows, so the two never look like they
+      // are naming different models.
+      return { label: message.model?.replace(/^ollama\//, "").replace(/:latest$/, "") ?? "local model", tone: "chip-live" };
     case "answer":
       return { label: "from your notes", tone: "chip-ok" };
     case "no-answer":
@@ -71,8 +75,41 @@ export function Conversation({ personality, onBuildRequest }: Props) {
   const { messages, status, restored, send, clear, sessionId } = useAssistant();
   const [draft, setDraft] = useState("");
   const [stats, setStats] = useState<Array<{ label: string; value: string }>>([]);
+  const [online, setOnline] = useState<boolean | null>(null);
+  const [model, setModel] = useState<string | null>(null);
+  const [clock, setClock] = useState(() => new Date());
   const endRef = useRef<HTMLDivElement>(null);
   const profile = personalityById(resolvePersonality(personality));
+
+  // The clock on the home screen is the real one, ticking. It is the cheapest
+  // honest signal that the app is running rather than a screenshot of itself.
+  useEffect(() => {
+    const ticker = window.setInterval(() => setClock(new Date()), 1000);
+    return () => window.clearInterval(ticker);
+  }, []);
+
+  // Reachability and which model is answering. Polled while the home screen is
+  // showing so the core reflects the service rather than assuming it.
+  useEffect(() => {
+    if (messages.length > 0) return;
+    let cancelled = false;
+
+    async function probe() {
+      try {
+        const response = await fetch(`${webEnv.apiBaseUrl}/v1/assist/model`);
+        const payload = response.ok ? await response.json() : null;
+        if (cancelled) return;
+        setOnline(response.ok);
+        setModel(payload?.data?.available ? payload?.data?.model ?? null : null);
+      } catch {
+        if (!cancelled) { setOnline(false); setModel(null); }
+      }
+    }
+
+    void probe();
+    const poll = window.setInterval(probe, 5000);
+    return () => { cancelled = true; window.clearInterval(poll); };
+  }, [messages.length]);
 
   // Real counts for the opening screen, read once when there is nothing to show.
   // They are what this app is holding, so an empty conversation still says
@@ -144,25 +181,40 @@ export function Conversation({ personality, onBuildRequest }: Props) {
 
       <div className="conversation-scroll scroll-y">
         {messages.length === 0 ? (
-          <div className="conversation-empty">
-            <div className="ready">
-              <span className="ready-mark" aria-hidden="true">◉</span>
-              <div>
-                <h3>Ready</h3>
-                <p className="muted">
-                  Answers come from a local model, from what you have asked it to remember, and
-                  from your documents — and it says plainly when it has none of those.
-                </p>
+          <div className="home">
+            <div className="home-core">
+              <Core state={busy ? "thinking" : online === false ? "offline" : "idle"} />
+
+              {/* Sits inside the rings. The clock is live and the date is
+                  today's, so the centre of the screen is never stale. */}
+              <div className="home-core-face">
+                <span className="home-time mono">
+                  {clock.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                </span>
+                <span className="home-date label">
+                  {clock.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                </span>
               </div>
+            </div>
+
+            <div className="home-greeting">
+              <h3 className="home-hello">{greetingFor(clock)}</h3>
+              <p className="home-sub muted">
+                {online === false
+                  ? "The local service is not responding. Nothing can be answered until it is back."
+                  : model
+                    ? `Running on ${model.replace(/:latest$/, "")}, your notes, and your documents.`
+                    : "No local model is running — answers come from your notes and documents only."}
+              </p>
             </div>
 
             {/* What the app is actually holding right now. An opening screen
                 that lists live counts reads as a running system; one that only
                 offers suggestions reads as a form waiting to be filled in. */}
-            <div className="ready-stats">
+            <div className="home-stats">
               {stats.map((stat) => (
-                <div key={stat.label} className="ready-stat">
-                  <span className="ready-stat-value">{stat.value}</span>
+                <div key={stat.label} className="home-stat">
+                  <span className="home-stat-value mono">{stat.value}</span>
                   <span className="label">{stat.label}</span>
                 </div>
               ))}
@@ -185,8 +237,11 @@ export function Conversation({ personality, onBuildRequest }: Props) {
 
         {busy ? (
           <div className="turn turn-assistant thinking" aria-live="polite">
-            <span className="label">Ascend</span>
-            <span className="thinking-dots"><i /><i /><i /></span>
+            {/* The same assembly as the home screen, small and quickened. A
+                reply from a local model can take a while, and a spinner says
+                only "wait"; this says the machine is working. */}
+            <Core state="thinking" size={44} />
+            <span className="label">Working…</span>
           </div>
         ) : null}
 

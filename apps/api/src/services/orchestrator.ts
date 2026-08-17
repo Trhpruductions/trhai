@@ -75,7 +75,11 @@ export async function runAssistantOrchestrator(
         // A distinct strategy: this was written by a model, not quoted from
         // anything the user saved, and the client labels provenance from it.
         strategy: "generated",
-        buildRequest: modelReply.buildRequest,
+        // No build offer here. Only a "create" plan survives to be built, and
+        // neither case that reaches this branch is one — so carrying the
+        // discarded plan's build request through put a "Build this" button
+        // under a two-sentence explanation of what a mutex is.
+        buildRequest: undefined,
         groundedOn: [],
         groundedOnHistory: 0
       };

@@ -172,7 +172,12 @@ export function createApp() {
       // Recorded after a successful reply so a failed request leaves no orphan turn.
       if (sessionId) {
         appendTurn(sessionId, "user", message);
-        appendTurn(sessionId, "assistant", result.assistantMessage);
+        // The assistant turn carries how it was produced, so a reloaded
+        // transcript still shows whether an answer was quoted or generated.
+        appendTurn(sessionId, "assistant", result.assistantMessage, {
+          strategy: result.strategy,
+          model: result.model
+        });
       }
 
       res.json({

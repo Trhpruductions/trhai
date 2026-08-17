@@ -241,3 +241,37 @@ test("the conversation endpoints require an identity", async () => {
     await server.close();
   }
 });
+
+test("an assistant turn keeps how it was produced", () => {
+  // The interface labels every reply with its provenance. A transcript that
+  // loses it shows a quote from the user's own notes and a sentence a model
+  // wrote as the same unlabelled block of text.
+  resetConversations();
+  appendTurn("session-provenance", "user", "What is a mutex?");
+  appendTurn("session-provenance", "assistant", "A lock.", {
+    strategy: "generated",
+    model: "ollama/llama3.2:latest"
+  });
+
+  const [, assistant] = listTurns("session-provenance");
+  assert.equal(assistant.strategy, "generated");
+  assert.equal(assistant.model, "ollama/llama3.2:latest");
+});
+
+test("provenance survives a restart", () => {
+  resetConversations();
+  appendTurn("session-restart", "assistant", "From your notes.", { strategy: "answer" });
+
+  reloadConversationsFromDisk();
+
+  assert.equal(listTurns("session-restart")[0]?.strategy, "answer");
+});
+
+test("a user turn carries no provenance", () => {
+  resetConversations();
+  appendTurn("session-user", "user", "Hello");
+
+  const [turn] = listTurns("session-user");
+  assert.equal(turn.strategy, undefined);
+  assert.equal(turn.model, undefined);
+});

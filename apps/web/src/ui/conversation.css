@@ -23,11 +23,6 @@
   padding: var(--space-5);
 }
 
-.conversation-empty {
-  margin: auto;
-  max-width: 52ch;
-}
-
 .conversation-suggestions {
   justify-content: center;
   margin-top: var(--space-3);
@@ -75,37 +70,15 @@
   margin-top: var(--space-1);
 }
 
-/* ---- Thinking ----------------------------------------------------------- */
+/* ---- Thinking -----------------------------------------------------------
+   A small core rather than a spinner: it is the same object as the one on the
+   home screen, so the state reads as "this machine is working" rather than as
+   a generic loading indicator. */
 
 .thinking {
   flex-direction: row;
   align-items: center;
   gap: var(--space-3);
-}
-
-.thinking-dots {
-  display: inline-flex;
-  gap: var(--space-1);
-}
-
-.thinking-dots i {
-  width: 5px;
-  height: 5px;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  animation: thinking 1s var(--ease) infinite;
-}
-
-.thinking-dots i:nth-child(2) { animation-delay: 0.15s; }
-.thinking-dots i:nth-child(3) { animation-delay: 0.3s; }
-
-@keyframes thinking {
-  0%, 60%, 100% { opacity: 0.25; }
-  30% { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .thinking-dots i { animation: none; opacity: 0.6; }
 }
 
 /* ---- Composer ----------------------------------------------------------- */
@@ -133,66 +106,106 @@
 }
 
 /* ---- Opening screen -----------------------------------------------------
-   An empty conversation still says something true about the system: what it is
-   holding, and that it is running. A blank page reads as broken. */
+   The home screen. It is built around a live core rather than a paragraph:
+   the rings turn while the service is reachable, the clock ticks, and the
+   counts underneath are what the app is actually holding. Everything on it is
+   either measured or obviously ornament — nothing invents a reading. */
 
-.conversation-empty {
+.home {
   margin: auto;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--space-5);
-  max-width: 56ch;
-  padding: var(--space-6) 0;
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  width: 100%;
+  max-width: 62ch;
 }
 
-.ready {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-4);
-}
-
-.ready-mark {
-  font-size: var(--text-2xl);
-  color: var(--accent);
-  line-height: 1;
-  /* The one animated thing on this screen: the app is idle, not asleep. */
-  animation: breathe 3.2s var(--ease) infinite;
-}
-
-@keyframes breathe {
-  0%, 100% { opacity: 0.5; text-shadow: none; }
-  50% { opacity: 1; text-shadow: var(--glow); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ready-mark { animation: none; opacity: 1; }
-}
-
-.ready h3 {
-  font-size: var(--text-lg);
-  margin-bottom: var(--space-1);
-}
-
-.ready p { font-size: var(--text-sm); }
-
-.ready-stats {
+.home-core {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-3);
+  place-items: center;
 }
 
-.ready-stat {
+/* The readout sits inside the rings, so the eye lands in the middle of the
+   assembly rather than beside it. */
+.home-core-face {
+  position: absolute;
+  /* The rings are bright behind the readout; this lifts the text off them
+     without drawing a visible plate. */
+  text-shadow: 0 0 12px var(--surface-0), 0 0 4px var(--surface-0);
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--space-1);
-  padding: var(--space-3) var(--space-4);
+  pointer-events: none;
+}
+
+.home-time {
+  font-family: var(--font-display);
+  /* Sized to sit inside the inner ring rather than across it. */
+  font-size: var(--text-xl);
+  color: var(--text);
+  letter-spacing: 0.04em;
+  text-shadow: var(--glow);
+  font-variant-numeric: tabular-nums;
+}
+
+.home-date {
+  color: var(--text-muted);
+}
+
+.home-greeting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.home-hello {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.home-sub {
+  font-size: var(--text-sm);
+  max-width: 48ch;
+  margin: 0 auto;
+}
+
+.home-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 44ch;
+}
+
+.home-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-2);
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-1);
 }
 
-.ready-stat-value {
+.home-stat-value {
   font-family: var(--font-display);
   font-size: var(--text-xl);
-  color: var(--text);
+  color: var(--accent-strong);
+  line-height: 1;
+}
+
+/* On a short window the core is the first thing to give up its space: the
+   composer and the counts matter more than the ornament. */
+@media (max-height: 720px) {
+  .home { gap: var(--space-4); padding-top: var(--space-4); }
+  .home-core { transform: scale(0.78); margin: calc(-1 * var(--space-6)) 0; }
 }

@@ -67,14 +67,20 @@ export function useAssistant() {
         if (!response.ok) return;
 
         const payload = await response.json();
-        const turns: Array<{ role: ChatRole; content: string }> = payload?.data?.turns ?? [];
+        const turns: Array<{ role: ChatRole; content: string; strategy?: string; model?: string }> =
+          payload?.data?.turns ?? [];
         if (cancelled || turns.length === 0) return;
 
+        // Provenance is carried back through, so a reload does not turn a
+        // quote from the user's notes and a model's sentence into the same
+        // unlabelled block of text.
         setMessages(turns.map((turn, index) => ({
           id: `restored-${index}`,
           role: turn.role,
           text: turn.content,
-          at: Date.now()
+          at: Date.now(),
+          strategy: turn.strategy,
+          model: turn.model
         })));
       } catch {
         // A missing transcript is not an error worth showing; the user can talk.

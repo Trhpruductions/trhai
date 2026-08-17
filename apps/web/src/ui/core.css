@@ -1,0 +1,146 @@
+/* The core ring assembly. Only tokens — no raw colours. */
+
+.core {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.core-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* ---- Rings -------------------------------------------------------------- */
+
+.ring {
+  fill: none;
+  stroke: var(--accent);
+  transform-origin: 120px 120px;
+}
+
+.ring-hairline {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.ring-outer {
+  stroke-width: 1.5;
+  stroke-opacity: 0.55;
+  /* A long mark and a long gap, so the ring reads as a segmented bezel rather
+     than a dotted line. */
+  stroke-dasharray: 54 18 4 18;
+  animation: core-spin 26s linear infinite;
+}
+
+.ring-mid {
+  stroke-width: 3;
+  stroke-opacity: 0.75;
+  stroke-linecap: round;
+  stroke-dasharray: 88 64;
+}
+
+.ring-mid-spin {
+  transform-origin: 120px 120px;
+  animation: core-spin 17s linear infinite reverse;
+}
+
+.ring-inner {
+  stroke-width: 1;
+  stroke-opacity: 0.4;
+  stroke-dasharray: 2 10;
+  animation: core-spin 40s linear infinite;
+}
+
+.tick {
+  stroke: var(--accent);
+  stroke-opacity: 0.22;
+  stroke-width: 1;
+}
+
+.tick-major {
+  stroke-opacity: 0.5;
+  stroke-width: 1.5;
+}
+
+/* ---- Centre ------------------------------------------------------------- */
+
+.core-bloom {
+  animation: core-breathe 6s var(--ease) infinite;
+  transform-origin: 120px 120px;
+}
+
+.core-pulse {
+  fill: var(--accent);
+  fill-opacity: 0.1;
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-opacity: 0.3;
+  transform-origin: 120px 120px;
+  animation: core-breathe 4s var(--ease) infinite;
+}
+
+.core-center {
+  fill: var(--accent);
+  fill-opacity: 0.16;
+  stroke: var(--accent-strong);
+  stroke-width: 1.5;
+  stroke-opacity: 0.6;
+}
+
+.core-seed {
+  fill: var(--accent-strong);
+  fill-opacity: 0.9;
+  filter: drop-shadow(0 0 10px var(--accent));
+  transform-origin: 120px 120px;
+  animation: core-breathe 4s var(--ease) infinite;
+}
+
+/* ---- States ------------------------------------------------------------
+   Thinking quickens and brightens the whole assembly; offline stops it and
+   drains the colour, so the ring is never turning cheerfully while nothing is
+   actually running behind it. */
+
+.core-thinking .ring-outer { animation-duration: 5s; stroke-opacity: 0.9; }
+.core-thinking .ring-mid-spin { animation-duration: 3.2s; }
+.core-thinking .ring-inner { animation-duration: 8s; stroke-opacity: 0.7; }
+.core-thinking .core-pulse,
+.core-thinking .core-seed { animation-duration: 1.1s; }
+.core-thinking .tick { stroke-opacity: 0.4; }
+
+.core-offline .ring,
+.core-offline .tick,
+.core-offline .core-center { stroke: var(--text-faint); }
+.core-offline .core-pulse { fill: var(--text-faint); stroke: var(--text-faint); }
+.core-offline .core-seed { fill: var(--text-faint); filter: none; }
+.core-offline .core-bloom { opacity: 0.25; }
+.core-offline .ring-outer,
+.core-offline .ring-inner,
+.core-offline .ring-mid-spin,
+.core-offline .core-pulse,
+.core-offline .core-seed,
+.core-offline .core-bloom { animation-play-state: paused; }
+
+@keyframes core-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes core-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(0.96); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+
+/* A rotating HUD is exactly the kind of continuous motion this setting exists
+   to stop. The assembly still renders — it just holds still. */
+@media (prefers-reduced-motion: reduce) {
+  .ring-outer,
+  .ring-inner,
+  .ring-mid-spin,
+  .core-pulse,
+  .core-seed,
+  .core-bloom {
+    animation: none;
+  }
+}

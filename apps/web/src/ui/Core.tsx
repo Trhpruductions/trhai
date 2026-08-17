@@ -1,0 +1,84 @@
+import { useId } from "react";
+import "./core.css";
+
+// The core.
+//
+// A ring assembly that turns while the app is up and quickens while it is
+// thinking. It is ornament, and it is labelled as nothing else: it carries no
+// numbers, no percentages and no readouts, so there is nothing on it a person
+// could mistake for a measurement. What it does carry is honest — it moves
+// when the service is reachable and goes still and grey when it is not, so a
+// glance at it tells you the true state of the system.
+
+export type CoreState = "idle" | "thinking" | "offline";
+
+/** Evenly spaced marks around a circle, as line endpoints. */
+function ticks(count: number, radius: number, length: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const angle = (index / count) * Math.PI * 2 - Math.PI / 2;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+
+    return {
+      key: index,
+      x1: 120 + cos * radius,
+      y1: 120 + sin * radius,
+      x2: 120 + cos * (radius + length),
+      y2: 120 + sin * (radius + length),
+      // Every fifth mark is longer and brighter, so the ring reads as a scale
+      // rather than a texture.
+      major: index % 5 === 0
+    };
+  });
+}
+
+const outerTicks = ticks(60, 104, 6);
+
+export function Core({ state = "idle", size = 300 }: { state?: CoreState; size?: number }) {
+  // Unique per instance: two cores can be mounted at once, and a duplicated
+  // gradient id makes the second one reference the first one's definition.
+  const bloomId = `core-bloom-${useId().replace(/:/g, "")}`;
+
+  return (
+    <div className={`core core-${state}`} style={{ width: size, height: size }} aria-hidden="true">
+      <svg viewBox="0 0 240 240" className="core-svg">
+        <defs>
+          <radialGradient id={bloomId}>
+            <stop offset="0%" stopColor="var(--accent-strong)" stopOpacity="0.55" />
+            <stop offset="55%" stopColor="var(--accent)" stopOpacity="0.14" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+
+        <circle cx="120" cy="120" r="112" fill={`url(#${bloomId})`} className="core-bloom" />
+
+        {/* Fixed scale ring. Stationary so the moving rings have something to
+            move against; a HUD where everything turns at once reads as noise. */}
+        <g className="core-ticks">
+          {outerTicks.map((tick) => (
+            <line key={tick.key} x1={tick.x1} y1={tick.y1} x2={tick.x2} y2={tick.y2}
+              className={tick.major ? "tick tick-major" : "tick"} />
+          ))}
+        </g>
+
+        <circle cx="120" cy="120" r="100" className="ring ring-hairline" />
+
+        {/* Broken outer ring, clockwise. */}
+        <circle cx="120" cy="120" r="88" className="ring ring-outer" />
+
+        {/* Three arcs, anticlockwise, so the assembly counter-rotates. */}
+        <g className="ring-mid-spin">
+          <circle cx="120" cy="120" r="72" className="ring ring-mid" />
+        </g>
+
+        <circle cx="120" cy="120" r="56" className="ring ring-inner" />
+
+        {/* The pulse. Slow while idle, quick while a reply is being produced —
+            this is the part that makes waiting legible without a spinner. */}
+        <circle cx="120" cy="120" r="34" className="core-pulse" />
+        <circle cx="120" cy="120" r="22" className="core-center" />
+        <circle cx="120" cy="120" r="9" className="core-seed" />
+      </svg>
+    </div>
+  );
+}

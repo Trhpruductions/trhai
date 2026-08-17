@@ -41,6 +41,28 @@ body::before {
     radial-gradient(60ch 40ch at 100% 0%, rgba(61, 120, 255, 0.05), transparent 70%);
 }
 
+/* A grid and a vignette, at the threshold of visibility. The point is that the
+   interface sits on a surface rather than on nothing; at these opacities it
+   reads as texture and never competes with a single character of text. Fixed,
+   so it does not slide around behind scrolling content. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    linear-gradient(rgba(120, 190, 235, 0.028) 1px, transparent 1px) 0 0 / 100% 44px,
+    linear-gradient(90deg, rgba(120, 190, 235, 0.028) 1px, transparent 1px) 0 0 / 44px 100%,
+    radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* Everything real sits above the texture. */
+#root {
+  position: relative;
+  z-index: 1;
+}
+
 h1, h2, h3, h4 {
   margin: 0;
   font-family: var(--font-display);

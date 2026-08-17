@@ -13,6 +13,16 @@ export type StoredTurn = {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  /**
+   * How the reply was produced, and by what.
+   *
+   * Stored because the interface labels every assistant turn with its
+   * provenance, and a reloaded transcript that has lost it shows a quote from
+   * the user's own notes and a sentence a model invented as the same thing.
+   * Absent on user turns, and on transcripts written before this was recorded.
+   */
+  strategy?: string;
+  model?: string;
 };
 
 /** Enough to be useful, bounded so an anonymous caller cannot grow it forever. */
@@ -34,7 +44,10 @@ function isStoredTurn(value: unknown): value is StoredTurn {
   return typeof turn.id === "string"
     && (turn.role === "user" || turn.role === "assistant")
     && typeof turn.content === "string"
-    && typeof turn.createdAt === "string";
+    && typeof turn.createdAt === "string"
+    // Optional, so a file written before provenance was recorded still loads.
+    && (turn.strategy === undefined || typeof turn.strategy === "string")
+    && (turn.model === undefined || typeof turn.model === "string");
 }
 
 function loadFromDisk(): void {
@@ -81,7 +94,12 @@ function evictOldestIfNeeded(): void {
   }
 }
 
-export function appendTurn(key: string, role: StoredTurn["role"], content: string): StoredTurn | null {
+export function appendTurn(
+  key: string,
+  role: StoredTurn["role"],
+  content: string,
+  provenance?: { strategy?: string; model?: string }
+): StoredTurn | null {
   loadFromDisk();
 
   const trimmed = typeof content === "string" ? content.trim() : "";
@@ -91,7 +109,9 @@ export function appendTurn(key: string, role: StoredTurn["role"], content: strin
     id: globalThis.crypto.randomUUID(),
     role,
     content: trimmed.length > maxContentLength ? trimmed.slice(0, maxContentLength) : trimmed,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    ...(provenance?.strategy ? { strategy: provenance.strategy } : {}),
+    ...(provenance?.model ? { model: provenance.model } : {})
   };
 
   const existing = turnsByKey.get(key) ?? [];
