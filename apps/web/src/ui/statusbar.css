@@ -1,0 +1,110 @@
+/* The live strip along the bottom. Always moving, always measured. */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  height: 30px;
+  background: var(--surface-1);
+  border-top: 1px solid var(--line-subtle);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  /* Sits above the page glow so the readings stay legible. */
+  position: relative;
+  z-index: 2;
+}
+
+.sb-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--text-faint);
+}
+
+/* A slow pulse, not a blink: it should read as a heartbeat you stop noticing,
+   not an alarm competing with the content. */
+.sb-dot.live {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+  animation: pulse 2.4s var(--ease) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-dot.live { animation: none; }
+}
+
+.sb-state {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.sb-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--line-subtle);
+}
+
+.sb-gauge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sb-gauge-label {
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+}
+
+.sb-bar {
+  display: block;
+  width: 46px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.sb-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  /* Eases between samples so the bar reads as a level changing rather than a
+     value being replaced. */
+  transition: width var(--slow) var(--ease);
+}
+
+.sb-gauge-value {
+  min-width: 34px;
+  font-size: 10.5px;
+}
+
+.sb-item { font-size: 10.5px; }
+
+.sb-model {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-subtle);
+}
+
+.sb-model.live {
+  color: var(--accent);
+  border-color: var(--line-strong);
+  background: var(--accent-quiet);
+}
+
+.sb-clock { color: var(--text-faint); }
+
+@media (max-width: 860px) {
+  /* The gauges are the first thing to go: the model and connection state are
+     what change what the app can do. */
+  .sb-gauge, .sb-sep { display: none; }
+}

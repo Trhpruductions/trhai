@@ -131,3 +131,68 @@
   height: 44px;
   min-width: 84px;
 }
+
+/* ---- Opening screen -----------------------------------------------------
+   An empty conversation still says something true about the system: what it is
+   holding, and that it is running. A blank page reads as broken. */
+
+.conversation-empty {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 56ch;
+  padding: var(--space-6) 0;
+}
+
+.ready {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.ready-mark {
+  font-size: var(--text-2xl);
+  color: var(--accent);
+  line-height: 1;
+  /* The one animated thing on this screen: the app is idle, not asleep. */
+  animation: breathe 3.2s var(--ease) infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.5; text-shadow: none; }
+  50% { opacity: 1; text-shadow: var(--glow); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ready-mark { animation: none; opacity: 1; }
+}
+
+.ready h3 {
+  font-size: var(--text-lg);
+  margin-bottom: var(--space-1);
+}
+
+.ready p { font-size: var(--text-sm); }
+
+.ready-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+
+.ready-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.ready-stat-value {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--text);
+}

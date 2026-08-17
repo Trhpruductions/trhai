@@ -3,10 +3,14 @@
 .shell {
   display: grid;
   grid-template-columns: var(--rail-width) 1fr;
+  grid-template-rows: 1fr auto;
   height: 100%;
   position: relative;
   z-index: 1;
 }
+
+/* The status strip runs under both columns. */
+.statusbar { grid-column: 1 / -1; }
 
 /* ---- Rail ---------------------------------------------------------------
    Icons only. The labels live in tooltips and aria-labels: eight words stacked

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Conversation } from "./Conversation";
+import { StatusBar } from "./StatusBar";
 import { resolvePersonality, type PersonalityId } from "../personalities";
 import "./shell.css";
 
@@ -127,6 +128,10 @@ export function AppShell({ renderSurface, modelLabel }: Props) {
           })
         )}
       </main>
+
+      {/* Spans the full width beneath both columns: it describes the whole app,
+          not the screen that happens to be open. */}
+      <StatusBar />
     </div>
   );
 }
