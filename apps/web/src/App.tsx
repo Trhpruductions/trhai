@@ -18,7 +18,7 @@ import {
   writeStoredToken,
   type Account
 } from "./accountClient";
-import { deriveTitle, generateProject, planProject } from "@ascend/shared";
+import { deriveTitle, generateProject, planProject, slugify } from "@ascend/shared";
 import { buildLocalCapabilityReply, inferLocalIntent, type LocalIntent } from "./localAssistant";
 import { prepareImport, summarizeImport, type ImportResult } from "./knowledgeImport";
 import { memoryBodyAddsInfo } from "./memoryView";
@@ -829,15 +829,6 @@ function storageSeverity(usedPercent: number): "ok" | "warn" | "critical" {
   return "ok";
 }
 
-function slugify(value: string): string {
-  const normalized = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-
-  return normalized || "custom-build";
-}
-
 function normalizeWorkspaceRelativePath(value: string): string {
   return value
     .trim()
@@ -854,7 +845,7 @@ function normalizeWorkspaceRelativePath(value: string): string {
 const defaultScaffoldTemplate = "generated-projects/{slug}";
 
 function resolveScaffoldRoot(blueprint: BuildBlueprint, destinationTemplate?: string): string {
-  const slug = slugify(blueprint.title);
+  const slug = slugify(blueprint.title, "custom-build");
   const template = destinationTemplate?.trim() || defaultScaffoldTemplate;
   const replaced = template.includes("{slug}") ? template.replace(/\{slug\}/g, slug) : template;
   const normalized = normalizeWorkspaceRelativePath(replaced);

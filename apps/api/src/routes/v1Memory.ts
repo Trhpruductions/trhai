@@ -1,5 +1,6 @@
 import { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import { z } from "zod";
+import { slugify } from "@ascend/shared";
 import { query } from "../db.js";
 import { runAssistantOrchestrator } from "../services/orchestrator.js";
 
@@ -112,15 +113,6 @@ const telemetryFlushTimers = new Map<string, NodeJS.Timeout>();
 
 function responseEnvelope(data: unknown) {
   return { data, traceId: defaultTraceId };
-}
-
-function slugify(value: string): string {
-  const slug = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .slice(0, 64);
-  return slug || "workspace";
 }
 
 function asyncRoute(handler: (req: Request, res: Response, next: NextFunction) => Promise<void>): RequestHandler {
@@ -579,7 +571,7 @@ v1MemoryRouter.post(
     const workspace: Workspace = {
       id,
       name: parsed.data.name,
-      slug: slugify(parsed.data.name),
+      slug: slugify(parsed.data.name, "workspace", 64),
       planTier: "free",
       members: [
         {

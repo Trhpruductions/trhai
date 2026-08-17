@@ -186,12 +186,25 @@ export function pluralize(word: string): string {
   return `${word}s`;
 }
 
-export function slugify(value: string): string {
-  return value
+/**
+ * The one slug rule for the whole repo.
+ *
+ * There were four of these — two in the API routes, one in the web shell, one
+ * here — with three different length caps and no shared behaviour, so the same
+ * name could slug differently depending on which layer produced it. Callers pass
+ * the fallback that suits their domain; nothing else varies.
+ *
+ * The cap is applied *before* the separators are trimmed. The other order let a
+ * slice land mid-separator and leave a trailing hyphen, which every copy did.
+ */
+export function slugify(value: string, fallback = "generated-project", maxLength = 60): string {
+  const slug = value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60) || "generated-project";
+    .slice(0, maxLength)
+    .replace(/^-+|-+$/g, "");
+
+  return slug || fallback;
 }
 
 function capitalize(value: string): string {

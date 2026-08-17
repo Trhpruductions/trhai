@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { planProject, extractEntityNames, detectFeatures, pluralize, singularize, isCollectionLabel, deriveTitle } from "../src/projectPlan.js";
+import { planProject, extractEntityNames, detectFeatures, pluralize, singularize, isCollectionLabel, deriveTitle, slugify } from "../src/projectPlan.js";
 import { generateProject } from "../src/projectGenerator.js";
 
 test("derives the entity from the request rather than a fixed template", () => {
@@ -959,4 +959,26 @@ test("a view described in the request is not stored as a column", () => {
   }
   // The view itself is still recognised.
   assert.ok(spec.features.includes("calendar"));
+});
+
+test("a slug never ends on a separator", () => {
+  // The regression, shared by all four copies: the length cap was applied after
+  // trimming, so a slice could land mid-separator and leave a trailing hyphen.
+  const slug = slugify("a".repeat(59) + " beta gamma");
+
+  assert.ok(!slug.endsWith("-"), `slug ended on a separator: "${slug}"`);
+  assert.ok(!slug.startsWith("-"));
+  assert.ok(slug.length <= 60);
+});
+
+test("slugify takes the caller's fallback and cap", () => {
+  assert.equal(slugify("", "workspace"), "workspace");
+  assert.equal(slugify("!!!", "custom-build"), "custom-build");
+  assert.equal(slugify("Support Desk"), "support-desk");
+  assert.equal(slugify("x".repeat(80), "workspace", 64).length, 64);
+});
+
+test("slugify is stable for ordinary names", () => {
+  assert.equal(slugify("Ops Runbook v2"), "ops-runbook-v2");
+  assert.equal(slugify("  Client   Portal  "), "client-portal");
 });

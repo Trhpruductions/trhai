@@ -1,5 +1,6 @@
 import { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import { z } from "zod";
+import { slugify } from "@ascend/shared";
 import { query, withTransaction } from "../db.js";
 import {
   findIdempotentResponse,
@@ -42,16 +43,6 @@ function responseEnvelope(data: unknown) {
   };
 }
 
-function slugify(value: string): string {
-  const slug = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .slice(0, 64);
-
-  return slug || "workspace";
-}
-
 function asyncRoute(handler: (req: Request, res: Response, next: NextFunction) => Promise<void>): RequestHandler {
   return (req, res, next) => {
     void handler(req, res, next).catch(next);
@@ -82,7 +73,7 @@ v1Router.post(
 
     const workspace = await withTransaction(async (client) => {
       const actor = await ensureActorUserWithClient(client, req);
-      const baseSlug = slugify(parsed.data.name);
+      const baseSlug = slugify(parsed.data.name, "workspace", 64);
 
       const result = await client.query<{ id: string; name: string; slug: string; plan_tier: string }>(
         `
