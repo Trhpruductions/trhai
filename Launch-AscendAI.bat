@@ -7,15 +7,23 @@ REM This script does not start the API or the web client. The desktop shell
 REM already does that in ensureSelfHostedServices, with port checks, a health
 REM check and a 45s warm-up allowance. Starting them here as well raced it: the
 REM previous version spawned run-web-dev.ps1, slept a fixed 8 seconds, and then
-REM detached Electron with `start` — after which the shell would exit, the web
+REM detached Electron with `start` ??? after which the shell would exit, the web
 REM server sat as a PowerShell process with no vite behind it, and neither port
 REM was listening. Electron is now run attached, so this hidden window is its
 REM parent and lives exactly as long as the app.
 
 cd /d "%~dp0"
 
-set "LOG=%~dp0launch.log"
-echo [%date% %time%] launch requested> "%LOG%"
+REM The log lives outside the repo. Kept beside the app it was held open by a
+REM stale handle from a previous run, and because every step redirects into it,
+REM a lock on the log stopped the app from starting at all. A log must never be
+REM able to do that, so a failure to write one is also survivable below.
+set "LOGDIR=%LOCALAPPDATA%\Ascend"
+if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>&1
+set "LOG=%LOGDIR%\launch.log"
+echo [%date% %time%] launch requested> "%LOG%" 2>nul
+if errorlevel 1 set "LOG=%TEMP%\ascend-launch.log"
+echo [%date% %time%] launch requested> "%LOG%" 2>nul
 
 REM Stop a previous instance of this app only. The command line match keeps it
 REM from touching any other Electron app the user happens to be running.
@@ -65,6 +73,6 @@ exit /b 0
 
 :fail
 REM Nothing can be printed to a hidden window, so the log is the only channel.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; [System.Windows.Forms.MessageBox]::Show('Ascend AI could not start. See launch.log in the app folder.', 'Ascend AI')" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; [System.Windows.Forms.MessageBox]::Show('Ascend AI could not start. See %LOCALAPPDATA%\Ascend\launch.log.', 'Ascend AI')" >nul 2>&1
 endlocal
 exit /b 1
