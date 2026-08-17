@@ -15,12 +15,10 @@ if (!rootElement) {
 /**
  * Which shell to render.
  *
- * The rebuilt UI is being brought up one surface at a time, so it is opt-in
- * until it covers everything the current one does. Switching the default early
- * would trade a cluttered app for an incomplete one, and the point of doing it
- * this way is that the app never stops working while it is replaced.
- *
- * `?ui=next` for the rebuild, `?ui=classic` to go back; the choice sticks.
+ * The rebuilt UI is the default. The previous one is kept behind ?ui=classic
+ * for a short while: it is the only place the draggable widget board still
+ * exists, and having a way back is cheap insurance while the new screens meet
+ * real use for the first time.
  */
 const uiStorageKey = "ascend.ui.v1";
 
@@ -30,7 +28,7 @@ function resolveShell(): "next" | "classic" {
     window.localStorage.setItem(uiStorageKey, requested);
     return requested;
   }
-  return window.localStorage.getItem(uiStorageKey) === "next" ? "next" : "classic";
+  return window.localStorage.getItem(uiStorageKey) === "classic" ? "classic" : "next";
 }
 
 const shell = resolveShell();
