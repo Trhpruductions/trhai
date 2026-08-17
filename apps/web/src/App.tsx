@@ -1550,12 +1550,22 @@ export function App() {
     const request = prompt.trim();
     if (!request || actionBusy || chatBusy) return;
 
-    if (activeTopTab === "ASSISTANT") {
-      void submitChatBuildRequest(request);
-      return;
-    }
-
-    createBlueprintFromText(request);
+    // The box says "Ask anything", so anything typed is asked. It used to route
+    // on the active tab instead of on what was typed, which meant that on Home —
+    // the screen the app opens on — every message went to the build engine:
+    // "what is 2+2?" produced a blueprint titled "What Is 2 2" and a scaffold
+    // path, and never answered.
+    //
+    // submitChatBuildRequest classifies the request and switches to the build
+    // view itself when it really is one, so routing everything through it keeps
+    // building available without making it the only thing the box can do.
+    // Show the conversation, because that is where the reply appears. Asking from
+    // Home and staying on Home left the answer on a screen the user was not
+    // looking at — only a status line hinted that anything had happened.
+    setPrompt("");
+    setActiveTopTab("ASSISTANT");
+    setActiveRailSection("Assistant");
+    void submitChatBuildRequest(request);
   }
 
   function pushExecutionEvent(stage: ReasoningStage, detail: string, level: ExecutionLevel = "info") {
@@ -5191,7 +5201,7 @@ export function App() {
             />
             <button
               type="button"
-              aria-label={activeTopTab === "ASSISTANT" ? "Develop from prompt" : "Generate build plan"}
+              aria-label="Send to the assistant"
               onClick={runPromptPrimaryAction}
               disabled={actionBusy || chatBusy}
             >
