@@ -22,6 +22,8 @@ export type ModelReply = {
   groundedOn: string[];
   /** Conversation turns the reply was actually grounded on. */
   groundedOnHistory: number;
+  /** For a plan, the kind of work detected. See ComposedReply.planTaskType. */
+  planTaskType?: string;
 };
 
 export type MemoryContext = {
@@ -69,7 +71,8 @@ export class ModelRouter {
       strategy: composed.strategy,
       buildRequest: composed.buildRequest,
       groundedOn: composed.groundedOn,
-      groundedOnHistory: composed.groundedOnHistory
+      groundedOnHistory: composed.groundedOnHistory,
+      planTaskType: composed.planTaskType
     };
   }
 

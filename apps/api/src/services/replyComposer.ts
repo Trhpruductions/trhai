@@ -83,6 +83,12 @@ export type ComposedReply = {
   groundedOn: string[];
   /** Conversation turns actually used to ground the reply. */
   groundedOnHistory: number;
+  /**
+   * For a "plan" reply, what kind of work was detected. Only "create" produces
+   * an app, so it is the only kind where the generic plan is the better answer
+   * than a model's — everything else reads as a canned four-step template.
+   */
+  planTaskType?: string;
 };
 
 function isCodingMode(mode: ComposerMode): boolean {
@@ -411,6 +417,7 @@ export function composeReply(input: ComposerInput): ComposedReply {
   return {
     text: `${preamble}${plan.steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}${constraints}`,
     strategy: "plan",
+    planTaskType: plan.taskType,
     groundedOn: relevant.map((entry) => entry.memory.id),
     groundedOnHistory: refining ? 1 : 0,
     buildRequest

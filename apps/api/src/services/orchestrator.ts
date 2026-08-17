@@ -58,7 +58,13 @@ export async function runAssistantOrchestrator(
   // The deterministic path had nothing, so try a local model if one is running.
   // Only this branch is eligible: a reply grounded in saved memory or a document
   // is an exact quote with a source, and must never be replaced by a generation.
-  if (modelReply.strategy === "no-answer") {
+  // Eligible when the deterministic path had no answer, and also when it fell
+  // back to a generic plan for something that is not a build. "Explain what a
+  // REST API is" was answered with "1. Clarify the end state ... 2. Identify the
+  // highest-impact next move", which is a template, not an answer. Only a
+  // "create" request produces an app, so only there is the plan worth keeping.
+  const isCannedPlan = modelReply.strategy === "plan" && modelReply.planTaskType !== "create";
+  if (modelReply.strategy === "no-answer" || isCannedPlan) {
     const generated = await answerWithLocalModel(input);
     if (generated) {
       return {
