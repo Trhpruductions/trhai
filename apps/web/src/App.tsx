@@ -21,6 +21,7 @@ import {
 import { generateProject, planProject } from "@ascend/shared";
 import { buildLocalCapabilityReply, inferLocalIntent, type LocalIntent } from "./localAssistant";
 import { prepareImport, summarizeImport, type ImportResult } from "./knowledgeImport";
+import { memoryBodyAddsInfo } from "./memoryView";
 import {
   appendNode,
   capabilityReason,
@@ -4268,8 +4269,42 @@ export function App() {
               {memories.map((item) => (
                 <li key={item.id}>
                   <div>
-                    <strong>{item.title}</strong>
-                    <small>{item.body}</small>
+                    {memoryEditId === item.id ? (
+                      <input
+                        className="memory-edit-input"
+                        type="text"
+                        value={memoryEditDraft}
+                        autoFocus
+                        onChange={(event) => setMemoryEditDraft(event.target.value)}
+                        onBlur={() => commitMemoryLabel(item)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            commitMemoryLabel(item);
+                          }
+                          if (event.key === "Escape") setMemoryEditId(null);
+                        }}
+                        aria-label={`Rename memory ${item.title}`}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="memory-rename"
+                        title="Click to rename"
+                        onClick={() => {
+                          setMemoryEditId(item.id);
+                          setMemoryEditDraft(item.title);
+                        }}
+                      >
+                        {item.title}
+                      </button>
+                    )}
+                    {/*
+                      A freshly extracted memory takes its title from its body, so
+                      showing both printed the same sentence twice on every row.
+                      The body only earns its line once the user has renamed the entry.
+                    */}
+                    {memoryBodyAddsInfo(item) ? <small>{item.body}</small> : null}
                   </div>
                   <div className="destination-row-actions">
                     <button type="button" onClick={() => toggleMemoryPin(item)}>

@@ -2997,6 +2997,27 @@ svg {
   color: rgba(255, 200, 121, 0.9);
 }
 
+/* The memory title doubles as the rename affordance, so it has to look like
+   text until you approach it. */
+.memory-rename {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  cursor: text;
+  border-bottom: 1px dashed transparent;
+}
+
+.memory-rename:hover,
+.memory-rename:focus-visible {
+  border-bottom-color: var(--line-strong);
+  outline: none;
+}
+
 /* ---------------------------------------------------------------------------
    Knowledge documents
 --------------------------------------------------------------------------- */
