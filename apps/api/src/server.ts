@@ -43,6 +43,7 @@ import {
   removeDocument,
   retrieveKnowledgePassages
 } from "./services/knowledgeStore.js";
+import { isAllowedOrigin } from "./services/originPolicy.js";
 import { attachAuthIdentity } from "./middleware/auth.js";
 import { v1MemoryRouter } from "./routes/v1Memory.js";
 import { v1Router } from "./routes/v1.js";
@@ -99,7 +100,16 @@ export function createApp() {
   const storageBackend = (process.env.API_STORAGE_BACKEND ?? "memory").toLowerCase();
 
   app.use(helmet());
-  app.use(cors({ origin: process.env.CORS_ORIGIN ?? "*" }));
+  // Defaults to this machine's own origins rather than "*". The API listens on
+  // localhost, but that does not stop a page on any site the user visits from
+  // calling it — CORS is what decides whether that page may read the reply, and
+  // these endpoints carry no credentials. CORS_ORIGIN still overrides, and takes
+  // a comma-separated list.
+  app.use(cors({
+    origin(origin, callback) {
+      callback(null, isAllowedOrigin(origin, process.env.CORS_ORIGIN));
+    }
+  }));
   app.use(express.json({ limit: "1mb" }));
   app.use(morgan("tiny"));
 

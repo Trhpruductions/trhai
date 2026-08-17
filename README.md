@@ -110,6 +110,11 @@ Copy `apps/api/.env.example` to `apps/api/.env` to change any of these.
 
 - `PORT` — API port, default 4000.
 - `API_STORAGE_BACKEND` — `memory` (default) or `postgres`.
+- `CORS_ORIGIN` — which browser origins may call the API. Defaults to this
+  machine's own origins on any port. The API listening on localhost does not by
+  itself stop a page on a site you visit from calling it, and the assistant,
+  memory and knowledge endpoints take no credentials, so the default is
+  deliberately not `*`. Accepts a comma-separated list, or `*` to allow all.
 - `AUTH_MODE` — `dev` accepts optional bearer tokens and falls back to dev identity;
   `jwt` requires a bearer token validated with `AUTH_JWT_SECRET`, optionally
   constrained by `AUTH_JWT_ISSUER` and `AUTH_JWT_AUDIENCE`.
