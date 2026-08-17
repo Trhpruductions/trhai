@@ -45,6 +45,7 @@ import {
 } from "./services/knowledgeStore.js";
 import { isAllowedOrigin } from "./services/originPolicy.js";
 import { checkAvailability, readLocalModelConfig } from "./services/localModel.js";
+import { readPreferences, updatePreferences } from "./services/preferences.js";
 import { attachAuthIdentity } from "./middleware/auth.js";
 import { v1MemoryRouter } from "./routes/v1Memory.js";
 import { v1Router } from "./routes/v1.js";
@@ -424,6 +425,18 @@ export function createApp() {
         : { available: false, model: null, reason: availability.reason },
       traceId: "trace-local"
     });
+  });
+
+  // Machine-wide preferences, so the desktop window and a browser tab agree.
+  // Not keyed by session: the session id lives in the browser's own storage, so
+  // keying by it would reproduce the split this exists to close.
+  app.get("/v1/preferences", (_req, res) => {
+    res.json({ data: readPreferences(), traceId: "trace-local" });
+  });
+
+  app.patch("/v1/preferences", (req, res) => {
+    const personality = typeof req.body?.personality === "string" ? req.body.personality : undefined;
+    res.json({ data: updatePreferences({ personality }), traceId: "trace-local" });
   });
 
   app.get("/v1/knowledge", (req, res) => {

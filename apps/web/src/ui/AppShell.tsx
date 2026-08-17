@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Conversation } from "./Conversation";
 import { StatusBar } from "./StatusBar";
 import { resolvePersonality, type PersonalityId } from "../personalities";
+import { webEnv } from "../env";
 import "./shell.css";
 
 // The shell.
@@ -73,13 +74,49 @@ export function AppShell({ renderSurface, modelLabel }: Props) {
   // comment here used to say this while the code restored the last surface.
   const [surface, setSurface] = useState<SurfaceId>("chat");
 
-  const [personality, setPersonality] = useState<PersonalityId>(
+  // Local storage is the starting guess so the first paint is not a flicker of
+  // the wrong personality; the API is the authority and corrects it a moment
+  // later. Keeping the local copy also means the app still opens with the right
+  // personality if the service is slow to come up.
+  const [personality, setPersonalityState] = useState<PersonalityId>(
     () => resolvePersonality(window.localStorage.getItem(personalityStorageKey))
   );
 
   useEffect(() => {
-    window.localStorage.setItem(personalityStorageKey, personality);
-  }, [personality]);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const response = await fetch(`${webEnv.apiBaseUrl}/v1/preferences`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        const stored = resolvePersonality(payload?.data?.personality ?? null);
+        if (!cancelled) {
+          setPersonalityState(stored);
+          window.localStorage.setItem(personalityStorageKey, stored);
+        }
+      } catch {
+        // Offline or still starting: the local copy stands until it answers.
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  /** Writes through to the API so the desktop window and a browser tab agree. */
+  const setPersonality = (next: PersonalityId) => {
+    setPersonalityState(next);
+    window.localStorage.setItem(personalityStorageKey, next);
+
+    void fetch(`${webEnv.apiBaseUrl}/v1/preferences`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ personality: next })
+    }).catch(() => {
+      // The choice is already applied here; a failed write means the other
+      // surface will not learn about it until this one is used again.
+    });
+  };
 
   const [buildSeed, setBuildSeed] = useState<string | null>(null);
 
