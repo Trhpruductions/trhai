@@ -555,6 +555,34 @@ async function waitForApiHealth(timeoutMs: number): Promise<boolean> {
   return false;
 }
 
+/** Where Ollama installs itself on Windows, per user. */
+function localModelBinary(): string {
+  const configured = process.env.OLLAMA_BINARY;
+  if (configured) return configured;
+  const localAppData = process.env.LOCALAPPDATA ?? "";
+  return path.join(localAppData, "Programs", "Ollama", "ollama.exe");
+}
+
+/**
+ * Start the local model server if it is installed but not listening.
+ *
+ * Absence stays fine: with no Ollama installed this does nothing and the
+ * assistant behaves exactly as it did before, answering from memory and
+ * documents and saying plainly when it has nothing. This only removes the need
+ * to start a second application by hand.
+ */
+async function ensureLocalModelServer(): Promise<void> {
+  const port = Number(process.env.OLLAMA_PORT ?? 11434);
+  if (await waitForPort(port, 800)) return;
+
+  const binary = localModelBinary();
+  if (!(await pathExists(binary))) return;
+
+  spawnDetachedCommand("Ollama", binary, ["serve"]);
+  // Loading is quick; the model itself is only read on the first question.
+  await waitForPort(port, 15000);
+}
+
 async function ensureSelfHostedServices() {
   if (autoStartDisabled) return;
   if (!(await pathExists(path.resolve(workspaceRoot, "package.json")))) return;
@@ -562,6 +590,13 @@ async function ensureSelfHostedServices() {
   const apiPortReady = await waitForPort(4000, 1200);
   const webPortReady = await waitForPort(webPort, 1200);
   const apiReady = apiPortReady ? await waitForApiHealth(2500) : false;
+
+  // The local model server is started here for the same reason the API and web
+  // client are: opening this app should be the only thing the user has to do.
+  // Leaving it to them made Ollama a second app to remember, and the assistant
+  // silently fell back to "I don't have anything saved" whenever it was not
+  // already running.
+  await ensureLocalModelServer();
 
   if (!apiReady) {
     spawnDetachedCommand("Ascend API", "npm.cmd", ["run", "dev:api"]);
