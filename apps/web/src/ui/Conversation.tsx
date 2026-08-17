@@ -77,6 +77,11 @@ export function Conversation({ personality, onBuildRequest }: Props) {
   const [stats, setStats] = useState<Array<{ label: string; value: string }>>([]);
   const [online, setOnline] = useState<boolean | null>(null);
   const [model, setModel] = useState<string | null>(null);
+  const [linkMs, setLinkMs] = useState<number | null>(null);
+  // Bumped on every completed poll. Used as a React key so the reading
+  // remounts and replays its animation — the flicker marks a real refresh
+  // rather than running on a timer of its own.
+  const [pollCount, setPollCount] = useState(0);
   const [clock, setClock] = useState(() => new Date());
   const endRef = useRef<HTMLDivElement>(null);
   const profile = personalityById(resolvePersonality(personality));
@@ -95,14 +100,20 @@ export function Conversation({ personality, onBuildRequest }: Props) {
     let cancelled = false;
 
     async function probe() {
+      // Timed here rather than reported by the server, so the figure is the
+      // round trip the user actually waits on.
+      const startedAt = performance.now();
       try {
         const response = await fetch(`${webEnv.apiBaseUrl}/v1/assist/model`);
+        const elapsed = Math.round(performance.now() - startedAt);
         const payload = response.ok ? await response.json() : null;
         if (cancelled) return;
         setOnline(response.ok);
+        setLinkMs(response.ok ? elapsed : null);
         setModel(payload?.data?.available ? payload?.data?.model ?? null : null);
+        setPollCount((count) => count + 1);
       } catch {
-        if (!cancelled) { setOnline(false); setModel(null); }
+        if (!cancelled) { setOnline(false); setModel(null); setLinkMs(null); }
       }
     }
 
@@ -182,42 +193,69 @@ export function Conversation({ personality, onBuildRequest }: Props) {
       <div className="conversation-scroll scroll-y">
         {messages.length === 0 ? (
           <div className="home">
-            <div className="home-core">
-              <Core state={busy ? "thinking" : online === false ? "offline" : "idle"} />
+            {/* Corner brackets. The home screen is a panel in an instrument
+                rather than a page in a document, and the brackets are what
+                say so without adding a single word. */}
+            <span className="home-frame" aria-hidden="true" />
 
-              {/* Sits inside the rings. The clock is live and the date is
-                  today's, so the centre of the screen is never stale. */}
-              <div className="home-core-face">
-                <span className="home-time mono">
-                  {clock.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-                </span>
-                <span className="home-date label">
-                  {clock.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
-                </span>
+            <div className="home-assembly">
+              {/* Left rail: the link. What is answering, and how quickly. */}
+              <dl className="home-rail home-rail-left">
+                <div className="home-readout">
+                  <dt className="label">Model</dt>
+                  <dd className={`mono${model ? "" : " home-readout-absent"}`}>
+                    {model ? model.replace(/:latest$/, "") : "none"}
+                  </dd>
+                </div>
+                <div className="home-readout">
+                  <dt className="label">Link</dt>
+                  <dd key={pollCount} className={`mono home-readout-live${linkMs === null ? " home-readout-absent" : ""}`}>
+                    {linkMs === null ? "—" : `${linkMs}ms`}
+                  </dd>
+                </div>
+                <div className="home-readout">
+                  <dt className="label">Voice</dt>
+                  <dd className="mono">{profile.label}</dd>
+                </div>
+              </dl>
+
+              <div className="home-core">
+                <Core state={busy ? "thinking" : online === false ? "offline" : "idle"} />
+
+                {/* Sits inside the rings. The clock is live and the date is
+                    today's, so the centre of the screen is never stale. */}
+                <div className="home-core-face">
+                  <span className="home-time mono">
+                    {clock.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                  <span className="home-date label">
+                    {clock.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                  </span>
+                </div>
               </div>
+
+              {/* Right rail: the store. What the app is actually holding.
+                  These are counts it read, not figures it composed. */}
+              <dl className="home-rail home-rail-right">
+                {stats.map((stat) => (
+                  <div key={stat.label} className="home-readout">
+                    <dt className="label">{stat.label}</dt>
+                    <dd className="mono home-readout-count">{stat.value}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
 
             <div className="home-greeting">
               <h3 className="home-hello">{greetingFor(clock)}</h3>
+              <span className="home-rule" aria-hidden="true" />
               <p className="home-sub muted">
                 {online === false
                   ? "The local service is not responding. Nothing can be answered until it is back."
                   : model
-                    ? `Running on ${model.replace(/:latest$/, "")}, your notes, and your documents.`
+                    ? "Answers come from the local model, from what you have asked me to remember, and from your documents."
                     : "No local model is running — answers come from your notes and documents only."}
               </p>
-            </div>
-
-            {/* What the app is actually holding right now. An opening screen
-                that lists live counts reads as a running system; one that only
-                offers suggestions reads as a form waiting to be filled in. */}
-            <div className="home-stats">
-              {stats.map((stat) => (
-                <div key={stat.label} className="home-stat">
-                  <span className="home-stat-value mono">{stat.value}</span>
-                  <span className="label">{stat.label}</span>
-                </div>
-              ))}
             </div>
 
             <div className="row wrap conversation-suggestions">

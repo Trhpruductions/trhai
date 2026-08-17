@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { access, mkdir, readdir, writeFile } from "node:fs/promises";
-import { getDetachedSpawnConfig } from "./launcher.js";
+import { getDetachedSpawnConfig, getServiceSpawnOptions } from "./launcher.js";
 import { containPath, isSafeExternalUrl, isTrustedAppUrl } from "./pathGuard.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -470,18 +470,59 @@ async function pathExists(candidatePath: string): Promise<boolean> {
   }
 }
 
+/** Services this shell started, so it can stop them again on the way out. */
+const startedServices: Array<{ label: string; pid: number }> = [];
+
 function spawnDetachedCommand(label: string, command: string, args: string[], env?: NodeJS.ProcessEnv) {
   const spawnConfig = getDetachedSpawnConfig(command, args);
+
+  // See getServiceSpawnOptions: on Windows this must not detach, or each
+  // service opens its own console window on the way up.
+  const options = getServiceSpawnOptions();
+
   const child = spawn(spawnConfig.command, spawnConfig.args, {
     cwd: workspaceRoot,
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
+    ...options,
     env: env ? { ...process.env, ...env } : process.env
   });
 
-  child.unref();
+  if (options.detached) child.unref();
+  if (child.pid !== undefined) startedServices.push({ label, pid: child.pid });
+
   return label;
+}
+
+/**
+ * Stop what this shell started.
+ *
+ * Only its own children, by pid, and only the ones it actually spawned — a
+ * service that was already running when the app opened was never added to the
+ * list, so closing the app does not take down something the user started.
+ *
+ * Without this, a session left a trail of orphaned node processes: closing the
+ * window stopped the window, and the API kept running with its port held.
+ */
+function stopStartedServices(): void {
+  while (startedServices.length > 0) {
+    const service = startedServices.pop();
+    if (!service) continue;
+
+    try {
+      if (process.platform === "win32") {
+        // The child is a cmd.exe shim; killing it leaves npm and node behind,
+        // so the whole tree goes. Hidden, or this would flash a console of its
+        // own on the way out.
+        spawn("taskkill", ["/pid", String(service.pid), "/t", "/f"], {
+          stdio: "ignore",
+          windowsHide: true
+        });
+      } else {
+        process.kill(-service.pid, "SIGTERM");
+      }
+    } catch {
+      // Already gone, or not ours any more. Quitting must not be blocked by it.
+    }
+  }
 }
 
 function clearWebRetryTimer() {
@@ -882,4 +923,8 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   clearWebRetryTimer();
+  // Closing the app closes what the app started. Otherwise a session left
+  // orphaned node processes holding port 4000, and the next launch found the
+  // port busy with a server it could no longer talk to.
+  stopStartedServices();
 });

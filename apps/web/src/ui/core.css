@@ -65,6 +65,11 @@
   stroke-width: 1.5;
 }
 
+.core-sweep {
+  transform-origin: 120px 120px;
+  animation: core-spin 9s linear infinite;
+}
+
 /* ---- Centre ------------------------------------------------------------- */
 
 .core-bloom {
@@ -103,6 +108,7 @@
    drains the colour, so the ring is never turning cheerfully while nothing is
    actually running behind it. */
 
+.core-thinking .core-sweep { animation-duration: 2.4s; }
 .core-thinking .ring-outer { animation-duration: 5s; stroke-opacity: 0.9; }
 .core-thinking .ring-mid-spin { animation-duration: 3.2s; }
 .core-thinking .ring-inner { animation-duration: 8s; stroke-opacity: 0.7; }
@@ -116,6 +122,7 @@
 .core-offline .core-pulse { fill: var(--text-faint); stroke: var(--text-faint); }
 .core-offline .core-seed { fill: var(--text-faint); filter: none; }
 .core-offline .core-bloom { opacity: 0.25; }
+.core-offline .core-sweep { opacity: 0; }
 .core-offline .ring-outer,
 .core-offline .ring-inner,
 .core-offline .ring-mid-spin,
@@ -138,6 +145,7 @@
   .ring-outer,
   .ring-inner,
   .ring-mid-spin,
+  .core-sweep,
   .core-pulse,
   .core-seed,
   .core-bloom {

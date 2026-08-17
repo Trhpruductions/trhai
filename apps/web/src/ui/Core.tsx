@@ -37,7 +37,9 @@ const outerTicks = ticks(60, 104, 6);
 export function Core({ state = "idle", size = 300 }: { state?: CoreState; size?: number }) {
   // Unique per instance: two cores can be mounted at once, and a duplicated
   // gradient id makes the second one reference the first one's definition.
-  const bloomId = `core-bloom-${useId().replace(/:/g, "")}`;
+  const instance = useId().replace(/:/g, "");
+  const bloomId = `core-bloom-${instance}`;
+  const sweepId = `core-sweep-${instance}`;
 
   return (
     <div className={`core core-${state}`} style={{ width: size, height: size }} aria-hidden="true">
@@ -48,6 +50,11 @@ export function Core({ state = "idle", size = 300 }: { state?: CoreState; size?:
             <stop offset="55%" stopColor="var(--accent)" stopOpacity="0.14" />
             <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
           </radialGradient>
+
+          <linearGradient id={sweepId} x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+          </linearGradient>
         </defs>
 
         <circle cx="120" cy="120" r="112" fill={`url(#${bloomId})`} className="core-bloom" />
@@ -72,6 +79,14 @@ export function Core({ state = "idle", size = 300 }: { state?: CoreState; size?:
         </g>
 
         <circle cx="120" cy="120" r="56" className="ring ring-inner" />
+
+        {/* Sweep. A wedge that travels round the dial, the way a radar trace
+            does. It measures nothing and is drawn as a soft gradient rather
+            than a needle, so it reads as the assembly being alive rather than
+            as a value being pointed at. */}
+        <g className="core-sweep">
+          <path d="M120 120 L120 24 A96 96 0 0 1 188 52 Z" fill={`url(#${sweepId})`} />
+        </g>
 
         {/* The pulse. Slow while idle, quick while a reply is being produced —
             this is the part that makes waiting legible without a spinner. */}
