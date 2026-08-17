@@ -16,3 +16,4 @@ generated-projects/
 data/
 # Desktop shell scratch (fallback HTML written at launch)
 .ascend-temp/
+launch.log

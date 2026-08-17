@@ -184,17 +184,33 @@ const capabilityPattern =
  * and getting "I don't have anything saved". Saying so up front is the whole
  * difference between a tool with limits and a tool that seems broken.
  */
-const capabilityReply = [
-  "I run locally, with no language model behind me — so I can't answer general questions from world knowledge, and I won't pretend to.",
-  "",
-  "What I can actually do:",
-  "- Build a working app from a description. \"Build a task tracker where projects have many tasks\" produces a real REST API with storage, validation and tests.",
-  "- Remember things you tell me. Start with \"remember that ...\" and I'll use it later.",
-  "- Answer from your documents. Add them under Knowledge and I'll quote the relevant passage back with its source.",
-  "- Run flows you build under Automation, and keep your schedule under Calendar.",
-  "",
-  "Ask me to build something, or tell me a fact to remember."
-].join("\n");
+export function buildCapabilityReply(localModel?: string): string {
+  // Two different true statements, depending on what is actually running.
+  // Claiming there is no model while one is answering would be as wrong as
+  // promising one that was never installed, and a user who reads either and
+  // then sees the opposite stops believing the rest of this reply.
+  const opening = localModel
+    ? `I run locally. General questions go to ${localModel} on this machine — nothing leaves it, and there is no API key involved.`
+    : "I run locally, with no language model behind me — so I can't answer general questions from world knowledge, and I won't pretend to.";
+
+  const closing = localModel
+    ? "What I answer from memory or your documents is quoted with its source. Anything else is written by the model."
+    : "Install Ollama and pull a model if you want me to answer general questions too.";
+
+  return [
+    opening,
+    "",
+    "What I can actually do:",
+    "- Build a working app from a description. \"Build a task tracker where projects have many tasks\" produces a real REST API with storage, validation and tests.",
+    "- Remember things you tell me. Start with \"remember that ...\" and I'll use it later.",
+    "- Answer from your documents. Add them under Knowledge and I'll quote the relevant passage back with its source.",
+    "- Run flows you build under Automation, and keep your schedule under Calendar.",
+    "",
+    "Ask me to build something, or tell me a fact to remember.",
+    "",
+    closing
+  ].join("\n");
+}
 
 export function composeReply(input: ComposerInput): ComposedReply {
   const message = input.message.trim();
@@ -205,7 +221,7 @@ export function composeReply(input: ComposerInput): ComposedReply {
   // branch reads them as a vague work request and answers "tell me your stack
   // and deadline", which is a strange reply to "thanks".
   if (capabilityPattern.test(message)) {
-    return { text: capabilityReply, strategy: "capability", groundedOn: [], groundedOnHistory: 0 };
+    return { text: buildCapabilityReply(), strategy: "capability", groundedOn: [], groundedOnHistory: 0 };
   }
 
   if (greetingPattern.test(message)) {

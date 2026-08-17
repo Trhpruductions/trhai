@@ -1,5 +1,6 @@
 import { ModelRouter, type ComposerKnowledge, type MemoryWriteOutcome } from "./modelRouter.js";
 import { checkAvailability, generate, readLocalModelConfig } from "./localModel.js";
+import { buildCapabilityReply } from "./replyComposer.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
@@ -41,6 +42,19 @@ export async function runAssistantOrchestrator(
     knowledge: input.knowledge
   });
 
+  // "What can you do?" must describe what is actually wired up right now, so the
+  // one branch whose answer depends on the backend asks before answering.
+  if (modelReply.strategy === "capability") {
+    const config = readLocalModelConfig();
+    const availability = await checkAvailability(config);
+    if (availability.available) {
+      return {
+        ...toResult(modelReply),
+        assistantMessage: buildCapabilityReply(`ollama/${availability.model}`)
+      };
+    }
+  }
+
   // The deterministic path had nothing, so try a local model if one is running.
   // Only this branch is eligible: a reply grounded in saved memory or a document
   // is an exact quote with a source, and must never be replaced by a generation.
@@ -62,6 +76,10 @@ export async function runAssistantOrchestrator(
     }
   }
 
+  return toResult(modelReply);
+}
+
+function toResult(modelReply: Awaited<ReturnType<ModelRouter["generate"]>>): OrchestratorResult {
   return {
     model: modelReply.model,
     assistantMessage: modelReply.output,

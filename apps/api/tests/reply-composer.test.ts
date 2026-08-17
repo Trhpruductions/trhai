@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzeRequest, extractTopics } from "../src/services/requestAnalysis.js";
 import { selectRelevantMemories, scoreMemories } from "../src/services/memoryRelevance.js";
-import { composeReply, type ComposerMemory } from "../src/services/replyComposer.js";
+import { buildCapabilityReply, composeReply, type ComposerMemory } from "../src/services/replyComposer.js";
 
 function memory(id: string, title: string, body: string, pinned = false): ComposerMemory {
   return { id, title, body, pinned, createdAt: new Date(2026, 0, 1).toISOString() };
@@ -571,4 +571,26 @@ test("the capability answer does not claim knowledge it lacks", () => {
   const reply = composeReply({ mode: "general", message: "what can you do?", memories: [], history: [] });
 
   assert.doesNotMatch(reply.text, /I know|ask me anything|any question/i);
+});
+
+test("the capability reply states which backend is actually answering", () => {
+  // Two different true statements. Saying there is no model while one answers
+  // would be as wrong as promising one that was never installed.
+  const withoutModel = buildCapabilityReply();
+  assert.match(withoutModel, /no language model behind me/i);
+  assert.match(withoutModel, /Install Ollama/i);
+
+  const withModel = buildCapabilityReply("ollama/llama3.2:latest");
+  assert.match(withModel, /ollama\/llama3\.2:latest/);
+  assert.doesNotMatch(withModel, /no language model behind me/i);
+  // Even with a model, sourcing stays distinguished from generation.
+  assert.match(withModel, /quoted with its source/i);
+});
+
+test("both capability replies still describe what the app does", () => {
+  for (const reply of [buildCapabilityReply(), buildCapabilityReply("ollama/x")]) {
+    assert.match(reply, /remember that/i);
+    assert.match(reply, /Knowledge/);
+    assert.match(reply, /Build a working app/i);
+  }
 });
