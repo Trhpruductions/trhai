@@ -14,7 +14,8 @@
     "dist:dir": "npm run build && electron-builder --dir",
     "start": "electron dist/main.js",
     "lint": "echo \"No linter configured yet\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { access, mkdir, readdir, writeFile } from "node:fs/promises";
 import { getDetachedSpawnConfig } from "./launcher.js";
+import { containPath, isSafeExternalUrl, isTrustedAppUrl } from "./pathGuard.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -331,7 +332,14 @@ ipcMain.handle("ascend:create-scaffold", async (_event, payload) => {
       return { ok: false, created: false, error: "Invalid scaffold payload." };
     }
 
-    const targetPath = path.resolve(workspaceRoot, spec.path, spec.fileName);
+    // Confined the same way run-command confines its working directory. Without
+    // this a spec path of ".." or an absolute path wrote outside the workspace.
+    const contained = containPath(workspaceRoot, spec.path, spec.fileName);
+    if (!contained.ok) {
+      return { ok: false, created: false, error: contained.reason };
+    }
+
+    const targetPath = contained.path;
     const targetDir = path.dirname(targetPath);
 
     await mkdir(targetDir, { recursive: true });
@@ -361,11 +369,11 @@ ipcMain.handle("ascend:run-command", async (event, payload) => {
     return { ok: false, runId, exitCode: -1, error: "Missing command." };
   }
 
-  const candidateCwd = requestedCwd ? path.resolve(workspaceRoot, requestedCwd) : workspaceRoot;
-  const relativeCwd = path.relative(workspaceRoot, candidateCwd);
-  if (relativeCwd.startsWith("..") || path.isAbsolute(relativeCwd)) {
+  const containedCwd = requestedCwd ? containPath(workspaceRoot, requestedCwd) : { ok: true as const, path: workspaceRoot };
+  if (!containedCwd.ok) {
     return { ok: false, runId, exitCode: -1, error: "Command cwd must be inside workspace." };
   }
+  const candidateCwd = containedCwd.path;
 
   if (!existsSync(candidateCwd)) {
     return { ok: false, runId, exitCode: -1, error: "Command cwd does not exist." };
@@ -748,8 +756,30 @@ function createWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    // openExternal hands the string to the OS, which will start far more than a
+    // web page — file:, javascript:, or any protocol another installed app has
+    // registered. Only web-ish schemes leave the window.
+    if (isSafeExternalUrl(url)) {
+      void shell.openExternal(url);
+    } else {
+      console.warn(`[desktop] Refused to open external URL: ${url}`);
+    }
     return { action: "deny" };
+  });
+
+  // The window carries a preload bridge that can run shell commands, so it must
+  // never end up somewhere untrusted. Nothing navigated it away before, but
+  // nothing stopped a redirect or an injected location change either.
+  mainWindow.webContents.on("will-navigate", (navigationEvent, url) => {
+    if (isTrustedAppUrl(url)) return;
+    navigationEvent.preventDefault();
+    console.warn(`[desktop] Blocked navigation to ${url}`);
+  });
+
+  mainWindow.webContents.on("will-redirect", (navigationEvent, url) => {
+    if (isTrustedAppUrl(url)) return;
+    navigationEvent.preventDefault();
+    console.warn(`[desktop] Blocked redirect to ${url}`);
   });
 
   mainWindow.webContents.on("did-fail-load", (_event, _errorCode, errorDescription, validatedURL, isMainFrame) => {
