@@ -470,13 +470,14 @@ async function pathExists(candidatePath: string): Promise<boolean> {
   }
 }
 
-function spawnDetachedCommand(label: string, command: string, args: string[]) {
+function spawnDetachedCommand(label: string, command: string, args: string[], env?: NodeJS.ProcessEnv) {
   const spawnConfig = getDetachedSpawnConfig(command, args);
   const child = spawn(spawnConfig.command, spawnConfig.args, {
     cwd: workspaceRoot,
     detached: true,
     stdio: "ignore",
-    windowsHide: true
+    windowsHide: true,
+    env: env ? { ...process.env, ...env } : process.env
   });
 
   child.unref();
@@ -555,6 +556,20 @@ async function waitForApiHealth(timeoutMs: number): Promise<boolean> {
   return false;
 }
 
+/**
+ * Where model weights live.
+ *
+ * Defaults beside the workspace rather than under the user profile: models are
+ * gigabytes, and the system drive is usually the one without room for them —
+ * on this machine C: was full while the workspace drive had terabytes free.
+ * An explicit OLLAMA_MODELS still wins.
+ */
+function resolveModelStore(): string {
+  const configured = process.env.OLLAMA_MODELS;
+  if (configured) return configured;
+  return path.join(path.parse(workspaceRoot).root, "Ollama", "models");
+}
+
 /** Where Ollama installs itself on Windows, per user. */
 function localModelBinary(): string {
   const configured = process.env.OLLAMA_BINARY;
@@ -578,7 +593,12 @@ async function ensureLocalModelServer(): Promise<void> {
   const binary = localModelBinary();
   if (!(await pathExists(binary))) return;
 
-  spawnDetachedCommand("Ollama", binary, ["serve"]);
+  // Told explicitly where the models are. A child inherits its parent's
+  // environment block, not the registry, so a machine-wide OLLAMA_MODELS set
+  // after this shell's parent started is invisible here — the server then reads
+  // the default location, finds nothing, and the assistant silently loses the
+  // model it appears to have installed.
+  spawnDetachedCommand("Ollama", binary, ["serve"], { OLLAMA_MODELS: resolveModelStore() });
   // Loading is quick; the model itself is only read on the first question.
   await waitForPort(port, 15000);
 }
