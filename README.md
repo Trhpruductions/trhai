@@ -30,7 +30,7 @@ rather than pretending.
 | **Knowledge** | Paste or import text files; questions are answered by quoting the matching passage with its source. |
 | **Automation** | Block canvas — IF / ELSE / WAIT / RUN SCRIPT and more. Dry run performs nothing; a live run executes control flow and scripts, and skips anything needing credentials with the reason stated. |
 | **Marketplace / Agents** | Ten agents with ratings, version history and install. The active agent changes the assistant's suggestions and focus. |
-| **Personalities** | Ten profiles that change tone and suggestions. Safety constraints on the medical, legal and financial profiles are enforced, not advisory. |
+| **Personalities** | Ten profiles that change tone and suggestions. The medical, legal and cyber-security profiles always append a professional-advice disclaimer — enforced in the response path, not left to the wording. |
 | **Widgets** | Draggable, resizable dashboard widgets. Widgets with no real data source say so instead of showing a plausible number. |
 | **Calendar** | Local events with live relative times. No connected account needed. |
 | **Projects / Files / Terminal** | Real host inventory and command execution, through the desktop shell. |

@@ -18,7 +18,7 @@ import {
   writeStoredToken,
   type Account
 } from "./accountClient";
-import { generateProject, planProject } from "@ascend/shared";
+import { deriveTitle, generateProject, planProject } from "@ascend/shared";
 import { buildLocalCapabilityReply, inferLocalIntent, type LocalIntent } from "./localAssistant";
 import { prepareImport, summarizeImport, type ImportResult } from "./knowledgeImport";
 import { memoryBodyAddsInfo } from "./memoryView";
@@ -680,15 +680,6 @@ const screenDefinitions: Record<TopTab, ScreenDefinition> = {
   }
 };
 
-function toTitleCase(value: string): string {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 8)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(" ");
-}
-
 function detectStack(idea: string): string[] {
   const lower = idea.toLowerCase();
   const stack = ["TypeScript", "React", "Node.js"];
@@ -705,7 +696,10 @@ function detectStack(idea: string): string[] {
 
 function generateBlueprint(idea: string): BuildBlueprint {
   const cleaned = idea.trim();
-  const title = toTitleCase(cleaned || "Custom Product Build");
+  // Shared with planProject rather than title-casing the whole request. The
+  // blueprint title becomes the scaffold folder name, so a sentence here
+  // produced generated-projects/remember-that-i-take-5mg-of-medication-each.
+  const title = cleaned ? deriveTitle(cleaned) : "Custom Product Build";
   const stack = detectStack(cleaned);
 
   return {
