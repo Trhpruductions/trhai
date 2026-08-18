@@ -13,7 +13,7 @@ const testWorkspace = mkdtempSync(path.join(tmpdir(), "ascend-agent-"));
 process.env.ASCEND_WORKSPACE = testWorkspace;
 import { maxToolRounds, runAgent, systemPrompt } from "../src/services/agentLoop.js";
 import { runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
-import { looksLikeRawToolCalls } from "../src/services/agentLoop.js";
+import { looksLikeRawToolCalls, parseTextToolCalls } from "../src/services/agentLoop.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
 
 const at = new Date("2026-08-17T12:00:00Z").toISOString();
@@ -728,16 +728,90 @@ test("ordinary prose is never mistaken for tool calls", () => {
   }
 });
 
-test("a reply that is only tool-call JSON is refused", async () => {
+test("tool calls written as text are run, not shown and not ignored", async () => {
+  // This used to be refused, which left the only model this machine can load
+  // unable to use a tool at all. The model names a tool this app advertises
+  // and passes arguments matching the schema it was given — the same request
+  // in a different encoding.
+  const { server, baseUrl } = await fakeModel([
+    answer('{"name": "current_datetime", "parameters": {}}'),
+    answer("It is August 2026.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what is the date?", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.toolsUsed, ["current_datetime"]);
+    assert.match(result.text, /August 2026/);
+  } finally {
+    server.close();
+  }
+});
+
+test("a tool the app does not advertise is dropped, never invoked", () => {
+  // The name check is what makes reading the model's prose safe — not the
+  // shape it happened to be written in.
+  assert.deepEqual(
+    parseTextToolCalls('{"name": "delete_everything", "parameters": {"path": "/"}}'),
+    []
+  );
+  assert.deepEqual(
+    parseTextToolCalls('{"name": "exec", "arguments": {"cmd": "rm -rf /"}}'),
+    []
+  );
+});
+
+test("a JSON array of calls is understood too", () => {
+  const calls = parseTextToolCalls(
+    '[{"name": "current_datetime", "parameters": {}}, {"name": "search_memory", "parameters": {"query": "x"}}]'
+  );
+
+  assert.deepEqual(calls.map((call) => call.name), ["current_datetime", "search_memory"]);
+});
+
+test("one malformed line does not discard the rest", () => {
+  const calls = parseTextToolCalls(
+    '{"name": "current_datetime", "parameters": {}}\n{ broken\n{"name": "list_memories", "parameters": {}}'
+  );
+
+  assert.deepEqual(calls.map((call) => call.name), ["current_datetime", "list_memories"]);
+});
+
+test("tool-call JSON is never shown as the answer", async () => {
+  // Even on the last round, where the calls are not acted on, the JSON must
+  // not be handed to the user as prose — it is the model's working.
   const { server, baseUrl } = await fakeModel([
     answer('{"name": "current_datetime", "parameters": {}}')
   ]);
 
   try {
-    const result = await runAgent(configFor(baseUrl), "what is the date?", context);
-    assert.equal(result.ok, false);
-    if (result.ok) return;
-    assert.match(result.reason, /tool calls as text/);
+    const result = await runAgent(configFor(baseUrl), "loop", context);
+    if (result.ok) {
+      assert.ok(!result.text.includes('"parameters"'), `leaked JSON: ${result.text}`);
+    }
+  } finally {
+    server.close();
+  }
+});
+
+
+test("the current date is stated to the model, not left to a tool call", async () => {
+  // Asked "which database, and what is today's date?", it called search_memory
+  // alone and answered "the current date is not recorded" — with the clock
+  // available and the prompt telling it to use current_datetime. A model
+  // cannot fail to call a tool it does not need.
+  const { server, baseUrl, received } = await fakeModel([answer("Understood.")]);
+
+  try {
+    await runAgent(configFor(baseUrl), "hello", context);
+
+    const request = received[0] as { messages: Array<{ role: string; content: string }> };
+    const system = request.messages.find((message) => message.role === "system");
+
+    // The fixed clock in this context is 17 August 2026.
+    assert.match(system?.content ?? "", /2026/);
+    assert.match(system?.content ?? "", /never say the date is unknown/);
   } finally {
     server.close();
   }

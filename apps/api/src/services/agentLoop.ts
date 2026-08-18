@@ -135,15 +135,83 @@ function firstLine(detail: string): string {
  * grounded answer, which is at least true and readable.
  */
 export function looksLikeRawToolCalls(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
+  return parseTextToolCalls(text).length > 0;
+}
 
-  // Every non-empty line is a JSON object naming a function and its arguments.
-  const lines = trimmed.split("\n").map((line) => line.trim()).filter(Boolean);
-  return lines.length > 0 && lines.every((line) =>
-    /^[[{]/.test(line)
-    && /"(name|function)"\s*:/.test(line)
-    && /"(parameters|arguments)"\s*:/.test(line));
+/**
+ * Tool calls a model wrote as text instead of calling.
+ *
+ * A smaller model sometimes ignores the tool interface and puts the calls it
+ * wanted into the message body, one JSON object per line:
+ *
+ *   {"name": "search_memory", "parameters": {"query": "billing"}}
+ *   {"name": "current_datetime", "parameters": {}}
+ *
+ * That text reached the user as their answer. The first fix was to refuse it,
+ * on the grounds that acting on it meant guessing at an intention in a shape
+ * this code never agreed to accept. That reasoning was wrong, and refusing it
+ * left the only model this machine can actually load unable to use any tool.
+ *
+ * It is not a guess. The model names a tool this app advertises and passes
+ * arguments matching the schema it was given; this is the same request in a
+ * different encoding. What makes acting on it safe is not the encoding but the
+ * checks that were always there — a name is only accepted if it is one of ours,
+ * every tool validates its own arguments, and each reports what it actually
+ * did. So it is parsed, and anything that does not name an advertised tool is
+ * dropped rather than run.
+ */
+export function parseTextToolCalls(text: string, known = advertisedToolNames()): ToolCall[] {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return [];
+
+  const objects: unknown[] = [];
+
+  // A JSON array of calls, or one object per line. Both shapes appear.
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) objects.push(...parsed);
+    else objects.push(parsed);
+  } catch {
+    for (const line of trimmed.split("\n")) {
+      const candidate = line.trim();
+      if (!candidate.startsWith("{")) continue;
+      try {
+        objects.push(JSON.parse(candidate));
+      } catch {
+        // One malformed line does not discard the rest.
+      }
+    }
+  }
+
+  const calls: ToolCall[] = [];
+  for (const entry of objects) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+
+    const name = typeof record.name === "string"
+      ? record.name
+      : typeof record.function === "string" ? record.function : null;
+
+    // The gate. An unrecognised name is dropped, never invoked: this is the
+    // check that makes reading the model's prose safe, not the shape it
+    // happened to be written in.
+    if (!name || !known.includes(name)) continue;
+
+    const rawArguments = record.parameters ?? record.arguments ?? {};
+    calls.push({
+      name,
+      arguments: rawArguments && typeof rawArguments === "object"
+        ? rawArguments as Record<string, unknown>
+        : {}
+    });
+  }
+
+  return calls;
+}
+
+/** The tools this app offers, by name. */
+function advertisedToolNames(): string[] {
+  return toolDefinitions.map((definition) => definition.function.name);
 }
 
 function parseToolCalls(response: ChatResponse): ToolCall[] {
@@ -194,8 +262,26 @@ export async function runAgent(
   context: ToolContext,
   fetchImpl: typeof fetch = fetch
 ): Promise<AgentResult> {
+  // The date is stated outright rather than left to a tool call.
+  //
+  // current_datetime exists and works, and the prompt tells the model to use
+  // it — and asked "which database, and what is today's date?" it called
+  // search_memory alone and answered "the current date is not recorded". A
+  // model cannot fail to call a tool it does not need, and this costs one line
+  // of prompt against a whole class of failure. It is still measured, from the
+  // same clock the tool reads.
+  const now = (context.now ?? (() => new Date()))();
+  const today = now.toLocaleString(undefined, {
+    weekday: "long", year: "numeric", month: "long", day: "numeric",
+    hour: "2-digit", minute: "2-digit"
+  });
+
   const messages: ChatMessage[] = [
-    { role: "system", content: systemPrompt },
+    {
+      role: "system",
+      content: `${systemPrompt}\n\nThe date and time on this machine right now is ${today}. `
+        + "That is current and correct — use it directly and never say the date is unknown or unrecorded."
+    },
     { role: "user", content: question }
   ];
 
@@ -250,23 +336,22 @@ export async function runAgent(
     // Tool calls are not honoured on the final round. A model can return them
     // even when none were offered, and acting on that would run one more round
     // than the bound allows — the bound has to hold whatever the model does.
-    const requested = parseToolCalls(response);
-    const calls = offerTools ? requested : [];
-    const text = typeof response.message?.content === "string"
+    const rawText = typeof response.message?.content === "string"
       ? response.message.content.trim()
       : "";
 
-    if (calls.length === 0) {
-      // Refused before anything else looks at it: this is not an answer, and
-      // showing it is worse than showing nothing.
-      if (looksLikeRawToolCalls(text)) {
-        return {
-          ok: false,
-          reason: "The local model wrote its tool calls as text instead of calling them.",
-          toolsUsed
-        };
-      }
+    // Tool-call JSON is never shown as an answer, whether or not it was
+    // understood: it is the model's working, not its reply.
+    const text = parseTextToolCalls(rawText).length > 0 ? "" : rawText;
 
+    // Both encodings. A model that used the interface and a model that wrote
+    // the same calls into its prose are asking for the same thing, and after
+    // the name check there is no reason to treat them differently.
+    const requested = parseToolCalls(response);
+    const written = requested.length === 0 && rawText ? parseTextToolCalls(rawText) : [];
+    const calls = offerTools ? [...requested, ...written] : [];
+
+    if (calls.length === 0) {
       if (!text) {
         // Two different failures, and they must not be confused. A model that
         // is still asking for tools on the final round has not gone quiet — it
