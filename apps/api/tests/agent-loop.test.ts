@@ -51,7 +51,8 @@ function fakeModel(turns: Array<Record<string, unknown>>) {
   });
 }
 
-const configFor = (baseUrl: string): LocalModelConfig => ({ baseUrl, model: "llama3.2", timeoutMs: 4000 });
+const configFor = (baseUrl: string): LocalModelConfig =>
+  ({ baseUrl, model: "llama3.2", modelFromEnv: true, timeoutMs: 4000 });
 
 const toolCall = (name: string, args: Record<string, unknown>) => ({
   message: { content: "", tool_calls: [{ function: { name, arguments: args } }] }
@@ -212,8 +213,18 @@ test("an empty reply is a failure, not a blank answer", async () => {
 
 test("the system prompt forbids inventing a result", () => {
   // The tools are only safe because of this instruction; it is worth a test.
-  assert.match(systemPrompt, /returns nothing, say so plainly/);
+  assert.match(systemPrompt, /An empty tool result means the USER has not recorded that/);
   assert.match(systemPrompt, /Never claim you saved, found or did something/);
+});
+
+test("the system prompt separates the user's facts from general knowledge", () => {
+  // Asked "what is a semaphore?", llama3.1:8b searched the user's documents,
+  // found nothing, and concluded it did not know what a semaphore is. The
+  // smaller model had answered it correctly. A model that follows instructions
+  // more literally exposed that the prompt never drew this distinction.
+  assert.match(systemPrompt, /Questions about the WORLD/);
+  assert.match(systemPrompt, /Do not search the user's private notes/);
+  assert.match(systemPrompt, /topic is unknowable/);
 });
 
 test("every advertised tool is actually implemented", () => {

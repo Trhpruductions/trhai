@@ -24,6 +24,15 @@ export type LocalModelConfig = {
   baseUrl: string;
   /** Which pulled model to ask. */
   model: string;
+  /**
+   * Whether `model` came from OLLAMA_MODEL or is just the built-in default.
+   *
+   * Without this the two are indistinguishable, and the preference list below
+   * never runs: the default is itself an installed model, so it always looked
+   * like a deliberate choice and a better model sitting alongside it was never
+   * picked up.
+   */
+  modelFromEnv: boolean;
   /** How long to wait before giving up on a reply. */
   timeoutMs: number;
 };
@@ -32,6 +41,7 @@ export function readLocalModelConfig(env: NodeJS.ProcessEnv = process.env): Loca
   return {
     baseUrl: (env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/+$/, ""),
     model: env.OLLAMA_MODEL ?? "llama3.2",
+    modelFromEnv: Boolean(env.OLLAMA_MODEL),
     // Local inference on CPU is slow. A short timeout would abandon a reply that
     // was on its way, which reads as a broken feature rather than a slow one.
     timeoutMs: Number(env.OLLAMA_TIMEOUT_MS ?? 45000)
@@ -89,12 +99,20 @@ export const preferredModels = [
  * list, otherwise whatever is installed — an assistant with some model is more
  * use than one that refuses because it did not find its first choice.
  */
-export function pickModel(configured: string, installed: string[]): string | null {
+export function pickModel(
+  configured: string,
+  installed: string[],
+  /** False when `configured` is the built-in default rather than a real choice. */
+  fromEnv = true
+): string | null {
   const matches = (candidate: string, name: string) =>
     name === candidate || name.split(":")[0] === candidate;
 
-  const exact = installed.find((name) => matches(configured, name));
-  if (exact) return exact;
+  // Only a model the user actually named short-circuits the preference list.
+  if (fromEnv) {
+    const exact = installed.find((name) => matches(configured, name));
+    if (exact) return exact;
+  }
 
   for (const preference of preferredModels) {
     const found = installed.find((name) => matches(preference, name));
@@ -122,7 +140,7 @@ export async function checkAvailability(
       .filter((name): name is string => typeof name === "string");
 
     // Ollama reports "llama3.2:latest" for a model pulled as "llama3.2".
-    const match = pickModel(config.model, installed);
+    const match = pickModel(config.model, installed, config.modelFromEnv ?? true);
     if (!match) {
       return {
         available: false,

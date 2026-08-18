@@ -39,7 +39,7 @@ function fakeOllama(handler: (url: string, body: unknown) => { status: number; p
 }
 
 function configFor(baseUrl: string, overrides: Partial<LocalModelConfig> = {}): LocalModelConfig {
-  return { baseUrl, model: "llama3.2", timeoutMs: 2000, ...overrides };
+  return { baseUrl, model: "llama3.2", modelFromEnv: true, timeoutMs: 2000, ...overrides };
 }
 
 test("configuration falls back to the usual local defaults", () => {
@@ -225,4 +225,30 @@ test("nothing installed means nothing to pick", () => {
 
 test("a bare name matches the tagged form Ollama reports", () => {
   assert.equal(pickModel("llama3.2", ["llama3.2:latest"]), "llama3.2:latest");
+});
+
+test("the built-in default does not block a better model", () => {
+  // The bug this exists to stop: OLLAMA_MODEL unset means model is "llama3.2",
+  // which is itself installed — so it looked like a deliberate choice and
+  // llama3.1:8b sitting next to it was never picked up. Pulling a better model
+  // changed nothing at all.
+  assert.equal(
+    pickModel("llama3.2", ["llama3.2:latest", "llama3.1:8b"], false),
+    "llama3.1:8b"
+  );
+});
+
+test("a model named in the environment still wins", () => {
+  assert.equal(
+    pickModel("llama3.2", ["llama3.2:latest", "llama3.1:8b"], true),
+    "llama3.2:latest"
+  );
+});
+
+test("the config records whether the model was actually chosen", () => {
+  assert.equal(readLocalModelConfig({} as NodeJS.ProcessEnv).modelFromEnv, false);
+  assert.equal(
+    readLocalModelConfig({ OLLAMA_MODEL: "mistral" } as NodeJS.ProcessEnv).modelFromEnv,
+    true
+  );
 });
