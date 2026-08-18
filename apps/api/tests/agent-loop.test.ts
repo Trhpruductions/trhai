@@ -390,3 +390,173 @@ test("plan_app describes what would be built", () => {
   assert.equal(result.ok, true);
   assert.match(result.content, /invoice/i);
 });
+
+// ---- Editing, pinning, conversation search, and dates --------------------
+
+const editContext: ToolContext = {
+  ...context,
+  documents: [
+    { id: "d1", title: "Runbook", body: "Rollback procedure: run scripts/rollback.sh." },
+    { id: "d2", title: "Onboarding", body: "New starters get a laptop on day one." }
+  ],
+  conversation: [
+    { role: "user", content: "The staging server is called halifax." },
+    { role: "assistant", content: "Noted." },
+    { role: "user", content: "We deploy on Fridays after the standup." }
+  ]
+};
+
+test("updating a document replaces the one that exists", () => {
+  const updates: Array<[string, string]> = [];
+  const result = runTool(
+    { name: "update_document", arguments: { title: "Runbook", content: "New procedure." } },
+    { ...editContext, updateDocument: (id, body) => { updates.push([id, body]); return true; } }
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(updates, [["d1", "New procedure."]]);
+});
+
+test("updating a document that does not exist creates nothing", () => {
+  // A model that misremembers a title would otherwise silently make a second
+  // document instead of editing the one the user meant.
+  const updates: string[] = [];
+  const result = runTool(
+    { name: "update_document", arguments: { title: "Payroll", content: "x" } },
+    { ...editContext, updateDocument: (id) => { updates.push(id); return true; } }
+  );
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(updates, []);
+  assert.match(result.content, /Runbook/);
+});
+
+test("deleting a document reports what was deleted", () => {
+  const deleted: string[] = [];
+  const result = runTool(
+    { name: "delete_document", arguments: { title: "Onboarding" } },
+    { ...editContext, deleteDocument: (id) => { deleted.push(id); return true; } }
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(deleted, ["d2"]);
+});
+
+test("deleting a document that does not exist deletes nothing", () => {
+  const deleted: string[] = [];
+  const result = runTool(
+    { name: "delete_document", arguments: { title: "Nonsense" } },
+    { ...editContext, deleteDocument: (id) => { deleted.push(id); return true; } }
+  );
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(deleted, []);
+});
+
+test("pinning marks the matching memory", () => {
+  const pins: Array<[string, boolean]> = [];
+  const result = runTool(
+    { name: "pin_memory", arguments: { fact: "The billing database is Postgres 16." } },
+    { ...editContext, pinMemory: (id, pinned) => { pins.push([id, pinned]); return true; } }
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(pins, [["m1", true]]);
+});
+
+test("pinning defaults to pinning, and unpins only when asked", () => {
+  const pins: boolean[] = [];
+  const pinMemory = (_id: string, pinned: boolean) => { pins.push(pinned); return true; };
+
+  runTool({ name: "pin_memory", arguments: { fact: "Postgres 16" } }, { ...editContext, pinMemory });
+  runTool(
+    { name: "pin_memory", arguments: { fact: "Postgres 16", pinned: false } },
+    { ...editContext, pinMemory }
+  );
+
+  assert.deepEqual(pins, [true, false]);
+});
+
+test("pinning something that is not saved marks nothing", () => {
+  const pins: string[] = [];
+  const result = runTool(
+    { name: "pin_memory", arguments: { fact: "my shoe size" } },
+    { ...editContext, pinMemory: (id) => { pins.push(id); return true; } }
+  );
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(pins, []);
+});
+
+test("the conversation can be searched for something never saved", () => {
+  // "halifax" was said, not remembered. Without this the assistant cannot
+  // answer about it once it falls out of the context window.
+  const result = runTool(
+    { name: "search_conversation", arguments: { query: "staging server name" } },
+    editContext
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /halifax/);
+});
+
+test("a conversation search says plainly when nothing matches", () => {
+  const result = runTool(
+    { name: "search_conversation", arguments: { query: "pension scheme" } },
+    editContext
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /Nothing earlier in this conversation matches/);
+});
+
+test("an empty conversation says so rather than looking like a miss", () => {
+  const result = runTool(
+    { name: "search_conversation", arguments: { query: "anything" } },
+    { ...editContext, conversation: [] }
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /Nothing has been said/);
+});
+
+test("days between two dates is exact", () => {
+  const result = runTool(
+    { name: "days_between", arguments: { from: "2026-08-17", to: "2026-08-24" } },
+    editContext
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /7 days after/);
+});
+
+test("days between resolves 'today' against the machine clock", () => {
+  // The fixed clock in this context is 17 August 2026.
+  const result = runTool(
+    { name: "days_between", arguments: { from: "today", to: "2026-08-27" } },
+    editContext
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /10 days after/);
+});
+
+test("shifting a date forwards", () => {
+  const result = runTool(
+    { name: "shift_date", arguments: { from: "2026-08-17", days: 90 } },
+    editContext
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /November/);
+});
+
+test("a date the tool cannot read is refused, not guessed", () => {
+  const result = runTool(
+    { name: "days_between", arguments: { from: "sometime", to: "2026-08-17" } },
+    editContext
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /sometime/);
+});

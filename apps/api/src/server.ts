@@ -187,6 +187,23 @@ export function createApp() {
             title,
             body
           }))
+          : undefined,
+        // An update is a delete and a re-add under the original title and id,
+        // because the store has no in-place edit. Done in this order so a
+        // failed write cannot leave the session with neither version.
+        updateDocument: sessionId
+          ? (id: string, body: string) => {
+            const existing = listDocuments(sessionId).find((document) => document.id === id);
+            if (!existing) return false;
+            const replaced = addDocument(sessionId, { id: `${id}-updated`, title: existing.title, body });
+            if (!replaced) return false;
+            removeDocument(sessionId, id);
+            return true;
+          }
+          : undefined,
+        deleteDocument: sessionId ? (id: string) => removeDocument(sessionId, id) : undefined,
+        pinMemory: sessionId
+          ? (id: string, pinned: boolean) => Boolean(setMemoryPinned(sessionId, id, pinned))
           : undefined
       });
 

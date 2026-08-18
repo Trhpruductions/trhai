@@ -1,5 +1,6 @@
 import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.js";
 import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
+import { describeDifference, shiftDate } from "./dateMath.js";
 import { planProject } from "@ascend/shared";
 
 // What the assistant can actually do.
@@ -69,6 +70,20 @@ export type ToolContext = {
   documents?: Array<{ id: string; title: string; body: string }>;
   /** Saves a new document. Returns false when it could not be stored. */
   saveDocument?: (title: string, body: string) => boolean;
+  /** Replaces a document's body by id. Returns false when nothing changed. */
+  updateDocument?: (id: string, body: string) => boolean;
+  /** Deletes a document by id. Returns false when nothing was deleted. */
+  deleteDocument?: (id: string) => boolean;
+  /** Pins or unpins a memory by id. Returns false when nothing changed. */
+  pinMemory?: (id: string, pinned: boolean) => boolean;
+  /**
+   * Earlier turns of this conversation, oldest first.
+   *
+   * Separate from memory: what was said a few messages ago was never saved
+   * anywhere, so without this the assistant cannot answer "what did I just
+   * ask you" except by whatever happens to be in its context window.
+   */
+  conversation?: Array<{ role: "user" | "assistant"; content: string }>;
   /** Overridable so a test can assert on a fixed clock. */
   now?: () => Date;
 };
@@ -225,6 +240,107 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "update_document",
+      description:
+        "Replace the contents of a document that already exists. Use this to correct or extend "
+        + "one rather than writing a second document with the same title.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "The document to change, as listed." },
+          content: { type: "string", description: "The full new text. It replaces what was there." }
+        },
+        required: ["title", "content"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_document",
+      description:
+        "Delete a document from the knowledge base. Only use this when the user asks for it.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "The document to delete, as listed." }
+        },
+        required: ["title"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "pin_memory",
+      description:
+        "Mark a saved fact as important, so it is favoured when answering later questions. "
+        + "Use it when the user says something matters or should not be forgotten. "
+        + "Set pinned to false to undo it.",
+      parameters: {
+        type: "object",
+        properties: {
+          fact: { type: "string", description: "The saved fact, as it is currently worded." },
+          pinned: { type: "boolean", description: "true to mark important, false to unmark." }
+        },
+        required: ["fact"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_conversation",
+      description:
+        "Search what has already been said in this conversation. Use this when the user refers "
+        + "back to something earlier that was never saved to memory.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "What to look for in the earlier messages." }
+        },
+        required: ["query"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "days_between",
+      description:
+        "How many days apart two dates are. Use this for anything about durations, deadlines or "
+        + "how long ago something was — do not count days yourself, you will get it wrong. "
+        + "Accepts 2026-08-17, 17 August 2026, today, tomorrow, yesterday.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: { type: "string", description: "The earlier date, or 'today'." },
+          to: { type: "string", description: "The other date." }
+        },
+        required: ["from", "to"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "shift_date",
+      description:
+        "The date a given number of days before or after another date. Use a negative number to "
+        + "go backwards. Use this for questions like 'what date is 90 days from now'.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: { type: "string", description: "The starting date, or 'today'." },
+          days: { type: "number", description: "Whole days to add; negative to subtract." }
+        },
+        required: ["from", "days"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "current_datetime",
       description:
         "The current date and time on the user's machine. Use this for anything involving today, "
@@ -249,6 +365,38 @@ function requireString(value: unknown): string | null {
  * given silence it will fill the gap itself, which is the exact failure this
  * whole codebase is built to avoid.
  */
+/**
+ * Find a document by title: exact match first, then a partial one.
+ *
+ * The model is repeating a title back from an earlier listing, and it
+ * paraphrases. Matching loosely is what makes that survivable; matching an id
+ * it invented would act on the wrong document.
+ */
+function findDocument(context: ToolContext, title: string) {
+  const documents = context.documents ?? [];
+  const wanted = title.trim().toLowerCase();
+
+  return documents.find((document) => document.title.trim().toLowerCase() === wanted)
+    ?? documents.find((document) => document.title.toLowerCase().includes(wanted));
+}
+
+/** A refusal that lists what does exist, so the model can correct itself. */
+function describeMissingDocument(context: ToolContext, title: string): string {
+  const documents = context.documents ?? [];
+  const available = documents.length > 0
+    ? ` Available documents: ${documents.map((document) => document.title).join(", ")}.`
+    : "";
+  return `There is no document called "${title}".${available}`;
+}
+
+/** The same exact-then-partial rule, for a saved fact. */
+function findMemory(context: ToolContext, fact: string) {
+  const wanted = fact.trim().toLowerCase();
+
+  return context.memories.find((memory) => memory.body.trim().toLowerCase() === wanted)
+    ?? context.memories.find((memory) => memory.body.toLowerCase().includes(wanted));
+}
+
 export function runTool(call: ToolCall, context: ToolContext): ToolResult {
   switch (call.name) {
     case "search_memory": {
@@ -319,11 +467,7 @@ export function runTool(call: ToolCall, context: ToolContext): ToolResult {
       // Matched against the stored wording rather than trusted as an id: the
       // model is repeating text back, and an id it invented would delete the
       // wrong memory. An unmatched request deletes nothing and says so.
-      const target = context.memories.find(
-        (memory) => memory.body.trim().toLowerCase() === fact.trim().toLowerCase()
-      ) ?? context.memories.find(
-        (memory) => memory.body.toLowerCase().includes(fact.trim().toLowerCase())
-      );
+      const target = findMemory(context, fact);
 
       if (!target) {
         return { ok: false, content: `Nothing saved matches "${fact}", so nothing was deleted.` };
@@ -350,20 +494,11 @@ export function runTool(call: ToolCall, context: ToolContext): ToolResult {
       const title = requireString(call.arguments.title);
       if (!title) return { ok: false, content: "read_document needs a title." };
 
-      const documents = context.documents ?? [];
-      const found = documents.find(
-        (document) => document.title.trim().toLowerCase() === title.trim().toLowerCase()
-      ) ?? documents.find(
-        (document) => document.title.toLowerCase().includes(title.trim().toLowerCase())
-      );
-
+      const found = findDocument(context, title);
       if (!found) {
         // The available titles come back with the refusal, so the model can
         // correct itself on the next round instead of guessing again.
-        const available = documents.length > 0
-          ? ` Available documents: ${documents.map((document) => document.title).join(", ")}.`
-          : "";
-        return { ok: false, content: `There is no document called "${title}".${available}` };
+        return { ok: false, content: describeMissingDocument(context, title) };
       }
 
       // Bounded: a long document would crowd out the rest of the exchange, and
@@ -420,6 +555,134 @@ export function runTool(call: ToolCall, context: ToolContext): ToolResult {
         content: `"${spec.title}" would hold:\n${entities}\n\n`
           + "The user can build this from the Build screen."
       };
+    }
+
+    case "update_document": {
+      const title = requireString(call.arguments.title);
+      const content = requireString(call.arguments.content);
+      if (!title || !content) {
+        return { ok: false, content: "update_document needs both a title and the new content." };
+      }
+      if (!context.updateDocument) {
+        return { ok: false, content: "There is nowhere to save documents, so nothing was changed." };
+      }
+
+      const found = findDocument(context, title);
+      if (!found) {
+        return { ok: false, content: describeMissingDocument(context, title) };
+      }
+
+      // Deliberately does not create on a miss. A model that misremembers a
+      // title would otherwise silently make a second document instead of
+      // editing the one the user meant.
+      const updated = context.updateDocument(found.id, content);
+      return updated
+        ? { ok: true, content: `Replaced the contents of "${found.title}".` }
+        : { ok: false, content: `"${found.title}" could not be changed, so nothing was written.` };
+    }
+
+    case "delete_document": {
+      const title = requireString(call.arguments.title);
+      if (!title) return { ok: false, content: "delete_document needs a title." };
+      if (!context.deleteDocument) {
+        return { ok: false, content: "There is no knowledge base to delete from, so nothing was removed." };
+      }
+
+      const found = findDocument(context, title);
+      if (!found) {
+        return { ok: false, content: describeMissingDocument(context, title) };
+      }
+
+      const deleted = context.deleteDocument(found.id);
+      return deleted
+        ? { ok: true, content: `Deleted the document "${found.title}".` }
+        : { ok: false, content: `"${found.title}" could not be deleted, so nothing was removed.` };
+    }
+
+    case "pin_memory": {
+      const fact = requireString(call.arguments.fact);
+      if (!fact) return { ok: false, content: "pin_memory needs the fact to mark." };
+      if (!context.pinMemory) {
+        return { ok: false, content: "There is no memory to change, so nothing was marked." };
+      }
+
+      // Absent means pin. Unpinning is the rarer request and is always stated.
+      const pinned = call.arguments.pinned !== false;
+
+      const target = findMemory(context, fact);
+      if (!target) {
+        return { ok: false, content: `Nothing saved matches "${fact}", so nothing was marked.` };
+      }
+
+      const changed = context.pinMemory(target.id, pinned);
+      if (!changed) {
+        return { ok: false, content: "That could not be changed, so nothing was marked." };
+      }
+
+      return {
+        ok: true,
+        content: pinned
+          ? `Marked as important: ${target.body}`
+          : `No longer marked as important: ${target.body}`
+      };
+    }
+
+    case "search_conversation": {
+      const query = requireString(call.arguments.query);
+      if (!query) return { ok: false, content: "search_conversation needs a query." };
+
+      const turns = context.conversation ?? [];
+      if (turns.length === 0) {
+        return { ok: false, content: "Nothing has been said in this conversation yet." };
+      }
+
+      // Scored with the same relevance code as everything else, so a search of
+      // the transcript behaves like a search of memory rather than like a
+      // separate, differently-behaved feature.
+      const scorable = turns.map((turn, index) => ({
+        id: `turn-${index}`,
+        title: turn.role === "user" ? "the user said" : "you said",
+        body: turn.content,
+        pinned: false,
+        createdAt: new Date(index).toISOString()
+      }));
+
+      const matches = selectRelevantMemories(query, scorable, searchLimit);
+      if (matches.length === 0) {
+        return { ok: false, content: `Nothing earlier in this conversation matches "${query}".` };
+      }
+
+      return {
+        ok: true,
+        content: matches
+          .map((entry) => `${entry.memory.title}: ${entry.memory.body}`)
+          .join("\n\n")
+      };
+    }
+
+    case "days_between": {
+      const from = requireString(call.arguments.from);
+      const to = requireString(call.arguments.to);
+      if (!from || !to) return { ok: false, content: "days_between needs two dates." };
+
+      const result = describeDifference(from, to, (context.now ?? (() => new Date()))());
+      return result.ok
+        ? { ok: true, content: result.value }
+        : { ok: false, content: result.reason };
+    }
+
+    case "shift_date": {
+      const from = requireString(call.arguments.from);
+      if (!from) return { ok: false, content: "shift_date needs a starting date." };
+
+      const days = typeof call.arguments.days === "number"
+        ? call.arguments.days
+        : Number(call.arguments.days);
+
+      const result = shiftDate(from, days, (context.now ?? (() => new Date()))());
+      return result.ok
+        ? { ok: true, content: result.value }
+        : { ok: false, content: result.reason };
     }
 
     case "current_datetime": {

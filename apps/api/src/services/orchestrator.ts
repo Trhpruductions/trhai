@@ -24,6 +24,12 @@ export type OrchestratorInput = {
   documents?: Array<{ id: string; title: string; body: string }>;
   /** Saves a new document, for the "write_document" tool. */
   saveDocument?: (title: string, body: string) => boolean;
+  /** Replaces a document's body, for the "update_document" tool. */
+  updateDocument?: (id: string, body: string) => boolean;
+  /** Deletes a document, for the "delete_document" tool. */
+  deleteDocument?: (id: string) => boolean;
+  /** Pins or unpins a memory, for the "pin_memory" tool. */
+  pinMemory?: (id: string, pinned: boolean) => boolean;
 };
 
 export type OrchestratorResult = {
@@ -162,7 +168,13 @@ async function answerWithLocalModel(
     saveMemory: input.saveMemory,
     forgetMemory: input.forgetMemory,
     documents: input.documents,
-    saveDocument: input.saveDocument
+    saveDocument: input.saveDocument,
+    updateDocument: input.updateDocument,
+    deleteDocument: input.deleteDocument,
+    pinMemory: input.pinMemory,
+    // The transcript the request already carries, so "what did I just ask you"
+    // is answerable without saving every turn to memory first.
+    conversation: input.history
   });
 
   return result.ok

@@ -61,6 +61,12 @@ function toolLabel(tool: string): string {
     case "write_document": return "wrote a document";
     case "calculate": return "calculated";
     case "plan_app": return "planned an app";
+    case "update_document": return "updated a document";
+    case "delete_document": return "deleted a document";
+    case "pin_memory": return "marked as important";
+    case "search_conversation": return "searched this conversation";
+    case "days_between": return "counted days";
+    case "shift_date": return "worked out a date";
     default: return tool.replace(/_/g, " ");
   }
 }
