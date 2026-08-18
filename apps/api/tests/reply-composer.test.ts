@@ -623,3 +623,67 @@ test("a statement said earlier is still quotable", () => {
   assert.equal(reply.strategy, "answer");
   assert.match(reply.text, /the deploy failed again/);
 });
+
+test("a decisively better document passage outranks a weak memory", () => {
+  // Memory used to be an absolute veto: any memory over the threshold returned
+  // immediately and the knowledge base was never consulted. Asked for the
+  // rollback procedure, "Deploys happen on Fridays." scored 0.321 — barely over
+  // the bar — and beat the passage holding the actual procedure at 1.575.
+  const reply = composeReply({
+    mode: "general",
+    message: "What is the rollback procedure for the payments deploy?",
+    memories: [{
+      id: "m1", title: "Deploy", body: "Deploys happen on Fridays.",
+      pinned: false, createdAt: new Date().toISOString()
+    }],
+    knowledge: [{
+      id: "k1", documentId: "d1", documentTitle: "Runbook", title: "Rollback",
+      body: "Rollback procedure for the payments deploy: run scripts/rollback.sh with the previous release tag.",
+      pinned: false, createdAt: new Date().toISOString()
+    }]
+  });
+
+  assert.equal(reply.strategy, "answer");
+  assert.match(reply.text, /rollback\.sh/);
+  assert.deepEqual(reply.groundedOn, ["k1"]);
+});
+
+test("a deliberately stated fact still wins a close call", () => {
+  // The preference is the point: what the user told you outranks a passage that
+  // merely shares vocabulary. Only a decisively better passage displaces it.
+  const reply = composeReply({
+    mode: "general",
+    message: "Which database do we use for billing?",
+    memories: [{
+      id: "m1", title: "Billing database", body: "The billing database is Postgres 16.",
+      pinned: false, createdAt: new Date().toISOString()
+    }],
+    knowledge: [{
+      id: "k1", documentId: "d1", documentTitle: "Notes", title: "Database",
+      body: "The billing database is described elsewhere in this document.",
+      pinned: false, createdAt: new Date().toISOString()
+    }]
+  });
+
+  assert.equal(reply.strategy, "answer");
+  assert.deepEqual(reply.groundedOn, ["m1"]);
+});
+
+test("memory still answers when no document comes close", () => {
+  const reply = composeReply({
+    mode: "general",
+    message: "Which database do we use for billing?",
+    memories: [{
+      id: "m1", title: "Billing database", body: "The billing database is Postgres 16.",
+      pinned: false, createdAt: new Date().toISOString()
+    }],
+    knowledge: [{
+      id: "k1", documentId: "d1", documentTitle: "Runbook", title: "Catering",
+      body: "Lunch is ordered on Thursdays from the place on the corner.",
+      pinned: false, createdAt: new Date().toISOString()
+    }]
+  });
+
+  assert.equal(reply.strategy, "answer");
+  assert.deepEqual(reply.groundedOn, ["m1"]);
+});

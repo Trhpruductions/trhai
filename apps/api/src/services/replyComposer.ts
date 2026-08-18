@@ -177,6 +177,21 @@ function answerLead(analysis: RequestAnalysis): string {
   }
 }
 
+/**
+ * How much better a document passage must score to outrank saved memory.
+ *
+ * A fact the user stated deliberately should win a close call; a passage that
+ * matches the question far better should win outright.
+ *
+ * Two, from measurement rather than taste. Asked which database billing uses,
+ * a passage reading "The billing database is described elsewhere in this
+ * document" scores 1.44x the memory holding the actual answer — it shares the
+ * vocabulary and answers nothing, and lexical scoring cannot tell the
+ * difference. A passage that does hold the answer scores about 5x. Those two
+ * cases sit either side of 2, so that is where the line goes.
+ */
+export const memoryPreference = 2;
+
 /** Openers and acknowledgements that are conversation, not a request for work. */
 const greetingPattern = /^(hi|hey|hello|yo|howdy|sup|good\s+(morning|afternoon|evening))\b[\s!.,]*$/i;
 const thanksPattern = /^(thanks|thank\s+you|ty|cheers|appreciate\s+it|nice|cool|great|awesome|perfect)\b[\s!.,]*$/i;
@@ -265,8 +280,24 @@ export function composeReply(input: ComposerInput): ComposedReply {
   if (analysis.shape === "question" && !refining) {
     const query = resolveQuery(message, history);
     const matches = selectRelevantMemories(query, input.memories);
+    const fromKnowledge = selectRelevantMemories(query, input.knowledge ?? [], 2);
 
-    if (matches.length > 0) {
+    // A fact the user dictated outranks a passage that merely shares vocabulary
+    // with the question — but as a preference, not a veto.
+    //
+    // This used to return on any memory that cleared the threshold, so the
+    // knowledge base was never consulted once a memory matched at all. Asked
+    // for the rollback procedure, "Deploys happen on Fridays." scored 0.321,
+    // barely over the bar, and won outright against the passage holding the
+    // actual procedure at 1.575. A five-fold better match was discarded.
+    //
+    // Multiplicative because these scores are not bounded to 1: a passage has
+    // to beat the best memory by a margin, not by a fixed number of points.
+    const bestMemory = matches[0]?.score ?? 0;
+    const bestPassage = fromKnowledge[0]?.score ?? 0;
+    const knowledgeIsDecisivelyBetter = bestPassage > bestMemory * memoryPreference;
+
+    if (matches.length > 0 && !knowledgeIsDecisivelyBetter) {
       return {
         text: `${answerLead(analysis)}\n\n${citeMemories(matches)}\n\nIf that's out of date, tell me and I'll update it.`,
         strategy: "answer",
@@ -275,10 +306,6 @@ export function composeReply(input: ComposerInput): ComposedReply {
       };
     }
 
-    // Nothing the user dictated matches, but a document they added might.
-    // Ranked below saved memory: a fact stated deliberately outranks a passage
-    // that merely shares vocabulary with the question.
-    const fromKnowledge = selectRelevantMemories(query, input.knowledge ?? [], 2);
     if (fromKnowledge.length > 0) {
       // Quoted verbatim with its source named. Matching here is lexical, so the
       // passage is evidence, not an interpretation — presenting it as a settled
