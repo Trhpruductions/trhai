@@ -5,6 +5,8 @@ import { readEvents } from "../localCalendar";
 import { webEnv } from "../env";
 import { Core } from "./Core";
 import { greetingFor } from "../greeting";
+import { Boot } from "./Boot";
+import { bootChecksFor } from "../bootChecks";
 import "./conversation.css";
 
 // The home screen: a conversation.
@@ -122,6 +124,11 @@ export function Conversation({ personality, onBuildRequest }: Props) {
   // rather than running on a timer of its own.
   const [pollCount, setPollCount] = useState(0);
   const [clock, setClock] = useState(() => new Date());
+  // Reported once per mount. Whether the store has answered yet is tracked
+  // separately from its contents, because "no memories" and "not asked yet"
+  // are different states and only one of them is a finished check.
+  const [booted, setBooted] = useState(false);
+  const [storeChecked, setStoreChecked] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const profile = personalityById(resolvePersonality(personality));
 
@@ -197,6 +204,7 @@ export function Conversation({ personality, onBuildRequest }: Props) {
         { label: plural(documents, "document", "documents"), value: String(documents) },
         { label: plural(events, "event", "events"), value: String(events) }
       ]);
+      setStoreChecked(true);
     })();
 
     return () => { cancelled = true; };
@@ -206,6 +214,10 @@ export function Conversation({ personality, onBuildRequest }: Props) {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length, status.state]);
+
+  // Derived in bootChecks.ts so the one rule that matters — a line may only
+  // claim a check passed when it actually ran — is stated once and tested.
+  const bootChecks = bootChecksFor({ online, model, linkMs, storeChecked, stats });
 
   const busy = status.state === "thinking";
 
@@ -232,6 +244,11 @@ export function Conversation({ personality, onBuildRequest }: Props) {
       <div className="conversation-scroll scroll-y">
         {messages.length === 0 ? (
           <div className="home">
+            {/* The app reporting its own systems as they come up. Shown only
+                on an empty conversation: a start-up report in the middle of a
+                conversation is noise. */}
+            {!booted ? <Boot checks={bootChecks} onDone={() => setBooted(true)} /> : null}
+
             {/* Corner brackets. The home screen is a panel in an instrument
                 rather than a page in a document, and the brackets are what
                 say so without adding a single word. */}
