@@ -13,6 +13,7 @@ const testWorkspace = mkdtempSync(path.join(tmpdir(), "ascend-agent-"));
 process.env.ASCEND_WORKSPACE = testWorkspace;
 import { maxToolRounds, runAgent, systemPrompt } from "../src/services/agentLoop.js";
 import { runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
+import { looksLikeRawToolCalls } from "../src/services/agentLoop.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
 
 const at = new Date("2026-08-17T12:00:00Z").toISOString();
@@ -653,4 +654,91 @@ test("list_files refuses to list outside the workspace", () => {
 
   assert.equal(result.ok, false);
   assert.match(result.content, /outside the workspace/);
+});
+
+test("a model that cannot be loaded is reported as unusable, not just failed", async () => {
+  // Ollama answers 500 with "cudaMalloc failed: out of memory" when a model
+  // does not fit. The caller can act on that by trying a smaller one — but
+  // only if the difference is reported.
+  const server = createServer((_request, response) => {
+    response.writeHead(500, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({
+      error: "llama-server process has terminated: exit status 1: cudaMalloc failed: out of memory"
+    }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "anything", context);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.modelUnusable, true);
+    assert.match(result.reason, /could not be loaded/);
+    assert.match(result.reason, /out of memory/);
+  } finally {
+    server.close();
+  }
+});
+
+test("an ordinary failure is not mistaken for an unusable model", async () => {
+  // A 400 means the request was wrong, and trying every other installed model
+  // against it would just make the user wait.
+  const server = createServer((_request, response) => {
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "bad request" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "anything", context);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.notEqual(result.modelUnusable, true);
+  } finally {
+    server.close();
+  }
+});
+
+
+test("tool calls written as text are recognised, not shown as an answer", () => {
+  // Seen from llama3.2 in the running app: it ignored the tool interface and
+  // wrote the calls it wanted into the message body, and that JSON reached the
+  // user as their answer.
+  assert.equal(looksLikeRawToolCalls(
+    '{"name": "search_document", "parameters": {"query": "billing"}}\n'
+    + '{"name": "current_datetime", "parameters": {}}'
+  ), true);
+
+  assert.equal(looksLikeRawToolCalls('{"name": "current_datetime", "parameters": {}}'), true);
+});
+
+test("ordinary prose is never mistaken for tool calls", () => {
+  for (const text of [
+    "Your billing database is Postgres 16.",
+    "The date is Tuesday, August 18, 2026.",
+    'A JSON object looks like {"a": 1} in most languages.',
+    "",
+    "{ this is not json at all }"
+  ]) {
+    assert.equal(looksLikeRawToolCalls(text), false, text);
+  }
+});
+
+test("a reply that is only tool-call JSON is refused", async () => {
+  const { server, baseUrl } = await fakeModel([
+    answer('{"name": "current_datetime", "parameters": {}}')
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what is the date?", context);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.match(result.reason, /tool calls as text/);
+  } finally {
+    server.close();
+  }
 });

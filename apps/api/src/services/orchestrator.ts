@@ -1,5 +1,5 @@
 import { ModelRouter, type ComposerKnowledge, type MemoryWriteOutcome } from "./modelRouter.js";
-import { checkAvailability, generate, readLocalModelConfig } from "./localModel.js";
+import { checkAvailability, generate, orderedCandidates, readLocalModelConfig } from "./localModel.js";
 import { buildCapabilityReply } from "./replyComposer.js";
 import { runAgent } from "./agentLoop.js";
 
@@ -188,7 +188,19 @@ async function answerWithLocalModel(
       + known.map((fact) => `- ${fact}`).join("\n")
     : input.userMessage;
 
-  const result = await runAgent({ ...config, model: availability.model }, question, {
+  // Worked down in order rather than betting on one.
+  //
+  // A model that is listed is not a model that will load. Asked to answer,
+  // Ollama returned 500 "cudaMalloc failed: out of memory" for the 8B model
+  // and a failed CPU buffer allocation for the 3B one — while the app went on
+  // reporting the first as available and silently falling back on every single
+  // question, with nothing on screen to say why.
+  const candidates = orderedCandidates(config.model, availability.installedModels, config.modelFromEnv ?? true);
+  const attempted: string[] = [];
+
+  for (const model of candidates) {
+    attempted.push(model);
+    const result = await runAgent({ ...config, model }, question, {
     memories: (input.memoryContext ?? []).map((entry, index) => ({
       id: entry.id ?? `memory-${index}`,
       title: entry.title,
@@ -216,7 +228,21 @@ async function answerWithLocalModel(
     conversation: input.history
   });
 
-  return result.ok
-    ? { text: result.text, model: `ollama/${result.model}`, toolsUsed: result.toolsUsed }
-    : null;
+    if (result.ok) {
+      return { text: result.text, model: `ollama/${result.model}`, toolsUsed: result.toolsUsed };
+    }
+
+    // Only a model that could not be loaded is worth replacing. One that
+    // loaded and then failed to answer will fail the same way again, and
+    // trying every installed model against it just makes the user wait.
+    if (!result.modelUnusable) return null;
+    console.warn(`[assist] ${result.reason}`);
+  }
+
+  if (attempted.length > 0) {
+    console.error(`[assist] no local model could be loaded; tried ${attempted.join(", ")}`);
+  }
+
+  return null;
 }
+

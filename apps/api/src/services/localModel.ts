@@ -107,6 +107,41 @@ export const preferredModels = [
  * list, otherwise whatever is installed — an assistant with some model is more
  * use than one that refuses because it did not find its first choice.
  */
+/**
+ * Every installed model worth trying, best first.
+ *
+ * A model that is listed is not necessarily a model that will load: asked to
+ * run, Ollama can answer 500 with "cudaMalloc failed: out of memory" or a
+ * failed CPU buffer allocation, and which models fit depends on what else the
+ * machine is doing at that moment. So the caller gets an order to work down
+ * rather than a single answer to fail on.
+ */
+export function orderedCandidates(
+  configured: string,
+  installed: string[],
+  fromEnv = true
+): string[] {
+  const matches = (candidate: string, name: string) =>
+    name === candidate || name.split(":")[0] === candidate;
+
+  const ordered: string[] = [];
+  const take = (name: string | undefined) => {
+    if (name && !ordered.includes(name)) ordered.push(name);
+  };
+
+  // A model the user actually named goes first, always.
+  if (fromEnv) take(installed.find((name) => matches(configured, name)));
+
+  for (const preference of preferredModels) {
+    take(installed.find((name) => matches(preference, name)));
+  }
+
+  // Then anything else installed: a model nobody ranked still beats no answer.
+  for (const name of installed) take(name);
+
+  return ordered;
+}
+
 export function pickModel(
   configured: string,
   installed: string[],

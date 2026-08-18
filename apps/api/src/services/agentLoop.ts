@@ -26,7 +26,19 @@ type ChatMessage = {
 
 export type AgentResult =
   | { ok: true; text: string; model: string; toolsUsed: string[] }
-  | { ok: false; reason: string; toolsUsed: string[] };
+  | {
+    ok: false;
+    reason: string;
+    toolsUsed: string[];
+    /**
+     * True when this model could not be loaded at all, as opposed to loading
+     * and then failing to answer. Ollama reports an out-of-memory or a failed
+     * buffer allocation as a 500, and whether a given model fits depends on
+     * what else the machine is doing — so the caller can usefully try a
+     * smaller one instead of giving up.
+     */
+    modelUnusable?: boolean;
+  };
 
 /**
  * How many times the model may call tools before it has to answer.
@@ -94,6 +106,45 @@ type ChatResponse = {
   };
   model?: unknown;
 };
+
+/** The useful sentence out of an error body, without the stack of allocator noise. */
+function firstLine(detail: string): string {
+  try {
+    const parsed = JSON.parse(detail) as { error?: unknown };
+    const message = typeof parsed.error === "string" ? parsed.error : detail;
+    return message.split("\n")[0].trim().slice(0, 160);
+  } catch {
+    return detail.split("\n")[0].trim().slice(0, 160);
+  }
+}
+
+/**
+ * Whether a reply is the model talking to itself rather than to the user.
+ *
+ * A smaller model sometimes ignores the tool interface and writes the calls it
+ * wanted to make as JSON in the message body. That text is not an answer, and
+ * it reached the user verbatim:
+ *
+ *   {"name": "search_document", "parameters": {"query": "..."}}
+ *   {"name": "current_datetime", "parameters": {}}
+ *
+ * Executing it is not an option — it is a guess at an intention, in a shape
+ * this code never agreed to accept, and running tools off it would be acting
+ * on something the model did not actually ask for through the interface that
+ * exists for exactly that. So it is refused, and the caller falls back to a
+ * grounded answer, which is at least true and readable.
+ */
+export function looksLikeRawToolCalls(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
+
+  // Every non-empty line is a JSON object naming a function and its arguments.
+  const lines = trimmed.split("\n").map((line) => line.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every((line) =>
+    /^[[{]/.test(line)
+    && /"(name|function)"\s*:/.test(line)
+    && /"(parameters|arguments)"\s*:/.test(line));
+}
 
 function parseToolCalls(response: ChatResponse): ToolCall[] {
   const calls = response.message?.tool_calls;
@@ -171,7 +222,21 @@ export async function runAgent(
         }));
 
       if (!raw.ok) {
-        return { ok: false, reason: `The local model answered ${raw.status}.`, toolsUsed };
+        // The body carries why. "cudaMalloc failed: out of memory" and a
+        // failed CPU buffer allocation both mean this model will not run here
+        // however many times it is asked — a different model might.
+        const detail = await raw.text().catch(() => "");
+        const unusable = raw.status >= 500
+          && /out of memory|failed to allocate|terminated|no space/i.test(detail);
+
+        return {
+          ok: false,
+          reason: unusable
+            ? `${config.model} could not be loaded: ${firstLine(detail)}`
+            : `The local model answered ${raw.status}.`,
+          toolsUsed,
+          modelUnusable: unusable
+        };
       }
 
       response = await raw.json() as ChatResponse;
@@ -192,6 +257,16 @@ export async function runAgent(
       : "";
 
     if (calls.length === 0) {
+      // Refused before anything else looks at it: this is not an answer, and
+      // showing it is worse than showing nothing.
+      if (looksLikeRawToolCalls(text)) {
+        return {
+          ok: false,
+          reason: "The local model wrote its tool calls as text instead of calling them.",
+          toolsUsed
+        };
+      }
+
       if (!text) {
         // Two different failures, and they must not be confused. A model that
         // is still asking for tools on the final round has not gone quiet — it

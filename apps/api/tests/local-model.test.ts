@@ -8,8 +8,7 @@ import {
   generate,
   pickModel,
   readLocalModelConfig,
-  type LocalModelConfig
-} from "../src/services/localModel.js";
+  type LocalModelConfig, orderedCandidates } from "../src/services/localModel.js";
 
 /**
  * A stand-in speaking Ollama's protocol.
@@ -265,4 +264,27 @@ test("the default timeout allows for a cold model load", () => {
 test("the timeout can still be set explicitly", () => {
   const config = readLocalModelConfig({ OLLAMA_TIMEOUT_MS: "5000" } as NodeJS.ProcessEnv);
   assert.equal(config.timeoutMs, 5000);
+});
+
+test("candidates are ordered best first, with the named model at the front", () => {
+  assert.deepEqual(
+    orderedCandidates("llama3.2", ["phi3:latest", "llama3.1:8b", "llama3.2:latest"], true),
+    ["llama3.2:latest", "llama3.1:8b", "phi3:latest"]
+  );
+});
+
+test("without a named model the preference list leads", () => {
+  assert.deepEqual(
+    orderedCandidates("llama3.2", ["phi3:latest", "llama3.2:latest", "llama3.1:8b"], false),
+    ["llama3.1:8b", "llama3.2:latest", "phi3:latest"]
+  );
+});
+
+test("an unranked model is still a candidate", () => {
+  // It beats no answer, so it goes last rather than being dropped.
+  assert.deepEqual(orderedCandidates("missing", ["phi3:latest"], true), ["phi3:latest"]);
+});
+
+test("nothing installed yields no candidates", () => {
+  assert.deepEqual(orderedCandidates("llama3.2", [], true), []);
 });
