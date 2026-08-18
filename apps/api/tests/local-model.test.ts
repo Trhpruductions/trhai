@@ -6,6 +6,7 @@ import {
   buildPrompt,
   checkAvailability,
   generate,
+  pickModel,
   readLocalModelConfig,
   type LocalModelConfig
 } from "../src/services/localModel.js";
@@ -87,9 +88,11 @@ test("a running server with the model pulled is available", async () => {
   }
 });
 
-test("a running server without the model says which models it does have", async () => {
-  // "Unavailable" alone would send the user looking for a server that is
-  // already running.
+test("another installed model is used rather than refusing outright", async () => {
+  // This used to report unavailable, and the assistant went dark whenever the
+  // configured model was not the one that happened to be pulled. A model the
+  // user did not name is still a working assistant, and which model answered
+  // is shown on every reply — so falling back is visible, not silent.
   const { server, baseUrl } = await fakeOllama(() => ({
     status: 200,
     payload: { models: [{ name: "codellama:latest" }] }
@@ -97,10 +100,9 @@ test("a running server without the model says which models it does have", async 
 
   try {
     const result = await checkAvailability(configFor(baseUrl));
-    assert.equal(result.available, false);
-    if (result.available) return;
-    assert.match(result.reason, /not pulled/);
-    assert.match(result.reason, /codellama/);
+    assert.equal(result.available, true);
+    if (!result.available) return;
+    assert.equal(result.model, "codellama:latest");
   } finally {
     server.close();
   }
@@ -196,4 +198,31 @@ test("known facts are offered as context, and only when there are some", () => {
 
   const withoutContext = buildPrompt({ question: "Which database do we use?", context: [] });
   assert.doesNotMatch(withoutContext, /Things the user has told you/);
+});
+
+test("an explicitly configured model always wins", () => {
+  // This picks a good default; it must never overrule a deliberate choice.
+  assert.equal(pickModel("llama3.2", ["llama3.1:8b", "llama3.2:latest"]), "llama3.2:latest");
+  assert.equal(pickModel("mistral", ["llama3.1:8b", "mistral:latest"]), "mistral:latest");
+});
+
+test("the larger model is preferred when the configured one is absent", () => {
+  // The tools raised the ceiling on capability and the model became the limit:
+  // a 3B model answers from its own knowledge where it should have looked
+  // something up. A bigger one follows the tool instructions more reliably.
+  assert.equal(pickModel("nonexistent", ["llama3.2:latest", "llama3.1:8b"]), "llama3.1:8b");
+});
+
+test("a model that is installed beats none at all", () => {
+  // An assistant running on some model is more use than one that refuses
+  // because it did not find its first choice.
+  assert.equal(pickModel("nonexistent", ["phi3:latest"]), "phi3:latest");
+});
+
+test("nothing installed means nothing to pick", () => {
+  assert.equal(pickModel("llama3.2", []), null);
+});
+
+test("a bare name matches the tagged form Ollama reports", () => {
+  assert.equal(pickModel("llama3.2", ["llama3.2:latest"]), "llama3.2:latest");
 });

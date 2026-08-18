@@ -61,6 +61,49 @@ async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<
  * the two need different things from the user and a single "unavailable" would
  * send them looking in the wrong place.
  */
+/**
+ * Models this app prefers, best first.
+ *
+ * The tools raised the ceiling on what the assistant can do, and the model
+ * became the limit instead: a 3B model picks tools well on a direct request
+ * but answers from its own knowledge on a vague one, when it should have
+ * reached for a lookup. A larger model follows the tool instructions more
+ * reliably, so if one is installed it should be used.
+ *
+ * Only consulted when the configured model is not itself installed, so an
+ * explicit OLLAMA_MODEL always wins — this picks a good default, it does not
+ * overrule a choice.
+ */
+export const preferredModels = [
+  "llama3.1:8b",
+  "llama3.1",
+  "llama3.2",
+  "mistral",
+  "qwen2.5"
+];
+
+/**
+ * Which installed model to use.
+ *
+ * The configured one if it is there, otherwise the best from the preference
+ * list, otherwise whatever is installed — an assistant with some model is more
+ * use than one that refuses because it did not find its first choice.
+ */
+export function pickModel(configured: string, installed: string[]): string | null {
+  const matches = (candidate: string, name: string) =>
+    name === candidate || name.split(":")[0] === candidate;
+
+  const exact = installed.find((name) => matches(configured, name));
+  if (exact) return exact;
+
+  for (const preference of preferredModels) {
+    const found = installed.find((name) => matches(preference, name));
+    if (found) return found;
+  }
+
+  return installed[0] ?? null;
+}
+
 export async function checkAvailability(
   config: LocalModelConfig,
   fetchImpl: FetchLike = fetch
@@ -79,7 +122,7 @@ export async function checkAvailability(
       .filter((name): name is string => typeof name === "string");
 
     // Ollama reports "llama3.2:latest" for a model pulled as "llama3.2".
-    const match = installed.find((name) => name === config.model || name.split(":")[0] === config.model);
+    const match = pickModel(config.model, installed);
     if (!match) {
       return {
         available: false,
