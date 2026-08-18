@@ -22,6 +22,8 @@ export type ModelReply = {
   groundedOn: string[];
   /** Conversation turns the reply was actually grounded on. */
   groundedOnHistory: number;
+  /** True when a grounded answer covers only part of a multi-part question. */
+  partial?: boolean;
   /** For a plan, the kind of work detected. See ComposedReply.planTaskType. */
   planTaskType?: string;
 };
@@ -72,6 +74,7 @@ export class ModelRouter {
       buildRequest: composed.buildRequest,
       groundedOn: composed.groundedOn,
       groundedOnHistory: composed.groundedOnHistory,
+      partial: composed.partial,
       planTaskType: composed.planTaskType
     };
   }

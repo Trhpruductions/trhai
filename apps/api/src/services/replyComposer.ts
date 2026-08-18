@@ -84,6 +84,15 @@ export type ComposedReply = {
   /** Conversation turns actually used to ground the reply. */
   groundedOnHistory: number;
   /**
+   * True when this answers only part of what was asked.
+   *
+   * A grounded answer is returned whole, so a two-part question whose first
+   * half matched memory lost its second half without a word. The caller uses
+   * this to prefer a model that can answer both — and to keep this reply when
+   * there is no model, since half an answer beats none.
+   */
+  partial?: boolean;
+  /**
    * For a "plan" reply, what kind of work was detected. Only "create" produces
    * an app, so it is the only kind where the generic plan is the better answer
    * than a model's — everything else reads as a canned four-step template.
@@ -190,6 +199,25 @@ function answerLead(analysis: RequestAnalysis): string {
  * difference. A passage that does hold the answer scores about 5x. Those two
  * cases sit either side of 2, so that is where the line goes.
  */
+/** Interrogatives. Two in one message means two things were asked. */
+const questionWords = /\b(what|which|when|where|who|whose|whom|why|how)\b/gi;
+
+/**
+ * Whether a message asks more than one thing.
+ *
+ * "Which database does my billing run on, and what is today's date?" was
+ * answered with the database alone: memory matched, the grounded answer was
+ * returned whole, and the second half was dropped silently.
+ *
+ * Counting interrogatives is crude, and it is the signal that actually
+ * separates this from a single question with a long subject — "what is the
+ * difference between TCP and UDP" has one interrogative and asks one thing.
+ */
+export function isMultiPartQuestion(message: string): boolean {
+  const matches = message.match(questionWords);
+  return (matches?.length ?? 0) > 1;
+}
+
 export const memoryPreference = 2;
 
 /** Openers and acknowledgements that are conversation, not a request for work. */
@@ -302,7 +330,10 @@ export function composeReply(input: ComposerInput): ComposedReply {
         text: `${answerLead(analysis)}\n\n${citeMemories(matches)}\n\nIf that's out of date, tell me and I'll update it.`,
         strategy: "answer",
         groundedOn: matches.map((entry) => entry.memory.id),
-        groundedOnHistory: 0
+        groundedOnHistory: 0,
+        // Memory answered something, but the question asked for more than one
+        // thing and this covers only whichever part matched.
+        partial: isMultiPartQuestion(query)
       };
     }
 

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzeRequest, extractTopics } from "../src/services/requestAnalysis.js";
 import { selectRelevantMemories, scoreMemories } from "../src/services/memoryRelevance.js";
-import { buildCapabilityReply, composeReply, type ComposerMemory } from "../src/services/replyComposer.js";
+import { buildCapabilityReply, composeReply, type ComposerMemory, isMultiPartQuestion } from "../src/services/replyComposer.js";
 
 function memory(id: string, title: string, body: string, pinned = false): ComposerMemory {
   return { id, title, body, pinned, createdAt: new Date(2026, 0, 1).toISOString() };
@@ -686,4 +686,52 @@ test("memory still answers when no document comes close", () => {
 
   assert.equal(reply.strategy, "answer");
   assert.deepEqual(reply.groundedOn, ["m1"]);
+});
+
+test("a two-part question is recognised as asking two things", () => {
+  assert.equal(
+    isMultiPartQuestion("Which database does my billing run on, and what is today's date?"),
+    true
+  );
+  assert.equal(isMultiPartQuestion("How do I deploy, and when should I?"), true);
+});
+
+test("one question with a long subject is not two questions", () => {
+  // The distinction that matters: "and" joining a subject is not "and" joining
+  // two questions.
+  assert.equal(isMultiPartQuestion("What is the difference between TCP and UDP?"), false);
+  assert.equal(isMultiPartQuestion("Which database do we use for billing and invoicing?"), false);
+  assert.equal(isMultiPartQuestion("Is the deploy done?"), false);
+});
+
+test("a grounded answer to a two-part question is flagged as partial", () => {
+  // Memory answers the first half; the second half needs a tool. The flag is
+  // what lets the caller prefer a model that can answer both.
+  const reply = composeReply({
+    mode: "general",
+    message: "Which database does my billing run on, and what is today's date?",
+    memories: [{
+      id: "m1", title: "Billing database", body: "The billing database is Postgres 16.",
+      pinned: false, createdAt: new Date().toISOString()
+    }]
+  });
+
+  assert.equal(reply.strategy, "answer");
+  assert.equal(reply.partial, true);
+  // Still a real answer: with no model to ask, half an answer beats none.
+  assert.match(reply.text, /Postgres 16/);
+});
+
+test("a grounded answer to a single question is not flagged", () => {
+  const reply = composeReply({
+    mode: "general",
+    message: "Which database does my billing run on?",
+    memories: [{
+      id: "m1", title: "Billing database", body: "The billing database is Postgres 16.",
+      pinned: false, createdAt: new Date().toISOString()
+    }]
+  });
+
+  assert.equal(reply.strategy, "answer");
+  assert.equal(reply.partial, false);
 });

@@ -93,8 +93,30 @@ export async function runAssistantOrchestrator(
   // invoices" returned a four-step plan and never called the tool that would
   // have built it.
   const isPlan = modelReply.strategy === "plan";
-  if (modelReply.strategy === "no-answer" || isPlan) {
-    const generated = await answerWithLocalModel(input);
+
+  // A grounded answer that only covers part of the question is also eligible.
+  //
+  // "Which database does my billing run on, and what is today's date?" matched
+  // memory on the database, returned that answer whole, and dropped the date
+  // half without a word. The agent can call search_memory and current_datetime
+  // and answer both — and if there is no model to ask, the partial answer
+  // below still stands, because half an answer beats none.
+  const isPartialAnswer = modelReply.strategy === "answer" && modelReply.partial === true;
+
+  if (modelReply.strategy === "no-answer" || isPlan || isPartialAnswer) {
+    // When the deterministic path already found the answer to part of the
+    // question, hand that over rather than making the model search for it
+    // again. Asked the database and the date, memory had matched the database
+    // — and the agent's own search_memory then came back empty and it reported
+    // the database as unrecorded. Rediscovering a fact we are already holding
+    // is a coin flip we do not need to take.
+    const known = isPartialAnswer
+      ? modelReply.groundedOn.map((id) => input.memoryContext?.find((entry) => entry.id === id))
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+        .map((entry) => entry.body)
+      : [];
+
+    const generated = await answerWithLocalModel(input, known);
     if (generated) {
       return {
         model: generated.model,
@@ -145,7 +167,9 @@ function estimateTokens(value: string): number {
  * the feature dark until a restart for no reason the user could see.
  */
 async function answerWithLocalModel(
-  input: OrchestratorInput
+  input: OrchestratorInput,
+  /** Facts already retrieved for this question, so the model need not re-find them. */
+  known: string[] = []
 ): Promise<{ text: string; model: string; toolsUsed: string[] } | null> {
   const config = readLocalModelConfig();
   const availability = await checkAvailability(config);
@@ -157,7 +181,14 @@ async function answerWithLocalModel(
   // attached to the request, which meant the model saw at most a handful of
   // memories and never the documents. Here it asks for what it needs and gets
   // the real thing back — and can follow one lookup with another.
-  const result = await runAgent({ ...config, model: availability.model }, input.userMessage, {
+  // Stated as fact rather than as a hint. The model is told where it came from
+  // so it does not present it as something it worked out.
+  const question = known.length > 0
+    ? `${input.userMessage}\n\nAlready found in the user's saved memory, use it directly:\n`
+      + known.map((fact) => `- ${fact}`).join("\n")
+    : input.userMessage;
+
+  const result = await runAgent({ ...config, model: availability.model }, question, {
     memories: (input.memoryContext ?? []).map((entry, index) => ({
       id: entry.id ?? `memory-${index}`,
       title: entry.title,

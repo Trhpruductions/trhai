@@ -226,6 +226,19 @@ test("the system prompt forbids inventing a result", () => {
   assert.match(systemPrompt, /Never claim you saved, found or did something/);
 });
 
+test("the system prompt tells it to answer every part of a question", () => {
+  // A two-part question was answered with the first half and stopped. Sending
+  // it to the agent only helps if the agent is told to cover both.
+  assert.match(systemPrompt, /asks for more than one thing, answer every part/);
+});
+
+test("the system prompt forbids hunting for the date in the user's notes", () => {
+  // Asked the database and the date, it searched memory and documents for the
+  // date, found nothing, and said "the current date is not recorded" — with
+  // the clock available the whole time.
+  assert.match(systemPrompt, /date is never in their notes or documents/);
+});
+
 test("the system prompt separates the user's facts from general knowledge", () => {
   // Asked "what is a semaphore?", llama3.1:8b searched the user's documents,
   // found nothing, and concluded it did not know what a semaphore is. The
