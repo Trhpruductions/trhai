@@ -2,6 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+// A workspace of its own. Without this the build tools write into the repo:
+// an earlier run of these tests left apps/api/workspace/it-nice behind, which
+// is a test quietly modifying the project it is testing.
+const testWorkspace = mkdtempSync(path.join(tmpdir(), "ascend-agent-"));
+process.env.ASCEND_WORKSPACE = testWorkspace;
 import { maxToolRounds, runAgent, systemPrompt } from "../src/services/agentLoop.js";
 import { runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
@@ -559,4 +568,76 @@ test("a date the tool cannot read is refused, not guessed", () => {
 
   assert.equal(result.ok, false);
   assert.match(result.content, /sometime/);
+});
+
+
+// ---- Building, and files on disk ----------------------------------------
+
+test("every advertised tool is still implemented", () => {
+  // Re-asserted after each batch: a tool the model can see but cannot call is
+  // a promise the app breaks.
+  for (const definition of toolDefinitions) {
+    const result = runTool({ name: definition.function.name, arguments: {} }, editContext);
+    assert.ok(
+      !/There is no tool called/.test(result.content),
+      `${definition.function.name} is advertised but not implemented`
+    );
+  }
+});
+
+test("build_app writes a real, runnable project to disk", () => {
+  // The whole point of this tool: not a description of an app, an app.
+  const result = runTool(
+    {
+      name: "build_app",
+      arguments: { description: "an app to track invoices with a client name, amount and due date" }
+    },
+    editContext
+  );
+
+  assert.equal(result.ok, true, result.content);
+  assert.match(result.content, /package\.json/);
+  assert.match(result.content, /server\.js/);
+  assert.match(result.content, /npm install/);
+
+  // Read one back off disk rather than trusting the report. A tool that says
+  // it built something and did not is exactly the failure this codebase keeps
+  // being written against.
+  const folder = /workspace at ([^/]+)\//.exec(result.content)?.[1];
+  assert.ok(folder, `no folder named in: ${result.content}`);
+
+  const server = readFileSync(path.join(testWorkspace, folder!, "server.js"), "utf8");
+  assert.match(server, /createServer|listen/);
+});
+
+test("a build reports nothing when there is nothing to build", () => {
+  const result = runTool({ name: "build_app", arguments: { description: "" } }, editContext);
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /needs a description/);
+});
+
+test("read_file refuses a path outside the workspace", () => {
+  // The tool layer must not be a way around the containment check.
+  const result = runTool({ name: "read_file", arguments: { path: "../../etc/passwd" } }, editContext);
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /outside the workspace/);
+});
+
+test("write_file refuses a path outside the workspace and writes nothing", () => {
+  const result = runTool(
+    { name: "write_file", arguments: { path: "../escape.txt", content: "x" } },
+    editContext
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /Nothing was written/);
+});
+
+test("list_files refuses to list outside the workspace", () => {
+  const result = runTool({ name: "list_files", arguments: { directory: ".." } }, editContext);
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /outside the workspace/);
 });

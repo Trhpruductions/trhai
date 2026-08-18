@@ -67,6 +67,10 @@ function toolLabel(tool: string): string {
     case "search_conversation": return "searched this conversation";
     case "days_between": return "counted days";
     case "shift_date": return "worked out a date";
+    case "build_app": return "built an app";
+    case "list_files": return "listed files";
+    case "read_file": return "read a file";
+    case "write_file": return "wrote a file";
     default: return tool.replace(/_/g, " ");
   }
 }

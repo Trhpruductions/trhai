@@ -17,3 +17,7 @@ data/
 # Desktop shell scratch (fallback HTML written at launch)
 .ascend-temp/
 launch.log
+
+# Apps the assistant builds. Generated output, not source.
+workspace/
+apps/api/workspace/

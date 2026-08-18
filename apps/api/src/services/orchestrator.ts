@@ -84,8 +84,16 @@ export async function runAssistantOrchestrator(
   // REST API is" was answered with "1. Clarify the end state ... 2. Identify the
   // highest-impact next move", which is a template, not an answer. Only a
   // "create" request produces an app, so only there is the plan worth keeping.
-  const isCannedPlan = modelReply.strategy === "plan" && modelReply.planTaskType !== "create";
-  if (modelReply.strategy === "no-answer" || isCannedPlan) {
+  // Every plan is now eligible, including a "create" one.
+  //
+  // That exception existed because a create request produced a scaffold the
+  // model could not, so the deterministic plan was the better answer. The
+  // assistant can build the app itself now, and keeping the exception made
+  // build_app unreachable from a conversation: "build me an app to track
+  // invoices" returned a four-step plan and never called the tool that would
+  // have built it.
+  const isPlan = modelReply.strategy === "plan";
+  if (modelReply.strategy === "no-answer" || isPlan) {
     const generated = await answerWithLocalModel(input);
     if (generated) {
       return {

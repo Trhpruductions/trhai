@@ -1,7 +1,12 @@
 import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.js";
 import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
 import { describeDifference, shiftDate } from "./dateMath.js";
-import { planProject } from "@ascend/shared";
+import { generateProject, planProject, slugify } from "@ascend/shared";
+import {
+  listWorkspace,
+  readWorkspaceFile,
+  writeWorkspaceFile
+} from "./workspace.js";
 
 // What the assistant can actually do.
 //
@@ -335,6 +340,72 @@ export const toolDefinitions: ToolDefinition[] = [
           days: { type: "number", description: "Whole days to add; negative to subtract." }
         },
         required: ["from", "days"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "build_app",
+      description:
+        "Actually build a small working app from a plain description and write it to the "
+        + "workspace. It produces a runnable REST server with a web UI and smoke tests. Use "
+        + "this when the user wants something built, not just described.",
+      parameters: {
+        type: "object",
+        properties: {
+          description: { type: "string", description: "What the app should do, in the user's words." }
+        },
+        required: ["description"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_files",
+      description:
+        "List the files in the user's workspace — the folder where apps you build and files you "
+        + "write are kept. Use this to see what is already there.",
+      parameters: {
+        type: "object",
+        properties: {
+          directory: { type: "string", description: "A subfolder to list. Omit for everything." }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_file",
+      description:
+        "Read a file from the workspace. Use it to look at code you or the user wrote before "
+        + "changing or explaining it.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "The path as shown by list_files." }
+        },
+        required: ["path"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_file",
+      description:
+        "Write a file into the workspace, creating folders as needed. Use this for code, scripts "
+        + "or data the user wants on disk rather than as a knowledge document.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Where to write it, relative to the workspace." },
+          content: { type: "string", description: "The full contents of the file." }
+        },
+        required: ["path", "content"]
       }
     }
   },
@@ -683,6 +754,93 @@ export function runTool(call: ToolCall, context: ToolContext): ToolResult {
       return result.ok
         ? { ok: true, content: result.value }
         : { ok: false, content: result.reason };
+    }
+
+    case "build_app": {
+      const description = requireString(call.arguments.description);
+      if (!description) return { ok: false, content: "build_app needs a description." };
+
+      const spec = planProject(description);
+      if (spec.entities.length === 0) {
+        return { ok: false, content: "That description does not name anything to store, so there is nothing to build yet." };
+      }
+
+      const folder = slugify(spec.title, "app", 60);
+      const files = generateProject(spec);
+
+      // Every file is written before anything is reported. A partial write that
+      // announced success would leave the user with an app that does not run
+      // and a message saying it does.
+      const written: string[] = [];
+      for (const file of files) {
+        const result = writeWorkspaceFile(`${folder}/${file.path}`, file.content);
+        if (!result.ok) {
+          return {
+            ok: false,
+            content: `Could not finish building: ${result.reason} Nothing was reported as built.`
+          };
+        }
+        written.push(result.path);
+      }
+
+      return {
+        ok: true,
+        content: `Built "${spec.title}" in the workspace at ${folder}/ with ${written.length} files:`
+          + `\n${written.map((file) => `- ${file}`).join("\n")}`
+          + `\n\nRun it with: cd ${folder} && npm install && npm start`
+      };
+    }
+
+    case "list_files": {
+      const directory = typeof call.arguments.directory === "string" && call.arguments.directory.trim()
+        ? call.arguments.directory.trim()
+        : ".";
+
+      const entries = listWorkspace(directory);
+      if (entries === null) {
+        return { ok: false, content: "That path is outside the workspace, so it was not listed." };
+      }
+      if (entries.length === 0) {
+        return { ok: false, content: "The workspace is empty." };
+      }
+
+      return {
+        ok: true,
+        content: entries
+          .filter((entry) => !entry.directory)
+          .map((entry) => `- ${entry.path} (${entry.bytes} bytes)`)
+          .join("\n")
+      };
+    }
+
+    case "read_file": {
+      const target = requireString(call.arguments.path);
+      if (!target) return { ok: false, content: "read_file needs a path." };
+
+      const result = readWorkspaceFile(target);
+      if (!result.ok) return { ok: false, content: result.reason };
+
+      // A truncated read says so. Answering about a file it has only partly
+      // seen, with no way for the reader to know, is the failure to avoid.
+      return {
+        ok: true,
+        content: result.truncated
+          ? `${result.content}\n\n[truncated - this file is longer than shown]`
+          : result.content
+      };
+    }
+
+    case "write_file": {
+      const target = requireString(call.arguments.path);
+      const content = typeof call.arguments.content === "string" ? call.arguments.content : null;
+      if (!target || content === null) {
+        return { ok: false, content: "write_file needs both a path and content." };
+      }
+
+      const result = writeWorkspaceFile(target, content);
+      return result.ok
+        ? { ok: true, content: `Wrote ${result.path} to the workspace.` }
+        : { ok: false, content: `${result.reason} Nothing was written.` };
     }
 
     case "current_datetime": {
