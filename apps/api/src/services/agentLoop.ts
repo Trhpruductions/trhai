@@ -74,7 +74,7 @@ export const systemPrompt = [
   "- If you genuinely do not know, say so. That is a complete answer.",
   "",
   "Answer in plain prose. Be brief unless detail was asked for."
-].join("\n");;
+].join("\n");
 
 /** Ollama's reply to a chat turn. */
 type ChatResponse = {
