@@ -374,3 +374,13 @@
   color: var(--accent-strong);
   text-shadow: var(--glow);
 }
+
+/* Quieter than the wordmark it sits under: the name identifies the app, this
+   only colours it. Anything louder competes with the greeting. */
+.home-tagline {
+  font-size: var(--text-xs);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  text-indent: 0.28em;
+}

@@ -123,7 +123,14 @@ export function AppShell({ renderSurface, modelLabel }: Props) {
   return (
     <div className="shell">
       <nav className="rail" aria-label="Sections">
-        <div className="rail-mark" aria-hidden="true">A</div>
+        {/* The same chevron as the core, small. A letter in a box is a
+            placeholder; the mark is the app saying its own name. */}
+        <div className="rail-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18">
+            <path d="M5 8 L12 18 L19 8" fill="none" stroke="currentColor"
+              strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
 
         {surfaces.map((entry) => (
           <button

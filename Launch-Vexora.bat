@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-REM Opens Vexora AI. Launch-AscendAI.vbs runs this with no visible window.
+REM Opens Vexora AI. Launch-Vexora.vbs runs this with no visible window.
 REM
 REM This script does not start the API or the web client. The desktop shell
 REM already does that in ensureSelfHostedServices, with port checks, a health
@@ -18,12 +18,12 @@ REM The log lives outside the repo. Kept beside the app it was held open by a
 REM stale handle from a previous run, and because every step redirects into it,
 REM a lock on the log stopped the app from starting at all. A log must never be
 REM able to do that, so a failure to write one is also survivable below.
-set "LOGDIR=%LOCALAPPDATA%\Ascend"
+set "LOGDIR=%LOCALAPPDATA%\Vexora"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>&1
 set "LOG=%LOGDIR%\launch.log"
 REM `||` not errorlevel: a failed redirection does not set errorlevel, so the
 REM earlier check never fired and a locked log still killed the launch.
-(echo [%date% %time%] launch requested)> "%LOG%" 2>nul || set "LOG=%TEMP%\ascend-launch.log"
+(echo [%date% %time%] launch requested)> "%LOG%" 2>nul || set "LOG=%TEMP%\vexora-launch.log"
 (echo [%date% %time%] launch requested)> "%LOG%" 2>nul || set "LOG=nul"
 
 REM Stop a previous instance of this app only. The command line match keeps it
@@ -76,6 +76,6 @@ exit /b 0
 
 :fail
 REM Nothing can be printed to a hidden window, so the log is the only channel.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; [System.Windows.Forms.MessageBox]::Show('Vexora AI could not start. See %LOCALAPPDATA%\Ascend\launch.log.', 'Vexora AI')" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; [System.Windows.Forms.MessageBox]::Show('Vexora AI could not start. See %LOCALAPPDATA%\Vexora\launch.log.', 'Vexora AI')" >nul 2>&1
 endlocal
 exit /b 1

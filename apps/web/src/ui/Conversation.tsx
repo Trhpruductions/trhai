@@ -292,6 +292,9 @@ export function Conversation({ personality, onBuildRequest }: Props) {
                   greeting is addressed to the reader, this only says whose
                   machine they are on. */}
               <span className="home-wordmark">Vexora <b>AI</b></span>
+              {/* Three words, not a paragraph. A tagline that has to be read
+                  is an advert; one that is taken in at a glance is a mark. */}
+              <span className="home-tagline">Adapt · Evolve · Empower</span>
               <p className="home-sub muted">
                 {online === false
                   ? "The local service is not responding. Nothing can be answered until it is back."

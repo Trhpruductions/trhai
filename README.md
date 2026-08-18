@@ -1,4 +1,4 @@
-# Ascend AI
+# Vexora AI
 
 A local-first AI workspace: a desktop/web shell that builds working software from a
 description, remembers what you tell it, answers from documents you add, and runs
@@ -6,19 +6,28 @@ automation flows.
 
 ## Read this first
 
-**There is no language model in this build.** Nothing here calls an LLM API, and no
-API key will make one appear — that is a deliberate constraint, not a missing step.
+**Vexora runs entirely on your own machine, and costs nothing to run.** No account,
+no API key, no third-party service. That is a deliberate constraint, and it is
+enforced by tests: the build fails if anyone adds a hosted provider key, a hosted
+provider SDK, or a non-loopback URL to the model client.
 
-What follows from that:
+Answers come from a local model through [Ollama](https://ollama.com) when one is
+installed, and the app starts and stops that server itself — opening Vexora is the
+only thing you have to do. With no model installed it still runs, answering from
+your saved memory and your documents and saying plainly when it has neither.
 
-- It **cannot** answer general questions. Ask it the capital of France and it will say
-  it has nothing saved that answers you, because it genuinely does not know.
-- It **can** do a specific set of things very concretely — build real apps, retrieve
-  what you told it, quote your documents, and run flows.
+The assistant has tools it can call and chain, so it can look something up, do
+arithmetic exactly, work out a date, write a file, and build a working app. Two rules
+hold throughout:
 
-Everything it does is deterministic: parsing, templating and lexical search. Where a
-feature would need a credential or a model it does not have, it says so in the UI
-rather than pretending.
+- **A tool that finds nothing reports that it found nothing.** Told an empty result a
+  model can say so; told nothing at all it invents. That difference is the whole
+  design.
+- **Nothing claims to have happened unless it did.** A save reports what was actually
+  written; a build that fails partway reports nothing as built.
+
+Every reply is labelled with how it was produced — quoted from your notes, quoted from
+a document, or written by the model — and with which tools ran.
 
 ## What works today
 
@@ -130,7 +139,7 @@ npm run dist:desktop:win
 ```
 
 Artifacts land in `apps/desktop/release`. `npm run dist:desktop` builds for the
-current platform. On Windows, `Launch-AscendAI.vbs` starts the packaged app with no
+current platform. On Windows, `Launch-Vexora.vbs` starts the packaged app with no
 visible console window.
 
 ## Notes
