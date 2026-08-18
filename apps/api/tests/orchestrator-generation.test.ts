@@ -84,14 +84,46 @@ test("a generated reply is labelled as generated, with its model", async () => {
   });
 });
 
-test("a real build request still offers to build", async () => {
-  // The fix above must not have removed the build offer everywhere: a "create"
-  // plan is the one case where the deterministic path is kept.
-  const result = await runAssistantOrchestrator({
-    mode: "general",
-    userMessage: "Build me an app to track invoices with a client name, amount, and due date."
-  });
+test("a build request reaches the model so it can build", async () => {
+  // This asserted "plan" and no longer should. A create request used to keep
+  // the deterministic four-step plan, which made sense while a plan was the
+  // best the app could do — and stopped making sense the moment build_app
+  // existed, because keeping it meant "build me an app" returned a plan and
+  // never called the tool that would have built the app.
+  //
+  // Driven by a fake model, not whichever Ollama happens to be running. This
+  // test previously called the real one: it passed when nothing was listening
+  // and took 97 seconds and failed when something was, which makes it a
+  // measurement of the machine rather than of the code.
+  await withFakeModel("Built it in the workspace.", async () => {
+    const result = await runAssistantOrchestrator({
+      mode: "general",
+      userMessage: "Build me an app to track invoices with a client name, amount, and due date."
+    });
 
-  assert.equal(result.strategy, "plan");
-  assert.ok(result.buildRequest, "a create request should still carry a build request");
+    assert.equal(result.strategy, "generated");
+    assert.match(result.model, /llama3\.2/);
+  });
+});
+
+test("a build request still carries what to build when there is no model", async () => {
+  // With nothing to generate an answer, the deterministic plan is still the
+  // right reply, and the "Build this" control still needs its request text.
+  const previous = process.env.OLLAMA_BASE_URL;
+  // A port nothing is listening on, so availability fails fast and the
+  // orchestrator falls back exactly as it would on a machine with no Ollama.
+  process.env.OLLAMA_BASE_URL = "http://127.0.0.1:9";
+
+  try {
+    const result = await runAssistantOrchestrator({
+      mode: "general",
+      userMessage: "Build me an app to track invoices with a client name, amount, and due date."
+    });
+
+    assert.equal(result.strategy, "plan");
+    assert.ok(result.buildRequest, "a create request must still carry a build request");
+  } finally {
+    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
+    else process.env.OLLAMA_BASE_URL = previous;
+  }
 });
