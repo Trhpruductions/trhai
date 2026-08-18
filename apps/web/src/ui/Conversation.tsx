@@ -54,6 +54,13 @@ function toolLabel(tool: string): string {
     case "search_documents": return "searched documents";
     case "remember": return "saved to memory";
     case "current_datetime": return "checked the time";
+    case "list_memories": return "read memory";
+    case "forget": return "deleted from memory";
+    case "list_documents": return "listed documents";
+    case "read_document": return "read a document";
+    case "write_document": return "wrote a document";
+    case "calculate": return "calculated";
+    case "plan_app": return "planned an app";
     default: return tool.replace(/_/g, " ");
   }
 }

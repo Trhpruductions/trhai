@@ -1,4 +1,6 @@
 import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.js";
+import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
+import { planProject } from "@ascend/shared";
 
 // What the assistant can actually do.
 //
@@ -61,6 +63,12 @@ export type ToolContext = {
   knowledge: Array<ScorableMemory & { documentTitle: string }>;
   /** Writes a fact to memory. Returns false when there was nowhere to write. */
   saveMemory?: (fact: string) => boolean;
+  /** Removes a saved memory by its id. Returns false when nothing was removed. */
+  forgetMemory?: (id: string) => boolean;
+  /** Documents in this session, newest first. */
+  documents?: Array<{ id: string; title: string; body: string }>;
+  /** Saves a new document. Returns false when it could not be stored. */
+  saveDocument?: (title: string, body: string) => boolean;
   /** Overridable so a test can assert on a fixed clock. */
   now?: () => Date;
 };
@@ -112,6 +120,105 @@ export const toolDefinitions: ToolDefinition[] = [
           fact: { type: "string", description: "The fact, written as a complete sentence." }
         },
         required: ["fact"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_memories",
+      description:
+        "List everything currently saved in memory. Use this when the user asks what you know "
+        + "or remember about them, rather than guessing at a search term.",
+      parameters: { type: "object", properties: {}, required: [] }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "forget",
+      description:
+        "Delete a saved memory. Only use this when the user asks you to forget something. "
+        + "Find the exact wording with list_memories or search_memory first.",
+      parameters: {
+        type: "object",
+        properties: {
+          fact: { type: "string", description: "The saved fact to remove, as it is currently worded." }
+        },
+        required: ["fact"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_documents",
+      description: "List the titles of every document in the user's knowledge base.",
+      parameters: { type: "object", properties: {}, required: [] }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_document",
+      description:
+        "Read a whole document by title. Use this after list_documents when a search result "
+        + "was not enough and you need the full text.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "The document title, as listed." }
+        },
+        required: ["title"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_document",
+      description:
+        "Save a new document to the user's knowledge base. Use this when the user asks you to "
+        + "write something down, take notes, or draft a document they want to keep.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "A short title." },
+          content: { type: "string", description: "The full text of the document." }
+        },
+        required: ["title", "content"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "calculate",
+      description:
+        "Work out an arithmetic expression exactly. Use this for any sum — do not do arithmetic "
+        + "yourself, you will get it wrong. Supports + - * / % ^ and brackets.",
+      parameters: {
+        type: "object",
+        properties: {
+          expression: { type: "string", description: "The expression, for example (12.5 * 3) + 7." }
+        },
+        required: ["expression"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "plan_app",
+      description:
+        "Work out what a small app described in plain words would contain — its records, their "
+        + "fields, and the screens. Use this when the user describes something they want built.",
+      parameters: {
+        type: "object",
+        properties: {
+          description: { type: "string", description: "What the user wants built, in their words." }
+        },
+        required: ["description"]
       }
     }
   },
@@ -190,6 +297,129 @@ export function runTool(call: ToolCall, context: ToolContext): ToolResult {
       return saved
         ? { ok: true, content: `Saved: ${fact}` }
         : { ok: false, content: "The save did not go through, so nothing was stored." };
+    }
+
+    case "list_memories": {
+      if (context.memories.length === 0) {
+        return { ok: false, content: "There is nothing saved in memory yet." };
+      }
+      return {
+        ok: true,
+        content: context.memories.map((memory) => `- ${memory.body}`).join("\n")
+      };
+    }
+
+    case "forget": {
+      const fact = requireString(call.arguments.fact);
+      if (!fact) return { ok: false, content: "forget needs the fact to remove." };
+      if (!context.forgetMemory) {
+        return { ok: false, content: "There is no memory to remove from, so nothing was deleted." };
+      }
+
+      // Matched against the stored wording rather than trusted as an id: the
+      // model is repeating text back, and an id it invented would delete the
+      // wrong memory. An unmatched request deletes nothing and says so.
+      const target = context.memories.find(
+        (memory) => memory.body.trim().toLowerCase() === fact.trim().toLowerCase()
+      ) ?? context.memories.find(
+        (memory) => memory.body.toLowerCase().includes(fact.trim().toLowerCase())
+      );
+
+      if (!target) {
+        return { ok: false, content: `Nothing saved matches "${fact}", so nothing was deleted.` };
+      }
+
+      const removed = context.forgetMemory(target.id);
+      return removed
+        ? { ok: true, content: `Deleted from memory: ${target.body}` }
+        : { ok: false, content: "The delete did not go through, so nothing was removed." };
+    }
+
+    case "list_documents": {
+      const documents = context.documents ?? [];
+      if (documents.length === 0) {
+        return { ok: false, content: "The knowledge base has no documents in it." };
+      }
+      return {
+        ok: true,
+        content: documents.map((document) => `- ${document.title}`).join("\n")
+      };
+    }
+
+    case "read_document": {
+      const title = requireString(call.arguments.title);
+      if (!title) return { ok: false, content: "read_document needs a title." };
+
+      const documents = context.documents ?? [];
+      const found = documents.find(
+        (document) => document.title.trim().toLowerCase() === title.trim().toLowerCase()
+      ) ?? documents.find(
+        (document) => document.title.toLowerCase().includes(title.trim().toLowerCase())
+      );
+
+      if (!found) {
+        // The available titles come back with the refusal, so the model can
+        // correct itself on the next round instead of guessing again.
+        const available = documents.length > 0
+          ? ` Available documents: ${documents.map((document) => document.title).join(", ")}.`
+          : "";
+        return { ok: false, content: `There is no document called "${title}".${available}` };
+      }
+
+      // Bounded: a long document would crowd out the rest of the exchange, and
+      // a truncated read has to say it was truncated.
+      const limit = 4000;
+      const body = found.body.length > limit
+        ? `${found.body.slice(0, limit)}\n\n[truncated — this document is longer than shown]`
+        : found.body;
+
+      return { ok: true, content: `"${found.title}":\n${body}` };
+    }
+
+    case "write_document": {
+      const title = requireString(call.arguments.title);
+      const content = requireString(call.arguments.content);
+      if (!title || !content) {
+        return { ok: false, content: "write_document needs both a title and content." };
+      }
+      if (!context.saveDocument) {
+        return { ok: false, content: "There is nowhere to save documents, so nothing was written." };
+      }
+
+      const saved = context.saveDocument(title, content);
+      return saved
+        ? { ok: true, content: `Saved the document "${title}".` }
+        : { ok: false, content: `"${title}" could not be saved, so nothing was written.` };
+    }
+
+    case "calculate": {
+      const expression = requireString(call.arguments.expression);
+      if (!expression) return { ok: false, content: "calculate needs an expression." };
+
+      const result = evaluateArithmetic(expression);
+      return result.ok
+        ? { ok: true, content: `${expression} = ${formatNumber(result.value)}` }
+        : { ok: false, content: result.reason };
+    }
+
+    case "plan_app": {
+      const description = requireString(call.arguments.description);
+      if (!description) return { ok: false, content: "plan_app needs a description." };
+
+      const spec = planProject(description);
+      if (spec.entities.length === 0) {
+        return { ok: false, content: "That description does not name anything to store yet." };
+      }
+
+      const entities = spec.entities
+        .map((entity) => `- ${entity.label}: ${entity.fields.map((field) => `${field.name} (${field.type})`).join(", ")}`)
+        .join("\n");
+
+      return {
+        ok: true,
+        content: `"${spec.title}" would hold:\n${entities}\n\n`
+          + "The user can build this from the Build screen."
+      };
     }
 
     case "current_datetime": {

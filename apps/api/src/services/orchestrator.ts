@@ -18,6 +18,12 @@ export type OrchestratorInput = {
    * rather than the assistant claiming otherwise.
    */
   saveMemory?: (fact: string) => boolean;
+  /** Removes a saved memory by id, for the "forget" tool. */
+  forgetMemory?: (id: string) => boolean;
+  /** Documents in this session, for the document tools. */
+  documents?: Array<{ id: string; title: string; body: string }>;
+  /** Saves a new document, for the "write_document" tool. */
+  saveDocument?: (title: string, body: string) => boolean;
 };
 
 export type OrchestratorResult = {
@@ -153,7 +159,10 @@ async function answerWithLocalModel(
       createdAt: entry.createdAt,
       documentTitle: entry.documentTitle
     })),
-    saveMemory: input.saveMemory
+    saveMemory: input.saveMemory,
+    forgetMemory: input.forgetMemory,
+    documents: input.documents,
+    saveDocument: input.saveDocument
   });
 
   return result.ok

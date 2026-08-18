@@ -172,6 +172,21 @@ export function createApp() {
         // than the assistant claiming a write that had nowhere to go.
         saveMemory: sessionId
           ? (fact: string) => recordMemoriesFromMessage(sessionId, `remember that ${fact}`).length > 0
+          : undefined,
+        forgetMemory: sessionId ? (id: string) => forgetMemory(sessionId, id) : undefined,
+        documents: sessionId
+          ? listDocuments(sessionId).map((document) => ({
+            id: document.id,
+            title: document.title,
+            body: document.body
+          }))
+          : undefined,
+        saveDocument: sessionId
+          ? (title: string, body: string) => Boolean(addDocument(sessionId, {
+            id: globalThis.crypto.randomUUID(),
+            title,
+            body
+          }))
           : undefined
       });
 

@@ -258,3 +258,124 @@ test("the clock is the real one on this machine", () => {
   assert.equal(result.ok, true);
   assert.match(result.content, /2026/);
 });
+
+// ---- The tools added after the first four -------------------------------
+
+const richContext: ToolContext = {
+  ...context,
+  documents: [
+    { id: "d1", title: "Runbook", body: "Rollback procedure: run scripts/rollback.sh." },
+    { id: "d2", title: "Onboarding", body: "New starters get a laptop on day one." }
+  ]
+};
+
+test("listing memories returns what is actually stored", () => {
+  const result = runTool({ name: "list_memories", arguments: {} }, richContext);
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /Postgres 16/);
+});
+
+test("listing memories on an empty store says it is empty", () => {
+  const result = runTool({ name: "list_memories", arguments: {} }, { ...richContext, memories: [] });
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /nothing saved in memory/);
+});
+
+test("forget matches the stored wording rather than trusting an id", () => {
+  // The model repeats text back; an id it invented would delete the wrong thing.
+  const removed: string[] = [];
+  const result = runTool(
+    { name: "forget", arguments: { fact: "The billing database is Postgres 16." } },
+    { ...richContext, forgetMemory: (id) => { removed.push(id); return true; } }
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(removed, ["m1"]);
+});
+
+test("forget deletes nothing when nothing matches", () => {
+  const removed: string[] = [];
+  const result = runTool(
+    { name: "forget", arguments: { fact: "my shoe size" } },
+    { ...richContext, forgetMemory: (id) => { removed.push(id); return true; } }
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /nothing was deleted/);
+  assert.deepEqual(removed, [], "nothing may be deleted on a miss");
+});
+
+test("documents can be listed and read", () => {
+  const listed = runTool({ name: "list_documents", arguments: {} }, richContext);
+  assert.equal(listed.ok, true);
+  assert.match(listed.content, /Runbook/);
+
+  const read = runTool({ name: "read_document", arguments: { title: "Runbook" } }, richContext);
+  assert.equal(read.ok, true);
+  assert.match(read.content, /rollback\.sh/);
+});
+
+test("a missing document is refused with the titles that do exist", () => {
+  // So the model can correct itself next round instead of guessing again.
+  const result = runTool({ name: "read_document", arguments: { title: "Payroll" } }, richContext);
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /Runbook/);
+  assert.match(result.content, /Onboarding/);
+});
+
+test("a long document is truncated and says so", () => {
+  const result = runTool(
+    { name: "read_document", arguments: { title: "Long" } },
+    { ...richContext, documents: [{ id: "d3", title: "Long", body: "x".repeat(9000) }] }
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /truncated/);
+});
+
+test("writing a document reports what was actually written", () => {
+  const written: Array<[string, string]> = [];
+  const result = runTool(
+    { name: "write_document", arguments: { title: "Notes", content: "Some notes." } },
+    { ...richContext, saveDocument: (title, body) => { written.push([title, body]); return true; } }
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(written, [["Notes", "Some notes."]]);
+});
+
+test("writing with nowhere to save reports that nothing was written", () => {
+  const result = runTool(
+    { name: "write_document", arguments: { title: "Notes", content: "Some notes." } },
+    richContext
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /nothing was written/);
+});
+
+test("the calculator is exact where the model is not", () => {
+  const result = runTool({ name: "calculate", arguments: { expression: "(12.5 * 3) + 7" } }, richContext);
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /44\.5/);
+});
+
+test("the calculator refuses code rather than running it", () => {
+  const result = runTool({ name: "calculate", arguments: { expression: "process.exit(1)" } }, richContext);
+
+  assert.equal(result.ok, false);
+});
+
+test("plan_app describes what would be built", () => {
+  const result = runTool(
+    { name: "plan_app", arguments: { description: "an app to track invoices with a client name, amount and due date" } },
+    richContext
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /invoice/i);
+});
