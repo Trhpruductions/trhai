@@ -1023,3 +1023,35 @@ test("both write paths check the size before the JSON", () => {
   const nullIndex = server.content.indexOf("body === null");
   assert.ok(tooLargeIndex < nullIndex, "size must be checked before JSON validity");
 });
+
+test("a container noun does not become the project name", () => {
+  // "an app to track invoices" was titled "App": the article was dropped, the
+  // container noun kept, and the scan stopped at "to" — a correct clause
+  // boundary reached one word too early. Every project is an app, so the word
+  // distinguishes nothing, and a folder of them called app, app-2, app-3 is
+  // unusable.
+  for (const request of [
+    "Build me an app to track invoices with a client name, amount and due date.",
+    "Build an app to track invoices",
+    "an app to track invoices",
+    "a tool to track invoices",
+    "a system for tracking invoices"
+  ]) {
+    const title = deriveTitle(request);
+    assert.notEqual(title, "App", request);
+    assert.notEqual(title, "Tool", request);
+    assert.notEqual(title, "System", request);
+    assert.match(title.toLowerCase(), /invoice/, request);
+  }
+});
+
+test("a request that is only a container noun keeps it", () => {
+  // There is nothing better to offer here, and "App" beats "Generated Project".
+  assert.equal(deriveTitle("build an app"), "App");
+  assert.equal(deriveTitle("build me a tool"), "Tool");
+});
+
+test("the scaffold folder follows the title, not the container noun", () => {
+  const spec = planProject("Build me an app to track invoices with a client name and amount");
+  assert.match(slugify(spec.title, "app", 60), /invoice/);
+});

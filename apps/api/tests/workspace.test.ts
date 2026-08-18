@@ -143,3 +143,26 @@ test("listing outside the workspace is refused", () => {
 test("listing a directory that does not exist is empty, not an error", () => {
   assert.deepEqual(listWorkspace("never-created"), []);
 });
+
+test("the default workspace is outside the repo", async () => {
+  // It used to be <cwd>/workspace, which put every app the assistant built
+  // inside the project's own source tree — gitignored to stay out of commits,
+  // destroyed by a clean checkout, and in a place nobody would think to look
+  // for the app they asked for.
+  const previous = process.env.ASCEND_WORKSPACE;
+  delete process.env.ASCEND_WORKSPACE;
+
+  try {
+    const { workspaceRoot } = await import("../src/services/workspace.js");
+    const resolved = path.resolve(workspaceRoot());
+
+    assert.ok(
+      !resolved.startsWith(path.resolve(process.cwd())),
+      `the workspace must not live inside the project: ${resolved}`
+    );
+    assert.match(resolved, /Ascend/);
+  } finally {
+    if (previous === undefined) delete process.env.ASCEND_WORKSPACE;
+    else process.env.ASCEND_WORKSPACE = previous;
+  }
+});

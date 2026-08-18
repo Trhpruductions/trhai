@@ -594,6 +594,25 @@ const titleClauseWords = new Set([
 const maxTitleWords = 5;
 
 /**
+ * Container nouns that name no subject.
+ *
+ * "an app to track invoices" was titled "App": the article was dropped, "app"
+ * was kept, and the scan stopped at "to" — a correct clause boundary reached
+ * one word too early. Every project is an app, so the word distinguishes
+ * nothing, and a folder full of them called app, app-2, app-3 is unusable.
+ *
+ * Dropped along with the connective that follows, so the title continues into
+ * what the thing is actually for.
+ */
+const containerNouns = new Set([
+  "app", "application", "tool", "system", "program", "platform", "service",
+  "site", "website", "dashboard", "portal", "thing", "project", "software"
+]);
+
+/** Connectives that follow a container noun: "an app *to* track invoices". */
+const containerConnectives = new Set(["to", "for", "that", "which", "where"]);
+
+/**
  * A name for the generated app.
  *
  * Without this the whole request became the title, so a support desk was called
@@ -614,10 +633,30 @@ export function deriveTitle(request: string): string {
   if (words.length > 1 && beneficiaryPronouns.has(words[0])) words = words.slice(1);
   if (words.length > 1 && /^(a|an|the)$/.test(words[0])) words = words.slice(1);
 
+  // "an app to track invoices" -> "track invoices". Only when something follows:
+  // a request that really is just "build an app" has nothing better to offer,
+  // and "App" beats "Generated Project" there.
+  if (words.length > 1 && containerNouns.has(words[0].replace(/,+$/, ""))) {
+    const rest = words.slice(1);
+    const withoutConnective = containerConnectives.has(rest[0]?.replace(/,+$/, "") ?? "")
+      ? rest.slice(1)
+      : rest;
+    if (withoutConnective.length > 0) words = withoutConnective;
+  }
+
   const kept: string[] = [];
   for (const word of words) {
     const bare = word.replace(/,+$/, "");
-    if (titleClauseWords.has(bare)) break;
+
+    if (titleClauseWords.has(bare)) {
+      // A clause boundary cannot be the first word: there is nothing before it
+      // for it to bound. "a system for tracking invoices" reaches "tracking"
+      // with nothing kept, and breaking there produced "Generated Project" for
+      // a request that plainly names its subject. Skip it and keep reading.
+      if (kept.length === 0) continue;
+      break;
+    }
+
     if (bare) kept.push(bare);
     if (word.endsWith(",") || kept.length >= maxTitleWords) break;
   }

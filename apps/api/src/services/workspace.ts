@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { homedir } from "node:os";
 
 // The one place on disk the assistant may touch.
 //
@@ -14,9 +15,27 @@ import path from "node:path";
 //
 // Nothing outside this directory is reachable, including the app's own source.
 
-/** Where the assistant's files live. One directory, never anywhere else. */
+/**
+ * Where the assistant's files live. One directory, never anywhere else.
+ *
+ * Under the user's home folder rather than inside the repo. The default was
+ * `<cwd>/workspace`, which put every app the assistant built inside the
+ * project's own source tree: it needed gitignoring to stay out of commits, it
+ * would be destroyed by a clean checkout, and someone looking for the app they
+ * asked for had no reason to look there. Their own Ascend folder is somewhere
+ * they can find it, back it up, and open in an editor.
+ *
+ * ASCEND_WORKSPACE still overrides, which is what the tests use.
+ */
 export function workspaceRoot(): string {
-  return process.env.ASCEND_WORKSPACE ?? path.join(process.cwd(), "workspace");
+  const configured = process.env.ASCEND_WORKSPACE;
+  if (configured) return configured;
+
+  // homedir() is empty in some containerised environments; falling back to the
+  // working directory is worse than nothing there, so it keeps the old
+  // behaviour rather than writing to the filesystem root.
+  const home = homedir();
+  return home ? path.join(home, "Ascend", "workspace") : path.join(process.cwd(), "workspace");
 }
 
 /** Nothing bigger than this is read back; a model cannot use it and it crowds out the exchange. */
