@@ -1,6 +1,7 @@
 import { ModelRouter, type ComposerKnowledge, type MemoryWriteOutcome } from "./modelRouter.js";
 import { checkAvailability, generate, readLocalModelConfig } from "./localModel.js";
 import { buildCapabilityReply } from "./replyComposer.js";
+import { runAgent } from "./agentLoop.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
@@ -11,6 +12,12 @@ export type OrchestratorInput = {
   memoryWrite?: MemoryWriteOutcome;
   /** Knowledge passages available to ground an answer. */
   knowledge?: ComposerKnowledge[];
+  /**
+   * Writes a fact to memory for the "remember" tool. Omitted when there is
+   * nowhere to write, in which case the tool reports that nothing was saved
+   * rather than the assistant claiming otherwise.
+   */
+  saveMemory?: (fact: string) => boolean;
 };
 
 export type OrchestratorResult = {
@@ -22,6 +29,8 @@ export type OrchestratorResult = {
   strategy: string;
   /** The text a build should be generated from, when this was a build request. */
   buildRequest?: string;
+  /** Tools the assistant actually called, in order. Empty when it used none. */
+  toolsUsed?: string[];
   /** Memory ids the reply was actually grounded on, not merely retrieved. */
   groundedOn: string[];
   /** Conversation turns the reply was actually grounded on, not merely sent. */
@@ -75,6 +84,7 @@ export async function runAssistantOrchestrator(
         // A distinct strategy: this was written by a model, not quoted from
         // anything the user saved, and the client labels provenance from it.
         strategy: "generated",
+        toolsUsed: generated.toolsUsed,
         // No build offer here. Only a "create" plan survives to be built, and
         // neither case that reaches this branch is one — so carrying the
         // discarded plan's build request through put a "Build this" button
@@ -114,16 +124,39 @@ function estimateTokens(value: string): number {
  * after the API, or stops it mid-session, and a cached "unavailable" would keep
  * the feature dark until a restart for no reason the user could see.
  */
-async function answerWithLocalModel(input: OrchestratorInput): Promise<{ text: string; model: string } | null> {
+async function answerWithLocalModel(
+  input: OrchestratorInput
+): Promise<{ text: string; model: string; toolsUsed: string[] } | null> {
   const config = readLocalModelConfig();
   const availability = await checkAvailability(config);
   if (!availability.available) return null;
 
-  const context = (input.memoryContext ?? []).slice(0, 5).map((entry) => entry.body);
-  const result = await generate({ ...config, model: availability.model }, {
-    question: input.userMessage,
-    context
+  // The agent loop rather than a single completion.
+  //
+  // A one-shot call could only work with whatever context happened to be
+  // attached to the request, which meant the model saw at most a handful of
+  // memories and never the documents. Here it asks for what it needs and gets
+  // the real thing back — and can follow one lookup with another.
+  const result = await runAgent({ ...config, model: availability.model }, input.userMessage, {
+    memories: (input.memoryContext ?? []).map((entry, index) => ({
+      id: entry.id ?? `memory-${index}`,
+      title: entry.title,
+      body: entry.body,
+      pinned: entry.pinned ?? false,
+      createdAt: entry.createdAt ?? new Date(index).toISOString()
+    })),
+    knowledge: (input.knowledge ?? []).map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      body: entry.body,
+      pinned: entry.pinned ?? false,
+      createdAt: entry.createdAt,
+      documentTitle: entry.documentTitle
+    })),
+    saveMemory: input.saveMemory
   });
 
-  return result.ok ? { text: result.text, model: `ollama/${result.model}` } : null;
+  return result.ok
+    ? { text: result.text, model: `ollama/${result.model}`, toolsUsed: result.toolsUsed }
+    : null;
 }

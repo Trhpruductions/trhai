@@ -47,6 +47,17 @@ function provenanceOf(message: ChatMessage): { label: string; tone: string } | n
   }
 }
 
+/** Tool names as an action the reader recognises, not as an identifier. */
+function toolLabel(tool: string): string {
+  switch (tool) {
+    case "search_memory": return "searched memory";
+    case "search_documents": return "searched documents";
+    case "remember": return "saved to memory";
+    case "current_datetime": return "checked the time";
+    default: return tool.replace(/_/g, " ");
+  }
+}
+
 function Turn({ message, onBuildRequest }: { message: ChatMessage; onBuildRequest: (r: string) => void }) {
   const provenance = message.role === "assistant" ? provenanceOf(message) : null;
 
@@ -60,6 +71,17 @@ function Turn({ message, onBuildRequest }: { message: ChatMessage; onBuildReques
       {/* Preserves the newlines the assistant writes; its answers are often
           lists, and collapsing them made every reply a wall. */}
       <div className="turn-body">{message.text}</div>
+
+      {/* What it actually did to answer. A reply that searched your notes and
+          found nothing reads very differently from one it simply wrote, and
+          without this the two look identical. */}
+      {message.toolsUsed && message.toolsUsed.length > 0 ? (
+        <div className="turn-tools">
+          {message.toolsUsed.map((tool, index) => (
+            <span key={`${tool}-${index}`} className="chip chip-tool">{toolLabel(tool)}</span>
+          ))}
+        </div>
+      ) : null}
 
       {message.buildRequest ? (
         <button type="button" className="btn btn-primary btn-sm turn-action"

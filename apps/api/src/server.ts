@@ -166,7 +166,13 @@ export function createApp() {
         // Without a session there is nowhere to write, and the user must be told
         // that rather than reassured.
         memoryWrite: { available: sessionId !== null, saved: savedMemories.length },
-        knowledge: sessionId ? retrieveKnowledgePassages(sessionId) : []
+        knowledge: sessionId ? retrieveKnowledgePassages(sessionId) : [],
+        // The write path for the assistant's own "remember" tool. Omitted
+        // without a session, so the tool reports that nothing was saved rather
+        // than the assistant claiming a write that had nowhere to go.
+        saveMemory: sessionId
+          ? (fact: string) => recordMemoriesFromMessage(sessionId, `remember that ${fact}`).length > 0
+          : undefined
       });
 
       // Recorded after a successful reply so a failed request leaves no orphan turn.
@@ -195,7 +201,10 @@ export function createApp() {
           strategy: result.strategy,
           // What the client should scaffold from: the original request merged
           // with any clarifying answer, not just this turn's text.
-          buildRequest: result.buildRequest
+          buildRequest: result.buildRequest,
+          // Which tools the assistant actually called. Reported so the interface
+          // can show what it did rather than only what it said.
+          toolsUsed: result.toolsUsed ?? []
         },
         traceId: "trace-local"
       });

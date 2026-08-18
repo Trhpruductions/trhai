@@ -23,7 +23,13 @@ function fakeOllama(reply: string) {
           return;
         }
 
-        response.end(JSON.stringify({ model: "llama3.2:latest", response: reply }));
+        // The orchestrator drives the agent loop, which speaks /api/chat. The
+        // older /api/generate shape is kept for anything still calling it.
+        response.end(JSON.stringify(
+          request.url?.startsWith("/api/chat")
+            ? { model: "llama3.2:latest", message: { content: reply } }
+            : { model: "llama3.2:latest", response: reply }
+        ));
       });
     });
 

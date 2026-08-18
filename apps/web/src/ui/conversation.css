@@ -338,3 +338,17 @@
   .home { gap: var(--space-4); padding: var(--space-5) var(--space-4); }
   .home-core { transform: scale(0.74); margin: calc(-1 * var(--space-7)) 0; }
 }
+
+/* What the assistant did to answer, under the reply it produced. */
+.turn-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.chip-tool {
+  color: var(--text-muted);
+  border-color: var(--line-subtle);
+  background: var(--surface-1);
+}

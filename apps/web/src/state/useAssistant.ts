@@ -22,6 +22,8 @@ export type ChatMessage = {
   model?: string;
   /** Set when the assistant decided this was a request to build software. */
   buildRequest?: string;
+  /** Tools the assistant called to produce this reply, in order. */
+  toolsUsed?: string[];
 };
 
 export type AssistantStatus =
@@ -128,7 +130,8 @@ export function useAssistant() {
         at: Date.now(),
         strategy: data.strategy,
         model: data.model,
-        buildRequest: data.buildRequest
+        buildRequest: data.buildRequest,
+        toolsUsed: data.toolsUsed
       }]);
       setStatus({ state: "idle" });
     } catch (error) {
