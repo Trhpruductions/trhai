@@ -81,7 +81,7 @@ function Turn({ message, onBuildRequest }: { message: ChatMessage; onBuildReques
   return (
     <article className={`turn turn-${message.role}`}>
       <header className="turn-head">
-        <span className="label">{message.role === "user" ? "You" : "Ascend"}</span>
+        <span className="label">{message.role === "user" ? "You" : "Vexora"}</span>
         {provenance ? <span className={`chip ${provenance.tone}`}>{provenance.label}</span> : null}
       </header>
 
@@ -288,6 +288,10 @@ export function Conversation({ personality, onBuildRequest }: Props) {
             <div className="home-greeting">
               <h3 className="home-hello">{greetingFor(clock)}</h3>
               <span className="home-rule" aria-hidden="true" />
+              {/* The mark under the rule, not shouted over the greeting: the
+                  greeting is addressed to the reader, this only says whose
+                  machine they are on. */}
+              <span className="home-wordmark">Vexora <b>AI</b></span>
               <p className="home-sub muted">
                 {online === false
                   ? "The local service is not responding. Nothing can be answered until it is back."

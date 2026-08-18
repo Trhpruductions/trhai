@@ -1,7 +1,7 @@
 {
   "name": "@ascend/desktop",
   "version": "0.1.4",
-  "description": "Ascend AI desktop shell",
+  "description": "Vexora AI desktop shell",
   "author": "TRH",
   "private": true,
   "type": "module",

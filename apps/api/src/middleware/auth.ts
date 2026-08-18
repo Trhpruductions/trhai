@@ -50,7 +50,7 @@ function resolveIdentityFromDevHeaders(req: Request): AuthIdentity {
   return {
     subject: email || "dev-user",
     email: email || process.env.DEV_USER_EMAIL || "owner@example.com",
-    name: name || process.env.DEV_USER_DISPLAY_NAME || "Ascend Owner",
+    name: name || process.env.DEV_USER_DISPLAY_NAME || "Vexora Owner",
     provider: "dev"
   };
 }

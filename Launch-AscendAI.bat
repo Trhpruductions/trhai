@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-REM Opens Ascend AI. Launch-AscendAI.vbs runs this with no visible window.
+REM Opens Vexora AI. Launch-AscendAI.vbs runs this with no visible window.
 REM
 REM This script does not start the API or the web client. The desktop shell
 REM already does that in ensureSelfHostedServices, with port checks, a health
@@ -29,7 +29,7 @@ REM earlier check never fired and a locked log still killed the launch.
 REM Stop a previous instance of this app only. The command line match keeps it
 REM from touching any other Electron app the user happens to be running.
 if /i not "%ASCEND_SKIP_PRELAUNCH_KILL%"=="1" (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { (($_.Name -eq 'Ascend AI Desktop.exe') -or ($_.Name -eq 'electron.exe')) -and $_.CommandLine -match 'trhai|Ascend AI Desktop' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >>"%LOG%" 2>&1
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { (($_.Name -eq 'Vexora AI Desktop.exe') -or ($_.Name -eq 'electron.exe')) -and $_.CommandLine -match 'trhai|Vexora AI Desktop' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >>"%LOG%" 2>&1
 )
 
 if not exist ".env" (
@@ -76,6 +76,6 @@ exit /b 0
 
 :fail
 REM Nothing can be printed to a hidden window, so the log is the only channel.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; [System.Windows.Forms.MessageBox]::Show('Ascend AI could not start. See %LOCALAPPDATA%\Ascend\launch.log.', 'Ascend AI')" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; [System.Windows.Forms.MessageBox]::Show('Vexora AI could not start. See %LOCALAPPDATA%\Ascend\launch.log.', 'Vexora AI')" >nul 2>&1
 endlocal
 exit /b 1

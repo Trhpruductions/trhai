@@ -3,7 +3,7 @@ import { PoolClient } from "pg";
 import { withTransaction } from "../db.js";
 
 const fallbackEmail = process.env.DEV_USER_EMAIL ?? "owner@example.com";
-const fallbackDisplayName = process.env.DEV_USER_DISPLAY_NAME ?? "Ascend Owner";
+const fallbackDisplayName = process.env.DEV_USER_DISPLAY_NAME ?? "Vexora Owner";
 
 export type ActorContext = {
   userId: string;

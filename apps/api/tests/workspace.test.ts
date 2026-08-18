@@ -160,7 +160,7 @@ test("the default workspace is outside the repo", async () => {
       !resolved.startsWith(path.resolve(process.cwd())),
       `the workspace must not live inside the project: ${resolved}`
     );
-    assert.match(resolved, /Ascend/);
+    assert.match(resolved, /Vexora/);
   } finally {
     if (previous === undefined) delete process.env.ASCEND_WORKSPACE;
     else process.env.ASCEND_WORKSPACE = previous;

@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("ascendDesktop", {
-  appName: "Ascend AI Desktop",
+  appName: "Vexora AI",
   version: "0.1.4",
   createWorkspaceScaffold: (payload: unknown) => ipcRenderer.invoke("ascend:create-scaffold", payload),
   getSystemTelemetry: () => ipcRenderer.invoke("ascend:get-system-telemetry"),

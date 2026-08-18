@@ -90,9 +90,14 @@ export function Core({ state = "idle", size = 300 }: { state?: CoreState; size?:
 
         {/* The pulse. Slow while idle, quick while a reply is being produced —
             this is the part that makes waiting legible without a spinner. */}
-        <circle cx="120" cy="120" r="34" className="core-pulse" />
-        <circle cx="120" cy="120" r="22" className="core-center" />
-        <circle cx="120" cy="120" r="9" className="core-seed" />
+        <circle cx="120" cy="120" r="40" className="core-pulse" />
+
+        {/* The mark. A chevron rather than another ring: the rings say the
+            machine is running, this says which machine. Drawn as a stroked
+            path so it reads at any size and inherits the accent with
+            everything else — no image file to go stale against the palette. */}
+        <path d="M96 78 L120 122 L144 78" className="core-mark" />
+        <path d="M107 78 L120 102 L133 78" className="core-mark core-mark-inner" />
       </svg>
     </div>
   );

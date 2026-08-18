@@ -35,7 +35,7 @@ export function workspaceRoot(): string {
   // working directory is worse than nothing there, so it keeps the old
   // behaviour rather than writing to the filesystem root.
   const home = homedir();
-  return home ? path.join(home, "Ascend", "workspace") : path.join(process.cwd(), "workspace");
+  return home ? path.join(home, "Vexora", "workspace") : path.join(process.cwd(), "workspace");
 }
 
 /** Nothing bigger than this is read back; a model cannot use it and it crowds out the exchange. */

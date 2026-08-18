@@ -77,7 +77,7 @@ export function WorkspaceSurface() {
       <Surface title="Workspace" summary="Your projects, host readings and a terminal.">
         <Empty title="Needs the desktop app">
           This screen reads your machine — project folders, disk and CPU, and a shell — which a
-          browser tab cannot do. Open Ascend AI from Launch-AscendAI and it appears here.
+          browser tab cannot do. Open Vexora AI from Launch-AscendAI and it appears here.
         </Empty>
       </Surface>
     );

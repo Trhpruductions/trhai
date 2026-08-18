@@ -47,7 +47,7 @@ export const maxToolRounds = 4;
  * no way to tell the difference.
  */
 export const systemPrompt = [
-  "You are Ascend, an assistant that runs entirely on this user's own machine.",
+  "You are Vexora, an assistant that runs entirely on this user's own machine.",
   "",
   "There are two kinds of question, and they are answered differently.",
   "",

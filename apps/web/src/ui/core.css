@@ -87,20 +87,41 @@
   animation: core-breathe 4s var(--ease) infinite;
 }
 
-.core-center {
-  fill: var(--accent);
-  fill-opacity: 0.16;
-  stroke: var(--accent-strong);
-  stroke-width: 1.5;
-  stroke-opacity: 0.6;
-}
 
-.core-seed {
-  fill: var(--accent-strong);
-  fill-opacity: 0.9;
-  filter: drop-shadow(0 0 10px var(--accent));
+/* ---- The mark -----------------------------------------------------------
+   Two nested chevrons, the Vexora V. The rings say the machine is running;
+   this says which machine.
+
+   `fill: none` is not optional. An SVG path fills by default, so without it
+   the chevron renders as a solid black triangle — which is exactly what it
+   did when an earlier edit removed this block and left the path with no CSS
+   at all. */
+
+.core-mark {
+  fill: none;
+  stroke: var(--accent-strong);
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 12px var(--accent));
   transform-origin: 120px 120px;
   animation: core-breathe 4s var(--ease) infinite;
+}
+
+.core-mark-inner {
+  stroke: var(--text);
+  stroke-width: 3;
+  stroke-opacity: 0.7;
+  filter: none;
+  animation-delay: 200ms;
+}
+
+.core-offline .core-mark { stroke: var(--text-faint); filter: none; }
+.core-offline .core-mark-inner { stroke: var(--text-faint); stroke-opacity: 0.45; }
+.core-thinking .core-mark { animation-duration: 1.1s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .core-mark { animation: none; }
 }
 
 /* ---- States ------------------------------------------------------------
@@ -113,21 +134,17 @@
 .core-thinking .ring-mid-spin { animation-duration: 3.2s; }
 .core-thinking .ring-inner { animation-duration: 8s; stroke-opacity: 0.7; }
 .core-thinking .core-pulse,
-.core-thinking .core-seed { animation-duration: 1.1s; }
 .core-thinking .tick { stroke-opacity: 0.4; }
 
 .core-offline .ring,
 .core-offline .tick,
-.core-offline .core-center { stroke: var(--text-faint); }
 .core-offline .core-pulse { fill: var(--text-faint); stroke: var(--text-faint); }
-.core-offline .core-seed { fill: var(--text-faint); filter: none; }
 .core-offline .core-bloom { opacity: 0.25; }
 .core-offline .core-sweep { opacity: 0; }
 .core-offline .ring-outer,
 .core-offline .ring-inner,
 .core-offline .ring-mid-spin,
 .core-offline .core-pulse,
-.core-offline .core-seed,
 .core-offline .core-bloom { animation-play-state: paused; }
 
 @keyframes core-spin {
@@ -147,7 +164,6 @@
   .ring-mid-spin,
   .core-sweep,
   .core-pulse,
-  .core-seed,
   .core-bloom {
     animation: none;
   }

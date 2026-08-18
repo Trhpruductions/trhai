@@ -6,38 +6,43 @@
  * Everything below is a fixed step on a scale, and components may only use
  * these — a raw hex or a stray 13px in a component is a bug, not a shortcut.
  *
- * The identity stays what it was: a dark HUD with a cyan signal colour. What
- * changes is discipline. One accent, used for the thing that matters on a
- * screen; glow reserved for live state rather than sprayed on every border.
+ * The identity is a dark HUD with a violet signal colour — Vexora. Discipline
+ * is the point: one accent, used for the thing that matters on a screen, with
+ * glow reserved for live state rather than sprayed on every border.
+ *
+ * The accent moved from cyan to violet with the rename. Cyan is the default
+ * colour of every dark developer tool ever made; violet is a choice, and the
+ * surfaces are tinted a few degrees towards it so the whole screen agrees
+ * rather than a blue-grey app wearing a purple highlight.
  */
 
 :root {
   /* ---- Surfaces ---------------------------------------------------------
      Four steps only. Deeper number means closer to the viewer, so a panel on a
      panel is always legible without a border doing the work. */
-  --surface-0: #05090f;
-  --surface-1: #0a121c;
-  --surface-2: #101c29;
-  --surface-3: #17283a;
+  --surface-0: #06040d;
+  --surface-1: #0c0918;
+  --surface-2: #150f27;
+  --surface-3: #1f1738;
 
   /* ---- Lines ------------------------------------------------------------ */
-  --line-subtle: rgba(120, 180, 220, 0.10);
-  --line: rgba(120, 190, 235, 0.18);
-  --line-strong: rgba(90, 220, 255, 0.42);
+  --line-subtle: rgba(170, 140, 255, 0.10);
+  --line: rgba(175, 150, 255, 0.20);
+  --line-strong: rgba(160, 110, 255, 0.50);
 
   /* ---- Text -------------------------------------------------------------
      Three weights of emphasis. Anything quieter than `--text-faint` is not
      worth rendering. */
-  --text: #e8f4ff;
-  --text-muted: #90aac4;
-  --text-faint: #5d7590;
+  --text: #f0ecff;
+  --text-muted: #a99cc8;
+  --text-faint: #6f6490;
 
   /* ---- Accent -----------------------------------------------------------
      One signal colour. `--accent-quiet` is for fills behind text, `--accent`
      for the text and strokes on top of them. */
-  --accent: #3ddcff;
-  --accent-strong: #7ceaff;
-  --accent-quiet: rgba(61, 220, 255, 0.12);
+  --accent: #a855f7;
+  --accent-strong: #c98bff;
+  --accent-quiet: rgba(168, 85, 247, 0.14);
 
   /* ---- Status -----------------------------------------------------------
      Reserved for outcomes. Never decorative. */
@@ -87,7 +92,7 @@
      command, an active connection. It never means "this is a box". */
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.45);
-  --glow: 0 0 18px rgba(61, 220, 255, 0.28);
+  --glow: 0 0 20px rgba(168, 85, 247, 0.38);
 
   /* ---- Motion -----------------------------------------------------------
      Two durations. Anything slower than `--slow` reads as lag. */

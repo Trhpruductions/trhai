@@ -789,7 +789,7 @@ async function renderInlineShell(reason: string, details?: string) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
 
   const fallbackPath = path.resolve(workspaceRoot, ".ascend-temp", "desktop-shell.html");
-  const html = `<!doctype html><html><head><meta charset="utf-8"/><title>Ascend AI Desktop</title><style>body{font-family:Segoe UI,sans-serif;background:#07111f;color:#f5f9ff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}div{max-width:640px;padding:24px;border:1px solid #2c4d74;border-radius:16px;background:rgba(3,12,24,.9)}h1{margin-top:0;font-size:28px}p{line-height:1.6}</style></head><body><div><h1>Ascend AI Desktop</h1><p>The desktop shell is running.</p><p>${reason}</p>${details ? `<p>${details}</p>` : ""}</div></body></html>`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"/><title>Vexora AI</title><style>body{font-family:Segoe UI,sans-serif;background:#07111f;color:#f5f9ff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}div{max-width:640px;padding:24px;border:1px solid #2c4d74;border-radius:16px;background:rgba(3,12,24,.9)}h1{margin-top:0;font-size:28px}p{line-height:1.6}</style></head><body><div><h1>Vexora AI</h1><p>The desktop shell is running.</p><p>${reason}</p>${details ? `<p>${details}</p>` : ""}</div></body></html>`;
 
   try {
     await mkdir(path.dirname(fallbackPath), { recursive: true });
@@ -936,7 +936,7 @@ function createWindow() {
     height: 860,
     minWidth: 980,
     minHeight: 680,
-    title: "Ascend AI Desktop",
+    title: "Vexora AI",
     autoHideMenuBar: true,
     show: false,
     backgroundColor: "#07111f",

@@ -254,6 +254,9 @@
    assembly rather than beside it. */
 .home-core-face {
   position: absolute;
+  /* Below the chevron rather than across it. The mark occupies the upper half
+     of the assembly, so a centred readout was written straight over it. */
+  transform: translateY(30px);
   /* The rings are bright behind the readout; this lifts the text off them
      without drawing a visible plate. */
   text-shadow: 0 0 12px var(--surface-0), 0 0 4px var(--surface-0);
@@ -351,4 +354,23 @@
   color: var(--text-muted);
   border-color: var(--line-subtle);
   background: var(--surface-1);
+}
+
+/* The wordmark. Wide letter-spacing and a two-weight split, so the name reads
+   as a mark rather than as another line of interface text. */
+.home-wordmark {
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  /* The tracking adds space after the final letter, which throws the centring
+     off by half a space; this pulls it back. */
+  text-indent: 0.42em;
+}
+
+.home-wordmark b {
+  font-weight: 700;
+  color: var(--accent-strong);
+  text-shadow: var(--glow);
 }

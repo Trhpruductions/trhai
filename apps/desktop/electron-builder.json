@@ -1,6 +1,6 @@
 {
   "appId": "com.trh.ascend.desktop",
-  "productName": "Ascend AI Desktop",
+  "productName": "Vexora AI",
   "asar": true,
   "directories": {
     "output": "release"
