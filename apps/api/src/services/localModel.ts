@@ -42,9 +42,17 @@ export function readLocalModelConfig(env: NodeJS.ProcessEnv = process.env): Loca
     baseUrl: (env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/+$/, ""),
     model: env.OLLAMA_MODEL ?? "llama3.2",
     modelFromEnv: Boolean(env.OLLAMA_MODEL),
-    // Local inference on CPU is slow. A short timeout would abandon a reply that
-    // was on its way, which reads as a broken feature rather than a slow one.
-    timeoutMs: Number(env.OLLAMA_TIMEOUT_MS ?? 45000)
+    // Local inference on CPU is slow, and the first request after a launch is
+    // slower still: the model has to be read into memory before it can answer
+    // anything, which for an 8B model is several gigabytes off disk.
+    //
+    // This was 45s, and that is comfortably enough once the model is warm and
+    // not enough for the cold start. The first question asked after opening the
+    // app was abandoned mid-load and fell back to "I don't have anything saved
+    // that answers that" — which reads as the feature being broken rather than
+    // as it still starting up. Measured: the same question failed on the first
+    // ask and answered in about a second on the second.
+    timeoutMs: Number(env.OLLAMA_TIMEOUT_MS ?? 180000)
   };
 }
 

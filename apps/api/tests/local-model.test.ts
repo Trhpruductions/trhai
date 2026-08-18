@@ -252,3 +252,17 @@ test("the config records whether the model was actually chosen", () => {
     true
   );
 });
+
+test("the default timeout allows for a cold model load", () => {
+  // 45s was enough for a warm model and not for the first request after a
+  // launch, where several gigabytes have to be read off disk first. That
+  // request was abandoned mid-load and reported as having no answer, which
+  // looks like a broken feature rather than a slow start.
+  const config = readLocalModelConfig({} as NodeJS.ProcessEnv);
+  assert.ok(config.timeoutMs >= 120000, `too short for a cold start: ${config.timeoutMs}ms`);
+});
+
+test("the timeout can still be set explicitly", () => {
+  const config = readLocalModelConfig({ OLLAMA_TIMEOUT_MS: "5000" } as NodeJS.ProcessEnv);
+  assert.equal(config.timeoutMs, 5000);
+});

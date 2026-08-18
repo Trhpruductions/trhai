@@ -662,6 +662,22 @@ async function modelStoreHasModels(): Promise<boolean> {
  *
  * Absence stays fine: with no Ollama installed this does nothing at all.
  */
+/**
+ * Ask a few times before believing a server has nothing to say.
+ *
+ * A freshly started Ollama accepts connections before it serves /api/tags, so
+ * one check is not evidence of anything.
+ */
+async function countServedModelsWithRetry(port: number, attempts = 5): Promise<number | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const served = await countServedModels(port);
+    if (served !== null) return served;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  return null;
+}
+
 async function ensureLocalModelServer(): Promise<string | null> {
   const port = Number(process.env.OLLAMA_PORT ?? 11434);
   const defaultUrl = `http://127.0.0.1:${port}`;
@@ -675,7 +691,15 @@ async function ensureLocalModelServer(): Promise<string | null> {
     // and holds the port. This used to return here on the strength of the port
     // alone, so the assistant silently lost a model that was installed all
     // along.
-    const served = await countServedModels(port);
+    // Asked more than once. waitForPort succeeds as soon as something accepts a
+    // TCP connection, which for Ollama is before it will answer /api/tags — so
+    // a single check returns "unknown" during the seconds after boot, and the
+    // app concluded the server was fine and used it. It then ran the whole
+    // session against a server with no models in it.
+    const served = await countServedModelsWithRetry(port);
+
+    // Still unknown after retrying: something is on the port that does not
+    // speak Ollama. Leave it alone rather than fighting whatever it is.
     if (served === null || served > 0) return defaultUrl;
     if (!(await modelStoreHasModels())) return defaultUrl;
 
