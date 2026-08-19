@@ -119,20 +119,12 @@ function firstLine(detail: string): string {
 }
 
 /**
- * Whether a reply is the model talking to itself rather than to the user.
+ * Whether a reply is the model's working rather than its answer.
  *
- * A smaller model sometimes ignores the tool interface and writes the calls it
- * wanted to make as JSON in the message body. That text is not an answer, and
- * it reached the user verbatim:
- *
- *   {"name": "search_document", "parameters": {"query": "..."}}
- *   {"name": "current_datetime", "parameters": {}}
- *
- * Executing it is not an option — it is a guess at an intention, in a shape
- * this code never agreed to accept, and running tools off it would be acting
- * on something the model did not actually ask for through the interface that
- * exists for exactly that. So it is refused, and the caller falls back to a
- * grounded answer, which is at least true and readable.
+ * True exactly when the text parses as calls this app advertises — the same
+ * check that decides whether to run them, so the two can never disagree about
+ * what a given reply is. Used to keep that JSON out of the answer even on the
+ * final round, where the calls themselves are not acted on.
  */
 export function looksLikeRawToolCalls(text: string): boolean {
   return parseTextToolCalls(text).length > 0;

@@ -7,6 +7,7 @@ import { Core } from "./Core";
 import { greetingFor } from "../greeting";
 import { Boot } from "./Boot";
 import { bootChecksFor } from "../bootChecks";
+import { Pulse } from "./Pulse";
 import "./conversation.css";
 
 // The home screen: a conversation.
@@ -159,7 +160,16 @@ export function Conversation({ personality, onBuildRequest }: Props) {
         setModel(payload?.data?.available ? payload?.data?.model ?? null : null);
         setPollCount((count) => count + 1);
       } catch {
-        if (!cancelled) { setOnline(false); setModel(null); setLinkMs(null); }
+        // Counted as a completed check too. A poll that failed is an event that
+        // happened, and without this the trace could never show a miss — it
+        // would simply stop advancing, which looks the same as the app being
+        // idle rather than the service being unreachable.
+        if (!cancelled) {
+          setOnline(false);
+          setModel(null);
+          setLinkMs(null);
+          setPollCount((count) => count + 1);
+        }
       }
     }
 
@@ -268,6 +278,9 @@ export function Conversation({ personality, onBuildRequest }: Props) {
                   <dd key={pollCount} className={`mono home-readout-live${linkMs === null ? " home-readout-absent" : ""}`}>
                     {linkMs === null ? "—" : `${linkMs}ms`}
                   </dd>
+                  {/* The last twenty round trips, one bar each. The only thing
+                      on this screen that accumulates rather than loops. */}
+                  <Pulse latest={linkMs} sampleId={pollCount} online={online} />
                 </div>
                 <div className="home-readout">
                   <dt className="label">Voice</dt>

@@ -1,0 +1,44 @@
+/* The link trace. Only tokens. */
+
+.pulse {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 22px;
+  opacity: 0.8;
+}
+
+.pulse-bar {
+  width: 3px;
+  min-height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  /* Each bar fades up as it arrives, so the strip advances visibly rather than
+     redrawing wholesale. One pass — it is a record, not an animation. */
+  animation: pulse-in 260ms var(--ease) both;
+}
+
+/* The newest bar is the live one, and reads that way. */
+.pulse-bar:last-child {
+  background: var(--accent-strong);
+  box-shadow: var(--glow);
+}
+
+.pulse-miss {
+  background: var(--warn);
+  box-shadow: none;
+}
+
+.pulse-offline .pulse-bar {
+  background: var(--text-faint);
+  box-shadow: none;
+}
+
+@keyframes pulse-in {
+  from { opacity: 0; transform: scaleY(0.4); transform-origin: bottom; }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-bar { animation: none; }
+}
