@@ -98,6 +98,36 @@ export const systemPrompt = [
   "Answer in plain prose. Be brief unless detail was asked for."
 ].join("\n");
 
+/**
+ * Tools that change something durable, as opposed to only looking something up.
+ *
+ * Their result text is forced into the final answer rather than trusted to
+ * survive the model's retelling — see the note on mutationResults for why.
+ */
+const mutatingTools = new Set([
+  "remember", "forget", "write_document", "update_document", "delete_document",
+  "pin_memory", "write_file", "build_app"
+]);
+
+/**
+ * Append what a mutating tool actually reported, unless the model's own text
+ * already contains it.
+ *
+ * Deliberately not "smart" about detecting a mismatch — trying to judge
+ * whether a paraphrase is faithful is exactly the kind of heuristic that is
+ * confidently wrong sometimes, which is the failure mode this exists to
+ * close. Always showing the real result costs an occasional repeated
+ * sentence when the model already relayed it correctly; that is a small
+ * price next to a build reported as something it was not.
+ */
+export function withMutationResults(text: string, mutationResults: string[]): string {
+  const missing = mutationResults.filter((result) => !text.includes(result));
+  if (missing.length === 0) return text;
+
+  const body = missing.join("\n\n");
+  return text ? `${text}\n\n${body}` : body;
+}
+
 /** Ollama's reply to a chat turn. */
 type ChatResponse = {
   message?: {
@@ -279,6 +309,19 @@ export async function runAgent(
 
   const toolsUsed: string[] = [];
 
+  // Results from tools that changed something, kept so they can survive into
+  // the final answer verbatim.
+  //
+  // Found live: asked to build a support-ticket tracker, build_app wrote a
+  // real project and verified it — "9/9 checks passed" — and the model's
+  // final answer described entirely different files that were never written
+  // (db.js, app.js, ticket-form.js) and never mentioned the verification at
+  // all. The build was correct; the report of it was invented. A model that
+  // narrates instead of relaying cannot be fixed by asking it more firmly, so
+  // the real result is now appended after whatever the model says, rather
+  // than trusted to survive its retelling.
+  const mutationResults: string[] = [];
+
   for (let round = 0; round <= maxToolRounds; round += 1) {
     // On the last round the tools are withheld, which forces an answer rather
     // than a fifth request for a search the model is not going to conclude on.
@@ -355,7 +398,7 @@ export async function runAgent(
       }
       return {
         ok: true,
-        text,
+        text: withMutationResults(text, mutationResults),
         model: typeof response.model === "string" ? response.model : config.model,
         toolsUsed
       };
@@ -370,11 +413,16 @@ export async function runAgent(
     });
 
     for (const call of calls) {
-      const result = runTool(call, context);
+      // Awaited in sequence rather than run in parallel. Two calls in one
+      // round are rare, and running them concurrently would let a build and a
+      // write race for the same workspace file with no ordering guarantee.
+      const result = await runTool(call, context);
       toolsUsed.push(call.name);
       // The failure text goes back unchanged. "Nothing matches X" is what stops
       // the model inventing an answer; softening it here would undo that.
       messages.push({ role: "tool", content: result.content });
+
+      if (mutatingTools.has(call.name)) mutationResults.push(result.content);
     }
   }
 

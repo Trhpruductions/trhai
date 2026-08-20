@@ -250,10 +250,10 @@ test("the system prompt separates the user's facts from general knowledge", () =
   assert.match(systemPrompt, /topic is unknowable/);
 });
 
-test("every advertised tool is actually implemented", () => {
+test("every advertised tool is actually implemented", async () => {
   // A tool the model can see but cannot call is a promise the app breaks.
   for (const definition of toolDefinitions) {
-    const result = runTool({ name: definition.function.name, arguments: {} }, context);
+    const result = await runTool({ name: definition.function.name, arguments: {} }, context);
     assert.ok(
       !/There is no tool called/.test(result.content),
       `${definition.function.name} is advertised but not implemented`
@@ -261,16 +261,16 @@ test("every advertised tool is actually implemented", () => {
   }
 });
 
-test("a save with nowhere to write reports that nothing was stored", () => {
-  const result = runTool({ name: "remember", arguments: { fact: "I like tea." } }, context);
+test("a save with nowhere to write reports that nothing was stored", async () => {
+  const result = await runTool({ name: "remember", arguments: { fact: "I like tea." } }, context);
 
   assert.equal(result.ok, false);
   assert.match(result.content, /nothing was saved/);
 });
 
-test("a successful save says what was saved", () => {
+test("a successful save says what was saved", async () => {
   const saved: string[] = [];
-  const result = runTool(
+  const result = await runTool(
     { name: "remember", arguments: { fact: "I like tea." } },
     { ...context, saveMemory: (fact) => { saved.push(fact); return true; } }
   );
@@ -279,15 +279,15 @@ test("a successful save says what was saved", () => {
   assert.deepEqual(saved, ["I like tea."]);
 });
 
-test("a document result carries the document it came from", () => {
-  const result = runTool({ name: "search_documents", arguments: { query: "rollback procedure" } }, context);
+test("a document result carries the document it came from", async () => {
+  const result = await runTool({ name: "search_documents", arguments: { query: "rollback procedure" } }, context);
 
   assert.equal(result.ok, true);
   assert.match(result.content, /Runbook/);
 });
 
-test("the clock is the real one on this machine", () => {
-  const result = runTool({ name: "current_datetime", arguments: {} }, context);
+test("the clock is the real one on this machine", async () => {
+  const result = await runTool({ name: "current_datetime", arguments: {} }, context);
 
   assert.equal(result.ok, true);
   assert.match(result.content, /2026/);
@@ -303,24 +303,24 @@ const richContext: ToolContext = {
   ]
 };
 
-test("listing memories returns what is actually stored", () => {
-  const result = runTool({ name: "list_memories", arguments: {} }, richContext);
+test("listing memories returns what is actually stored", async () => {
+  const result = await runTool({ name: "list_memories", arguments: {} }, richContext);
 
   assert.equal(result.ok, true);
   assert.match(result.content, /Postgres 16/);
 });
 
-test("listing memories on an empty store says it is empty", () => {
-  const result = runTool({ name: "list_memories", arguments: {} }, { ...richContext, memories: [] });
+test("listing memories on an empty store says it is empty", async () => {
+  const result = await runTool({ name: "list_memories", arguments: {} }, { ...richContext, memories: [] });
 
   assert.equal(result.ok, false);
   assert.match(result.content, /nothing saved in memory/);
 });
 
-test("forget matches the stored wording rather than trusting an id", () => {
+test("forget matches the stored wording rather than trusting an id", async () => {
   // The model repeats text back; an id it invented would delete the wrong thing.
   const removed: string[] = [];
-  const result = runTool(
+  const result = await runTool(
     { name: "forget", arguments: { fact: "The billing database is Postgres 16." } },
     { ...richContext, forgetMemory: (id) => { removed.push(id); return true; } }
   );
@@ -329,9 +329,9 @@ test("forget matches the stored wording rather than trusting an id", () => {
   assert.deepEqual(removed, ["m1"]);
 });
 
-test("forget deletes nothing when nothing matches", () => {
+test("forget deletes nothing when nothing matches", async () => {
   const removed: string[] = [];
-  const result = runTool(
+  const result = await runTool(
     { name: "forget", arguments: { fact: "my shoe size" } },
     { ...richContext, forgetMemory: (id) => { removed.push(id); return true; } }
   );
@@ -341,27 +341,27 @@ test("forget deletes nothing when nothing matches", () => {
   assert.deepEqual(removed, [], "nothing may be deleted on a miss");
 });
 
-test("documents can be listed and read", () => {
-  const listed = runTool({ name: "list_documents", arguments: {} }, richContext);
+test("documents can be listed and read", async () => {
+  const listed = await runTool({ name: "list_documents", arguments: {} }, richContext);
   assert.equal(listed.ok, true);
   assert.match(listed.content, /Runbook/);
 
-  const read = runTool({ name: "read_document", arguments: { title: "Runbook" } }, richContext);
+  const read = await runTool({ name: "read_document", arguments: { title: "Runbook" } }, richContext);
   assert.equal(read.ok, true);
   assert.match(read.content, /rollback\.sh/);
 });
 
-test("a missing document is refused with the titles that do exist", () => {
+test("a missing document is refused with the titles that do exist", async () => {
   // So the model can correct itself next round instead of guessing again.
-  const result = runTool({ name: "read_document", arguments: { title: "Payroll" } }, richContext);
+  const result = await runTool({ name: "read_document", arguments: { title: "Payroll" } }, richContext);
 
   assert.equal(result.ok, false);
   assert.match(result.content, /Runbook/);
   assert.match(result.content, /Onboarding/);
 });
 
-test("a long document is truncated and says so", () => {
-  const result = runTool(
+test("a long document is truncated and says so", async () => {
+  const result = await runTool(
     { name: "read_document", arguments: { title: "Long" } },
     { ...richContext, documents: [{ id: "d3", title: "Long", body: "x".repeat(9000) }] }
   );
@@ -370,9 +370,9 @@ test("a long document is truncated and says so", () => {
   assert.match(result.content, /truncated/);
 });
 
-test("writing a document reports what was actually written", () => {
+test("writing a document reports what was actually written", async () => {
   const written: Array<[string, string]> = [];
-  const result = runTool(
+  const result = await runTool(
     { name: "write_document", arguments: { title: "Notes", content: "Some notes." } },
     { ...richContext, saveDocument: (title, body) => { written.push([title, body]); return true; } }
   );
@@ -381,8 +381,8 @@ test("writing a document reports what was actually written", () => {
   assert.deepEqual(written, [["Notes", "Some notes."]]);
 });
 
-test("writing with nowhere to save reports that nothing was written", () => {
-  const result = runTool(
+test("writing with nowhere to save reports that nothing was written", async () => {
+  const result = await runTool(
     { name: "write_document", arguments: { title: "Notes", content: "Some notes." } },
     richContext
   );
@@ -391,21 +391,21 @@ test("writing with nowhere to save reports that nothing was written", () => {
   assert.match(result.content, /nothing was written/);
 });
 
-test("the calculator is exact where the model is not", () => {
-  const result = runTool({ name: "calculate", arguments: { expression: "(12.5 * 3) + 7" } }, richContext);
+test("the calculator is exact where the model is not", async () => {
+  const result = await runTool({ name: "calculate", arguments: { expression: "(12.5 * 3) + 7" } }, richContext);
 
   assert.equal(result.ok, true);
   assert.match(result.content, /44\.5/);
 });
 
-test("the calculator refuses code rather than running it", () => {
-  const result = runTool({ name: "calculate", arguments: { expression: "process.exit(1)" } }, richContext);
+test("the calculator refuses code rather than running it", async () => {
+  const result = await runTool({ name: "calculate", arguments: { expression: "process.exit(1)" } }, richContext);
 
   assert.equal(result.ok, false);
 });
 
-test("plan_app describes what would be built", () => {
-  const result = runTool(
+test("plan_app describes what would be built", async () => {
+  const result = await runTool(
     { name: "plan_app", arguments: { description: "an app to track invoices with a client name, amount and due date" } },
     richContext
   );
@@ -429,9 +429,9 @@ const editContext: ToolContext = {
   ]
 };
 
-test("updating a document replaces the one that exists", () => {
+test("updating a document replaces the one that exists", async () => {
   const updates: Array<[string, string]> = [];
-  const result = runTool(
+  const result = await runTool(
     { name: "update_document", arguments: { title: "Runbook", content: "New procedure." } },
     { ...editContext, updateDocument: (id, body) => { updates.push([id, body]); return true; } }
   );
@@ -440,11 +440,11 @@ test("updating a document replaces the one that exists", () => {
   assert.deepEqual(updates, [["d1", "New procedure."]]);
 });
 
-test("updating a document that does not exist creates nothing", () => {
+test("updating a document that does not exist creates nothing", async () => {
   // A model that misremembers a title would otherwise silently make a second
   // document instead of editing the one the user meant.
   const updates: string[] = [];
-  const result = runTool(
+  const result = await runTool(
     { name: "update_document", arguments: { title: "Payroll", content: "x" } },
     { ...editContext, updateDocument: (id) => { updates.push(id); return true; } }
   );
@@ -454,9 +454,9 @@ test("updating a document that does not exist creates nothing", () => {
   assert.match(result.content, /Runbook/);
 });
 
-test("deleting a document reports what was deleted", () => {
+test("deleting a document reports what was deleted", async () => {
   const deleted: string[] = [];
-  const result = runTool(
+  const result = await runTool(
     { name: "delete_document", arguments: { title: "Onboarding" } },
     { ...editContext, deleteDocument: (id) => { deleted.push(id); return true; } }
   );
@@ -465,9 +465,9 @@ test("deleting a document reports what was deleted", () => {
   assert.deepEqual(deleted, ["d2"]);
 });
 
-test("deleting a document that does not exist deletes nothing", () => {
+test("deleting a document that does not exist deletes nothing", async () => {
   const deleted: string[] = [];
-  const result = runTool(
+  const result = await runTool(
     { name: "delete_document", arguments: { title: "Nonsense" } },
     { ...editContext, deleteDocument: (id) => { deleted.push(id); return true; } }
   );
@@ -476,9 +476,9 @@ test("deleting a document that does not exist deletes nothing", () => {
   assert.deepEqual(deleted, []);
 });
 
-test("pinning marks the matching memory", () => {
+test("pinning marks the matching memory", async () => {
   const pins: Array<[string, boolean]> = [];
-  const result = runTool(
+  const result = await runTool(
     { name: "pin_memory", arguments: { fact: "The billing database is Postgres 16." } },
     { ...editContext, pinMemory: (id, pinned) => { pins.push([id, pinned]); return true; } }
   );
@@ -487,12 +487,12 @@ test("pinning marks the matching memory", () => {
   assert.deepEqual(pins, [["m1", true]]);
 });
 
-test("pinning defaults to pinning, and unpins only when asked", () => {
+test("pinning defaults to pinning, and unpins only when asked", async () => {
   const pins: boolean[] = [];
   const pinMemory = (_id: string, pinned: boolean) => { pins.push(pinned); return true; };
 
-  runTool({ name: "pin_memory", arguments: { fact: "Postgres 16" } }, { ...editContext, pinMemory });
-  runTool(
+  await runTool({ name: "pin_memory", arguments: { fact: "Postgres 16" } }, { ...editContext, pinMemory });
+  await runTool(
     { name: "pin_memory", arguments: { fact: "Postgres 16", pinned: false } },
     { ...editContext, pinMemory }
   );
@@ -500,9 +500,9 @@ test("pinning defaults to pinning, and unpins only when asked", () => {
   assert.deepEqual(pins, [true, false]);
 });
 
-test("pinning something that is not saved marks nothing", () => {
+test("pinning something that is not saved marks nothing", async () => {
   const pins: string[] = [];
-  const result = runTool(
+  const result = await runTool(
     { name: "pin_memory", arguments: { fact: "my shoe size" } },
     { ...editContext, pinMemory: (id) => { pins.push(id); return true; } }
   );
@@ -511,10 +511,10 @@ test("pinning something that is not saved marks nothing", () => {
   assert.deepEqual(pins, []);
 });
 
-test("the conversation can be searched for something never saved", () => {
+test("the conversation can be searched for something never saved", async () => {
   // "halifax" was said, not remembered. Without this the assistant cannot
   // answer about it once it falls out of the context window.
-  const result = runTool(
+  const result = await runTool(
     { name: "search_conversation", arguments: { query: "staging server name" } },
     editContext
   );
@@ -523,8 +523,8 @@ test("the conversation can be searched for something never saved", () => {
   assert.match(result.content, /halifax/);
 });
 
-test("a conversation search says plainly when nothing matches", () => {
-  const result = runTool(
+test("a conversation search says plainly when nothing matches", async () => {
+  const result = await runTool(
     { name: "search_conversation", arguments: { query: "pension scheme" } },
     editContext
   );
@@ -533,8 +533,8 @@ test("a conversation search says plainly when nothing matches", () => {
   assert.match(result.content, /Nothing earlier in this conversation matches/);
 });
 
-test("an empty conversation says so rather than looking like a miss", () => {
-  const result = runTool(
+test("an empty conversation says so rather than looking like a miss", async () => {
+  const result = await runTool(
     { name: "search_conversation", arguments: { query: "anything" } },
     { ...editContext, conversation: [] }
   );
@@ -543,8 +543,8 @@ test("an empty conversation says so rather than looking like a miss", () => {
   assert.match(result.content, /Nothing has been said/);
 });
 
-test("days between two dates is exact", () => {
-  const result = runTool(
+test("days between two dates is exact", async () => {
+  const result = await runTool(
     { name: "days_between", arguments: { from: "2026-08-17", to: "2026-08-24" } },
     editContext
   );
@@ -553,9 +553,9 @@ test("days between two dates is exact", () => {
   assert.match(result.content, /7 days after/);
 });
 
-test("days between resolves 'today' against the machine clock", () => {
+test("days between resolves 'today' against the machine clock", async () => {
   // The fixed clock in this context is 17 August 2026.
-  const result = runTool(
+  const result = await runTool(
     { name: "days_between", arguments: { from: "today", to: "2026-08-27" } },
     editContext
   );
@@ -564,8 +564,8 @@ test("days between resolves 'today' against the machine clock", () => {
   assert.match(result.content, /10 days after/);
 });
 
-test("shifting a date forwards", () => {
-  const result = runTool(
+test("shifting a date forwards", async () => {
+  const result = await runTool(
     { name: "shift_date", arguments: { from: "2026-08-17", days: 90 } },
     editContext
   );
@@ -574,8 +574,8 @@ test("shifting a date forwards", () => {
   assert.match(result.content, /November/);
 });
 
-test("a date the tool cannot read is refused, not guessed", () => {
-  const result = runTool(
+test("a date the tool cannot read is refused, not guessed", async () => {
+  const result = await runTool(
     { name: "days_between", arguments: { from: "sometime", to: "2026-08-17" } },
     editContext
   );
@@ -587,11 +587,11 @@ test("a date the tool cannot read is refused, not guessed", () => {
 
 // ---- Building, and files on disk ----------------------------------------
 
-test("every advertised tool is still implemented", () => {
+test("every advertised tool is still implemented", async () => {
   // Re-asserted after each batch: a tool the model can see but cannot call is
   // a promise the app breaks.
   for (const definition of toolDefinitions) {
-    const result = runTool({ name: definition.function.name, arguments: {} }, editContext);
+    const result = await runTool({ name: definition.function.name, arguments: {} }, editContext);
     assert.ok(
       !/There is no tool called/.test(result.content),
       `${definition.function.name} is advertised but not implemented`
@@ -599,9 +599,12 @@ test("every advertised tool is still implemented", () => {
   }
 });
 
-test("build_app writes a real, runnable project to disk", () => {
-  // The whole point of this tool: not a description of an app, an app.
-  const result = runTool(
+test("build_app writes a real, runnable project to disk, and verifies it runs", async () => {
+  // The whole point of this tool: not a description of an app, an app — and
+  // not just written, but actually run and checked before being reported as
+  // done. Every generated project ships its own smoke test with zero
+  // dependencies, and build_app now runs it rather than trusting the write.
+  const result = await runTool(
     {
       name: "build_app",
       arguments: { description: "an app to track invoices with a client name, amount and due date" }
@@ -610,8 +613,8 @@ test("build_app writes a real, runnable project to disk", () => {
   );
 
   assert.equal(result.ok, true, result.content);
-  assert.match(result.content, /package\.json/);
-  assert.match(result.content, /server\.js/);
+  assert.match(result.content, /verified it/);
+  assert.match(result.content, /\d+\/\d+ checks passed/);
   assert.match(result.content, /npm install/);
 
   // Read one back off disk rather than trusting the report. A tool that says
@@ -624,23 +627,24 @@ test("build_app writes a real, runnable project to disk", () => {
   assert.match(server, /createServer|listen/);
 });
 
-test("a build reports nothing when there is nothing to build", () => {
-  const result = runTool({ name: "build_app", arguments: { description: "" } }, editContext);
+
+test("a build reports nothing when there is nothing to build", async () => {
+  const result = await runTool({ name: "build_app", arguments: { description: "" } }, editContext);
 
   assert.equal(result.ok, false);
   assert.match(result.content, /needs a description/);
 });
 
-test("read_file refuses a path outside the workspace", () => {
+test("read_file refuses a path outside the workspace", async () => {
   // The tool layer must not be a way around the containment check.
-  const result = runTool({ name: "read_file", arguments: { path: "../../etc/passwd" } }, editContext);
+  const result = await runTool({ name: "read_file", arguments: { path: "../../etc/passwd" } }, editContext);
 
   assert.equal(result.ok, false);
   assert.match(result.content, /outside the workspace/);
 });
 
-test("write_file refuses a path outside the workspace and writes nothing", () => {
-  const result = runTool(
+test("write_file refuses a path outside the workspace and writes nothing", async () => {
+  const result = await runTool(
     { name: "write_file", arguments: { path: "../escape.txt", content: "x" } },
     editContext
   );
@@ -649,8 +653,8 @@ test("write_file refuses a path outside the workspace and writes nothing", () =>
   assert.match(result.content, /Nothing was written/);
 });
 
-test("list_files refuses to list outside the workspace", () => {
-  const result = runTool({ name: "list_files", arguments: { directory: ".." } }, editContext);
+test("list_files refuses to list outside the workspace", async () => {
+  const result = await runTool({ name: "list_files", arguments: { directory: ".." } }, editContext);
 
   assert.equal(result.ok, false);
   assert.match(result.content, /outside the workspace/);

@@ -2,6 +2,7 @@ import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.j
 import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
 import { describeDifference, shiftDate } from "./dateMath.js";
 import { generateProject, planProject, slugify } from "@ascend/shared";
+import { verifyBuiltProject } from "./buildVerification.js";
 import {
   listWorkspace,
   readWorkspaceFile,
@@ -349,8 +350,9 @@ export const toolDefinitions: ToolDefinition[] = [
       name: "build_app",
       description:
         "Actually build a small working app from a plain description and write it to the "
-        + "workspace. It produces a runnable REST server with a web UI and smoke tests. Use "
-        + "this when the user wants something built, not just described.",
+        + "workspace. It produces a runnable REST server with a web UI, then starts it and runs "
+        + "its own tests before reporting back, so the result you see is verified, not assumed. "
+        + "Use this when the user wants something built, not just described.",
       parameters: {
         type: "object",
         properties: {
@@ -468,7 +470,7 @@ function findMemory(context: ToolContext, fact: string) {
     ?? context.memories.find((memory) => memory.body.toLowerCase().includes(wanted));
 }
 
-export function runTool(call: ToolCall, context: ToolContext): ToolResult {
+export async function runTool(call: ToolCall, context: ToolContext): Promise<ToolResult> {
   switch (call.name) {
     case "search_memory": {
       const query = requireString(call.arguments.query);
@@ -783,11 +785,37 @@ export function runTool(call: ToolCall, context: ToolContext): ToolResult {
         written.push(result.path);
       }
 
+      // Written is not the same as working. Every generated project ships its
+      // own smoke test with zero dependencies, so it can be run immediately
+      // rather than trusted, rather than merely reported as built. Reporting
+      // outcomes rather than intentions is the rule everywhere else in this
+      // file; a build is the one action where skipping it is easiest to miss.
+      const verification = await verifyBuiltProject(folder);
+      const runLine = "Run it with: cd " + folder + " && npm install && npm start";
+
+      if (!verification.ran) {
+        return {
+          ok: true,
+          content: "Built \"" + spec.title + "\" in the workspace at " + folder + "/ with "
+            + written.length + " files. Could not verify it automatically: " + verification.reason
+            + "\n\n" + runLine
+        };
+      }
+
+      if (!verification.passed) {
+        return {
+          ok: false,
+          content: "Built \"" + spec.title + "\" at " + folder + "/, but it failed its own checks "
+            + "and is not working:\n" + verification.output
+            + "\n\nThe files are on disk but the app should not be reported as done."
+        };
+      }
+
       return {
         ok: true,
-        content: `Built "${spec.title}" in the workspace at ${folder}/ with ${written.length} files:`
-          + `\n${written.map((file) => `- ${file}`).join("\n")}`
-          + `\n\nRun it with: cd ${folder} && npm install && npm start`
+        content: "Built \"" + spec.title + "\" in the workspace at " + folder + "/ with "
+          + written.length + " files, and verified it: " + verification.output
+          + "\n\n" + runLine
       };
     }
 
