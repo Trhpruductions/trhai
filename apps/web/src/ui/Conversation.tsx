@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useAssistant, type ChatMessage } from "../state/useAssistant";
 import { personalityById, resolvePersonality, type PersonalityId } from "../personalities";
-import { readEvents } from "../localCalendar";
+import { formatRelative, readEvents, upcomingEvents } from "../localCalendar";
+import { readFlow } from "../automation";
+import { allAgents, isInstalled, readMarketplaceState } from "../marketplace";
 import { webEnv } from "../env";
 import { Core } from "./Core";
 import { greetingFor } from "../greeting";
@@ -116,7 +118,11 @@ function Turn({ message, onBuildRequest }: { message: ChatMessage; onBuildReques
 export function Conversation({ personality, onBuildRequest }: Props) {
   const { messages, status, restored, send, clear, sessionId } = useAssistant();
   const [draft, setDraft] = useState("");
-  const [stats, setStats] = useState<Array<{ label: string; value: string }>>([]);
+  const [stats, setStats] = useState<Array<{ label: string; value: string; title?: string }>>([]);
+  // Bumped on every completed stats refresh, same trick as pollCount for the
+  // link reading: a React key that changes is what makes a CSS entrance
+  // animation replay on a value that was already there.
+  const [statsPollCount, setStatsPollCount] = useState(0);
   const [online, setOnline] = useState<boolean | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const [linkMs, setLinkMs] = useState<number | null>(null);
@@ -178,14 +184,15 @@ export function Conversation({ personality, onBuildRequest }: Props) {
     return () => { cancelled = true; window.clearInterval(poll); };
   }, [messages.length]);
 
-  // Real counts for the opening screen, read once when there is nothing to show.
-  // They are what this app is holding, so an empty conversation still says
-  // something true about the state of the system.
+  // What the app is actually holding, read while there is nothing else to
+  // show. Polled rather than fetched once, on the same reasoning as the
+  // reachability check above: a front page that only ever shows the moment
+  // you opened it is not a live one, it is a screenshot of one.
   useEffect(() => {
     if (messages.length > 0) return;
     let cancelled = false;
 
-    (async () => {
+    async function sample() {
       const ask = async (path: string, key: string) => {
         try {
           const response = await fetch(`${webEnv.apiBaseUrl}${path}?sessionId=${encodeURIComponent(sessionId)}`);
@@ -202,7 +209,13 @@ export function Conversation({ personality, onBuildRequest }: Props) {
         ask("/v1/knowledge", "documents")
       ]);
 
-      const events = readEvents(window.localStorage, "ascend.calendar.events.v1").length;
+      const events = readEvents(window.localStorage, "ascend.calendar.events.v1");
+      const next = upcomingEvents(events, new Date(), 1)[0] ?? null;
+
+      const flow = readFlow(window.localStorage, "ascend.automation.flow.v1");
+      const marketplace = readMarketplaceState(window.localStorage, "ascend.marketplace.v1");
+      const installedAgents = allAgents().filter((agent) => isInstalled(marketplace, agent.id)).length;
+
       if (cancelled) return;
 
       // Singular when there is one of something: "1 documents" is the kind of
@@ -212,12 +225,25 @@ export function Conversation({ personality, onBuildRequest }: Props) {
       setStats([
         { label: plural(memories, "remembered", "remembered"), value: String(memories) },
         { label: plural(documents, "document", "documents"), value: String(documents) },
-        { label: plural(events, "event", "events"), value: String(events) }
+        {
+          label: plural(events.length, "event", "events"),
+          value: String(events.length),
+          title: next ? `Next: ${next.title} (${formatRelative(next.startsAt, new Date())})` : undefined
+        },
+        {
+          label: "automation",
+          value: flow ? String(flow.nodes.length) : "0",
+          title: flow ? `${flow.name}: ${flow.nodes.length} step${flow.nodes.length === 1 ? "" : "s"}` : "No flow built yet"
+        },
+        { label: plural(installedAgents, "agent", "agents"), value: String(installedAgents) }
       ]);
       setStoreChecked(true);
-    })();
+      setStatsPollCount((count) => count + 1);
+    }
 
-    return () => { cancelled = true; };
+    void sample();
+    const poll = window.setInterval(sample, 12_000);
+    return () => { cancelled = true; window.clearInterval(poll); };
   }, [messages.length, sessionId]);
 
   // Follow the conversation as it grows, including while a reply streams in.
@@ -315,9 +341,11 @@ export function Conversation({ personality, onBuildRequest }: Props) {
                   These are counts it read, not figures it composed. */}
               <dl className="home-rail home-rail-right">
                 {stats.map((stat) => (
-                  <div key={stat.label} className="home-readout">
+                  <div key={stat.label} className="home-readout" title={stat.title}>
                     <dt className="label">{stat.label}</dt>
-                    <dd className="mono home-readout-count">{stat.value}</dd>
+                    <dd key={statsPollCount} className="mono home-readout-count home-readout-count-live">
+                      {stat.value}
+                    </dd>
                   </div>
                 ))}
               </dl>
