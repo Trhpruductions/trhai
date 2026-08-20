@@ -128,6 +128,29 @@ export function withMutationResults(text: string, mutationResults: string[]): st
   return text ? `${text}\n\n${body}` : body;
 }
 
+/**
+ * build_app writes files and runs a one-off smoke test on a random port,
+ * then stops — nothing is left listening. Caught live: build_app correctly
+ * wrote and verified "Support Desk", 9/9 checks passed, and the model's own
+ * sentence on top of that read "The Support Desk is now live at
+ * http://localhost:3000" — a port nothing was listening on. build_app's own
+ * result text already says how to run it; this only removes the invented
+ * claim that it is running already.
+ *
+ * Scoped to present-tense claims ("is/'s [now] live/up/running ... http://")
+ * so a genuine forward-looking "run it and it will be available at ..." is
+ * left alone.
+ */
+export function withoutFabricatedLiveClaims(text: string): string {
+  if (!text) return text;
+  const falseLiveClaim =
+    /\b(?:is|are|'s)\s+(?:now\s+|already\s+)?(?:live|up|running|deployed|accessible|available)\b[^.!?]*https?:\/\//i;
+  const kept = text
+    .split(/(?<=[.!?])\s+/)
+    .filter((sentence) => !falseLiveClaim.test(sentence));
+  return kept.join(" ").trim();
+}
+
 /** Ollama's reply to a chat turn. */
 type ChatResponse = {
   message?: {
@@ -396,9 +419,10 @@ export async function runAgent(
           ? { ok: false, reason: "The assistant kept searching without reaching an answer.", toolsUsed }
           : { ok: false, reason: "The local model returned an empty reply.", toolsUsed };
       }
+      const cleanedText = toolsUsed.includes("build_app") ? withoutFabricatedLiveClaims(text) : text;
       return {
         ok: true,
-        text: withMutationResults(text, mutationResults),
+        text: withMutationResults(cleanedText, mutationResults),
         model: typeof response.model === "string" ? response.model : config.model,
         toolsUsed
       };

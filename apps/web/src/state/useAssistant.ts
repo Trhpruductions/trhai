@@ -146,6 +146,14 @@ export function useAssistant() {
         at: Date.now(),
         strategy: "error"
       }]);
+    } finally {
+      // Without this, the latch that exists to block a same-tick double
+      // submit instead blocks every submit after the first: tryAcquire sets
+      // busy permanently on success, and nothing else ever clears it. Caught
+      // live — a second, unrelated message typed after the first reply had
+      // already finished did nothing at all, with no error shown, because the
+      // draft still cleared on click even though send() returned immediately.
+      latch.current.release();
     }
   }, [messages]);
 
