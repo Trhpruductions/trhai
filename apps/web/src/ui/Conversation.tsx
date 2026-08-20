@@ -25,6 +25,45 @@ type Props = {
 };
 
 /**
+ * A memory audit entry, as /v1/assist/memory already returns it.
+ *
+ * Not new tracking — this log has existed since memory controls shipped, it
+ * was just never shown anywhere. It is the one real "what did this actually
+ * do recently" record in the app.
+ */
+type AuditEntry = {
+  id: string;
+  action: "recorded" | "pinned" | "unpinned" | "relabeled" | "forgotten" | "cleared";
+  detail: string;
+  createdAt: string;
+};
+
+/** Always a past moment, unlike localCalendar's formatRelative which is future-only. */
+function timeAgo(iso: string, now: Date): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+
+  const minutes = Math.round((now.getTime() - then) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+const auditActionLabel: Record<AuditEntry["action"], string> = {
+  recorded: "Remembered",
+  pinned: "Pinned",
+  unpinned: "Unpinned",
+  relabeled: "Renamed",
+  forgotten: "Forgot",
+  cleared: "Cleared"
+};
+
+/**
  * How a reply was produced, in the user's words rather than the code's.
  *
  * Shown on every assistant turn. The whole app is built on not implying
@@ -147,6 +186,7 @@ export function Conversation({ personality, onBuildRequest }: Props) {
   const { messages, status, restored, send, clear, sessionId } = useAssistant();
   const [draft, setDraft] = useState("");
   const [stats, setStats] = useState<Array<{ label: string; value: string; title?: string }>>([]);
+  const [recentActivity, setRecentActivity] = useState<AuditEntry[]>([]);
   // Bumped on every completed stats refresh, same trick as pollCount for the
   // link reading: a React key that changes is what makes a CSS entrance
   // animation replay on a value that was already there.
@@ -232,10 +272,16 @@ export function Conversation({ personality, onBuildRequest }: Props) {
         }
       };
 
-      const [memories, documents] = await Promise.all([
-        ask("/v1/assist/memory", "memories"),
-        ask("/v1/knowledge", "documents")
-      ]);
+      // Fetched directly rather than through ask(): the audit trail it also
+      // carries is the only real "what did this actually do recently" record
+      // in the app, and ask() only ever kept the count.
+      const memoryPayload = await fetch(
+        `${webEnv.apiBaseUrl}/v1/assist/memory?sessionId=${encodeURIComponent(sessionId)}`
+      ).then((response) => (response.ok ? response.json() : null)).catch(() => null);
+      const memories = (memoryPayload?.data?.memories ?? []).length as number;
+      const audit = (memoryPayload?.data?.audit ?? []) as AuditEntry[];
+
+      const documents = await ask("/v1/knowledge", "documents");
 
       const events = readEvents(window.localStorage, "ascend.calendar.events.v1");
       const next = upcomingEvents(events, new Date(), 1)[0] ?? null;
@@ -265,6 +311,7 @@ export function Conversation({ personality, onBuildRequest }: Props) {
         },
         { label: plural(installedAgents, "agent", "agents"), value: String(installedAgents) }
       ]);
+      setRecentActivity(audit.slice(0, 5));
       setStoreChecked(true);
       setStatsPollCount((count) => count + 1);
     }
@@ -435,6 +482,24 @@ export function Conversation({ personality, onBuildRequest }: Props) {
                 </button>
               ))}
             </div>
+
+            {/* Absent rather than empty when there is nothing yet — a fresh
+                session has no history to show, and saying so here would just
+                be noise under a screen that already says as much. */}
+            {recentActivity.length > 0 ? (
+              <div className="home-activity">
+                <h3 className="label home-activity-head">Recent activity</h3>
+                <ul className="home-activity-list">
+                  {recentActivity.map((entry) => (
+                    <li key={entry.id} className="home-activity-row">
+                      <span className="chip chip-tool">{auditActionLabel[entry.action]}</span>
+                      <span className="home-activity-detail">{entry.detail}</span>
+                      <span className="home-activity-time mono">{timeAgo(entry.createdAt, clock)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         ) : (
           messages.map((message) => (

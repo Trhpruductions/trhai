@@ -454,3 +454,58 @@
   color: var(--text-faint);
   text-indent: 0.28em;
 }
+
+/* ---- Recent activity -----------------------------------------------------
+   The one real "what did this actually do" record in the app — the memory
+   audit trail, which existed before this screen did and was never shown
+   anywhere. Last in the settle sequence: the greeting and suggestions invite
+   the next action, this only looks back at the last few. */
+
+.home-activity {
+  width: 100%;
+  max-width: 60ch;
+  margin: 0 auto;
+  text-align: left;
+  animation: home-settle 620ms var(--ease) 260ms both;
+}
+
+.home-activity-head {
+  margin: 0 0 var(--space-2);
+  color: var(--text-faint);
+}
+
+.home-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-activity-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.home-activity-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.home-activity-time {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-activity { animation: none; }
+}
