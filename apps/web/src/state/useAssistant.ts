@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { webEnv } from "../env";
 import { createSubmissionLatch } from "../submissionLatch";
+import { applyResponseStyle, defaultPersonality, type PersonalityId } from "../personalities";
 
 // Conversation state.
 //
@@ -46,7 +47,7 @@ function resolveSessionId(): string {
 /** Only the last few turns are sent; the server keeps the full transcript. */
 const historyTurns = 8;
 
-export function useAssistant() {
+export function useAssistant(personality: PersonalityId = defaultPersonality) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [status, setStatus] = useState<AssistantStatus>({ state: "idle" });
   const [restored, setRestored] = useState(false);
@@ -123,10 +124,16 @@ export function useAssistant() {
       const payload = await response.json();
       const data = payload?.data ?? {};
 
+      // The mandatory disclaimer for a regulated personality (medical, legal,
+      // cyber-security) is applied here, once, at the moment the reply is
+      // actually received — not at render time. The active personality can
+      // change later, and a disclaimer stamped on at render would drift with
+      // it, silently attaching today's personality to an answer generated
+      // under a different one, or dropping it if the user switched away.
       setMessages((current) => [...current, {
         id: crypto.randomUUID(),
         role: "assistant",
-        text: data.assistantMessage ?? "",
+        text: applyResponseStyle(data.assistantMessage ?? "", personality),
         at: Date.now(),
         strategy: data.strategy,
         model: data.model,
@@ -155,7 +162,7 @@ export function useAssistant() {
       // draft still cleared on click even though send() returned immediately.
       latch.current.release();
     }
-  }, [messages]);
+  }, [messages, personality]);
 
   const clear = useCallback(async () => {
     setMessages([]);

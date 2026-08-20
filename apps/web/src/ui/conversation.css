@@ -381,6 +381,15 @@
   margin: 0 auto;
 }
 
+/* The active agent's focus line. Accented rather than muted like the line
+   below it — this is the one piece of state on the home screen that changed
+   because of something the user just did (installing an agent), not a
+   standing description of the app. */
+.home-agent-focus {
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+
 /* ---- Narrow and short --------------------------------------------------
    The rails are the first thing to fold: side by side under the core they
    still read, stacked beside it they do not. */

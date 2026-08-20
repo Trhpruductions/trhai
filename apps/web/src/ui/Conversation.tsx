@@ -3,7 +3,7 @@ import { useAssistant, type ChatMessage } from "../state/useAssistant";
 import { personalityById, resolvePersonality, type PersonalityId } from "../personalities";
 import { formatRelative, readEvents, upcomingEvents } from "../localCalendar";
 import { readFlow } from "../automation";
-import { allAgents, isInstalled, readMarketplaceState } from "../marketplace";
+import { activeAgent, allAgents, isInstalled, readMarketplaceState, type Agent } from "../marketplace";
 import { webEnv } from "../env";
 import { Core } from "./Core";
 import { greetingFor } from "../greeting";
@@ -183,10 +183,15 @@ function Turn({ message, onBuildRequest }: { message: ChatMessage; onBuildReques
 }
 
 export function Conversation({ personality, onBuildRequest }: Props) {
-  const { messages, status, restored, send, clear, sessionId } = useAssistant();
+  const profile = personalityById(resolvePersonality(personality));
+  const { messages, status, restored, send, clear, sessionId } = useAssistant(profile.id);
   const [draft, setDraft] = useState("");
   const [stats, setStats] = useState<Array<{ label: string; value: string; title?: string }>>([]);
   const [recentActivity, setRecentActivity] = useState<AuditEntry[]>([]);
+  // The installed agent currently shaping suggestions and focus — a lens on
+  // top of the personality, the same way the personality is a lens on the
+  // assistant. Null when none is installed or none is active.
+  const [agent, setAgent] = useState<Agent | null>(null);
   // Bumped on every completed stats refresh, same trick as pollCount for the
   // link reading: a React key that changes is what makes a CSS entrance
   // animation replay on a value that was already there.
@@ -205,7 +210,6 @@ export function Conversation({ personality, onBuildRequest }: Props) {
   const [booted, setBooted] = useState(false);
   const [storeChecked, setStoreChecked] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
-  const profile = personalityById(resolvePersonality(personality));
 
   // The clock on the home screen is the real one, ticking. It is the cheapest
   // honest signal that the app is running rather than a screenshot of itself.
@@ -288,9 +292,11 @@ export function Conversation({ personality, onBuildRequest }: Props) {
 
       const flow = readFlow(window.localStorage, "ascend.automation.flow.v1");
       const marketplace = readMarketplaceState(window.localStorage, "ascend.marketplace.v1");
-      const installedAgents = allAgents().filter((agent) => isInstalled(marketplace, agent.id)).length;
+      const installedAgents = allAgents().filter((entry) => isInstalled(marketplace, entry.id)).length;
 
       if (cancelled) return;
+
+      setAgent(activeAgent(marketplace));
 
       // Singular when there is one of something: "1 documents" is the kind of
       // detail that makes an interface feel unattended.
@@ -465,6 +471,16 @@ export function Conversation({ personality, onBuildRequest }: Props) {
               {/* Three words, not a paragraph. A tagline that has to be read
                   is an advert; one that is taken in at a glance is a mark. */}
               <span className="home-tagline">Adapt · Evolve · Empower</span>
+              {/* An installed agent is a lens on top of the personality: it
+                  narrows what the assistant pays attention to, same as the
+                  personality does, just one step more specific. Shown here
+                  so installing one visibly does something, rather than only
+                  moving a count on the right rail. */}
+              {agent ? (
+                <p className="home-sub home-agent-focus">
+                  <span aria-hidden="true">{agent.avatar}</span> <b>{agent.name}</b> — {agent.focus}
+                </p>
+              ) : null}
               <p className="home-sub muted">
                 {online === false
                   ? "The local service is not responding. Nothing can be answered until it is back."
@@ -475,7 +491,7 @@ export function Conversation({ personality, onBuildRequest }: Props) {
             </div>
 
             <div className="row wrap conversation-suggestions">
-              {profile.suggestions.map((suggestion) => (
+              {(agent?.suggestions ?? profile.suggestions).map((suggestion) => (
                 <button key={suggestion} type="button" className="btn btn-sm"
                   onClick={() => { setDraft(suggestion); }}>
                   {suggestion}
