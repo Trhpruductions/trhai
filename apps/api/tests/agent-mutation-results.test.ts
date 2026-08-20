@@ -54,6 +54,16 @@ test("more than one mutation in a turn all survive", () => {
   assert.match(text, /Deleted: y/);
 });
 
+// Caught live: writing then reading then rewriting the same file in one turn
+// called write_file on the same path twice, so mutationResults held the
+// identical sentence twice, and the reply read "Wrote test.txt to the
+// workspace." twice in a row — as if two different things had happened,
+// when only one had.
+test("the same mutation reported twice by different calls appears once", () => {
+  const text = withMutationResults("ok", ["Wrote test.txt to the workspace.", "Wrote test.txt to the workspace."]);
+  assert.equal((text.match(/Wrote test\.txt to the workspace\./g) ?? []).length, 1);
+});
+
 // Caught live, separately from the file-name hallucination above: build_app
 // correctly wrote and verified "Support Desk" — 9/9 checks passed — and the
 // model's own sentence on top of that said "The Support Desk is now live at

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -261,6 +261,20 @@ test("every advertised tool is actually implemented", async () => {
   }
 });
 
+test("an unregistered tool name is refused with what is actually callable", async () => {
+  // A name this app never advertised still reaches runTool unfiltered from
+  // the native tool_calls path — parseToolCalls does not gate on known
+  // names, only parseTextToolCalls does. Refusing here has to say what does
+  // exist, not just that this one does not, or the model has nothing to
+  // correct toward on the next round.
+  const result = await runTool({ name: "update_file", arguments: {} }, context);
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /no tool called "update_file"/);
+  assert.match(result.content, /write_file/);
+  assert.match(result.content, /read_file/);
+});
+
 test("a save with nowhere to write reports that nothing was stored", async () => {
   const result = await runTool({ name: "remember", arguments: { fact: "I like tea." } }, context);
 
@@ -484,6 +498,45 @@ test("updating a document that does not exist creates nothing", async () => {
   assert.equal(result.ok, false);
   assert.deepEqual(updates, []);
   assert.match(result.content, /Runbook/);
+});
+
+test("a missing-document refusal points at write_file when the name is really a file", async () => {
+  // Caught live: "Update test.txt to say X" led the model to update_document,
+  // which correctly found no document by that name — but test.txt was a real
+  // workspace file the whole time, and the plain "no such document" refusal
+  // gave the model nothing to correct toward, so it reached for
+  // write_document next instead of write_file.
+  writeFileSync(path.join(testWorkspace, "real-file.txt"), "hello", "utf8");
+
+  const result = await runTool(
+    { name: "update_document", arguments: { title: "real-file.txt", content: "x" } },
+    { ...editContext, updateDocument: () => true }
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /real-file\.txt.*workspace/);
+  assert.match(result.content, /write_file/);
+});
+
+test("write_document refuses when the name is actually a workspace file", async () => {
+  // The other half of the same live failure: update_document's miss was
+  // recoverable, but the model's actual next move was write_document, which
+  // has no existing-document check to fail against — it just created a
+  // stray document named "test.txt", left the real file untouched, and the
+  // assistant reported the file itself as changed. This is the one place
+  // left that can still catch it.
+  writeFileSync(path.join(testWorkspace, "test.txt"), "VEXORA WORKS", "utf8");
+
+  const written: Array<[string, string]> = [];
+  const result = await runTool(
+    { name: "write_document", arguments: { title: "test.txt", content: "VEXORA CONFIRMED" } },
+    { ...editContext, saveDocument: (title, body) => { written.push([title, body]); return true; } }
+  );
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(written, []);
+  assert.match(result.content, /write_file/);
+  assert.equal(readFileSync(path.join(testWorkspace, "test.txt"), "utf8"), "VEXORA WORKS");
 });
 
 test("deleting a document reports what was deleted", async () => {
@@ -838,6 +891,38 @@ test("one malformed line does not discard the rest", () => {
   );
 
   assert.deepEqual(calls.map((call) => call.name), ["current_datetime", "list_memories"]);
+});
+
+test("a call wrapped in commentary is recognised, not shown as the answer", () => {
+  // Caught live: asked to write test.txt, the reply was "Sure, I'll write
+  // that:" followed by the correct JSON call and then more text. Valid JSON,
+  // but not as the whole message and not as a whole line either — the old
+  // parser only ever tried those two shapes, so prose on either side of the
+  // call made it invisible and the literal JSON reached the user as text
+  // instead of ever running.
+  const calls = parseTextToolCalls(
+    'Sure, I\'ll write that:\n\n{"name": "write_file", "parameters": {"path": "test.txt", "content": "VEXORA TEST"}}\n\nDone.'
+  );
+
+  assert.deepEqual(calls, [{ name: "write_file", arguments: { path: "test.txt", content: "VEXORA TEST" } }]);
+});
+
+test("a call fenced in a ```json block is recognised", () => {
+  const calls = parseTextToolCalls('```json\n{"name": "current_datetime", "parameters": {}}\n```');
+  assert.deepEqual(calls, [{ name: "current_datetime", arguments: {} }]);
+});
+
+test("a brace inside the call's own content does not break the scan", () => {
+  // The content being written can itself contain braces — source code, say —
+  // and the scan has to tell those apart from the ones that close the call.
+  const calls = parseTextToolCalls(
+    'Here you go: {"name": "write_file", "parameters": '
+    + '{"path": "a.js", "content": "function f() { return 1; }"}} — saved.'
+  );
+
+  assert.deepEqual(calls, [
+    { name: "write_file", arguments: { path: "a.js", content: "function f() { return 1; }" } }
+  ]);
 });
 
 test("a call written as name(key=\"value\") is recognised, not just JSON", () => {

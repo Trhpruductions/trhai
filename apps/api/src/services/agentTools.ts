@@ -206,8 +206,10 @@ export const toolDefinitions: ToolDefinition[] = [
     function: {
       name: "write_document",
       description:
-        "Save a new document to the user's knowledge base. Use this when the user asks you to "
-        + "write something down, take notes, or draft a document they want to keep.",
+        "Save a new document to the user's knowledge base, titled in plain language. Use this "
+        + "when the user asks you to write something down, take notes, or draft something to keep. "
+        + "Not for a file: if the name looks like a filename, such as test.txt, use write_file "
+        + "instead — a knowledge document and a workspace file are different places.",
       parameters: {
         type: "object",
         properties: {
@@ -255,8 +257,9 @@ export const toolDefinitions: ToolDefinition[] = [
     function: {
       name: "update_document",
       description:
-        "Replace the contents of a document that already exists. Use this to correct or extend "
-        + "one rather than writing a second document with the same title.",
+        "Replace the contents of a knowledge-base document that already exists. Use this to "
+        + "correct or extend one rather than writing a second document with the same title. Not "
+        + "for a file on disk — a name like test.txt is a workspace file; use write_file for that.",
       parameters: {
         type: "object",
         properties: {
@@ -406,8 +409,8 @@ export const toolDefinitions: ToolDefinition[] = [
     function: {
       name: "write_file",
       description:
-        "Write a file into the workspace, creating folders as needed. Use this for code, scripts "
-        + "or data the user wants on disk rather than as a knowledge document.",
+        "Write a file into the workspace, creating folders as needed. Use this for code, scripts, "
+        + "or anything named like a file, such as test.txt or app.js — not as a knowledge document.",
       parameters: {
         type: "object",
         properties: {
@@ -466,7 +469,18 @@ function describeMissingDocument(context: ToolContext, title: string): string {
   const available = documents.length > 0
     ? ` Available documents: ${documents.map((document) => document.title).join(", ")}.`
     : "";
-  return `There is no document called "${title}".${available}`;
+  // Caught live: asked to update "test.txt", update_document correctly found
+  // no such document — but "test.txt" was a real workspace file the whole
+  // time, and the model recovered by calling write_document instead, which
+  // created a stray knowledge entry and left the actual file untouched while
+  // the assistant reported the file itself as changed. Checking the real
+  // workspace here, rather than guessing from the name, is what lets the
+  // refusal point at the tool that would have actually worked.
+  const fileHint = readWorkspaceFile(title).ok
+    ? ` "${title}" is a real file in the workspace, not a knowledge document — use read_file or `
+      + "write_file instead."
+    : "";
+  return `There is no document called "${title}".${available}${fileHint}`;
 }
 
 /** The same exact-then-partial rule, for a saved fact. */
@@ -609,6 +623,22 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       if (!title || !content) {
         return { ok: false, content: "write_document needs both a title and content." };
       }
+
+      // Same check as the missing-document refusal, applied before a write
+      // instead of after a miss. Without it, a request naming a real file —
+      // "update test.txt" — that the model routes to the wrong tool family
+      // does not fail loudly; it quietly creates a same-named document while
+      // the file itself is never touched, and the reply claims the file
+      // changed. Refusing here is the one place that can still stop it,
+      // since write_document does not check for an existing document first.
+      if (readWorkspaceFile(title).ok) {
+        return {
+          ok: false,
+          content: `"${title}" is a real file in the workspace, not a knowledge document. Use `
+            + "write_file to change it, or read_file to see what it currently contains."
+        };
+      }
+
       if (!context.saveDocument) {
         return { ok: false, content: "There is nowhere to save documents, so nothing was written." };
       }
@@ -907,8 +937,13 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     default:
-      // A model can ask for a tool that does not exist. Saying so plainly lets
-      // it recover on the next turn; an exception would end the conversation.
-      return { ok: false, content: `There is no tool called "${call.name}".` };
+      // A model can ask for a tool that does not exist. Saying so plainly,
+      // with what is actually callable, lets it pick a real one on the next
+      // turn instead of guessing again; an exception would end the conversation.
+      return {
+        ok: false,
+        content: `There is no tool called "${call.name}". Available tools: `
+          + `${toolDefinitions.map((definition) => definition.function.name).join(", ")}.`
+      };
   }
 }

@@ -76,6 +76,10 @@ export const systemPrompt = [
   "- build_app when they want something built. It writes a working app to disk.",
   "  Do not describe what you would build and stop; build it, then say where it is.",
   "- list_files, read_file, write_file for the workspace where those apps live.",
+  "- A name with a file extension - test.txt, notes.md, server.js - is a workspace FILE: use",
+  "  list_files, read_file, write_file. write_document, update_document, read_document and",
+  "  delete_document are only for the knowledge base, titled in plain language with no extension.",
+  "  These are two different places; a file is never also a document under the same name.",
   "",
   "Questions about the WORLD - what a semaphore is, how TCP works, what a word means.",
   "Answer these yourself, from what you know. Do not search the user's private notes",
@@ -121,7 +125,12 @@ const mutatingTools = new Set([
  * price next to a build reported as something it was not.
  */
 export function withMutationResults(text: string, mutationResults: string[]): string {
-  const missing = mutationResults.filter((result) => !text.includes(result));
+  // Two calls in one turn can report the identical sentence — the same path
+  // written twice in the same round of the same test.txt, say — and showing
+  // it twice reads as if two different things happened. Deduplicated here
+  // rather than at the call site, so every caller gets the same guarantee.
+  const distinct = [...new Set(mutationResults)];
+  const missing = distinct.filter((result) => !text.includes(result));
   if (missing.length === 0) return text;
 
   const body = missing.join("\n\n");
@@ -255,55 +264,131 @@ function parseBareCall(line: string, known: string[]): ToolCall | null {
  * did. So it is parsed, and anything that does not name an advertised tool is
  * dropped rather than run.
  */
+/** Turn one parsed JSON value into a ToolCall, or null if it does not name an advertised tool. */
+function toToolCall(entry: unknown, known: string[]): ToolCall | null {
+  if (!entry || typeof entry !== "object") return null;
+  const record = entry as Record<string, unknown>;
+
+  const name = typeof record.name === "string"
+    ? record.name
+    : typeof record.function === "string" ? record.function : null;
+
+  // The gate. An unrecognised name is dropped, never invoked: this is the
+  // check that makes reading the model's prose safe, not the shape it
+  // happened to be written in.
+  if (!name || !known.includes(name)) return null;
+
+  const rawArguments = record.parameters ?? record.arguments ?? {};
+  return {
+    name,
+    arguments: rawArguments && typeof rawArguments === "object"
+      ? rawArguments as Record<string, unknown>
+      : {}
+  };
+}
+
+/**
+ * The exact shapes seen from a model that mostly cooperates: the whole
+ * message is one JSON object, a JSON array of calls, or one object per line.
+ * Unchanged from the original parser — a model that gets this far into
+ * parseTextToolCalls without this succeeding falls through to the wider scan
+ * below, but this stays first because it is what "one malformed line does not
+ * discard the rest" depends on: recovery per line, not per balanced brace.
+ */
+function parseDirectJson(trimmed: string, known: string[]): ToolCall[] {
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return [];
+
+  const objects: unknown[] = [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) objects.push(...parsed);
+    else objects.push(parsed);
+  } catch {
+    for (const line of trimmed.split("\n")) {
+      const candidate = line.trim();
+      if (!candidate.startsWith("{")) continue;
+      try {
+        objects.push(JSON.parse(candidate));
+      } catch {
+        // One malformed line does not discard the rest.
+      }
+    }
+  }
+
+  return objects.map((entry) => toToolCall(entry, known)).filter((call): call is ToolCall => call !== null);
+}
+
+/**
+ * The first balanced {...} substring starting at or after `from`, respecting
+ * quoted strings so a brace inside a write_file call's own content — source
+ * code, say — cannot throw off the count. Retries past a span that balances
+ * but does not parse (a stray brace in plain prose) rather than giving up on
+ * the rest of the message. Returns null once nothing more closes.
+ */
+function nextJsonObject(text: string, from: number): { value: unknown; end: number } | null {
+  const start = text.indexOf("{", from);
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return { value: JSON.parse(text.slice(start, i + 1)), end: i + 1 };
+        } catch {
+          return nextJsonObject(text, start + 1);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Every JSON object found anywhere in the text, in the order they appear. */
+function extractJsonObjects(text: string): unknown[] {
+  const found: unknown[] = [];
+  let cursor = 0;
+  for (;;) {
+    const next = nextJsonObject(text, cursor);
+    if (!next) break;
+    found.push(next.value);
+    cursor = next.end;
+  }
+  return found;
+}
+
 export function parseTextToolCalls(text: string, known = advertisedToolNames()): ToolCall[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
 
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    const objects: unknown[] = [];
+  const direct = parseDirectJson(trimmed, known);
+  if (direct.length > 0) return direct;
 
-    // A JSON array of calls, or one object per line. Both shapes appear.
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) objects.push(...parsed);
-      else objects.push(parsed);
-    } catch {
-      for (const line of trimmed.split("\n")) {
-        const candidate = line.trim();
-        if (!candidate.startsWith("{")) continue;
-        try {
-          objects.push(JSON.parse(candidate));
-        } catch {
-          // One malformed line does not discard the rest.
-        }
-      }
-    }
-
-    const calls: ToolCall[] = [];
-    for (const entry of objects) {
-      if (!entry || typeof entry !== "object") continue;
-      const record = entry as Record<string, unknown>;
-
-      const name = typeof record.name === "string"
-        ? record.name
-        : typeof record.function === "string" ? record.function : null;
-
-      // The gate. An unrecognised name is dropped, never invoked: this is the
-      // check that makes reading the model's prose safe, not the shape it
-      // happened to be written in.
-      if (!name || !known.includes(name)) continue;
-
-      const rawArguments = record.parameters ?? record.arguments ?? {};
-      calls.push({
-        name,
-        arguments: rawArguments && typeof rawArguments === "object"
-          ? rawArguments as Record<string, unknown>
-          : {}
-      });
-    }
-
-    return calls;
-  }
+  // A call the model wrote inside a sentence, or fenced in ```json, rather
+  // than as the entire message. Caught live: asked to write test.txt, the
+  // reply was "Sure, I'll write that:" followed by the correct JSON call and
+  // then more prose — valid JSON, but not as the whole trimmed message and
+  // not as a whole line either, so parseDirectJson found nothing and the
+  // literal JSON reached the user as their answer instead of ever running.
+  // This scans the whole message for a balanced {...} wherever it sits,
+  // rather than trusting message or line boundaries.
+  const embedded = extractJsonObjects(trimmed)
+    .map((entry) => toToolCall(entry, known))
+    .filter((call): call is ToolCall => call !== null);
+  if (embedded.length > 0) return embedded;
 
   return trimmed.split("\n")
     .map((line) => parseBareCall(line, known))
