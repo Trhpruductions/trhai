@@ -366,7 +366,14 @@ export const toolDefinitions: ToolDefinition[] = [
       parameters: {
         type: "object",
         properties: {
-          description: { type: "string", description: "What the app should do, in the user's words." }
+          description: {
+            type: "string",
+            description:
+              "What the app should do, in the user's words. If the user gave it a specific name "
+              + "(\"build Aurora Notes\"), lead with that exact name — it becomes the app's title. "
+              + "A description that only explains the purpose, without the name, builds something "
+              + "real but titled generically instead of what the user actually called it."
+          }
         },
         required: ["description"]
       }

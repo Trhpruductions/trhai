@@ -37,6 +37,20 @@ test("project-inspection verbs are commands, not statements", () => {
   assert.equal(analyzeRequest("Verify the build actually works").shape, "command");
 });
 
+test("memory- and calculator-tool verbs are commands, not statements", () => {
+  // Caught live: "Calculate 47 times 12" got "Got it — I'll keep that in
+  // mind for this conversation" and never touched the calculator tool — the
+  // same failure as the inspection verbs above, just for a different set of
+  // tools that were never added to commandVerbs either.
+  assert.equal(analyzeRequest("Remember that the codename is Aurora").shape, "command");
+  assert.equal(analyzeRequest("Forget the fact about the codename").shape, "command");
+  assert.equal(analyzeRequest("Pin the fact about the deploy window").shape, "command");
+  assert.equal(analyzeRequest("Unpin the note about the old server").shape, "command");
+  assert.equal(analyzeRequest("Calculate 47 times 12").shape, "command");
+  assert.equal(analyzeRequest("Save this as a document called Notes").shape, "command");
+  assert.equal(analyzeRequest("Recall what I told you about the deploy schedule").shape, "command");
+});
+
 test("treats a recall phrase without a question mark as a question", () => {
   assert.equal(analyzeRequest("Remind me what our database standard is").shape, "question");
   assert.equal(analyzeRequest("What did we decide about deploys").shape, "question");

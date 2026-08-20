@@ -66,7 +66,17 @@ const commandVerbs = new Set([
   // acknowledged instead of ever reaching the agent — every tool call in it
   // never happened. These are the verbs a project-inspection request
   // actually starts with, not covered by any of the ones already here.
-  "look", "inspect", "check", "read", "open", "verify", "investigate", "search"
+  "look", "inspect", "check", "read", "open", "verify", "investigate", "search",
+  // Caught live, same failure, different tool family: "Calculate 47 times 12"
+  // got "Got it — I'll keep that in mind for this conversation" and never
+  // touched the calculator. These are leading verbs for tools that exist —
+  // remember, forget, pin, calculate — that were simply never added here.
+  // "Remember" already has a separate deterministic save path for a bare
+  // fact, which is why that specific case did not visibly fail; it is added
+  // anyway so a compound request ("Remember X, then build Y") is recognised
+  // as a command from the start rather than depending on a different branch
+  // to notice the rest of the sentence.
+  "remember", "forget", "pin", "unpin", "calculate", "save", "recall"
 ]);
 
 const questionLeads: Array<{ pattern: RegExp; type: QuestionType }> = [
