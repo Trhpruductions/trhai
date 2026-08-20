@@ -1,14 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
-import { createApp } from "../src/server.js";
-import {
+
+// See memory-controls.test.ts for why this must be set before createApp or
+// assistMemoryStore is loaded, and what happened live when it was not. All
+// five are set defensively — createApp() loads every store server.js wires
+// up, regardless of which routes this file happens to exercise today.
+const dataDir = mkdtempSync(path.join(tmpdir(), "ascend-assist-memory-"));
+process.env.ASSIST_MEMORY_FILE = path.join(dataDir, "memory.json");
+process.env.ASSIST_ACCOUNTS_FILE = path.join(dataDir, "accounts.json");
+process.env.ASSIST_CONVERSATION_FILE = path.join(dataDir, "conversations.json");
+process.env.ASSIST_KNOWLEDGE_FILE = path.join(dataDir, "knowledge.json");
+process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
+
+const { createApp } = await import("../src/server.js");
+const {
   maxMemoriesPerSession,
   recordMemoriesFromMessage,
   resetAssistMemory,
   retrieveSessionMemories
-} from "../src/services/assistMemoryStore.js";
+} = await import("../src/services/assistMemoryStore.js");
+
+test.after(() => {
+  rmSync(dataDir, { recursive: true, force: true });
+});
 
 test("records only new memories and reports what was written", () => {
   resetAssistMemory("s1");

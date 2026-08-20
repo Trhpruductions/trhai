@@ -47,9 +47,6 @@ import {
 import { isAllowedOrigin } from "./services/originPolicy.js";
 import { checkAvailability, readLocalModelConfig } from "./services/localModel.js";
 import { readPreferences, updatePreferences } from "./services/preferences.js";
-import { attachAuthIdentity } from "./middleware/auth.js";
-import { v1MemoryRouter } from "./routes/v1Memory.js";
-import { v1Router } from "./routes/v1.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -100,7 +97,6 @@ function normalizeAssistMode(mode: unknown): AssistRouteMode {
 
 export function createApp() {
   const app = express();
-  const storageBackend = (process.env.API_STORAGE_BACKEND ?? "memory").toLowerCase();
 
   app.use(helmet());
   // Defaults to this machine's own origins rather than "*". The API listens on
@@ -251,8 +247,6 @@ export function createApp() {
   });
 
   // ---- Accounts -----------------------------------------------------------
-  // Registered before attachAuthIdentity for the same reason /v1/assist is: this
-  // is the layer that establishes identity, so it cannot require it.
 
   function tooManyAttempts(res: express.Response, retryAfterSeconds: number): void {
     res.setHeader("Retry-After", String(retryAfterSeconds));
@@ -595,10 +589,6 @@ export function createApp() {
 
     res.json({ data: { forgotten: true }, traceId: "trace-local" });
   });
-
-  app.use(attachAuthIdentity());
-
-  app.use("/v1", storageBackend === "postgres" ? v1Router : v1MemoryRouter);
 
   app.use((error: Error & { statusCode?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const statusCode = error.statusCode ?? 500;

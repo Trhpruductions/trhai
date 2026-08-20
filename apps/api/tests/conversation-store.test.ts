@@ -11,6 +11,8 @@ const conversationFile = path.join(dataDir, "conversations.json");
 process.env.ASSIST_CONVERSATION_FILE = conversationFile;
 process.env.ASSIST_ACCOUNTS_FILE = path.join(dataDir, "accounts.json");
 process.env.ASSIST_MEMORY_FILE = path.join(dataDir, "memory.json");
+process.env.ASSIST_KNOWLEDGE_FILE = path.join(dataDir, "knowledge.json");
+process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 
 const {
   appendTurn,

@@ -7,10 +7,18 @@ import { AddressInfo } from "node:net";
 import { once } from "node:events";
 
 // Paths are read at module load, so they must be set before importing.
+//
+// This file posts to /v1/assist through a real server, which appends to the
+// conversation store as a side effect — missing ASSIST_CONVERSATION_FILE let
+// "Remember that the vault code is alpha." and its sibling turns leak into
+// the real apps/api/data/conversations.json on every run of this suite.
 const dataDir = mkdtempSync(path.join(tmpdir(), "ascend-accounts-"));
 const accountsFile = path.join(dataDir, "accounts.json");
 process.env.ASSIST_ACCOUNTS_FILE = accountsFile;
 process.env.ASSIST_MEMORY_FILE = path.join(dataDir, "memory.json");
+process.env.ASSIST_CONVERSATION_FILE = path.join(dataDir, "conversations.json");
+process.env.ASSIST_KNOWLEDGE_FILE = path.join(dataDir, "knowledge.json");
+process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 
 const {
   accountForToken,

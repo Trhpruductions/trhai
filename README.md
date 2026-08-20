@@ -97,38 +97,19 @@ npm test
 - `apps/web` — React + Vite shell. All destinations and the widget dashboard.
 - `apps/desktop` — Electron shell providing host telemetry, file and command access.
 - `packages/shared` — project planner and generator; the code that writes code.
-- `packages/db` — SQL migrations, used only in the optional Postgres mode.
 - `docs` — architecture, roadmap, PRD, backlog, contracts, product vision.
 - `generated-projects` — output of the build engine, deliberately outside the workspaces.
-
-## Optional Postgres mode
-
-The default `API_STORAGE_BACKEND=memory` needs no external services. To use Postgres
-instead:
-
-```bash
-npm run db:up
-```
-
-Then apply `packages/db/migrations/001_core_init.sql` and `002_idempotency_keys.sql`,
-set `DATABASE_URL`, and set `API_STORAGE_BACKEND=postgres`.
 
 ## Configuration
 
 Copy `apps/api/.env.example` to `apps/api/.env` to change any of these.
 
 - `PORT` — API port, default 4000.
-- `API_STORAGE_BACKEND` — `memory` (default) or `postgres`.
 - `CORS_ORIGIN` — which browser origins may call the API. Defaults to this
   machine's own origins on any port. The API listening on localhost does not by
   itself stop a page on a site you visit from calling it, and the assistant,
   memory and knowledge endpoints take no credentials, so the default is
   deliberately not `*`. Accepts a comma-separated list, or `*` to allow all.
-- `AUTH_MODE` — `dev` accepts optional bearer tokens and falls back to dev identity;
-  `jwt` requires a bearer token validated with `AUTH_JWT_SECRET`, optionally
-  constrained by `AUTH_JWT_ISSUER` and `AUTH_JWT_AUDIENCE`.
-- `DEV_USER_EMAIL`, `DEV_USER_DISPLAY_NAME` — identity used in dev mode when the
-  `x-ascend-user-email` and `x-ascend-user-name` headers are absent.
 - `ASSIST_MEMORY_FILE`, `ASSIST_KNOWLEDGE_FILE` — where assistant memory and knowledge
   documents persist. Set `ASSIST_MEMORY_PERSIST=off` to keep memory in RAM only.
 
@@ -146,4 +127,3 @@ visible console window.
 
 - Route stubs are aligned with `docs/08-openapi-v1.yaml`.
 - The complete product vision is `docs/12-ascend-ai-complete-product-vision.md`.
-- RBAC and idempotency checklist: `apps/api/tests/rbac-idempotency-checklist.md`.

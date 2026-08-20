@@ -17,8 +17,6 @@
     "dev:web": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-web-dev.ps1",
     "dev:desktop": "npm run dev --workspace @ascend/desktop",
     "dev:all": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-local-dev.ps1",
-    "db:up": "docker compose -f infra/docker-compose.postgres.yml up -d",
-    "db:down": "docker compose -f infra/docker-compose.postgres.yml down",
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces --if-present",
     "build:desktop": "npm run build --workspace @ascend/desktop",

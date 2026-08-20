@@ -1,9 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
-import { createApp } from "../src/server.js";
-import {
+
+// The store reads ASSIST_MEMORY_FILE at import time, so it must be set before
+// createApp or assistMemoryStore is loaded — a static import would already
+// have pulled the module in with the real, un-isolated path baked in.
+//
+// Caught live: this file and assist-memory.test.ts both wrote through the
+// default path, apps/api/data/assist-memory.json — the same file the running
+// dev server reads and writes. A `remember` a user had saved earlier in the
+// same machine's session was silently overwritten by a test run's fixture
+// data the next time the suite ran.
+// All five are set defensively — createApp() loads every store server.js
+// wires up, regardless of which routes this file happens to exercise today.
+const dataDir = mkdtempSync(path.join(tmpdir(), "ascend-memory-controls-"));
+process.env.ASSIST_MEMORY_FILE = path.join(dataDir, "memory.json");
+process.env.ASSIST_ACCOUNTS_FILE = path.join(dataDir, "accounts.json");
+process.env.ASSIST_CONVERSATION_FILE = path.join(dataDir, "conversations.json");
+process.env.ASSIST_KNOWLEDGE_FILE = path.join(dataDir, "knowledge.json");
+process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
+
+const { createApp } = await import("../src/server.js");
+const {
   forgetAllMemories,
   forgetMemory,
   getMemoryAudit,
@@ -14,7 +36,11 @@ import {
   resetAssistMemory,
   retrieveSessionMemories,
   setMemoryPinned
-} from "../src/services/assistMemoryStore.js";
+} = await import("../src/services/assistMemoryStore.js");
+
+test.after(() => {
+  rmSync(dataDir, { recursive: true, force: true });
+});
 
 test("forgetting a memory removes it from retrieval immediately", () => {
   resetAssistMemory("c1");

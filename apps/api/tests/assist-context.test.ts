@@ -1,13 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
-import { createApp } from "../src/server.js";
-import {
+
+// createApp() below starts a real server and posts to /v1/assist through it,
+// which can write through every persisted store server.js touches. Each
+// store reads its file path at import time, so this has to be set — and
+// createApp imported dynamically — before any of it loads. See
+// memory-controls.test.ts for what happened live when a test file skipped
+// this and wrote through the default path instead of an isolated one.
+const dataDir = mkdtempSync(path.join(tmpdir(), "ascend-assist-context-"));
+process.env.ASSIST_MEMORY_FILE = path.join(dataDir, "memory.json");
+process.env.ASSIST_ACCOUNTS_FILE = path.join(dataDir, "accounts.json");
+process.env.ASSIST_CONVERSATION_FILE = path.join(dataDir, "conversations.json");
+process.env.ASSIST_KNOWLEDGE_FILE = path.join(dataDir, "knowledge.json");
+process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
+
+const { createApp } = await import("../src/server.js");
+const {
   maxAssistHistoryContentLength,
   maxAssistHistoryTurns,
   normalizeAssistHistory
-} from "../src/services/assistContext.js";
+} = await import("../src/services/assistContext.js");
+
+test.after(() => {
+  rmSync(dataDir, { recursive: true, force: true });
+});
 
 test("normalizeAssistHistory keeps valid turns and drops junk", () => {
   const turns = normalizeAssistHistory([

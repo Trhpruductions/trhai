@@ -6,10 +6,16 @@ import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
 
+// Defensive: this file starts a real server via createApp(), which touches
+// every persisted store server.js wires up. See accounts.test.ts for what
+// happens when one of these is left pointed at the real default path.
 const dataDir = mkdtempSync(path.join(tmpdir(), "ascend-password-"));
 const accountsFile = path.join(dataDir, "accounts.json");
 process.env.ASSIST_ACCOUNTS_FILE = accountsFile;
 process.env.ASSIST_MEMORY_FILE = path.join(dataDir, "memory.json");
+process.env.ASSIST_CONVERSATION_FILE = path.join(dataDir, "conversations.json");
+process.env.ASSIST_KNOWLEDGE_FILE = path.join(dataDir, "knowledge.json");
+process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 
 const {
   accountForToken,
