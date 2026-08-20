@@ -183,3 +183,86 @@ test("an ordinary remember with nothing trailing stays the plain acknowledgement
   assert.equal(result.strategy, "acknowledge");
   assert.match(result.assistantMessage, /Saved/i);
 });
+
+test("a build clarification merged across turns reaches the agent whole", async () => {
+  // Caught live. "Build me something to help my business" got a clarifying
+  // question, which is correct. The answer, "customers with email, phone and
+  // company", was correctly merged by the composer into strategy "plan" with
+  // buildRequest "Build me something to help my business. customers with
+  // email, phone and company" — and the agent was then asked only
+  // input.userMessage, the current turn alone, with no idea it was ever about
+  // a build. It searched the user's documents for "customers" and reported
+  // finding nothing. The merged buildRequest is what must reach the model,
+  // not the bare current-turn message.
+  await withFakeModel("Built it in the workspace.", async (received) => {
+    const result = await runAssistantOrchestrator({
+      mode: "general",
+      userMessage: "customers with email, phone and company",
+      history: [
+        { role: "user", content: "Build me something to help my business." },
+        {
+          role: "assistant",
+          content: "Before I build that: what should each record store?"
+        }
+      ]
+    });
+
+    assert.equal(result.strategy, "generated");
+
+    const firstRequest = received[0] as { messages: Array<{ role: string; content: string }> };
+    const user = firstRequest.messages.find((message) => message.role === "user");
+    assert.match(user?.content ?? "", /Build me something to help my business/);
+    assert.match(user?.content ?? "", /customers with email, phone and company/);
+  });
+});
+
+test("an ordinary single-turn build request is unaffected by the merge path", async () => {
+  // The fix above must not change anything when there is nothing to merge:
+  // buildRequest and userMessage are the same string outside a refinement.
+  await withFakeModel("Built it in the workspace.", async (received) => {
+    await runAssistantOrchestrator({
+      mode: "general",
+      userMessage: "Build me an app to track invoices with a client name, amount, and due date."
+    });
+
+    const firstRequest = received[0] as { messages: Array<{ role: string; content: string }> };
+    const user = firstRequest.messages.find((message) => message.role === "user");
+    assert.match(user?.content ?? "", /^Build me an app to track invoices/);
+  });
+});
+
+test("a create plan is told to call build_app, not plan_app", async () => {
+  // Caught live, one step further than the merge fix above: understanding the
+  // request correctly was not enough. Handed "Build me something to help my
+  // business. customers with email, phone and company" with no further
+  // instruction, the model chose plan_app — worked out what the app would
+  // contain, correctly — then invented a description of a "Build screen"
+  // with a "Plan" selector that does not exist, instead of building anything.
+  // Told more politely which tool to use was not going to fix a model that
+  // already had a correct tool available and picked a different one; naming
+  // it outright removes the choice that goes wrong.
+  await withFakeModel("Built it in the workspace.", async (received) => {
+    await runAssistantOrchestrator({
+      mode: "general",
+      userMessage: "Build me an app to track invoices with a client name, amount, and due date."
+    });
+
+    const firstRequest = received[0] as { messages: Array<{ role: string; content: string }> };
+    const user = firstRequest.messages.find((message) => message.role === "user");
+    assert.match(user?.content ?? "", /Call build_app with this/);
+    assert.match(user?.content ?? "", /[Nn]ot plan_app/);
+  });
+});
+
+test("the build_app instruction is not stapled onto unrelated turns", async () => {
+  // Scoped to isPlan && planTaskType === "create" specifically. A no-answer
+  // turn reaches this same branch by a different door and must not carry an
+  // instruction about a tool that has nothing to do with what was asked.
+  await withFakeModel("Paris.", async (received) => {
+    await runAssistantOrchestrator({ mode: "general", userMessage: "What is the capital of France?" });
+
+    const firstRequest = received[0] as { messages: Array<{ role: string; content: string }> };
+    const user = firstRequest.messages.find((message) => message.role === "user");
+    assert.doesNotMatch(user?.content ?? "", /build_app/);
+  });
+});

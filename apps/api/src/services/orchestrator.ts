@@ -129,7 +129,39 @@ export async function runAssistantOrchestrator(
         : input.memoryWrite?.savedBodies ?? []
       : [];
 
-    const generated = await answerWithLocalModel(input, known);
+    // A "plan" reply's buildRequest is the merged text — the original request
+    // plus a clarifying answer, when there was one — while input.userMessage
+    // is only ever this single turn. Caught live: "Build me something to help
+    // my business", then asked to clarify, answered "customers with email,
+    // phone and company". The composer correctly merged those into one build
+    // request and returned strategy "plan" — and the agent was then handed
+    // only the current turn, "customers with email, phone and company", with
+    // no idea it was ever about a build. It searched the user's documents for
+    // "customers" and reported finding nothing. Passing the merged text here
+    // is what the composer already computed and this branch already trusts;
+    // not using it was passing up the answer sitting one line above.
+    //
+    // For a "create" plan specifically, the deterministic path has already
+    // decided this is a build — that is the entire reason this branch exists.
+    // The agent still gets to choose its own tool, and on the next attempt at
+    // this exact scenario it chose plan_app over build_app: it worked out
+    // what the app would contain, correctly, and then invented a description
+    // of a "Build screen" with a "Plan" selector that this app does not have,
+    // rather than building anything. Stating the right tool by name is the
+    // same move already proven twice on this branch — the date stated
+    // outright rather than left to current_datetime, a fact stated as already
+    // saved rather than left to the model's own search — because a model that
+    // is told what to do and does something else anyway is not fixed by
+    // asking more politely; it is fixed by removing the choice that goes
+    // wrong.
+    const question = isPlan && modelReply.buildRequest
+      ? modelReply.planTaskType === "create"
+        ? `${modelReply.buildRequest}\n\nCall build_app with this. Not plan_app — the user wants it `
+          + `actually built, not described. Do not stop at explaining what it would contain.`
+        : modelReply.buildRequest
+      : undefined;
+
+    const generated = await answerWithLocalModel(input, known, question);
     if (generated) {
       return {
         model: generated.model,
@@ -182,7 +214,13 @@ function estimateTokens(value: string): number {
 async function answerWithLocalModel(
   input: OrchestratorInput,
   /** Facts already retrieved for this question, so the model need not re-find them. */
-  known: string[] = []
+  known: string[] = [],
+  /**
+   * What to actually ask, when it differs from input.userMessage — the merged
+   * buildRequest for a "plan" turn, which carries an earlier turn's context
+   * that the current message alone does not.
+   */
+  askAs?: string
 ): Promise<{ text: string; model: string; toolsUsed: string[] } | null> {
   const config = readLocalModelConfig();
   const availability = await checkAvailability(config);
@@ -200,11 +238,13 @@ async function answerWithLocalModel(
   // on it a second time — redundant at best, and confusing when that second,
   // unnecessary write failed and the reply had to explain a failure that
   // never needed to happen.
+  const baseQuestion = askAs ?? input.userMessage;
+
   const question = known.length > 0
-    ? `${input.userMessage}\n\nAlready in the user's saved memory — it is stored, do not save it again, `
+    ? `${baseQuestion}\n\nAlready in the user's saved memory — it is stored, do not save it again, `
       + `just use it directly:\n`
       + known.map((fact) => `- ${fact}`).join("\n")
-    : input.userMessage;
+    : baseQuestion;
 
   // Worked down in order rather than betting on one.
   //

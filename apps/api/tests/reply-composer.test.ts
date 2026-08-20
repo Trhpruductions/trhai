@@ -797,3 +797,32 @@ test("an ordinary remember statement is not flagged partial", () => {
   assert.equal(reply.strategy, "acknowledge");
   assert.equal(reply.partial, false);
 });
+
+test("a short answer to a clarifying question is not re-asked for being short", () => {
+  // "a CRM" is vague on its own — almost no content words — and would
+  // ordinarily be told "I need a bit more to work with". It is not on its own
+  // here: it is the answer to a question that was just asked, and judging it
+  // in isolation would leave the conversation unable to progress, repeating
+  // the same clarifying question forever. Found by inspection while fixing
+  // the sibling bug in the statement branch a few lines below this one, which
+  // already carried the equivalent guard.
+  const reply = composeReply({
+    mode: "general",
+    message: "a CRM",
+    memories: [],
+    history: [
+      { role: "user", content: "Build me something to help my business." },
+      { role: "assistant", content: "Before I build that: what should each record store?" }
+    ]
+  });
+
+  assert.notEqual(reply.strategy, "clarify");
+});
+
+test("the same short message with no clarification pending is still too vague", () => {
+  // The fix must not stop this from working at all — only when it is
+  // genuinely answering something.
+  const reply = composeReply({ mode: "general", message: "a CRM", memories: [], history: [] });
+
+  assert.equal(reply.strategy, "clarify");
+});

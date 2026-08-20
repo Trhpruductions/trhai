@@ -426,8 +426,14 @@ export function composeReply(input: ComposerInput): ComposedReply {
     };
   }
 
-  // Too little signal to plan against.
-  if (analysis.vague) {
+  // Too little signal to plan against — unless this is itself the answer to
+  // an earlier clarifying question, in which case it is judged together with
+  // the original request rather than alone. A short, on-topic answer like "a
+  // CRM" is vague by itself but is not vague once merged with what it is
+  // answering; asking the same clarifying question a second time would leave
+  // the conversation unable to progress. Found by inspection while fixing the
+  // sibling bug just above at line 483, which already carries this guard.
+  if (analysis.vague && !refining) {
     return {
       text: "I need a bit more to work with. Tell me what you're trying to end up with, and any constraint that matters (stack, deadline, audience), and I'll turn it into a concrete plan.",
       strategy: "clarify",
