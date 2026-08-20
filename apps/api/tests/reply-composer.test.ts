@@ -2,7 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzeRequest, extractTopics } from "../src/services/requestAnalysis.js";
 import { selectRelevantMemories, scoreMemories } from "../src/services/memoryRelevance.js";
-import { buildCapabilityReply, composeReply, type ComposerMemory, isMultiPartQuestion } from "../src/services/replyComposer.js";
+import {
+  buildCapabilityReply,
+  composeReply,
+  type ComposerMemory,
+  isMultiPartQuestion,
+  rememberHasTrailingRequest
+} from "../src/services/replyComposer.js";
 
 function memory(id: string, title: string, body: string, pinned = false): ComposerMemory {
   return { id, title, body, pinned, createdAt: new Date(2026, 0, 1).toISOString() };
@@ -733,5 +739,61 @@ test("a grounded answer to a single question is not flagged", () => {
   });
 
   assert.equal(reply.strategy, "answer");
+  assert.equal(reply.partial, false);
+});
+
+test("a trailing request after a remember clause is detected", () => {
+  // Caught live: this saved the door code correctly and answered with a bare
+  // "Saved." — the trailing "tell me every door code I have saved" was never
+  // read at all, because the remember branch returns as soon as it recognises
+  // the opening clause.
+  assert.equal(
+    rememberHasTrailingRequest("Remember that the server room door code is 4471. Then tell me every door code I have saved."),
+    true
+  );
+  assert.equal(rememberHasTrailingRequest("Remember that we standardized on Postgres. What do we use for caching?"), true);
+});
+
+test("a plain remember statement has no trailing request", () => {
+  assert.equal(rememberHasTrailingRequest("Remember that we standardized on Postgres"), false);
+  assert.equal(rememberHasTrailingRequest("Remember that we standardized on Postgres."), false);
+  assert.equal(rememberHasTrailingRequest("Remember that my deploy server is rack-4 in the basement."), false);
+});
+
+test("a second sentence that is not a request does not count", () => {
+  // "It has been that way for years" states something else; it is not a
+  // second instruction being dropped.
+  assert.equal(
+    rememberHasTrailingRequest("Remember that we standardized on Postgres. It has been that way for years."),
+    false
+  );
+});
+
+test("a confirmed save is flagged partial when a trailing request was dropped", () => {
+  const reply = composeReply({
+    mode: "general",
+    message: "Remember that the server room door code is 4471. Then tell me every door code I have saved.",
+    memories: [],
+    history: [],
+    memoryWrite: { available: true, saved: 1, savedBodies: ["the server room door code is 4471"] }
+  });
+
+  assert.equal(reply.strategy, "acknowledge");
+  assert.equal(reply.partial, true);
+  // The acknowledgement itself is still the honest reply to fall back on when
+  // there is no model to hand the rest to.
+  assert.match(reply.text, /Saved/i);
+});
+
+test("an ordinary remember statement is not flagged partial", () => {
+  const reply = composeReply({
+    mode: "general",
+    message: "Remember that we standardized on Postgres",
+    memories: [],
+    history: [],
+    memoryWrite: { available: true, saved: 1, savedBodies: ["we standardized on Postgres"] }
+  });
+
+  assert.equal(reply.strategy, "acknowledge");
   assert.equal(reply.partial, false);
 });

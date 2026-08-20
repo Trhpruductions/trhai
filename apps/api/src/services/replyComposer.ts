@@ -44,6 +44,14 @@ export type MemoryWriteOutcome = {
   available: boolean;
   /** How many memories were actually written from this message. */
   saved: number;
+  /**
+   * The text of what was actually written, when this turn wrote anything.
+   *
+   * Lets a "remember that X, then do Y" turn hand X to the model directly
+   * rather than making it call search_memory for a fact that was written a
+   * moment ago in the very message it is answering.
+   */
+  savedBodies?: string[];
 };
 
 export type ComposerInput = {
@@ -216,6 +224,37 @@ const questionWords = /\b(what|which|when|where|who|whose|whom|why|how)\b/gi;
 export function isMultiPartQuestion(message: string): boolean {
   const matches = message.match(questionWords);
   return (matches?.length ?? 0) > 1;
+}
+
+/**
+ * Whether a "remember that ..." message carries a second instruction after it.
+ *
+ * Caught live: "Remember that the server room door code is 4471. Then tell me
+ * every door code I have saved." saved the fact correctly and answered with a
+ * bare acknowledgement — the trailing request was never even read, because
+ * the remember branch returns as soon as it recognises the opening clause.
+ * isMultiPartQuestion does not catch this: "tell me" carries no interrogative
+ * word at all, and the fact is stated once rather than asked about twice.
+ *
+ * The first sentence is always assumed to be the memory clause and is
+ * skipped; anything sentence after it that reads as a request or a question
+ * counts as a second instruction.
+ */
+export function rememberHasTrailingRequest(message: string): boolean {
+  const sentences = message.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
+  if (sentences.length < 2) return false;
+
+  return sentences.slice(1).some((sentence) => {
+    // "Then tell me ..." reads as a statement on its own: analyzeRequest's
+    // recall check is anchored to the start of the sentence, and "then" sits
+    // in front of the very phrase ("tell me") that would have matched it. The
+    // connective carries no meaning of its own here, so it is dropped before
+    // asking what kind of sentence this actually is — the same judgement a
+    // reader makes without noticing they made it.
+    const withoutConnective = sentence.replace(/^(then|also|and|now|next|plus)\b[,\s]*/i, "");
+    const analysis = analyzeRequest(withoutConnective);
+    return analysis.shape === "question" || analysis.hasRequestMarker;
+  });
 }
 
 export const memoryPreference = 2;
@@ -406,7 +445,12 @@ export function composeReply(input: ComposerInput): ComposedReply {
         text: "Saved. I'll use that as context from here on — you can review or remove it in the Memory panel.",
         strategy: "acknowledge",
         groundedOn: [],
-        groundedOnHistory: 0
+        groundedOnHistory: 0,
+        // "Remember that X. Then tell me Y" saved X correctly and never
+        // looked at the trailing "tell me Y" — the branch returns as soon as
+        // it recognises the opening clause. Flagged the same way a grounded
+        // answer that only covers half a question is flagged.
+        partial: rememberHasTrailingRequest(message)
       };
     }
 

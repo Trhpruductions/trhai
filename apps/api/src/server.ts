@@ -11,6 +11,7 @@ import {
   getMemoryAudit,
   listSessionMemories,
   recordMemoriesFromMessage,
+  recordSingleMemory,
   relabelMemory,
   retrieveSessionMemories,
   setMemoryPinned
@@ -165,13 +166,17 @@ export function createApp() {
         // Reported so the reply can only confirm a save that actually happened.
         // Without a session there is nowhere to write, and the user must be told
         // that rather than reassured.
-        memoryWrite: { available: sessionId !== null, saved: savedMemories.length },
+        memoryWrite: {
+          available: sessionId !== null,
+          saved: savedMemories.length,
+          savedBodies: savedMemories.map((memory) => memory.body)
+        },
         knowledge: sessionId ? retrieveKnowledgePassages(sessionId) : [],
         // The write path for the assistant's own "remember" tool. Omitted
         // without a session, so the tool reports that nothing was saved rather
         // than the assistant claiming a write that had nowhere to go.
         saveMemory: sessionId
-          ? (fact: string) => recordMemoriesFromMessage(sessionId, `remember that ${fact}`).length > 0
+          ? (fact: string) => recordSingleMemory(sessionId, fact).status
           : undefined,
         forgetMemory: sessionId ? (id: string) => forgetMemory(sessionId, id) : undefined,
         documents: sessionId

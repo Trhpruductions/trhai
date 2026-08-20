@@ -11,7 +11,9 @@ import { runAssistantOrchestrator } from "../src/services/orchestrator.js";
  * about inference, so the model always succeeds and always says the same thing.
  */
 function fakeOllama(reply: string) {
-  return new Promise<{ server: Server; baseUrl: string }>((resolve) => {
+  const received: Array<Record<string, unknown>> = [];
+
+  return new Promise<{ server: Server; baseUrl: string; received: typeof received }>((resolve) => {
     const server = createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk) => chunks.push(chunk as Buffer));
@@ -21,6 +23,10 @@ function fakeOllama(reply: string) {
         if (request.url?.startsWith("/api/tags")) {
           response.end(JSON.stringify({ models: [{ name: "llama3.2:latest" }] }));
           return;
+        }
+
+        if (chunks.length) {
+          received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
         }
 
         // The orchestrator drives the agent loop, which speaks /api/chat. The
@@ -34,18 +40,25 @@ function fakeOllama(reply: string) {
     });
 
     server.listen(0, "127.0.0.1", () => {
-      resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}` });
+      resolve({
+        server,
+        baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+        received
+      });
     });
   });
 }
 
-async function withFakeModel<T>(reply: string, run: () => Promise<T>): Promise<T> {
-  const { server, baseUrl } = await fakeOllama(reply);
+async function withFakeModel<T>(
+  reply: string,
+  run: (received: Array<Record<string, unknown>>) => Promise<T>
+): Promise<T> {
+  const { server, baseUrl, received } = await fakeOllama(reply);
   const previous = process.env.OLLAMA_BASE_URL;
   process.env.OLLAMA_BASE_URL = baseUrl;
 
   try {
-    return await run();
+    return await run(received);
   } finally {
     if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
     else process.env.OLLAMA_BASE_URL = previous;
@@ -126,4 +139,47 @@ test("a build request still carries what to build when there is no model", async
     if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
     else process.env.OLLAMA_BASE_URL = previous;
   }
+});
+
+test("a remember-then-ask turn reaches the model with the fact already known", async () => {
+  // Caught live: "Remember that the server room door code is 4471. Then tell
+  // me every door code I have saved." saved the fact and answered with a bare
+  // "Saved." — the trailing request was never read. The fix routes this to
+  // the agent and hands over what was just written, so the model does not
+  // have to rediscover in its own search_memory call a fact that was written
+  // in the very message it is answering.
+  await withFakeModel("Saved, and it is the only door code you have on file.", async (received) => {
+    const result = await runAssistantOrchestrator({
+      mode: "general",
+      userMessage: "Remember that the server room door code is 4471. Then tell me every door code I have saved.",
+      memoryWrite: { available: true, saved: 1, savedBodies: ["the server room door code is 4471"] }
+    });
+
+    assert.equal(result.strategy, "generated");
+
+    // The hand-over is stated in the user turn, not the system prompt — see
+    // answerWithLocalModel's `question` construction.
+    const firstRequest = received[0] as { messages: Array<{ role: string; content: string }> };
+    const user = firstRequest.messages.find((message) => message.role === "user");
+    assert.match(user?.content ?? "", /4471/, "the just-saved fact must reach the model");
+    // "do not save it again" is load-bearing: without it, the model handed a
+    // fact that was already saved sometimes called remember on it a second
+    // time anyway, and reported a confusing failure when that redundant
+    // write did not go through.
+    assert.match(user?.content ?? "", /already.*saved memory/i);
+    assert.match(user?.content ?? "", /do not save it again/i);
+  });
+});
+
+test("an ordinary remember with nothing trailing stays the plain acknowledgement", async () => {
+  // Must not regress into routing every remember statement to the model —
+  // only ones that actually carry a second instruction.
+  const result = await runAssistantOrchestrator({
+    mode: "general",
+    userMessage: "Remember that we standardized on Postgres",
+    memoryWrite: { available: true, saved: 1, savedBodies: ["we standardized on Postgres"] }
+  });
+
+  assert.equal(result.strategy, "acknowledge");
+  assert.match(result.assistantMessage, /Saved/i);
 });

@@ -209,6 +209,58 @@ export function recordMemoriesFromMessage(sessionKey: string, message: string): 
   return stored;
 }
 
+/** Why a single explicit save wrote nothing, or that it wrote something. */
+export type SaveOutcome =
+  | { status: "saved"; memory: StoredMemory }
+  | { status: "duplicate" }
+  | { status: "empty" };
+
+/**
+ * Save one fact stated directly (the "remember" tool), distinguishing why a
+ * zero-write outcome happened.
+ *
+ * recordMemoriesFromMessage collapses both zero-write cases to `[]`, which is
+ * the right contract for its own caller — nothing there depends on knowing
+ * why. It is the wrong contract for a tool reporting back to a model: a
+ * remember call on a fact that is already saved is not a failure, and telling
+ * the model "the save did not go through" for it is untrue. That happened
+ * live — told a fact was already saved and told explicitly not to save it
+ * again, the model called remember on it anyway, and the honest-sounding
+ * failure message was in fact wrong.
+ */
+export function recordSingleMemory(sessionKey: string, fact: string): SaveOutcome {
+  loadFromDisk();
+  const candidates = extractMemoryCandidates(`remember that ${fact}`);
+  // A defensive fallback rather than a path exercised today: the
+  // explicit-remember rule matches almost anything once it is framed as
+  // "remember that X", and the only real caller (the remember tool) already
+  // rejects a blank fact before this is reached. Kept in case that changes.
+  if (candidates.length === 0) return { status: "empty" };
+
+  const existing = memoriesBySession.get(sessionKey) ?? [];
+  const fresh = suppressDuplicateMemories(candidates, existing.map((entry) => entry.body));
+  if (fresh.length === 0) return { status: "duplicate" };
+
+  const now = new Date().toISOString();
+  const stored: StoredMemory = {
+    id: globalThis.crypto.randomUUID(),
+    title: fresh[0].title,
+    body: fresh[0].body,
+    kind: fresh[0].kind,
+    confidence: fresh[0].confidence,
+    rule: fresh[0].rule,
+    createdAt: now,
+    pinned: false
+  };
+
+  memoriesBySession.set(sessionKey, applyCap([...existing, stored]));
+  evictOldestSessionIfNeeded();
+  recordAudit(sessionKey, stored.id, "recorded", `Recorded via ${stored.rule}: ${stored.title}`);
+  saveToDisk();
+
+  return { status: "saved", memory: stored };
+}
+
 /**
  * Trim to the cap by dropping the oldest *unpinned* entries. Pinning is an explicit
  * user instruction to keep something, so eviction must never override it.

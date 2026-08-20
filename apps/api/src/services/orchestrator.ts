@@ -15,9 +15,10 @@ export type OrchestratorInput = {
   /**
    * Writes a fact to memory for the "remember" tool. Omitted when there is
    * nowhere to write, in which case the tool reports that nothing was saved
-   * rather than the assistant claiming otherwise.
+   * rather than the assistant claiming otherwise. "duplicate" is a success —
+   * the fact is already there — not a failure to report as one.
    */
-  saveMemory?: (fact: string) => boolean;
+  saveMemory?: (fact: string) => "saved" | "duplicate" | "empty";
   /** Removes a saved memory by id, for the "forget" tool. */
   forgetMemory?: (id: string) => boolean;
   /** Documents in this session, for the document tools. */
@@ -94,26 +95,38 @@ export async function runAssistantOrchestrator(
   // have built it.
   const isPlan = modelReply.strategy === "plan";
 
-  // A grounded answer that only covers part of the question is also eligible.
+  // A grounded answer or a confirmed save that only covers part of the
+  // message is also eligible.
   //
-  // "Which database does my billing run on, and what is today's date?" matched
-  // memory on the database, returned that answer whole, and dropped the date
-  // half without a word. The agent can call search_memory and current_datetime
-  // and answer both — and if there is no model to ask, the partial answer
-  // below still stands, because half an answer beats none.
-  const isPartialAnswer = modelReply.strategy === "answer" && modelReply.partial === true;
+  // Two live failures of the same shape. "Which database does my billing run
+  // on, and what is today's date?" matched memory on the database, returned
+  // that answer whole, and dropped the date half without a word. "Remember
+  // that the server room door code is 4471. Then tell me every door code I
+  // have saved." saved the fact and answered with a bare "Saved." — the
+  // remember branch returns as soon as it recognises the opening clause and
+  // never reads what follows. Both are covered by the same partial flag; the
+  // agent can call search_memory, list_memories or current_datetime and
+  // answer the rest, and if there is no model to ask, the partial reply below
+  // still stands, because half an answer beats none.
+  const isPartialAnswer = modelReply.partial === true
+    && (modelReply.strategy === "answer" || modelReply.strategy === "acknowledge");
 
   if (modelReply.strategy === "no-answer" || isPlan || isPartialAnswer) {
-    // When the deterministic path already found the answer to part of the
-    // question, hand that over rather than making the model search for it
-    // again. Asked the database and the date, memory had matched the database
-    // — and the agent's own search_memory then came back empty and it reported
-    // the database as unrecorded. Rediscovering a fact we are already holding
-    // is a coin flip we do not need to take.
+    // When the deterministic path already found or just wrote the fact, hand
+    // it over rather than making the model search for it again. Asked the
+    // database and the date, memory had matched the database — and the
+    // agent's own search_memory then came back empty and it reported the
+    // database as unrecorded. Rediscovering a fact we are already holding is
+    // a coin flip we do not need to take.
     const known = isPartialAnswer
-      ? modelReply.groundedOn.map((id) => input.memoryContext?.find((entry) => entry.id === id))
-        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
-        .map((entry) => entry.body)
+      ? modelReply.strategy === "answer"
+        ? modelReply.groundedOn.map((id) => input.memoryContext?.find((entry) => entry.id === id))
+          .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+          .map((entry) => entry.body)
+        // The acknowledge case: groundedOn is empty, since nothing was
+        // searched — this was a write, not a retrieval. What was actually
+        // written is what needs to be handed over instead.
+        : input.memoryWrite?.savedBodies ?? []
       : [];
 
     const generated = await answerWithLocalModel(input, known);
@@ -181,10 +194,15 @@ async function answerWithLocalModel(
   // attached to the request, which meant the model saw at most a handful of
   // memories and never the documents. Here it asks for what it needs and gets
   // the real thing back — and can follow one lookup with another.
-  // Stated as fact rather than as a hint. The model is told where it came from
-  // so it does not present it as something it worked out.
+  // Stated as fact rather than as a hint, and stated as already saved rather
+  // than merely found. Without "do not save it again", a remember-then-ask
+  // turn handed the fact over correctly and the model still called remember
+  // on it a second time — redundant at best, and confusing when that second,
+  // unnecessary write failed and the reply had to explain a failure that
+  // never needed to happen.
   const question = known.length > 0
-    ? `${input.userMessage}\n\nAlready found in the user's saved memory, use it directly:\n`
+    ? `${input.userMessage}\n\nAlready in the user's saved memory — it is stored, do not save it again, `
+      + `just use it directly:\n`
       + known.map((fact) => `- ${fact}`).join("\n")
     : input.userMessage;
 

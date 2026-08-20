@@ -272,11 +272,43 @@ test("a successful save says what was saved", async () => {
   const saved: string[] = [];
   const result = await runTool(
     { name: "remember", arguments: { fact: "I like tea." } },
-    { ...context, saveMemory: (fact) => { saved.push(fact); return true; } }
+    { ...context, saveMemory: (fact) => { saved.push(fact); return "saved"; } }
   );
 
   assert.equal(result.ok, true);
   assert.deepEqual(saved, ["I like tea."]);
+});
+
+test("saving a fact already in memory is a success, not a reported failure", async () => {
+  // Caught live: told a fact was already saved and told explicitly not to
+  // save it again, the model called remember on it anyway. The store's own
+  // duplicate check correctly suppressed the redundant write, and the tool
+  // then reported "the save did not go through, so nothing was stored" for
+  // it — which reads as a real failure to whoever is reading the reply, when
+  // nothing was actually wrong. The store is the one place that genuinely
+  // knows whether a fact is new; its answer is trusted rather than guessed at
+  // with a second, less reliable check in this file.
+  const attempts: string[] = [];
+  const result = await runTool(
+    { name: "remember", arguments: { fact: "The billing database is Postgres 16." } },
+    { ...context, saveMemory: (fact) => { attempts.push(fact); return "duplicate"; } }
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /Already saved/);
+  // The call does reach the store — that is what makes the "duplicate"
+  // answer authoritative rather than a guess made without asking it.
+  assert.deepEqual(attempts, ["The billing database is Postgres 16."]);
+});
+
+test("a save that extracted nothing is reported as the real failure it is", async () => {
+  const result = await runTool(
+    { name: "remember", arguments: { fact: "I like tea." } },
+    { ...context, saveMemory: () => "empty" }
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /did not go through/);
 });
 
 test("a document result carries the document it came from", async () => {

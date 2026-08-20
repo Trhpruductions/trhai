@@ -68,8 +68,15 @@ export type ToolContext = {
   memories: ScorableMemory[];
   /** Knowledge passages available to this session. */
   knowledge: Array<ScorableMemory & { documentTitle: string }>;
-  /** Writes a fact to memory. Returns false when there was nowhere to write. */
-  saveMemory?: (fact: string) => boolean;
+  /**
+   * Writes a fact to memory.
+   *
+   * "duplicate" is distinct from a failure: the fact is genuinely already
+   * saved, which is a success with nothing left to do, not an error. A tool
+   * that could not tell the two apart reported "the save did not go through"
+   * for a fact that was, in fact, already there.
+   */
+  saveMemory?: (fact: string) => "saved" | "duplicate" | "empty";
   /** Removes a saved memory by its id. Returns false when nothing was removed. */
   forgetMemory?: (id: string) => boolean;
   /** Documents in this session, newest first. */
@@ -514,10 +521,22 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         return { ok: false, content: "There is nowhere to save to, so nothing was saved." };
       }
 
-      const saved = context.saveMemory(fact);
-      return saved
-        ? { ok: true, content: `Saved: ${fact}` }
-        : { ok: false, content: "The save did not go through, so nothing was stored." };
+      const outcome = context.saveMemory(fact);
+
+      // "duplicate" first checked myself against context.memories with a
+      // simple string match before writing, which missed cases where the
+      // model's fact argument was phrased differently from the stored
+      // wording even though the store's own fingerprint-based check still
+      // caught it as the same fact. The store is the one place that actually
+      // knows, so its answer is used instead of a second guess at this layer.
+      switch (outcome) {
+        case "saved":
+          return { ok: true, content: `Saved: ${fact}` };
+        case "duplicate":
+          return { ok: true, content: `Already saved: ${fact}` };
+        case "empty":
+          return { ok: false, content: "The save did not go through, so nothing was stored." };
+      }
     }
 
     case "list_memories": {
