@@ -1547,7 +1547,305 @@ function smokeFile(spec: ProjectSpec): string {
   ].join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// The calculator archetype.
+//
+// No entities, no store, no CRUD routes — a calculator has nothing to save.
+// Everything below is its own small, complete generator rather than a special
+// case bolted onto the entity-driven one above, because there is no entity
+// here to bolt it onto.
+// ---------------------------------------------------------------------------
+
+function calculatorPackageFile(spec: ProjectSpec): string {
+  return JSON.stringify({
+    name: spec.slug,
+    version: "0.1.0",
+    private: true,
+    type: "module",
+    description: spec.summary,
+    engines: { node: ">=18.0.0" },
+    scripts: {
+      start: "node server.js",
+      smoke: "node smoke.js"
+    }
+  }, null, 2) + "\n";
+}
+
+function calculatorReadmeFile(spec: ProjectSpec): string {
+  return [
+    "# " + spec.title,
+    "",
+    spec.summary,
+    "",
+    "## Run it",
+    "",
+    "```bash",
+    "node server.js",
+    "```",
+    "",
+    "Then open http://localhost:4400",
+    "",
+    "No dependencies and no install step — this runs on the Node standard library alone.",
+    "",
+    "## API",
+    "",
+    "| Method | Path | Purpose |",
+    "| --- | --- | --- |",
+    "| GET | `/health` | Liveness check |",
+    "| POST | `/api/calculate` | `{ a, b, operation }` -> `{ result }` |",
+    "",
+    "`operation` is one of `add`, `subtract`, `multiply`, `divide`. Dividing by",
+    "zero and non-numeric input are both rejected with a 400 and an `error`",
+    "field, not silently turned into `null` or `Infinity`.",
+    ""
+  ].join("\n");
+}
+
+/** The four operations the UI, the API and the smoke test all share. */
+function calculatorOperationsSource(): string {
+  return [
+    "const operations = {",
+    "  add: (a, b) => a + b,",
+    "  subtract: (a, b) => a - b,",
+    "  multiply: (a, b) => a * b,",
+    "  divide: (a, b) => {",
+    "    if (b === 0) throw new Error(\"Cannot divide by zero\");",
+    "    return a / b;",
+    "  }",
+    "};",
+    "",
+    "function calculate(a, b, operation) {",
+    "  if (typeof a !== \"number\" || !Number.isFinite(a)) return { error: \"a must be a finite number\" };",
+    "  if (typeof b !== \"number\" || !Number.isFinite(b)) return { error: \"b must be a finite number\" };",
+    "  const fn = operations[operation];",
+    "  if (!fn) return { error: \"operation must be one of: \" + Object.keys(operations).join(\", \") };",
+    "  try {",
+    "    return { result: fn(a, b) };",
+    "  } catch (error) {",
+    "    return { error: error instanceof Error ? error.message : String(error) };",
+    "  }",
+    "}"
+  ].join("\n");
+}
+
+function calculatorServerFile(): string {
+  return [
+    "import { createServer } from \"node:http\";",
+    "import { readFile } from \"node:fs/promises\";",
+    "import { fileURLToPath } from \"node:url\";",
+    "import path from \"node:path\";",
+    "",
+    "const rootDir = path.dirname(fileURLToPath(import.meta.url));",
+    "",
+    calculatorOperationsSource(),
+    "",
+    "function sendJson(response, status, payload) {",
+    "  const body = JSON.stringify(payload, null, 2);",
+    "  response.writeHead(status, {",
+    "    \"Content-Type\": \"application/json; charset=utf-8\",",
+    "    \"Content-Length\": Buffer.byteLength(body)",
+    "  });",
+    "  response.end(body);",
+    "}",
+    "",
+    "const server = createServer(async (request, response) => {",
+    "  const url = new URL(request.url, \"http://localhost\");",
+    "",
+    "  if (request.method === \"GET\" && url.pathname === \"/health\") {",
+    "    sendJson(response, 200, { status: \"ok\" });",
+    "    return;",
+    "  }",
+    "",
+    "  if (request.method === \"POST\" && url.pathname === \"/api/calculate\") {",
+    "    const chunks = [];",
+    "    for await (const chunk of request) chunks.push(chunk);",
+    "    let body;",
+    "    try {",
+    "      body = JSON.parse(Buffer.concat(chunks).toString(\"utf8\") || \"{}\");",
+    "    } catch {",
+    "      sendJson(response, 400, { error: \"invalid JSON body\" });",
+    "      return;",
+    "    }",
+    "",
+    "    const outcome = calculate(Number(body.a), Number(body.b), String(body.operation ?? \"\"));",
+    "    sendJson(response, outcome.error ? 400 : 200, outcome);",
+    "    return;",
+    "  }",
+    "",
+    "  if (request.method === \"GET\" && (url.pathname === \"/\" || url.pathname === \"/index.html\")) {",
+    "    try {",
+    "      const html = await readFile(path.join(rootDir, \"public\", \"index.html\"), \"utf8\");",
+    "      response.writeHead(200, { \"Content-Type\": \"text/html; charset=utf-8\" });",
+    "      response.end(html);",
+    "    } catch {",
+    "      sendJson(response, 500, { error: \"index.html is missing\" });",
+    "    }",
+    "    return;",
+    "  }",
+    "",
+    "  sendJson(response, 404, { error: \"not found\" });",
+    "});",
+    "",
+    "const port = Number(process.env.PORT ?? 4400);",
+    "server.listen(port, () => {",
+    "  console.log(\"listening on http://localhost:\" + port);",
+    "});",
+    ""
+  ].join("\n");
+}
+
+function calculatorUiFile(spec: ProjectSpec): string {
+  return [
+    "<!doctype html>",
+    "<html lang=\"en\">",
+    "<head>",
+    "  <meta charset=\"utf-8\" />",
+    "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />",
+    "  <title>" + spec.title + "</title>",
+    "  <style>",
+    "    body { font-family: system-ui, sans-serif; max-width: 360px; margin: 48px auto; padding: 0 16px; }",
+    "    h1 { font-size: 1.25rem; }",
+    "    .row { display: flex; gap: 8px; margin-bottom: 8px; }",
+    "    input, select, button { font-size: 1rem; padding: 8px; }",
+    "    input { width: 100px; }",
+    "    #result { margin-top: 16px; font-size: 1.1rem; min-height: 1.5em; }",
+    "    #result.error { color: #b3261e; }",
+    "  </style>",
+    "</head>",
+    "<body>",
+    "  <h1>" + spec.title + "</h1>",
+    "  <div class=\"row\">",
+    "    <input id=\"a\" type=\"number\" placeholder=\"First number\" />",
+    "    <select id=\"operation\">",
+    "      <option value=\"add\">+</option>",
+    "      <option value=\"subtract\">-</option>",
+    "      <option value=\"multiply\">×</option>",
+    "      <option value=\"divide\">÷</option>",
+    "    </select>",
+    "    <input id=\"b\" type=\"number\" placeholder=\"Second number\" />",
+    "  </div>",
+    "  <button id=\"go\">=</button>",
+    "  <div id=\"result\"></div>",
+    "  <script>",
+    "    const resultEl = document.getElementById(\"result\");",
+    "    document.getElementById(\"go\").addEventListener(\"click\", async () => {",
+    "      const a = Number(document.getElementById(\"a\").value);",
+    "      const b = Number(document.getElementById(\"b\").value);",
+    "      const operation = document.getElementById(\"operation\").value;",
+    "",
+    "      resultEl.className = \"\";",
+    "      resultEl.textContent = \"…\";",
+    "",
+    "      try {",
+    "        const response = await fetch(\"/api/calculate\", {",
+    "          method: \"POST\",",
+    "          headers: { \"Content-Type\": \"application/json\" },",
+    "          body: JSON.stringify({ a, b, operation })",
+    "        });",
+    "        const payload = await response.json();",
+    "        if (!response.ok) {",
+    "          resultEl.className = \"error\";",
+    "          resultEl.textContent = payload.error;",
+    "          return;",
+    "        }",
+    "        resultEl.textContent = \"= \" + payload.result;",
+    "      } catch {",
+    "        resultEl.className = \"error\";",
+    "        resultEl.textContent = \"Could not reach the server.\";",
+    "      }",
+    "    });",
+    "  </script>",
+    "</body>",
+    "</html>",
+    ""
+  ].join("\n");
+}
+
+function calculatorSmokeFile(): string {
+  return [
+    "// Starts the server, exercises the real API, and reports the result.",
+    "import { spawn } from \"node:child_process\";",
+    "import { once } from \"node:events\";",
+    "import { setTimeout as delay } from \"node:timers/promises\";",
+    "",
+    "const port = Number(process.env.SMOKE_PORT ?? 4499);",
+    "const child = spawn(process.execPath, [\"server.js\"], {",
+    "  env: { ...process.env, PORT: String(port) },",
+    "  stdio: \"ignore\"",
+    "});",
+    "",
+    "const base = \"http://127.0.0.1:\" + port;",
+    "let failures = 0;",
+    "",
+    "function check(label, condition) {",
+    "  console.log((condition ? \"  ok   \" : \"  FAIL \") + label);",
+    "  if (!condition) failures += 1;",
+    "}",
+    "",
+    "async function calc(a, b, operation) {",
+    "  const response = await fetch(base + \"/api/calculate\", {",
+    "    method: \"POST\",",
+    "    headers: { \"Content-Type\": \"application/json\" },",
+    "    body: JSON.stringify({ a, b, operation })",
+    "  });",
+    "  return { status: response.status, body: await response.json() };",
+    "}",
+    "",
+    "try {",
+    "  for (let attempt = 0; attempt < 40; attempt += 1) {",
+    "    try { await fetch(base + \"/health\"); break; } catch { await delay(100); }",
+    "  }",
+    "",
+    "  const health = await fetch(base + \"/health\");",
+    "  check(\"health responds 200\", health.status === 200);",
+    "",
+    "  const sum = await calc(2, 3, \"add\");",
+    "  check(\"2 + 3 = 5\", sum.status === 200 && sum.body.result === 5);",
+    "",
+    "  const diff = await calc(10, 4, \"subtract\");",
+    "  check(\"10 - 4 = 6\", diff.status === 200 && diff.body.result === 6);",
+    "",
+    "  const product = await calc(6, 7, \"multiply\");",
+    "  check(\"6 * 7 = 42\", product.status === 200 && product.body.result === 42);",
+    "",
+    "  const quotient = await calc(9, 2, \"divide\");",
+    "  check(\"9 / 2 = 4.5\", quotient.status === 200 && quotient.body.result === 4.5);",
+    "",
+    "  const byZero = await calc(5, 0, \"divide\");",
+    "  check(\"division by zero is rejected, not Infinity\", byZero.status === 400 && typeof byZero.body.error === \"string\");",
+    "",
+    "  const badOp = await calc(1, 1, \"exponentiate\");",
+    "  check(\"an unknown operation is rejected\", badOp.status === 400);",
+    "",
+    "  const badInput = await calc(\"nope\", 1, \"add\");",
+    "  check(\"non-numeric input is rejected, not coerced\", badInput.status === 400);",
+    "",
+    "  const page = await fetch(base + \"/\");",
+    "  check(\"the calculator page itself loads\", page.status === 200);",
+    "} finally {",
+    "  child.kill();",
+    "  await Promise.race([once(child, \"exit\"), delay(2000)]);",
+    "}",
+    "",
+    "console.log(failures === 0 ? \"\\nAll checks passed.\" : \"\\n\" + failures + \" check(s) failed.\");",
+    "process.exitCode = failures === 0 ? 0 : 1;",
+    ""
+  ].join("\n");
+}
+
+function generateCalculatorProject(spec: ProjectSpec): GeneratedFile[] {
+  return [
+    { path: "package.json", content: calculatorPackageFile(spec) },
+    { path: "README.md", content: calculatorReadmeFile(spec) },
+    { path: "server.js", content: calculatorServerFile() },
+    { path: "smoke.js", content: calculatorSmokeFile() },
+    { path: "public/index.html", content: calculatorUiFile(spec) }
+  ];
+}
+
 export function generateProject(spec: ProjectSpec): GeneratedFile[] {
+  if (spec.kind === "calculator") return generateCalculatorProject(spec);
+
   return [
     { path: "package.json", content: packageFile(spec) },
     { path: "README.md", content: readmeFile(spec) },

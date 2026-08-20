@@ -1055,3 +1055,76 @@ test("the scaffold folder follows the title, not the container noun", () => {
   const spec = planProject("Build me an app to track invoices with a client name and amount");
   assert.match(slugify(spec.title, "app", 60), /invoice/);
 });
+
+// ---------------------------------------------------------------------------
+// The calculator archetype.
+//
+// Caught live: "Build me a simple calculator application that performs basic
+// arithmetic operations..." went through ordinary entity extraction and
+// produced a REST API for /api/applications, /api/performs and
+// /api/arithmetics — nouns the sentence never named as records, because it
+// never named any records at all. A calculator has nothing to store.
+// ---------------------------------------------------------------------------
+
+test("a calculator request is recognised before entity extraction ever runs", () => {
+  const spec = planProject(
+    "Build me a simple calculator application that performs basic arithmetic operations, "
+    + "including addition, subtraction, multiplication, and division."
+  );
+
+  assert.equal(spec.kind, "calculator");
+  assert.deepEqual(spec.entities, []);
+  assert.deepEqual(spec.features, []);
+});
+
+test("a plain 'build me a calculator' is enough to trigger it", () => {
+  assert.equal(planProject("Build me a calculator app.").kind, "calculator");
+  assert.equal(planProject("calculator").kind, "calculator");
+});
+
+test("a request that never says calculator is unaffected", () => {
+  const spec = planProject("Build a task tracker where tasks have a title and status");
+  assert.notEqual(spec.kind, "calculator");
+  assert.ok(spec.entities.length > 0);
+});
+
+test("generateProject emits the calculator's own files, not the CRUD skeleton", () => {
+  const spec = planProject("Build me a calculator");
+  const files = generateProject(spec);
+  const paths = files.map((file) => file.path).sort();
+
+  assert.deepEqual(paths, ["README.md", "package.json", "public/index.html", "server.js", "smoke.js"]);
+  // No store.js — there is nothing to persist.
+  assert.ok(!paths.includes("store.js"));
+});
+
+test("the generated calculator server implements real arithmetic, not a stub", () => {
+  const files = generateProject(planProject("Build me a calculator"));
+  const server = files.find((file) => file.path === "server.js")?.content ?? "";
+
+  // The four operations are real functions, not placeholder strings.
+  assert.match(server, /add:\s*\(a,\s*b\)\s*=>\s*a\s*\+\s*b/);
+  assert.match(server, /subtract:\s*\(a,\s*b\)\s*=>\s*a\s*-\s*b/);
+  assert.match(server, /multiply:\s*\(a,\s*b\)\s*=>\s*a\s*\*\s*b/);
+  assert.match(server, /divide:/);
+  // Division by zero is refused rather than producing Infinity.
+  assert.match(server, /Cannot divide by zero/);
+  // Every generated project is dependency-free.
+  assert.doesNotMatch(server, /from "express"|from "body-parser"/);
+});
+
+test("no generated file routes to the entities the old bug invented", () => {
+  // The bug was never the word "application" appearing anywhere — it is in
+  // the description here honestly, because the user's own sentence used it.
+  // The bug was it becoming a stored, routable record: /api/applications,
+  // /api/performs, /api/arithmetics, none of which the sentence ever named
+  // as something to save.
+  const files = generateProject(planProject(
+    "Build me a simple calculator application that performs basic arithmetic operations, "
+    + "including addition, subtraction, multiplication, and division."
+  ));
+
+  for (const file of files) {
+    assert.doesNotMatch(file.content, /\/api\/(applications|performs|arithmetics)\b/, file.path);
+  }
+});

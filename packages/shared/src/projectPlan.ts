@@ -48,6 +48,15 @@ export type ProjectSpec = {
   summary: string;
   entities: Entity[];
   features: ProjectFeature[];
+  /**
+   * Set when the request is not a data-CRUD app at all — a calculator has no
+   * records to store, and running it through entity extraction anyway is what
+   * produced a REST API for "applications", "performs" and "arithmetics" from
+   * a description that never named a single one of them. entities and
+   * features are empty for these; generateProject checks this before it ever
+   * looks at either.
+   */
+  kind?: "calculator";
 };
 
 /** Words that describe the *kind* of app, never the thing it stores. */
@@ -667,6 +676,25 @@ export function deriveTitle(request: string): string {
 
 export function planProject(request: string, title?: string): ProjectSpec {
   const trimmed = request.trim();
+
+  // A calculator has no records to store. Routed through entity extraction
+  // anyway, "a simple calculator application that performs basic arithmetic
+  // operations" produced a REST API for /api/applications, /api/performs and
+  // /api/arithmetics — a description that never named any of them, read as
+  // if it had. Checked before entities are ever extracted, not patched
+  // afterward: the mismatch is the category, not a specific noun.
+  if (/\bcalculators?\b/i.test(trimmed)) {
+    const resolvedTitle = title?.trim() || deriveTitle(trimmed);
+    return {
+      title: resolvedTitle,
+      slug: slugify(resolvedTitle),
+      summary: trimmed,
+      entities: [],
+      features: [],
+      kind: "calculator"
+    };
+  }
+
   const features = detectFeatures(trimmed);
 
   // Entities are read from the request with the field lists removed, so

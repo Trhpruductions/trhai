@@ -660,6 +660,32 @@ test("build_app writes a real, runnable project to disk, and verifies it runs", 
 });
 
 
+test("build_app actually builds a calculator instead of refusing it", async () => {
+  // Caught live: the model's own real description — "a simple calculator
+  // application that takes in two numbers and an operator (+, -, *, /) and
+  // returns the result" — genuinely names a calculator, and planProject
+  // correctly returned kind: "calculator" with entities: [] by design,
+  // because a calculator has nothing to store. This exact check predates
+  // that archetype and only knew "empty entities" as "nothing was
+  // understood", so it refused every calculator with "does not name
+  // anything to store" — on exactly the condition that is normal for one.
+  const result = await runTool(
+    {
+      name: "build_app",
+      arguments: {
+        description: "a simple calculator application that takes in two numbers and an "
+          + "operator (+, -, *, /) and returns the result"
+      }
+    },
+    editContext
+  );
+
+  assert.equal(result.ok, true, result.content);
+  assert.doesNotMatch(result.content, /does not name anything to store/);
+  assert.match(result.content, /verified it/);
+  assert.match(result.content, /\d+\/\d+ checks passed/);
+});
+
 test("a build reports nothing when there is nothing to build", async () => {
   const result = await runTool({ name: "build_app", arguments: { description: "" } }, editContext);
 

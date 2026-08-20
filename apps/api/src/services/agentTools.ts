@@ -782,7 +782,12 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       if (!description) return { ok: false, content: "build_app needs a description." };
 
       const spec = planProject(description);
-      if (spec.entities.length === 0) {
+      // A calculator has nothing to store by design — spec.entities is
+      // empty on purpose, not because nothing was understood. Caught live:
+      // this check predates the calculator archetype and does not know
+      // about it, so it was rejecting every calculator request on exactly
+      // the condition that is normal for one.
+      if (spec.kind !== "calculator" && spec.entities.length === 0) {
         return { ok: false, content: "That description does not name anything to store, so there is nothing to build yet." };
       }
 
