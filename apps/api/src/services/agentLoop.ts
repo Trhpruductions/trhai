@@ -184,18 +184,68 @@ export function looksLikeRawToolCalls(text: string): boolean {
 }
 
 /**
+ * One line that is nothing but `tool_name(key="value", other=123)` — the
+ * other shape a model reaches for instead of the JSON this interface asks
+ * for. Caught live: asked to build a calculator, the reply was the single
+ * line `build_app(description="...")` and nothing else. That is not JSON, so
+ * parseTextToolCalls' JSON branch returned no calls, looksLikeRawToolCalls
+ * (defined in terms of it) agreed nothing looked like a call, and the literal
+ * text reached the user as their answer instead of ever running.
+ *
+ * Only recognised when the whole line is the call, the same discipline the
+ * JSON branch applies — this reads a request the model made, not a mention of
+ * a function's name in the middle of an explanation.
+ */
+function parseBareCall(line: string, known: string[]): ToolCall | null {
+  const match = /^([a-zA-Z_][a-zA-Z0-9_]*)\(([^()]*)\)$/.exec(line.trim());
+  if (!match) return null;
+
+  const [, name, argsText] = match;
+  if (!known.includes(name)) return null;
+
+  const args: Record<string, unknown> = {};
+  const pairs = argsText.match(
+    /[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^,]+)/g
+  ) ?? [];
+
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    if (eq === -1) continue;
+    const key = pair.slice(0, eq).trim();
+    const raw = pair.slice(eq + 1).trim();
+
+    if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+      args[key] = raw.slice(1, -1).replace(/\\(.)/g, "$1");
+    } else if (raw === "true") {
+      args[key] = true;
+    } else if (raw === "false") {
+      args[key] = false;
+    } else if (raw === "null") {
+      args[key] = null;
+    } else if (raw !== "" && !Number.isNaN(Number(raw))) {
+      args[key] = Number(raw);
+    } else {
+      args[key] = raw;
+    }
+  }
+
+  return { name, arguments: args };
+}
+
+/**
  * Tool calls a model wrote as text instead of calling.
  *
  * A smaller model sometimes ignores the tool interface and puts the calls it
- * wanted into the message body, one JSON object per line:
+ * wanted into the message body — as JSON, one object per line:
  *
  *   {"name": "search_memory", "parameters": {"query": "billing"}}
  *   {"name": "current_datetime", "parameters": {}}
  *
- * That text reached the user as their answer. The first fix was to refuse it,
- * on the grounds that acting on it meant guessing at an intention in a shape
- * this code never agreed to accept. That reasoning was wrong, and refusing it
- * left the only model this machine can actually load unable to use any tool.
+ * or as a bare call, see parseBareCall. Both reached the user as their
+ * answer before this existed. The first fix was to refuse it, on the grounds
+ * that acting on it meant guessing at an intention in a shape this code never
+ * agreed to accept. That reasoning was wrong, and refusing it left the only
+ * model this machine can actually load unable to use any tool.
  *
  * It is not a guess. The model names a tool this app advertises and passes
  * arguments matching the schema it was given; this is the same request in a
@@ -207,51 +257,57 @@ export function looksLikeRawToolCalls(text: string): boolean {
  */
 export function parseTextToolCalls(text: string, known = advertisedToolNames()): ToolCall[] {
   const trimmed = text.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return [];
+  if (!trimmed) return [];
 
-  const objects: unknown[] = [];
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    const objects: unknown[] = [];
 
-  // A JSON array of calls, or one object per line. Both shapes appear.
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (Array.isArray(parsed)) objects.push(...parsed);
-    else objects.push(parsed);
-  } catch {
-    for (const line of trimmed.split("\n")) {
-      const candidate = line.trim();
-      if (!candidate.startsWith("{")) continue;
-      try {
-        objects.push(JSON.parse(candidate));
-      } catch {
-        // One malformed line does not discard the rest.
+    // A JSON array of calls, or one object per line. Both shapes appear.
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) objects.push(...parsed);
+      else objects.push(parsed);
+    } catch {
+      for (const line of trimmed.split("\n")) {
+        const candidate = line.trim();
+        if (!candidate.startsWith("{")) continue;
+        try {
+          objects.push(JSON.parse(candidate));
+        } catch {
+          // One malformed line does not discard the rest.
+        }
       }
     }
+
+    const calls: ToolCall[] = [];
+    for (const entry of objects) {
+      if (!entry || typeof entry !== "object") continue;
+      const record = entry as Record<string, unknown>;
+
+      const name = typeof record.name === "string"
+        ? record.name
+        : typeof record.function === "string" ? record.function : null;
+
+      // The gate. An unrecognised name is dropped, never invoked: this is the
+      // check that makes reading the model's prose safe, not the shape it
+      // happened to be written in.
+      if (!name || !known.includes(name)) continue;
+
+      const rawArguments = record.parameters ?? record.arguments ?? {};
+      calls.push({
+        name,
+        arguments: rawArguments && typeof rawArguments === "object"
+          ? rawArguments as Record<string, unknown>
+          : {}
+      });
+    }
+
+    return calls;
   }
 
-  const calls: ToolCall[] = [];
-  for (const entry of objects) {
-    if (!entry || typeof entry !== "object") continue;
-    const record = entry as Record<string, unknown>;
-
-    const name = typeof record.name === "string"
-      ? record.name
-      : typeof record.function === "string" ? record.function : null;
-
-    // The gate. An unrecognised name is dropped, never invoked: this is the
-    // check that makes reading the model's prose safe, not the shape it
-    // happened to be written in.
-    if (!name || !known.includes(name)) continue;
-
-    const rawArguments = record.parameters ?? record.arguments ?? {};
-    calls.push({
-      name,
-      arguments: rawArguments && typeof rawArguments === "object"
-        ? rawArguments as Record<string, unknown>
-        : {}
-    });
-  }
-
-  return calls;
+  return trimmed.split("\n")
+    .map((line) => parseBareCall(line, known))
+    .filter((call): call is ToolCall => call !== null);
 }
 
 /** The tools this app offers, by name. */

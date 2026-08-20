@@ -814,6 +814,63 @@ test("one malformed line does not discard the rest", () => {
   assert.deepEqual(calls.map((call) => call.name), ["current_datetime", "list_memories"]);
 });
 
+test("a call written as name(key=\"value\") is recognised, not just JSON", () => {
+  // Caught live: asked to build a calculator, the entire reply was the single
+  // line build_app(description="..."). Not JSON, so the JSON branch found
+  // nothing, looksLikeRawToolCalls (defined in terms of it) agreed nothing
+  // looked like a call, and that literal line reached the user as their
+  // answer — the tool never ran.
+  assert.equal(looksLikeRawToolCalls('build_app(description="a calculator app")'), true);
+
+  const calls = parseTextToolCalls('build_app(description="a calculator app")');
+  assert.deepEqual(calls, [{ name: "build_app", arguments: { description: "a calculator app" } }]);
+});
+
+test("bare-call arguments keep their real type, not just strings", () => {
+  const calls = parseTextToolCalls("shift_date(days=7, from_today=true, label='next week')");
+  assert.deepEqual(calls, [
+    { name: "shift_date", arguments: { days: 7, from_today: true, label: "next week" } }
+  ]);
+});
+
+test("a bare call to an unadvertised tool is dropped, never invoked", () => {
+  // The same gate as the JSON path, applied to the other shape.
+  assert.deepEqual(parseTextToolCalls('delete_everything(path="/")'), []);
+});
+
+test("prose with parentheses is never mistaken for a bare call", () => {
+  for (const text of [
+    "Call me at (555) 123-4567.",
+    "This is one option (see below).",
+    "You could call build_app(description) to do this yourself.",
+    "The function signature is roughly build_app(description: string)."
+  ]) {
+    assert.equal(looksLikeRawToolCalls(text), false, text);
+  }
+});
+
+test("a bare call is actually run, not shown and not ignored", async () => {
+  // The end-to-end version of the caught-live case above: the model's whole
+  // reply is the bare call, and running it means a real tool actually
+  // executes and the real result is what the user sees — not the literal
+  // text of the call itself.
+  const { server, baseUrl } = await fakeModel([
+    answer('current_datetime()'),
+    answer("Recorded.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what time is it?", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.toolsUsed, ["current_datetime"]);
+    // The bare-call text itself must never reach the user as the answer.
+    assert.ok(!result.text.includes("current_datetime("), `leaked call syntax: ${result.text}`);
+  } finally {
+    server.close();
+  }
+});
+
 test("tool-call JSON is never shown as the answer", async () => {
   // Even on the last round, where the calls are not acted on, the JSON must
   // not be handed to the user as prose — it is the model's working.
