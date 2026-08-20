@@ -24,6 +24,19 @@ test("classifies questions, commands and statements", () => {
   assert.equal(analyzeRequest("We standardized on Postgres").shape, "statement");
 });
 
+test("project-inspection verbs are commands, not statements", () => {
+  // Caught live: "Look inside the calculator project, list its files, then
+  // read server.js and tell me whether the arithmetic looks correct" led
+  // with a verb none of the original commandVerbs covered, fell through to
+  // "statement", and was acknowledged with "Got it, I'll keep that in mind"
+  // instead of ever reaching the agent — every tool call in it never ran.
+  assert.equal(analyzeRequest("Look inside the calculator project").shape, "command");
+  assert.equal(analyzeRequest("Inspect the workspace for problems").shape, "command");
+  assert.equal(analyzeRequest("Check whether the server starts").shape, "command");
+  assert.equal(analyzeRequest("Read server.js and tell me if it looks right").shape, "command");
+  assert.equal(analyzeRequest("Verify the build actually works").shape, "command");
+});
+
 test("treats a recall phrase without a question mark as a question", () => {
   assert.equal(analyzeRequest("Remind me what our database standard is").shape, "question");
   assert.equal(analyzeRequest("What did we decide about deploys").shape, "question");

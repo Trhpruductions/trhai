@@ -59,7 +59,14 @@ const commandVerbs = new Set([
   "build", "create", "make", "generate", "add", "write", "implement", "fix", "debug", "refactor",
   "design", "plan", "draft", "review", "test", "deploy", "set", "setup", "configure", "update",
   "remove", "delete", "explain", "summarize", "analyze", "compare", "list", "show", "find",
-  "optimize", "migrate", "install", "run", "scaffold"
+  "optimize", "migrate", "install", "run", "scaffold",
+  // Caught live: "Look inside the calculator project, list its files, then
+  // read server.js and tell me whether the arithmetic looks correct" led
+  // with a word not in this set, fell through to "statement", and was
+  // acknowledged instead of ever reaching the agent — every tool call in it
+  // never happened. These are the verbs a project-inspection request
+  // actually starts with, not covered by any of the ones already here.
+  "look", "inspect", "check", "read", "open", "verify", "investigate", "search"
 ]);
 
 const questionLeads: Array<{ pattern: RegExp; type: QuestionType }> = [
