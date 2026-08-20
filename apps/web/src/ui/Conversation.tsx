@@ -241,6 +241,14 @@ export function Conversation({ personality, onBuildRequest }: Props) {
     <section className="conversation" aria-label="Conversation">
       <header className="conversation-head">
         <div className="row">
+          {/* Present for the life of the conversation, not just while a reply
+              is in flight — the ambient idle turn is what makes the header
+              read as a running machine rather than a label that goes quiet
+              the moment the home screen scrolls away. Driven by state this
+              component already tracks, not a new poll: "thinking" mirrors the
+              same busy flag the composer disables on, and "offline" only
+              lights up after a real request has actually failed. */}
+          <Core state={busy ? "thinking" : status.state === "error" ? "offline" : "idle"} size={36} />
           <h2 className="label">Conversation</h2>
           <span className="chip">{profile.label}</span>
         </div>
@@ -355,7 +363,10 @@ export function Conversation({ personality, onBuildRequest }: Props) {
                 reply from a local model can take a while, and a spinner says
                 only "wait"; this says the machine is working. */}
             <Core state="thinking" size={44} />
-            <span className="label">Working…</span>
+            <span className="label">
+              Working
+              <span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>
+            </span>
           </div>
         ) : null}
 

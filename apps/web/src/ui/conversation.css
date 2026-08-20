@@ -38,6 +38,20 @@
   flex-direction: column;
   gap: var(--space-2);
   max-width: var(--measure);
+  /* Arrives rather than snaps in — a reply that just appears reads as a page
+     refresh; one that settles reads as something having just happened. Plays
+     once per mount, so a stable key (message.id) is what keeps this from
+     replaying on the rest of the list every time one more turn is added. */
+  animation: turn-arrive var(--slow) var(--ease) both;
+}
+
+@keyframes turn-arrive {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn { animation: none; }
 }
 
 .turn-head {
@@ -81,6 +95,36 @@
   gap: var(--space-3);
 }
 
+/* Three dots, not the single "…" glyph — the glyph is static text and this is
+   meant to be read as motion, the same honest kind as the core beside it:
+   there is no fake percentage here, only "still working". */
+.thinking-dots {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 2px;
+}
+
+.thinking-dots i {
+  width: 3px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  opacity: 0.3;
+  animation: thinking-dot 1.2s var(--ease) infinite;
+}
+
+.thinking-dots i:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dots i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes thinking-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-dots i { animation: none; opacity: 0.6; }
+}
+
 /* ---- Composer ----------------------------------------------------------- */
 
 .composer {
@@ -90,6 +134,15 @@
   padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--line-subtle);
   background: var(--surface-1);
+  transition: border-top-color var(--slow) var(--ease), box-shadow var(--slow) var(--ease);
+}
+
+/* A focused composer is about to become live input, which is exactly the
+   condition --glow exists for — it is never spent on a border that is just
+   sitting there. */
+.composer:focus-within {
+  border-top-color: var(--line-strong);
+  box-shadow: 0 -1px 0 0 var(--line-strong), 0 -12px 24px -12px var(--accent-quiet);
 }
 
 .composer-field {
