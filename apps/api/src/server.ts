@@ -3,6 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
 import { runAssistantOrchestrator } from "./services/orchestrator.js";
+import { clearActivity, getActivity } from "./services/agentActivity.js";
 import { normalizeAssistHistory } from "./services/assistContext.js";
 import { appendTurn, clearConversation, listTurns } from "./services/conversationStore.js";
 import {
@@ -151,6 +152,7 @@ export function createApp() {
       const result = await runAssistantOrchestrator({
         mode,
         userMessage: message,
+        sessionId: sessionId ?? undefined,
         history,
         memoryContext: memoryContext.map((entry) => ({
           id: entry.id,
@@ -206,6 +208,10 @@ export function createApp() {
         pinMemory: sessionId
           ? (id: string, pinned: boolean) => Boolean(setMemoryPinned(sessionId, id, pinned))
           : undefined
+      }).finally(() => {
+        // Whatever a client polling /v1/assist/activity mid-turn was told is
+        // stale the instant this turn ends, success or failure alike.
+        if (sessionId) clearActivity(sessionId);
       });
 
       // Recorded after a successful reply so a failed request leaves no orphan turn.
@@ -470,6 +476,17 @@ export function createApp() {
         : { available: false, model: null, reason: availability.reason },
       traceId: "trace-local"
     });
+  });
+
+  // Which tool the agent is running right now, for a client to poll while a
+  // reply is in flight. Absent is a real answer — the model is still thinking,
+  // or between tool calls — not an error, so this never 404s on a live session.
+  app.get("/v1/assist/activity", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId, res, req);
+    if (!sessionId) return;
+
+    const activity = getActivity(sessionId);
+    res.json({ data: { tool: activity?.tool ?? null }, traceId: "trace-local" });
   });
 
   // Machine-wide preferences, so the desktop window and a browser tab agree.

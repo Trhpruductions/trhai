@@ -305,7 +305,9 @@ export async function runAgent(
   config: LocalModelConfig,
   question: string,
   context: ToolContext,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  /** Fired right before each tool call, so a caller can report live progress. */
+  onToolStart?: (toolName: string) => void
 ): Promise<AgentResult> {
   // The date is stated outright rather than left to a tool call.
   //
@@ -437,6 +439,8 @@ export async function runAgent(
     });
 
     for (const call of calls) {
+      onToolStart?.(call.name);
+
       // Awaited in sequence rather than run in parallel. Two calls in one
       // round are rare, and running them concurrently would let a build and a
       // write race for the same workspace file with no ordering guarantee.

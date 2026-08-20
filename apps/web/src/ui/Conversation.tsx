@@ -80,6 +80,34 @@ function toolLabel(tool: string): string {
   }
 }
 
+/** The same tools, in progress rather than reported after the fact. */
+function liveToolLabel(tool: string): string {
+  switch (tool) {
+    case "search_memory": return "Searching memory";
+    case "search_documents": return "Searching your documents";
+    case "remember": return "Saving to memory";
+    case "current_datetime": return "Checking the time";
+    case "list_memories": return "Reading memory";
+    case "forget": return "Removing from memory";
+    case "list_documents": return "Listing documents";
+    case "read_document": return "Reading a document";
+    case "write_document": return "Writing a document";
+    case "calculate": return "Calculating";
+    case "plan_app": return "Planning the app";
+    case "update_document": return "Updating a document";
+    case "delete_document": return "Deleting a document";
+    case "pin_memory": return "Marking as important";
+    case "search_conversation": return "Searching this conversation";
+    case "days_between": return "Counting days";
+    case "shift_date": return "Working out a date";
+    case "build_app": return "Building and verifying the app";
+    case "list_files": return "Listing files";
+    case "read_file": return "Reading a file";
+    case "write_file": return "Writing a file";
+    default: return tool.replace(/_/g, " ");
+  }
+}
+
 function Turn({ message, onBuildRequest }: { message: ChatMessage; onBuildRequest: (r: string) => void }) {
   const provenance = message.role === "assistant" ? provenanceOf(message) : null;
 
@@ -251,6 +279,32 @@ export function Conversation({ personality, onBuildRequest }: Props) {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length, status.state]);
 
+  // Which tool the agent is running right now, polled only while a reply is
+  // in flight — "Searching your documents" beats a generic spinner, and once
+  // the turn ends there is nothing left to poll for. Short interval and a
+  // small payload: this is a status light, not a data fetch.
+  const [liveTool, setLiveTool] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (status.state !== "thinking") { setLiveTool(null); return; }
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const response = await fetch(`${webEnv.apiBaseUrl}/v1/assist/activity?sessionId=${encodeURIComponent(sessionId)}`);
+        if (!response.ok || cancelled) return;
+        const payload = await response.json();
+        if (!cancelled) setLiveTool(payload?.data?.tool ?? null);
+      } catch {
+        // A missed poll just leaves the last known tool showing a little longer.
+      }
+    }
+
+    void poll();
+    const interval = window.setInterval(poll, 600);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [status.state, sessionId]);
+
   // Derived in bootChecks.ts so the one rule that matters — a line may only
   // claim a check passed when it actually ran — is stated once and tested.
   const bootChecks = bootChecksFor({ online, model, linkMs, storeChecked, stats });
@@ -279,7 +333,10 @@ export function Conversation({ personality, onBuildRequest }: Props) {
           <span className="chip">{profile.label}</span>
         </div>
         {messages.length > 0 ? (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => void clear()}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+            // No undo once this fires — the whole transcript goes with it.
+            if (window.confirm("Clear this conversation? This cannot be undone.")) void clear();
+          }}>
             Clear
           </button>
         ) : null}
@@ -392,7 +449,7 @@ export function Conversation({ personality, onBuildRequest }: Props) {
                 only "wait"; this says the machine is working. */}
             <Core state="thinking" size={44} />
             <span className="label">
-              Working
+              {liveTool ? liveToolLabel(liveTool) : "Working"}
               <span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>
             </span>
           </div>

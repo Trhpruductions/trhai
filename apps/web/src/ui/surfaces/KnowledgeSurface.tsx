@@ -77,8 +77,11 @@ export function KnowledgeSurface() {
     }
   }
 
-  async function remove(id: string) {
-    await fetch(`${webEnv.apiBaseUrl}/v1/knowledge/${encodeURIComponent(id)}?sessionId=${encodeURIComponent(sessionId())}`, {
+  async function remove(doc: Doc) {
+    // No undo once this fetch fires — worth a pause, not a placeholder click.
+    if (!window.confirm(`Remove "${doc.title}"? This cannot be undone.`)) return;
+
+    await fetch(`${webEnv.apiBaseUrl}/v1/knowledge/${encodeURIComponent(doc.id)}?sessionId=${encodeURIComponent(sessionId())}`, {
       method: "DELETE"
     });
     await load();
@@ -143,7 +146,7 @@ export function KnowledgeSurface() {
                   {doc.body.slice(0, 150)}{doc.body.length > 150 ? "…" : ""}
                 </p>
               </div>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void remove(doc.id)}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void remove(doc)}>
                 Remove
               </button>
             </li>

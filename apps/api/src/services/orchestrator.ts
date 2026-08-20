@@ -2,10 +2,13 @@ import { ModelRouter, type ComposerKnowledge, type MemoryWriteOutcome } from "./
 import { checkAvailability, generate, orderedCandidates, readLocalModelConfig } from "./localModel.js";
 import { buildCapabilityReply } from "./replyComposer.js";
 import { runAgent } from "./agentLoop.js";
+import { setActivity } from "./agentActivity.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
   userMessage: string;
+  /** Present only when there is a session to report live tool activity against. */
+  sessionId?: string;
   memoryContext?: Array<{ id?: string; title: string; body: string; pinned?: boolean; createdAt?: string }>;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   /** What actually happened to memory this turn; see MemoryWriteOutcome. */
@@ -226,6 +229,9 @@ async function answerWithLocalModel(
   const availability = await checkAvailability(config);
   if (!availability.available) return null;
 
+  const { sessionId } = input;
+  const onToolStart = sessionId ? (tool: string) => setActivity(sessionId, tool) : undefined;
+
   // The agent loop rather than a single completion.
   //
   // A one-shot call could only work with whatever context happened to be
@@ -284,7 +290,7 @@ async function answerWithLocalModel(
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history
-  });
+  }, fetch, onToolStart);
 
     if (result.ok) {
       return { text: result.text, model: `ollama/${result.model}`, toolsUsed: result.toolsUsed };

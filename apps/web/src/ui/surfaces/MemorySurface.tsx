@@ -46,6 +46,9 @@ export function MemorySurface() {
   }
 
   async function forget(item: Memory) {
+    // No undo once this fetch fires — worth a pause, not a placeholder click.
+    if (!window.confirm(`Forget "${item.title}"? This cannot be undone.`)) return;
+
     await fetch(`${webEnv.apiBaseUrl}/v1/assist/memory/${encodeURIComponent(item.id)}?sessionId=${encodeURIComponent(sessionId())}`, {
       method: "DELETE"
     });
