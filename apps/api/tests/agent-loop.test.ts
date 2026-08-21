@@ -450,6 +450,40 @@ test("the calculator refuses code rather than running it", async () => {
   assert.equal(result.ok, false);
 });
 
+test("a real tool called with a missing required argument fails honestly, not by crashing", async () => {
+  // The parsing-layer tests above cover a call that is malformed, unknown, or
+  // to a tool that does not exist. This is the other half of "invalid tool
+  // calls": a genuine, advertised tool, reached correctly, given nothing (or
+  // the wrong type) for a required argument — the shape a model produces
+  // when it decides to call a tool before it has actually worked out what to
+  // put in it. Every handler already guards this with requireString; this is
+  // what stops that guard from being able to silently regress.
+  const noExpression = await runTool({ name: "calculate", arguments: {} }, richContext);
+  assert.equal(noExpression.ok, false);
+  assert.match(noExpression.content, /expression/i);
+
+  const wrongTypeExpression = await runTool(
+    { name: "calculate", arguments: { expression: 47 } },
+    richContext
+  );
+  assert.equal(wrongTypeExpression.ok, false);
+
+  const noContent = await runTool({ name: "write_file", arguments: { path: "notes.txt" } }, richContext);
+  assert.equal(noContent.ok, false);
+  assert.match(noContent.content, /path and content/i);
+
+  const noPath = await runTool({ name: "write_file", arguments: { content: "hello" } }, richContext);
+  assert.equal(noPath.ok, false);
+
+  const emptyFact = await runTool({ name: "remember", arguments: { fact: "" } }, richContext);
+  assert.equal(emptyFact.ok, false);
+  assert.match(emptyFact.content, /fact to save/i);
+
+  const noQuery = await runTool({ name: "search_memory", arguments: {} }, richContext);
+  assert.equal(noQuery.ok, false);
+  assert.match(noQuery.content, /query/i);
+});
+
 test("plan_app describes what would be built", async () => {
   const result = await runTool(
     { name: "plan_app", arguments: { description: "an app to track invoices with a client name, amount and due date" } },
@@ -752,6 +786,19 @@ test("read_file refuses a path outside the workspace", async () => {
 
   assert.equal(result.ok, false);
   assert.match(result.content, /outside the workspace/);
+});
+
+test("reading a file that genuinely is not there says so, not a fabricated success", async () => {
+  // A valid, in-workspace path that simply does not exist — the ordinary
+  // case, not the traversal attack above. The one behavior that must never
+  // happen here is ok: true with invented content.
+  const result = await runTool(
+    { name: "read_file", arguments: { path: "this-file-was-never-created.txt" } },
+    editContext
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /this-file-was-never-created\.txt/);
 });
 
 test("write_file refuses a path outside the workspace and writes nothing", async () => {
