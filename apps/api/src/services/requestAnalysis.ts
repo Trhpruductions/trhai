@@ -186,7 +186,13 @@ export function analyzeRequest(message: unknown): RequestAnalysis {
 
   // A leading command verb wins over a question word only when there is no "?".
   // "List the options" is a command; "What should I list?" is a question.
-  const looksImperative = commandVerbs.has(lead) && !endsWithQuestionMark && questionType === "none";
+  const continuationPattern =
+  /^(continue|proceed|resume|go ahead|do it|do that|apply (?:it|that)|make (?:the )?changes)\b/i;
+
+const looksImperative =
+  (commandVerbs.has(lead) || continuationPattern.test(text))
+  && !endsWithQuestionMark
+  && questionType === "none";
 
   let shape: RequestShape;
   if (looksImperative) {
