@@ -37,12 +37,18 @@ export function KnowledgeSurface() {
   useEffect(() => { void load(); }, [load]);
 
   async function add(nextTitle: string, nextBody: string): Promise<boolean> {
-    const response = await fetch(`${webEnv.apiBaseUrl}/v1/knowledge`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: sessionId(), title: nextTitle, body: nextBody })
-    });
-    return response.ok;
+    try {
+      const response = await fetch(`${webEnv.apiBaseUrl}/v1/knowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: sessionId(), title: nextTitle, body: nextBody })
+      });
+      return response.ok;
+    } catch {
+      // Unreachable service reads the same as a rejected save to every caller
+      // here — both mean the document was not actually stored.
+      return false;
+    }
   }
 
   async function submitPasted() {
@@ -64,14 +70,20 @@ export function KnowledgeSurface() {
 
     try {
       const results: ImportResult[] = [];
+      let saveFailures = 0;
       for (const file of Array.from(list)) {
         const contents = await file.text().catch(() => "");
         const prepared = prepareImport(file.name, contents, file.size);
         results.push(prepared);
-        if (prepared.ok) await add(prepared.title, prepared.body);
+        // summarizeImport only judges the file's own content — whether it read
+        // as text, whether it fit. It has no way to know the network call that
+        // follows also has to succeed, so a save failure is tracked and
+        // reported here rather than silently counted as "imported".
+        if (prepared.ok && !(await add(prepared.title, prepared.body))) saveFailures += 1;
       }
       await load();
-      setNote(summarizeImport(results));
+      const summary = summarizeImport(results);
+      setNote(saveFailures > 0 ? `${summary} · ${saveFailures} could not be saved` : summary);
     } finally {
       setBusy(false);
     }
@@ -81,11 +93,16 @@ export function KnowledgeSurface() {
     // No undo once this fetch fires — worth a pause, not a placeholder click.
     if (!window.confirm(`Remove "${doc.title}"? This cannot be undone.`)) return;
 
-    await fetch(`${webEnv.apiBaseUrl}/v1/knowledge/${encodeURIComponent(doc.id)}?sessionId=${encodeURIComponent(sessionId())}`, {
-      method: "DELETE"
-    });
-    await load();
-    setNote("Document removed");
+    try {
+      const response = await fetch(
+        `${webEnv.apiBaseUrl}/v1/knowledge/${encodeURIComponent(doc.id)}?sessionId=${encodeURIComponent(sessionId())}`,
+        { method: "DELETE" }
+      );
+      await load();
+      setNote(response.ok ? "Document removed" : "Could not remove the document — it may still be there.");
+    } catch {
+      setNote("Could not reach the assistant service — nothing was removed.");
+    }
   }
 
   return (

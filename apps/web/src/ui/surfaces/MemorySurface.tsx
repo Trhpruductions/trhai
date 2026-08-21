@@ -36,24 +36,33 @@ export function MemorySurface() {
   useEffect(() => { void load(); }, [load]);
 
   async function patch(id: string, body: Record<string, unknown>, message: string) {
-    await fetch(`${webEnv.apiBaseUrl}/v1/assist/memory/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: sessionId(), ...body })
-    });
-    await load();
-    setNote(message);
+    try {
+      const response = await fetch(`${webEnv.apiBaseUrl}/v1/assist/memory/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: sessionId(), ...body })
+      });
+      await load();
+      setNote(response.ok ? message : "That change did not save — it may still show the old value.");
+    } catch {
+      setNote("Could not reach the assistant service — nothing changed.");
+    }
   }
 
   async function forget(item: Memory) {
     // No undo once this fetch fires — worth a pause, not a placeholder click.
     if (!window.confirm(`Forget "${item.title}"? This cannot be undone.`)) return;
 
-    await fetch(`${webEnv.apiBaseUrl}/v1/assist/memory/${encodeURIComponent(item.id)}?sessionId=${encodeURIComponent(sessionId())}`, {
-      method: "DELETE"
-    });
-    await load();
-    setNote(`Forgot "${item.title}"`);
+    try {
+      const response = await fetch(
+        `${webEnv.apiBaseUrl}/v1/assist/memory/${encodeURIComponent(item.id)}?sessionId=${encodeURIComponent(sessionId())}`,
+        { method: "DELETE" }
+      );
+      await load();
+      setNote(response.ok ? `Forgot "${item.title}"` : `Could not forget "${item.title}" — it is still saved.`);
+    } catch {
+      setNote("Could not reach the assistant service — nothing was forgotten.");
+    }
   }
 
   function commitRename(item: Memory) {
