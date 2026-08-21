@@ -164,11 +164,6 @@ function evictOldestSessionIfNeeded(): void {
   }
 }
 
-export function getSessionMemories(sessionKey: string): StoredMemory[] {
-  loadFromDisk();
-  return memoriesBySession.get(sessionKey) ?? [];
-}
-
 /**
  * Extract memories from a message and persist the ones that are actually new.
  * Returns only what was written, so callers can report real counts.
@@ -403,9 +398,4 @@ export function reloadAssistMemoryFromDisk(): void {
   auditLog.length = 0;
   loaded = false;
   loadFromDisk();
-}
-
-/** Test seam: run without touching disk. */
-export function setAssistMemoryPersistence(enabled: boolean): void {
-  persistenceEnabled = enabled;
 }

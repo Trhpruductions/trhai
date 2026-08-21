@@ -152,8 +152,3 @@ export function reloadConversationsFromDisk(): void {
   loaded = false;
   loadFromDisk();
 }
-
-/** Test seam. */
-export function setConversationPersistence(enabled: boolean): void {
-  persistenceEnabled = enabled;
-}

@@ -215,9 +215,3 @@ export function resetKnowledge(sessionKey?: string): void {
 export function setKnowledgePersistence(enabled: boolean): void {
   persistenceEnabled = enabled;
 }
-
-export function reloadKnowledgeFromDisk(): void {
-  documentsBySession.clear();
-  loaded = false;
-  loadFromDisk();
-}

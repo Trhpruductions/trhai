@@ -437,8 +437,3 @@ export function reloadAccountsFromDisk(): void {
   loaded = false;
   loadFromDisk();
 }
-
-/** Test seam. */
-export function setAccountsPersistence(enabled: boolean): void {
-  persistenceEnabled = enabled;
-}
