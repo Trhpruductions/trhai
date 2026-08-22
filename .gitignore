@@ -21,3 +21,7 @@ launch.log
 # Apps the assistant builds. Generated output, not source.
 workspace/
 apps/api/workspace/
+
+# Generated desktop release files
+apps/desktop/release/
+ascend-ai-export.zip
