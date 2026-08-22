@@ -165,7 +165,9 @@ test("the same fact in different sessions is not a duplicate of itself", () => {
 
 test("a fact saved through recordSingleMemory survives a restart", () => {
   resetAssistMemory();
-  recordSingleMemory("single5", "the server room door code is 4471");
+
+  const saved = recordSingleMemory("single5", "the server room door code is 4471");
+  assert.equal(saved.status, "saved");
 
   reloadAssistMemoryFromDisk();
 

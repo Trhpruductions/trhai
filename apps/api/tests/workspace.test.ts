@@ -125,8 +125,10 @@ test("an oversized write is refused", () => {
 });
 
 test("listing reports files under the workspace with sizes", () => {
-  writeWorkspaceFile("listed/one.txt", "abc");
-  const entries = listWorkspace(".");
+  const written = writeWorkspaceFile("listed/one.txt", "abc");
+  assert.equal(written.ok, true, written.ok ? "" : written.reason);
+
+  const entries = listWorkspace("listed");
 
   assert.ok(entries);
   const one = entries!.find((entry) => entry.path === "listed/one.txt");
@@ -134,6 +136,7 @@ test("listing reports files under the workspace with sizes", () => {
   assert.equal(one!.bytes, 3);
   assert.equal(one!.directory, false);
 });
+ const written = writeWorkspaceFile("listed/one.txt", "abc");
 
 test("listing outside the workspace is refused", () => {
   assert.equal(listWorkspace(".."), null);
