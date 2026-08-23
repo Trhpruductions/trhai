@@ -3,6 +3,9 @@ import { checkAvailability, generate, orderedCandidates, readLocalModelConfig } 
 import { buildCapabilityReply } from "./replyComposer.js";
 import { runAgent } from "./agentLoop.js";
 import { setActivity } from "./agentActivity.js";
+import { isContinuationRequest } from "./requestAnalysis.js";
+import { detectTaskType } from "./taskPlanning.js";
+import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
@@ -58,9 +61,27 @@ const modelRouter = new ModelRouter();
 export async function runAssistantOrchestrator(
   input: OrchestratorInput
 ): Promise<OrchestratorResult> {
+  // A continuation carries no content of its own — "do it" is two words with
+  // nothing to act on. What it means is entirely in the task it refers back
+  // to, so that task's request is what the rest of this function works from.
+  //
+  // When nothing is resumable the message is left exactly as it arrived. It
+  // then reaches the composer's vague branch and asks what to do, which is
+  // the honest answer: inventing a task here to look responsive is the
+  // failure this whole store exists to prevent.
+  const resuming = input.sessionId && isContinuationRequest(input.userMessage)
+    ? getResumableTask(input.sessionId)
+    : null;
+
+  const effectiveMessage = resuming ? resuming.request : input.userMessage;
+
+  if (resuming && input.sessionId) {
+    updateTask(input.sessionId, { status: "executing" });
+  }
+
   const modelReply = await modelRouter.generate({
     mode: input.mode,
-    userMessage: input.userMessage,
+    userMessage: effectiveMessage,
     memoryContext: input.memoryContext,
     history: input.history,
     memoryWrite: input.memoryWrite,
@@ -164,7 +185,33 @@ export async function runAssistantOrchestrator(
         : modelReply.buildRequest
       : undefined;
 
-    const generated = await answerWithLocalModel(input, known, question);
+    // This branch is where real work happens — it is the one that reaches the
+    // agent and its tools. Recording here rather than on every turn keeps the
+    // store to things there is actually something to resume, instead of
+    // filing a "task" for every greeting.
+    if (input.sessionId && !resuming) {
+      recordTask(input.sessionId, {
+        request: effectiveMessage,
+        taskType: detectTaskType(effectiveMessage),
+        status: "executing"
+      });
+    }
+
+    const generated = await answerWithLocalModel(
+      { ...input, userMessage: effectiveMessage },
+      known,
+      question
+    );
+
+    if (input.sessionId) {
+      updateTask(input.sessionId, generated
+        ? { status: "succeeded", toolsUsed: generated.toolsUsed, lastResult: generated.text }
+        // No local model to ask. The work did not fail on its merits — it never
+        // ran — so it stays resumable and says why, rather than being recorded
+        // as a failure or quietly dropped.
+        : { status: "blocked", error: "No local model was available to run this." });
+    }
+
     if (generated) {
       return {
         model: generated.model,

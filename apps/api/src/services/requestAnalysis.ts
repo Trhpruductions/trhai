@@ -89,6 +89,25 @@ const questionLeads: Array<{ pattern: RegExp; type: QuestionType }> = [
   { pattern: /^(do|does|did|is|are|was|were|can|could|should|would|will|have|has)\b/i, type: "confirm" }
 ];
 
+/**
+ * "Carry on with what you were doing", in the ways people actually say it.
+ *
+ * Exported so the one place that decides whether a message is a continuation
+ * is this one. The orchestrator needs the same answer to know whether to
+ * resume a stored task, and a second copy of this regex living there would
+ * drift the first time either was edited.
+ *
+ * Deliberately anchored to the start. "Continue" as an opener is a
+ * continuation; "we should continue testing this later" is a statement that
+ * merely contains the word, and resuming on it would hijack the turn.
+ */
+const continuationPattern =
+  /^(continue|proceed|resume|go ahead|do it|do that|apply (?:it|that)|make (?:the )?changes|finish it|carry on)\b/i;
+
+export function isContinuationRequest(message: unknown): boolean {
+  return typeof message === "string" && continuationPattern.test(message.trim());
+}
+
 /** Phrases that ask about stored knowledge even without a question mark. */
 const recallPatterns = [
   /^(remind me|tell me|what did we|what do we|what are our|what is our|what's our)\b/i,
@@ -186,11 +205,8 @@ export function analyzeRequest(message: unknown): RequestAnalysis {
 
   // A leading command verb wins over a question word only when there is no "?".
   // "List the options" is a command; "What should I list?" is a question.
-  const continuationPattern =
-  /^(continue|proceed|resume|go ahead|do it|do that|apply (?:it|that)|make (?:the )?changes)\b/i;
-
 const looksImperative =
-  (commandVerbs.has(lead) || continuationPattern.test(text))
+  (commandVerbs.has(lead) || isContinuationRequest(text))
   && !endsWithQuestionMark
   && questionType === "none";
 
