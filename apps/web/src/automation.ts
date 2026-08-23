@@ -106,7 +106,7 @@ export function nodeSummary(node: FlowNode): string {
     case "wait":
       return `WAIT ${node.config.seconds ?? "0"}s`;
     case "run-script":
-      return `RUN SCRIPT ${node.config.command ?? "(no command)"}`;
+      return `RUN SCRIPT ${node.config.check ?? "(no check)"}`;
     case "open-website":
       return `OPEN WEBSITE ${node.config.url ?? "(no url)"}`;
     case "email":
@@ -152,8 +152,8 @@ export function validateFlow(flow: Flow): ValidationIssue[] {
       if (stack.pop() === undefined) {
         issues.push({ nodeId: node.id, message: "END IF has no matching IF." });
       }
-    } else if (node.type === "run-script" && !node.config.command) {
-      issues.push({ nodeId: node.id, message: "RUN SCRIPT needs a command." });
+    } else if (node.type === "run-script" && !node.config.check) {
+      issues.push({ nodeId: node.id, message: "RUN SCRIPT needs a check." });
     } else if (node.type === "wait") {
       const seconds = Number(node.config.seconds);
       if (!Number.isFinite(seconds) || seconds < 0) {
@@ -203,7 +203,12 @@ export type RunResult = {
   failed: boolean;
 };
 
-export type ScriptRunner = (command: string) => Promise<{ ok: boolean; exitCode: number; output?: string }>;
+/**
+ * Runs one named check. Takes a check name, never a command line: the
+ * executable and its arguments live in the desktop main process, and a flow
+ * can only ask for one of them by name.
+ */
+export type ScriptRunner = (check: string) => Promise<{ ok: boolean; exitCode: number; output?: string }>;
 
 export type ExecuteOptions = {
   dryRun: boolean;
@@ -329,13 +334,13 @@ export async function executeFlow(flow: Flow, options: ExecuteOptions): Promise<
     }
 
     if (node.type === "run-script") {
-      const command = node.config.command ?? "";
+      const check = node.config.check ?? "";
       if (!options.runScript) {
-        push(node, "skipped", "No command runner available; RUN SCRIPT needs the desktop bridge.");
+        push(node, "skipped", "No check runner available; RUN SCRIPT needs the desktop bridge.");
         continue;
       }
 
-      const result = await options.runScript(command);
+      const result = await options.runScript(check);
       context.exitCode = String(result.exitCode);
       context.ok = result.ok ? "true" : "false";
       if (result.output !== undefined) context.output = result.output;
@@ -343,7 +348,7 @@ export async function executeFlow(flow: Flow, options: ExecuteOptions): Promise<
       push(
         node,
         result.ok ? "ok" : "failed",
-        result.ok ? `${command} → exit 0` : `${command} → exit ${result.exitCode}`
+        result.ok ? `${check} → exit 0` : `${check} → exit ${result.exitCode}`
       );
 
       if (!result.ok) {

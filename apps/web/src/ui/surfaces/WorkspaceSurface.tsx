@@ -21,9 +21,9 @@ export function WorkspaceSurface() {
   const bridge = window.ascendDesktop;
   const [projects, setProjects] = useState<HostProject[]>([]);
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
-  const [command, setCommand] = useState("");
+  const [checks, setChecks] = useState<Array<{ name: string; label: string }>>([]);
   const [log, setLog] = useState<LogLine[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!bridge?.listProjectInventory) return;
@@ -60,23 +60,48 @@ export function WorkspaceSurface() {
     });
   }, [bridge]);
 
-  async function runCommand() {
-    const trimmed = command.trim();
-    if (!trimmed || busy || !bridge?.runWorkspaceCommand) return;
+  // The runnable set comes from the main process rather than being listed
+  // here, so this screen cannot drift out of step with what will actually be
+  // accepted — an unknown name is refused at the dispatcher either way.
+  useEffect(() => {
+    if (!bridge?.listWorkspaceChecks) return;
+    let cancelled = false;
 
-    setBusy(true);
+    void bridge.listWorkspaceChecks().then((result) => {
+      if (!cancelled && result?.ok) setChecks(result.checks ?? []);
+    }).catch(() => {
+      // Leaves the list empty, which reads as "no checks available" rather
+      // than offering a button that cannot work.
+    });
+
+    return () => { cancelled = true; };
+  }, [bridge]);
+
+  async function runCheck(check: string) {
+    if (busy || !bridge?.runWorkspaceCheck) return;
+
+    setBusy(check);
     try {
-      await bridge.runWorkspaceCommand({ command: trimmed });
+      const result = await bridge.runWorkspaceCheck({ check });
+      // A refusal from the dispatcher is reported in the same log as real
+      // output; without this a rejected check looks identical to one that ran
+      // and printed nothing.
+      if (result && !result.ok && result.error) {
+        setLog((current) => [
+          { id: crypto.randomUUID(), text: result.error!, level: "error" },
+          ...current
+        ].slice(0, 200));
+      }
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   if (!bridge?.getSystemTelemetry) {
     return (
-      <Surface title="Workspace" summary="Your projects, host readings and a terminal.">
+      <Surface title="Workspace" summary="Your projects, host readings and project checks.">
         <Empty title="Needs the desktop app">
-          This screen reads your machine — project folders, disk and CPU, and a shell — which a
+          This screen reads your machine — project folders, disk and CPU, and project checks — which a
           browser tab cannot do. Open Vexora AI from Launch-Vexora and it appears here.
         </Empty>
       </Surface>
@@ -93,7 +118,7 @@ export function WorkspaceSurface() {
   return (
     <Surface
       title="Workspace"
-      summary="Your projects, live host readings and a shell — all on this machine."
+      summary="Your projects, live host readings and project checks — all on this machine."
       count={`${projects.length} projects`}
       readable={false}
       actions={<button type="button" className="btn btn-sm" onClick={() => void refresh()}>Refresh</button>}
@@ -140,25 +165,35 @@ export function WorkspaceSurface() {
         </div>
 
         <div className="col">
-          <span className="label">Terminal</span>
-          <div className="row">
-            <input
-              className="field mono grow"
-              value={command}
-              placeholder="npm test"
-              aria-label="Command"
-              onChange={(event) => setCommand(event.target.value)}
-              onKeyDown={(event) => { if (event.key === "Enter") void runCommand(); }}
-            />
-            <button type="button" className="btn btn-primary" disabled={busy || !command.trim()}
-              onClick={() => void runCommand()}>
-              {busy ? "Running…" : "Run"}
-            </button>
-          </div>
+          <span className="label">Checks</span>
+          {/* Named checks rather than a command box. The executable and its
+              arguments live in the desktop shell; this screen can only ask
+              for one of them by name, so there is no command text for page
+              content to influence. */}
+          {checks.length === 0 ? (
+            <Empty title="No checks available">
+              The desktop shell reports nothing runnable. Checks run against your project
+              and are defined in the app itself, not typed here.
+            </Empty>
+          ) : (
+            <div className="row wrap">
+              {checks.map((check) => (
+                <button
+                  key={check.name}
+                  type="button"
+                  className="btn"
+                  disabled={busy !== null}
+                  onClick={() => void runCheck(check.name)}
+                >
+                  {busy === check.name ? `${check.label}…` : check.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="panel term-log">
             {log.length === 0 ? (
-              <p className="faint">Output appears here as a command runs.</p>
+              <p className="faint">Output appears here as a check runs.</p>
             ) : (
               log.map((line) => (
                 <p key={line.id} className={`mono term-line term-${line.level}`}>{line.text}</p>

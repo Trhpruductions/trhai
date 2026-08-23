@@ -70,8 +70,12 @@ declare global {
         ok?: boolean;
         error?: string;
       }>;
-      runWorkspaceCommand?: (payload: {
-        command: string;
+      listWorkspaceChecks?: () => Promise<{
+        ok?: boolean;
+        checks?: Array<{ name: string; label: string }>;
+      }>;
+      runWorkspaceCheck?: (payload: {
+        check: string;
         cwd?: string;
       }) => Promise<{
         ok?: boolean;

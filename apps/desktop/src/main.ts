@@ -10,6 +10,12 @@ import { access, mkdir, readdir, writeFile } from "node:fs/promises";
 import { getDetachedSpawnConfig, getServiceSpawnOptions } from "./launcher.js";
 import { containPath, isSafeExternalUrl, isTrustedAppUrl } from "./pathGuard.js";
 import { getDesktopBuildInfo } from "./buildInfo.js";
+import {
+  checkEnvironment,
+  isWorkspaceCheck,
+  listWorkspaceChecks,
+  workspaceChecks
+} from "./workspaceChecks.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -377,23 +383,37 @@ ipcMain.handle("ascend:create-scaffold", async (_event, payload) => {
   }
 });
 
-ipcMain.handle("ascend:run-command", async (event, payload) => {
-  const command = typeof payload?.command === "string" ? payload.command.trim() : "";
+ipcMain.handle("ascend:list-workspace-checks", async () => {
+  return { ok: true, checks: listWorkspaceChecks() };
+});
+
+ipcMain.handle("ascend:run-check", async (event, payload) => {
+  const requestedCheck: unknown = payload?.check;
   const requestedCwd = typeof payload?.cwd === "string" ? payload.cwd.trim() : "";
   const runId = randomUUID();
 
-  if (!command) {
-    return { ok: false, runId, exitCode: -1, error: "Missing command." };
+  // The gate. An unrecognised name never reaches spawn, and the refusal names
+  // what is actually runnable rather than only that this was not.
+  if (!isWorkspaceCheck(requestedCheck)) {
+    const known = listWorkspaceChecks().map((entry) => entry.name).join(", ");
+    return {
+      ok: false,
+      runId,
+      exitCode: -1,
+      error: `Unknown check. Available checks: ${known}.`
+    };
   }
+
+  const selected = workspaceChecks[requestedCheck];
 
   const containedCwd = requestedCwd ? containPath(workspaceRoot, requestedCwd) : { ok: true as const, path: workspaceRoot };
   if (!containedCwd.ok) {
-    return { ok: false, runId, exitCode: -1, error: "Command cwd must be inside workspace." };
+    return { ok: false, runId, exitCode: -1, error: "Check cwd must be inside workspace." };
   }
   const candidateCwd = containedCwd.path;
 
   if (!existsSync(candidateCwd)) {
-    return { ok: false, runId, exitCode: -1, error: "Command cwd does not exist." };
+    return { ok: false, runId, exitCode: -1, error: "Check cwd does not exist." };
   }
 
   const emitEvent = (kind: "start" | "stdout" | "stderr" | "exit", line: string, level: "info" | "ok" | "warn" | "error" = "info") => {
@@ -407,12 +427,16 @@ ipcMain.handle("ascend:run-command", async (event, payload) => {
   };
 
   return await new Promise<{ ok: boolean; runId: string; exitCode: number; error?: string }>((resolve) => {
-    emitEvent("start", `[run:${runId}] ${command}`, "info");
+    emitEvent("start", `[run:${runId}] ${selected.label}`, "info");
 
-    const child = spawn("cmd.exe", ["/d", "/s", "/c", command], {
+    // `shell: false` is the point of this call: the executable and every
+    // argument are passed as separate values, so nothing in them is ever
+    // parsed as an operator, a redirect, or a second command.
+    const child = spawn(selected.command, [...selected.args], {
       cwd: candidateCwd,
       windowsHide: true,
-      env: process.env
+      shell: false,
+      env: checkEnvironment()
     });
 
     let stdoutBuffer = "";
@@ -461,7 +485,7 @@ ipcMain.handle("ascend:run-command", async (event, payload) => {
 
       const ok = safeCode === 0;
       emitEvent("exit", `[run:${runId}] exit ${safeCode}`, ok ? "ok" : "error");
-      resolve({ ok, runId, exitCode: safeCode, ...(ok ? {} : { error: `Command exited with code ${safeCode}` }) });
+      resolve({ ok, runId, exitCode: safeCode, ...(ok ? {} : { error: `${selected.label} exited with code ${safeCode}` }) });
     });
   });
 });

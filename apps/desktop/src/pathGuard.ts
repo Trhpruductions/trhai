@@ -3,7 +3,7 @@ import path from "node:path";
 // Containment for paths the renderer supplies.
 //
 // The desktop bridge takes paths from page content and turns them into real
-// filesystem work. `ascend:run-command` already confined its working directory
+// filesystem work. `ascend:run-check` already confined its working directory
 // this way; `ascend:create-scaffold` did not, so a spec path of "../.." or an
 // absolute path resolved cleanly outside the workspace and the handler then
 // created directories and wrote a file there.

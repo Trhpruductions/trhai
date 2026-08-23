@@ -80,7 +80,7 @@ test("a second ELSE on one IF is refused", () => {
 });
 
 test("nodes missing required settings are refused", () => {
-  assert.match(validateFlow(flow(node("a", "run-script")))[0].message, /needs a command/);
+  assert.match(validateFlow(flow(node("a", "run-script")))[0].message, /needs a check/);
   assert.match(validateFlow(flow(node("a", "wait", { seconds: "-1" })))[0].message, /non-negative/);
   assert.match(validateFlow(flow(node("a", "wait", { seconds: "soon" })))[0].message, /non-negative/);
   assert.match(validateFlow(flow(node("a", "if", {})))[0].message, /needs something to compare/);
@@ -89,7 +89,7 @@ test("nodes missing required settings are refused", () => {
 test("an invalid flow produces no execution steps at all", async () => {
   // Half-running a broken flow would leave whatever came before the bad node
   // already done, with no way to tell what happened.
-  const result = await executeFlow(flow(node("a", "run-script", { command: "" })), {
+  const result = await executeFlow(flow(node("a", "run-script", { check: "" })), {
     dryRun: false,
     runScript: async () => {
       throw new Error("must not run");
@@ -103,7 +103,7 @@ test("an invalid flow produces no execution steps at all", async () => {
 test("the flow renders as a readable indented outline", () => {
   const outline = describeFlow(
     flow(
-      node("a", "run-script", { command: "npm test" }),
+      node("a", "run-script", { check: "tests" }),
       node("b", "if", { left: "exitCode", op: "==", right: "0" }),
       node("c", "discord-message", { channel: "builds" }),
       node("d", "else"),
@@ -113,7 +113,7 @@ test("the flow renders as a readable indented outline", () => {
   );
 
   assert.deepEqual(outline, [
-    "RUN SCRIPT npm test",
+    "RUN SCRIPT tests",
     "IF exitCode == 0",
     "  SEND DISCORD MESSAGE #builds",
     "ELSE",
@@ -135,7 +135,7 @@ test("conditions compare against variables produced by the run", () => {
 test("a dry run performs nothing and reports what would happen", async () => {
   let ran = false;
   const result = await executeFlow(
-    flow(node("a", "run-script", { command: "rm -rf /" }), node("b", "email", { to: "x@y.z" })),
+    flow(node("a", "run-script", { check: "tests" }), node("b", "email", { to: "x@y.z" })),
     {
       dryRun: true,
       runScript: async () => {
@@ -153,17 +153,17 @@ test("a dry run performs nothing and reports what would happen", async () => {
 });
 
 test("a live run executes a script and records its result", async () => {
-  const commands: string[] = [];
-  const result = await executeFlow(flow(node("a", "run-script", { command: "npm test" })), {
+  const checkNames: string[] = [];
+  const result = await executeFlow(flow(node("a", "run-script", { check: "tests" })), {
     dryRun: false,
     sleep: noSleep,
-    runScript: async (command) => {
-      commands.push(command);
+    runScript: async (check) => {
+      checkNames.push(check);
       return { ok: true, exitCode: 0, output: "done" };
     }
   });
 
-  assert.deepEqual(commands, ["npm test"]);
+  assert.deepEqual(checkNames, ["tests"]);
   assert.equal(result.failed, false);
   assert.equal(result.steps[0].status, "ok");
   assert.equal(result.context.exitCode, "0");
@@ -184,7 +184,7 @@ test("a credentialed node in a live run is skipped, never reported as done", asy
 });
 
 test("RUN SCRIPT without a runner is skipped rather than silently passing", async () => {
-  const result = await executeFlow(flow(node("a", "run-script", { command: "npm test" })), {
+  const result = await executeFlow(flow(node("a", "run-script", { check: "tests" })), {
     dryRun: false,
     sleep: noSleep
   });
@@ -195,16 +195,16 @@ test("RUN SCRIPT without a runner is skipped rather than silently passing", asyn
 
 test("only the taken branch runs", async () => {
   const ran: string[] = [];
-  const runScript = async (command: string) => {
-    ran.push(command);
+  const runScript = async (check: string) => {
+    ran.push(check);
     return { ok: true, exitCode: 0 };
   };
 
   const taken = flow(
     node("a", "if", { left: "ok", op: "==", right: "true" }),
-    node("b", "run-script", { command: "then-branch" }),
+    node("b", "run-script", { check: "then-branch" }),
     node("c", "else"),
-    node("d", "run-script", { command: "else-branch" }),
+    node("d", "run-script", { check: "else-branch" }),
     node("e", "end-if")
   );
 
@@ -225,18 +225,18 @@ test("a nested IF inside a skipped branch stays skipped", async () => {
     flow(
       node("a", "if", { left: "outer", op: "==", right: "yes" }),
       node("b", "if", { left: "inner", op: "==", right: "yes" }),
-      node("c", "run-script", { command: "inner-then" }),
+      node("c", "run-script", { check: "inner-then" }),
       node("d", "end-if"),
-      node("e", "run-script", { command: "after-inner" }),
+      node("e", "run-script", { check: "after-inner" }),
       node("f", "end-if"),
-      node("g", "run-script", { command: "after-outer" })
+      node("g", "run-script", { check: "after-outer" })
     ),
     {
       dryRun: false,
       sleep: noSleep,
       context: { outer: "no", inner: "yes" },
-      runScript: async (command) => {
-        ran.push(command);
+      runScript: async (check) => {
+        ran.push(check);
         return { ok: true, exitCode: 0 };
       }
     }
@@ -252,9 +252,9 @@ test("a nested ELSE inside a skipped branch does not switch it back on", async (
     flow(
       node("a", "if", { left: "outer", op: "==", right: "yes" }),
       node("b", "if", { left: "inner", op: "==", right: "yes" }),
-      node("c", "run-script", { command: "inner-then" }),
+      node("c", "run-script", { check: "inner-then" }),
       node("d", "else"),
-      node("e", "run-script", { command: "inner-else" }),
+      node("e", "run-script", { check: "inner-else" }),
       node("f", "end-if"),
       node("g", "end-if")
     ),
@@ -262,8 +262,8 @@ test("a nested ELSE inside a skipped branch does not switch it back on", async (
       dryRun: false,
       sleep: noSleep,
       context: { outer: "no", inner: "no" },
-      runScript: async (command) => {
-        ran.push(command);
+      runScript: async (check) => {
+        ran.push(check);
         return { ok: true, exitCode: 0 };
       }
     }
@@ -277,36 +277,36 @@ test("a script result steers the branch taken next", async () => {
 
   await executeFlow(
     flow(
-      node("a", "run-script", { command: "npm test" }),
+      node("a", "run-script", { check: "tests" }),
       node("b", "if", { left: "ok", op: "==", right: "true" }),
-      node("c", "run-script", { command: "deploy" }),
+      node("c", "run-script", { check: "deploy" }),
       node("d", "end-if")
     ),
     {
       dryRun: false,
       sleep: noSleep,
-      runScript: async (command) => {
-        ran.push(command);
-        return { ok: command === "npm test", exitCode: command === "npm test" ? 0 : 1 };
+      runScript: async (check) => {
+        ran.push(check);
+        return { ok: check === "tests", exitCode: check === "tests" ? 0 : 1 };
       }
     }
   );
 
-  assert.deepEqual(ran, ["npm test", "deploy"]);
+  assert.deepEqual(ran, ["tests", "deploy"]);
 });
 
 test("a failing script stops the run at the failure", async () => {
   const ran: string[] = [];
   const result = await executeFlow(
     flow(
-      node("a", "run-script", { command: "failing" }),
-      node("b", "run-script", { command: "should-not-run" })
+      node("a", "run-script", { check: "failing" }),
+      node("b", "run-script", { check: "should-not-run" })
     ),
     {
       dryRun: false,
       sleep: noSleep,
-      runScript: async (command) => {
-        ran.push(command);
+      runScript: async (check) => {
+        ran.push(check);
         return { ok: false, exitCode: 2 };
       }
     }
@@ -320,14 +320,14 @@ test("a failing script stops the run at the failure", async () => {
 test("a failed run rewinds to the failing step so it can be replayed", async () => {
   const result = await executeFlow(
     flow(
-      node("a", "run-script", { command: "ok-one" }),
-      node("b", "run-script", { command: "boom" }),
-      node("c", "run-script", { command: "never" })
+      node("a", "run-script", { check: "ok-one" }),
+      node("b", "run-script", { check: "boom" }),
+      node("c", "run-script", { check: "never" })
     ),
     {
       dryRun: false,
       sleep: noSleep,
-      runScript: async (command) => ({ ok: command !== "boom", exitCode: command === "boom" ? 1 : 0 })
+      runScript: async (check) => ({ ok: check !== "boom", exitCode: check === "boom" ? 1 : 0 })
     }
   );
 

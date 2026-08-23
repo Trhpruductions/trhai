@@ -9,7 +9,14 @@ contextBridge.exposeInMainWorld("ascendDesktop", {
   listProjectInventory: () => ipcRenderer.invoke("ascend:list-project-inventory"),
   listStorageDevices: () => ipcRenderer.invoke("ascend:list-storage-devices"),
   openPath: (targetPath: string) => ipcRenderer.invoke("ascend:open-path", targetPath),
-  runWorkspaceCommand: (payload: { command: string; cwd?: string }) => ipcRenderer.invoke("ascend:run-command", payload),
+  // Named checks only. There is deliberately no way to send a command string
+  // from here: the executable and its arguments live in the main process, and
+  // this bridge carries a name the main process looks up. Renamed from
+  // runWorkspaceCommand so a stale caller still passing { command } fails
+  // loudly at the type and at runtime, rather than silently sending a payload
+  // the handler now ignores.
+  listWorkspaceChecks: () => ipcRenderer.invoke("ascend:list-workspace-checks"),
+  runWorkspaceCheck: (payload: { check: string; cwd?: string }) => ipcRenderer.invoke("ascend:run-check", payload),
   onRuntimeEvent: (listener: (event: {
     runId: string;
     kind: "start" | "stdout" | "stderr" | "exit";
