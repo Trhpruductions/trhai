@@ -6,6 +6,11 @@ import { setActivity } from "./agentActivity.js";
 import { isContinuationRequest } from "./requestAnalysis.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
+import {
+  consumePendingConfirmation,
+  isAffirmative,
+  recordPendingConfirmation
+} from "./pendingConfirmation.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
@@ -61,6 +66,19 @@ const modelRouter = new ModelRouter();
 export async function runAssistantOrchestrator(
   input: OrchestratorInput
 ): Promise<OrchestratorResult> {
+  // An affirmative answers the offer that is actually standing, or it is
+  // ordinary conversation. Consumed rather than merely read, so one "yes"
+  // cannot authorise a second destructive action later in the same session.
+  //
+  // A null here is a real answer: "yes" with nothing pending grants nothing
+  // at all, which is the whole point of holding the offer rather than
+  // trusting the word on its own. Checked before continuation because the
+  // two overlap — "do it" is both — and answering a standing offer to delete
+  // something is the more specific reading.
+  const approving = input.sessionId && isAffirmative(input.userMessage)
+    ? consumePendingConfirmation(input.sessionId)
+    : null;
+
   // A continuation carries no content of its own — "do it" is two words with
   // nothing to act on. What it means is entirely in the task it refers back
   // to, so that task's request is what the rest of this function works from.
@@ -69,11 +87,15 @@ export async function runAssistantOrchestrator(
   // then reaches the composer's vague branch and asks what to do, which is
   // the honest answer: inventing a task here to look responsive is the
   // failure this whole store exists to prevent.
-  const resuming = input.sessionId && isContinuationRequest(input.userMessage)
+  const resuming = input.sessionId && !approving && isContinuationRequest(input.userMessage)
     ? getResumableTask(input.sessionId)
     : null;
 
-  const effectiveMessage = resuming ? resuming.request : input.userMessage;
+  const effectiveMessage = approving
+    ? approving.request
+    : resuming
+      ? resuming.request
+      : input.userMessage;
 
   if (resuming && input.sessionId) {
     updateTask(input.sessionId, { status: "executing" });
@@ -200,8 +222,22 @@ export async function runAssistantOrchestrator(
     const generated = await answerWithLocalModel(
       { ...input, userMessage: effectiveMessage },
       known,
-      question
+      question,
+      // Authorised for this turn only, and only for the exact tool the user
+      // was asked about. An approval does not become a standing permission.
+      approving ? new Set([approving.tool]) : undefined
     );
+
+    // The gate refused something. Hold the offer open so the user's "yes"
+    // has a specific action to attach to, rather than being read as blanket
+    // permission for whatever comes next.
+    if (input.sessionId && generated?.awaitingConfirmation) {
+      recordPendingConfirmation(input.sessionId, {
+        tool: generated.awaitingConfirmation.tool,
+        arguments: generated.awaitingConfirmation.arguments,
+        request: effectiveMessage
+      });
+    }
 
     if (input.sessionId) {
       updateTask(input.sessionId, generated
@@ -270,8 +306,15 @@ async function answerWithLocalModel(
    * buildRequest for a "plan" turn, which carries an earlier turn's context
    * that the current message alone does not.
    */
-  askAs?: string
-): Promise<{ text: string; model: string; toolsUsed: string[] } | null> {
+  askAs?: string,
+  /** Tool names the user authorised this turn; see the permission ladder. */
+  confirmedActions?: ReadonlySet<string>
+): Promise<{
+  text: string;
+  model: string;
+  toolsUsed: string[];
+  awaitingConfirmation?: { tool: string; arguments: Record<string, unknown> };
+} | null> {
   const config = readLocalModelConfig();
   const availability = await checkAvailability(config);
   if (!availability.available) return null;
@@ -334,13 +377,19 @@ async function answerWithLocalModel(
     updateDocument: input.updateDocument,
     deleteDocument: input.deleteDocument,
     pinMemory: input.pinMemory,
+    confirmedActions,
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history
   }, fetch, onToolStart);
 
     if (result.ok) {
-      return { text: result.text, model: `ollama/${result.model}`, toolsUsed: result.toolsUsed };
+      return {
+        text: result.text,
+        model: `ollama/${result.model}`,
+        toolsUsed: result.toolsUsed,
+        ...(result.awaitingConfirmation ? { awaitingConfirmation: result.awaitingConfirmation } : {})
+      };
     }
 
     // Only a model that could not be loaded is worth replacing. One that

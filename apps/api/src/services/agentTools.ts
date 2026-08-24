@@ -3,6 +3,7 @@ import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
 import { describeDifference, shiftDate } from "./dateMath.js";
 import { generateProject, planProject, slugify } from "@ascend/shared";
 import { verifyBuiltProject } from "./buildVerification.js";
+import { describeConfirmationNeeded, requiresConfirmation } from "./toolPermissions.js";
 import {
   listWorkspace,
   readWorkspaceFile,
@@ -55,6 +56,12 @@ export type ToolResult = {
   ok: boolean;
   /** Fed back to the model verbatim, so it must read as plain fact. */
   content: string;
+  /**
+   * Set when the tool was refused only because it needs the user's
+   * confirmation. Distinct from an ordinary failure: nothing was attempted,
+   * and the same call would succeed once authorised.
+   */
+  needsConfirmation?: boolean;
 };
 
 /**
@@ -97,6 +104,13 @@ export type ToolContext = {
    * ask you" except by whatever happens to be in its context window.
    */
   conversation?: Array<{ role: "user" | "assistant"; content: string }>;
+  /**
+   * Tool names the user has explicitly authorised for this turn.
+   *
+   * Per turn, not stored: an authorisation that outlived the exchange it was
+   * given in would mean "yes" to one deletion quietly permitting the next.
+   */
+  confirmedActions?: ReadonlySet<string>;
   /** Overridable so a test can assert on a fixed clock. */
   now?: () => Date;
 };
@@ -499,6 +513,27 @@ function findMemory(context: ToolContext, fact: string) {
 }
 
 export async function runTool(call: ToolCall, context: ToolContext): Promise<ToolResult> {
+  // The permission gate, applied once here rather than inside each handler.
+  //
+  // Every tool call in the app goes through this function, so this is the
+  // only place it can be enforced without relying on someone remembering to
+  // add a check to a new tool — and permissionLevelOf treats an unclassified
+  // tool as destructive, so forgetting fails closed.
+  //
+  // Refused before the handler runs, not after: a check that happens once the
+  // work is done is not a permission system, it is a log.
+  // Only registered tools are gated. A name that is not a tool at all is not
+  // a permission question — it is a mistake, and must reach the switch's
+  // default so the model is told what is actually callable. Without this the
+  // fail-closed default treats every hallucinated name as a destructive
+  // action awaiting approval, which teaches the model to ask the user to
+  // confirm a tool that does not exist.
+  const isRegistered = toolDefinitions.some((definition) => definition.function.name === call.name);
+
+  if (isRegistered && requiresConfirmation(call.name) && !context.confirmedActions?.has(call.name)) {
+    return { ok: false, content: describeConfirmationNeeded(call.name), needsConfirmation: true };
+  }
+
   switch (call.name) {
     case "search_memory": {
       const query = requireString(call.arguments.query);
