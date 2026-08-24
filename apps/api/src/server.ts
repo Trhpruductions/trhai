@@ -54,6 +54,7 @@ import {
   describePendingAction,
   getPendingConfirmation
 } from "./services/pendingConfirmation.js";
+import { maxSynthesisCharacters, piperStatus, synthesize, type Cadence } from "./services/piperSpeech.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -87,6 +88,14 @@ function resolveMemoryKey(req: express.Request, sessionId: string | null): strin
   return sessionId;
 }
 
+/** Client-supplied cadence, or undefined to let the voice's default stand. */
+function normalizeCadence(value: unknown): Cadence | undefined {
+  if (value === "measured" || value === "brisk" || value === "playful" || value === "deliberate") {
+    return value;
+  }
+  return undefined;
+}
+
 function normalizeAssistMode(mode: unknown): AssistRouteMode {
   if (mode === "build"
     || mode === "code"
@@ -114,7 +123,12 @@ export function createApp() {
   app.use(cors({
     origin(origin, callback) {
       callback(null, isAllowedOrigin(origin, process.env.CORS_ORIGIN));
-    }
+    },
+    // Response headers a browser client is allowed to read. Without this the
+    // browser hides them from JavaScript even though they are sent, which is
+    // the worst kind of bug: the header looks right in curl and does nothing
+    // in the app.
+    exposedHeaders: ["X-Speech-Voice"]
   }));
   app.use(express.json({ limit: "1mb" }));
   app.use(morgan("tiny"));
@@ -536,6 +550,73 @@ export function createApp() {
         : { available: false, model: null, reason: availability.reason },
       traceId: "trace-local"
     });
+  });
+
+  // Whether the neural voice is installed, so the interface can offer it
+  // honestly instead of listing a voice that would produce silence. Absent is a
+  // normal state with a reason attached, not an error.
+  app.get("/v1/speech", (_req, res) => {
+    const status = piperStatus();
+
+    res.json({
+      data: status.available
+        ? {
+            available: true,
+            voice: status.voice.id,
+            // The full list, so the picker offers what is actually on disk
+            // rather than a hardcoded menu that can drift out of date.
+            voices: status.voices.map(({ id, name, locale, quality }) => ({ id, name, locale, quality })),
+            maxCharacters: maxSynthesisCharacters
+          }
+        : { available: false, voice: null, voices: [], reason: status.reason },
+      traceId: "trace-local"
+    });
+  });
+
+  // Text in, spoken audio out. The synthesis runs on this machine — no account,
+  // no key, nothing leaves the box — which is the whole reason for preferring
+  // it over a hosted voice.
+  app.post("/v1/speech", async (req, res) => {
+    const text = typeof req.body?.text === "string" ? req.body.text : "";
+    if (!text.trim()) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "text is required",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    // All clamped or resolved inside the service, and passed through as-is so
+    // a nonsense value falls back to the voice's own delivery rather than
+    // failing a request the user would rather just hear.
+    const result = await synthesize(text, {
+      voiceId: typeof req.body?.voiceId === "string" ? req.body.voiceId : undefined,
+      rate: typeof req.body?.rate === "number" ? req.body.rate : undefined,
+      expressiveness: typeof req.body?.expressiveness === "number" ? req.body.expressiveness : undefined,
+      cadence: normalizeCadence(req.body?.cadence)
+    });
+
+    if (!result.ok) {
+      // 503 rather than 500: the usual cause is that the voice is not
+      // installed, which is a state of the machine, not a bug in the request.
+      res.status(503).json({
+        code: "SPEECH_UNAVAILABLE",
+        message: result.reason,
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Content-Length", String(result.audio.length));
+    // Which voice actually spoke, so a client that asked for one no longer
+    // installed can tell it got a different one.
+    res.setHeader("X-Speech-Voice", result.voice);
+    // Each reply is spoken once; caching would only serve stale audio after a
+    // voice change.
+    res.setHeader("Cache-Control", "no-store");
+    res.send(result.audio);
   });
 
   // Which tool the agent is running right now, for a client to poll while a
