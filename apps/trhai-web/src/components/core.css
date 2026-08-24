@@ -96,6 +96,29 @@
   filter: drop-shadow(0 0 5px var(--accent));
 }
 
+/* The six-point bracket frame — TRHAI's own silhouette, deliberately
+   angular rather than the segmented-disc shape that belongs to somebody
+   else's iconography. */
+.bracket {
+  stroke: var(--accent-strong);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-opacity: 0.65;
+  fill: none;
+}
+
+.bracket-spin {
+  transform-origin: 120px 120px;
+  animation: core-spin 60s linear infinite reverse;
+}
+
+.core-thinking .bracket-spin { animation-duration: 24s; }
+.core-executing .bracket-spin { animation-duration: 12s; }
+.core-executing .bracket { stroke-opacity: 0.95; }
+.core-offline .bracket { stroke: var(--text-faint); stroke-opacity: 0.3; }
+.core-success .bracket { stroke: var(--ok); }
+.core-error .bracket { stroke: var(--danger); }
+
 .core-sweep {
   transform-origin: 120px 120px;
   animation: core-spin 8s linear infinite;
@@ -240,7 +263,7 @@
 @media (prefers-reduced-motion: reduce) {
   .ring-outer, .ring-inner, .ring-inner-2, .ring-mid, .ring-mid-spin,
   .core-sweep, .core-orb, .core-orb-ring, .core-bloom,
-  .arc-spin, .orbiter-spin, .core-ticks-inner {
+  .arc-spin, .orbiter-spin, .core-ticks-inner, .bracket-spin {
     animation: none;
   }
   .core-metered.core-speaking .core-orb,
