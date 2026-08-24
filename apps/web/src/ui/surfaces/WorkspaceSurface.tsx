@@ -14,6 +14,14 @@ import "./workspace.css";
 // the top, instead of every panel failing separately.
 
 type HostProject = { name: string; path: string; group: string };
+type ConnectedProject = { root: string; name: string; connectedAt: string };
+type ProjectEntry = { path: string; bytes: number; directory: boolean };
+
+/** The folder above `entryPath`, or the project root. */
+function parentOf(entryPath: string): string {
+  const cut = entryPath.lastIndexOf("/");
+  return cut === -1 ? "" : entryPath.slice(0, cut);
+}
 type Telemetry = { cpuPercent?: number; memoryPercent?: number; storagePercent?: number; networkPercent?: number };
 type LogLine = { id: string; text: string; level: string };
 
@@ -24,6 +32,12 @@ export function WorkspaceSurface() {
   const [checks, setChecks] = useState<Array<{ name: string; label: string }>>([]);
   const [log, setLog] = useState<LogLine[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [connected, setConnected] = useState<ConnectedProject | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  /** Folder currently being browsed, relative to the project root. "" is the root. */
+  const [projectPath, setProjectPath] = useState("");
+  const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
+  const [fileView, setFileView] = useState<{ path: string; content: string; truncated: boolean } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!bridge?.listProjectInventory) return;
@@ -76,6 +90,67 @@ export function WorkspaceSurface() {
 
     return () => { cancelled = true; };
   }, [bridge]);
+
+  const openFolder = useCallback(async (folder: string) => {
+    if (!bridge?.listProjectFiles) return;
+
+    const result = await bridge.listProjectFiles({ subdirectory: folder || "." });
+    // A refusal leaves the previous listing alone rather than blanking the
+    // panel, so a rejected path does not look like an empty folder.
+    if (result?.ok) {
+      setProjectPath(folder);
+      setProjectEntries(result.entries ?? []);
+      setFileView(null);
+    }
+  }, [bridge]);
+
+  const refreshConnected = useCallback(async () => {
+    if (!bridge?.getConnectedProject) return;
+
+    const result = await bridge.getConnectedProject();
+    const project = result?.ok ? result.project ?? null : null;
+    setConnected(project);
+    if (project) await openFolder("");
+  }, [bridge, openFolder]);
+
+  useEffect(() => { void refreshConnected(); }, [refreshConnected]);
+
+  async function connect() {
+    if (!bridge?.connectProject || connecting) return;
+
+    setConnecting(true);
+    try {
+      const result = await bridge.connectProject();
+      // Cancelling the picker is a normal outcome, not a failure to report.
+      if (result?.ok && result.project) {
+        setConnected(result.project);
+        await openFolder("");
+      }
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function disconnect() {
+    if (!bridge?.disconnectProject) return;
+
+    await bridge.disconnectProject();
+    setConnected(null);
+    setProjectEntries([]);
+    setProjectPath("");
+    setFileView(null);
+  }
+
+  async function openFile(filePath: string) {
+    if (!bridge?.readProjectFile) return;
+
+    const result = await bridge.readProjectFile({ path: filePath });
+    setFileView(result?.ok
+      ? { path: filePath, content: result.content ?? "", truncated: Boolean(result.truncated) }
+      // Shown rather than swallowed: a file that could not be read must not
+      // look like a file that was empty.
+      : { path: filePath, content: result?.error ?? "That file could not be read.", truncated: false });
+  }
 
   async function runCheck(check: string) {
     if (busy || !bridge?.runWorkspaceCheck) return;
@@ -137,6 +212,81 @@ export function WorkspaceSurface() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Connected Project: a folder the user picked in the operating
+          system's own dialog. Read-only by construction — the bridge has no
+          write method because the main process has no write handler. */}
+      <div className="col connected-project">
+        <div className="row spread">
+          <span className="label">Connected project</span>
+          {connected ? (
+            <button type="button" className="btn btn-sm" onClick={() => void disconnect()}>
+              Disconnect
+            </button>
+          ) : (
+            <button type="button" className="btn btn-sm" disabled={connecting}
+              onClick={() => void connect()}>
+              {connecting ? "Choosing…" : "Connect a project"}
+            </button>
+          )}
+        </div>
+
+        {connected ? (
+          <>
+            <div className="panel list-row">
+              <div className="grow">
+                <strong>{connected.name}</strong>
+                <p className="faint list-excerpt mono">{connected.root}</p>
+              </div>
+              <span className="chip">read-only</span>
+            </div>
+
+            {projectPath ? (
+              <button type="button" className="btn btn-ghost btn-sm project-up"
+                onClick={() => void openFolder(parentOf(projectPath))}>
+                ← {projectPath}
+              </button>
+            ) : null}
+
+            {projectEntries.length === 0 ? (
+              <p className="faint">Nothing to show in this folder.</p>
+            ) : (
+              <ul className="list">
+                {projectEntries.map((entry) => (
+                  <li key={entry.path} className="panel list-row">
+                    <button type="button" className="btn btn-ghost grow project-entry"
+                      onClick={() => void (entry.directory ? openFolder(entry.path) : openFile(entry.path))}>
+                      {entry.directory ? "📁" : "📄"} {entry.path.split("/").pop()}
+                    </button>
+                    {!entry.directory ? <span className="faint">{entry.bytes} bytes</span> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {fileView ? (
+              <div className="panel project-file">
+                <div className="row spread">
+                  <strong className="mono">{fileView.path}</strong>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFileView(null)}>
+                    Close
+                  </button>
+                </div>
+                {fileView.truncated ? (
+                  <p className="faint">Showing the first part of this file; it is longer than displayed.</p>
+                ) : null}
+                <pre className="mono project-file-body">{fileView.content}</pre>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <Empty title="No project connected">
+            Connect a folder to browse and read its files here. You choose it in your own
+            file picker, and this app can only read what is inside it — there is no way to
+            write to it from this screen.
+          </Empty>
+        )}
       </div>
 
       <div className="workspace-split">

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
 import { constants as fsConstants, existsSync, statSync, statfsSync } from "node:fs";
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,21 @@ import {
   listWorkspaceChecks,
   workspaceChecks
 } from "./workspaceChecks.js";
+import {
+  configureConnectedProjectStore,
+  connectProject,
+  disconnectProject,
+  getConnectedProject,
+  listProjectFiles,
+  readProjectFile
+} from "./connectedProject.js";
+
+// Per-user, not per-working-directory. The module's own default is relative
+// to process.cwd(), which for a desktop app depends entirely on how it was
+// launched — so a project connected via the launcher was invisible when the
+// app was started any other way. Done at import time, before anything reads
+// the store.
+configureConnectedProjectStore(path.join(app.getPath("userData"), "connected-project.json"));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -356,6 +371,55 @@ handleFromAppWindow("ascend:list-storage-devices", async () => {
       error: error instanceof Error ? error.message : "Failed to collect storage devices."
     };
   }
+});
+
+handleFromAppWindow("ascend:connect-project", async (event) => {
+  // The folder comes from the operating system's own picker, never from the
+  // renderer. This is the security property the whole module rests on: a
+  // page can cause this dialog to open, and cannot decide what it returns or
+  // pre-fill it. There is deliberately no variant of this that takes a path.
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  const result = parent
+    ? await dialog.showOpenDialog(parent, {
+      title: "Connect a project",
+      properties: ["openDirectory"],
+      buttonLabel: "Connect"
+    })
+    : await dialog.showOpenDialog({
+      title: "Connect a project",
+      properties: ["openDirectory"],
+      buttonLabel: "Connect"
+    });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { ok: false, canceled: true, error: "No folder was chosen." };
+  }
+
+  return connectProject(result.filePaths[0]);
+});
+
+handleFromAppWindow("ascend:disconnect-project", async () => {
+  return { ok: true, disconnected: disconnectProject() };
+});
+
+handleFromAppWindow("ascend:get-connected-project", async () => {
+  return { ok: true, project: getConnectedProject() };
+});
+
+handleFromAppWindow("ascend:list-project-files", async (_event, payload) => {
+  const subdirectory = typeof payload?.subdirectory === "string" ? payload.subdirectory : ".";
+  const entries = listProjectFiles(subdirectory);
+
+  return entries
+    ? { ok: true, entries }
+    : { ok: false, error: "That folder is not readable inside the connected project." };
+});
+
+handleFromAppWindow("ascend:read-project-file", async (_event, payload) => {
+  const target = typeof payload?.path === "string" ? payload.path : "";
+  if (!target) return { ok: false, error: "No file was named." };
+
+  return readProjectFile(target);
 });
 
 handleFromAppWindow("ascend:open-path", async (_event, targetPath) => {
