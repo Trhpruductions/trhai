@@ -1,4 +1,4 @@
-import { personalityById, resolvePersonality, type PersonalityId } from "./personalities";
+import { personalityById, resolvePersonality, type PersonalityId } from "@ascend/shared";
 
 // Speaking replies aloud.
 //

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useSpeech } from "../../hooks/useSpeech";
 import { accents, readStoredAccent, writeStoredAccent, type Accent } from "../../lib/theme";
+import { readStoredPersonality, writeStoredPersonality } from "../../lib/personality";
+import { allPersonalities, type PersonalityId } from "@ascend/shared";
 import "./settings.css";
 
 const accentLabel: Record<Accent, string> = {
@@ -57,6 +59,43 @@ function VoiceSettings() {
   );
 }
 
+function PersonalitySettings() {
+  const [personality, setPersonality] = useState<PersonalityId>("professional");
+
+  useEffect(() => {
+    setPersonality(readStoredPersonality(window.localStorage));
+  }, []);
+
+  function choose(id: PersonalityId) {
+    setPersonality(id);
+    writeStoredPersonality(window.localStorage, id);
+  }
+
+  return (
+    <div className="panel settings-card">
+      <span className="hud-label">Personality</span>
+      <p className="muted settings-desc">
+        Changes what the dashboard suggests and how replies read. It never changes what TRHAI
+        is allowed to do.
+      </p>
+      <div className="settings-personality-list">
+        {allPersonalities().map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            className={`btn btn-sm${personality === entry.id ? " btn-on" : ""}`}
+            aria-pressed={personality === entry.id}
+            title={entry.summary}
+            onClick={() => choose(entry.id)}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ThemeSettings() {
   const [accent, setAccent] = useState<Accent>("cyan");
 
@@ -97,10 +136,11 @@ export default function SettingsPage() {
     <div className="settings">
       <header className="settings-head">
         <h1>Settings</h1>
-        <p className="muted">Voice and theme are real today. Personality, memory and tool permissions arrive in later phases.</p>
+        <p className="muted">Voice, theme and personality are real today. Memory and tool permissions arrive in later phases.</p>
       </header>
 
       <VoiceSettings />
+      <PersonalitySettings />
       <ThemeSettings />
     </div>
   );

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { allPersonalities } from "../src/personalities.js";
+import { allPersonalities } from "@ascend/shared";
 import {
   cadenceFor,
   chooseVoice,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Conversation } from "./Conversation";
 import { StatusBar } from "./StatusBar";
-import { resolvePersonality, type PersonalityId } from "../personalities";
+import { resolvePersonality, type PersonalityId } from "@ascend/shared";
 import { webEnv } from "../env";
 import "./shell.css";
 

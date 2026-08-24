@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Core } from "../components/Core";
 import { apiBaseUrl } from "../lib/api";
+import { readStoredPersonality } from "../lib/personality";
+import { activeAgent, personalityById, readMarketplaceState, type Agent } from "@ascend/shared";
+import { marketplaceStorageKey } from "../lib/agents";
 import "./dash.css";
 
 // Dashboard: the command centre.
@@ -30,10 +33,24 @@ export default function DashboardPage() {
   const [info, setInfo] = useState<ModelInfo | null>(null);
   const [clock, setClock] = useState(() => new Date());
   const [draft, setDraft] = useState("");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [agent, setAgent] = useState<Agent | null>(null);
 
   useEffect(() => {
     const ticker = window.setInterval(() => setClock(new Date()), 1000);
     return () => window.clearInterval(ticker);
+  }, []);
+
+  // Read once on mount, the same as the accent and voice settings — this
+  // screen is what a personality or an active agent is actually FOR, per
+  // @ascend/shared's own design note: a lens with no visible effect is just
+  // a wall of decorative cards.
+  useEffect(() => {
+    const personality = personalityById(readStoredPersonality(window.localStorage));
+    const marketplace = readMarketplaceState(window.localStorage, marketplaceStorageKey);
+    const installedAgent = activeAgent(marketplace);
+    setAgent(installedAgent);
+    setSuggestions(installedAgent?.suggestions ?? personality.suggestions);
   }, []);
 
   useEffect(() => {
@@ -110,6 +127,11 @@ export default function DashboardPage() {
 
       <div className="dash-ask panel">
         <label className="hud-label" htmlFor="dash-ask-input">What would you like me to do?</label>
+        {agent ? (
+          <p className="muted dash-agent-focus">
+            <span aria-hidden="true">{agent.avatar}</span> <b>{agent.name}</b> — {agent.focus}
+          </p>
+        ) : null}
         <div className="dash-ask-row">
           <input
             id="dash-ask-input"
@@ -121,6 +143,16 @@ export default function DashboardPage() {
           />
           <button type="button" className="btn btn-primary" onClick={askAndGo}>Go</button>
         </div>
+        {suggestions.length > 0 ? (
+          <div className="dash-suggestions">
+            {suggestions.map((suggestion) => (
+              <button key={suggestion} type="button" className="btn btn-ghost btn-sm"
+                onClick={() => setDraft(suggestion)}>
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <p className="dash-note faint">

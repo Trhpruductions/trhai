@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { allPersonalities, personalityById, type PersonalityId } from "../../personalities";
+import { allPersonalities, personalityById, type PersonalityId } from "@ascend/shared";
 import { Surface } from "../Surface";
 import type { SurfaceContext } from "../AppShell";
 import { webEnv } from "../../env";

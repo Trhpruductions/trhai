@@ -10,7 +10,7 @@ import {
   uninstallAgent,
   writeMarketplaceState,
   type MarketplaceState
-} from "../../marketplace";
+} from "@ascend/shared";
 import { Surface } from "../Surface";
 
 // Agents: installable lenses on the same assistant.

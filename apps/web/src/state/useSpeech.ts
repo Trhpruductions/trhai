@@ -19,7 +19,7 @@ import {
   type NeuralVoiceStatus
 } from "../neuralSpeech";
 import { rmsAmplitude, smoothAmplitude } from "../audioAmplitude";
-import type { PersonalityId } from "../personalities";
+import type { PersonalityId } from "@ascend/shared";
 
 // Speaking, as state the interface can trust.
 //
