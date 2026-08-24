@@ -184,7 +184,10 @@ function Turn({ message, onBuildRequest }: { message: ChatMessage; onBuildReques
 
 export function Conversation({ personality, onBuildRequest }: Props) {
   const profile = personalityById(resolvePersonality(personality));
-  const { messages, status, restored, send, clear, sessionId } = useAssistant(profile.id);
+  const {
+    messages, status, restored, send, clear, sessionId,
+    pendingConfirmation, declineConfirmation
+  } = useAssistant(profile.id);
   const [draft, setDraft] = useState("");
   const [stats, setStats] = useState<Array<{ label: string; value: string; title?: string }>>([]);
   const [recentActivity, setRecentActivity] = useState<AuditEntry[]>([]);
@@ -538,6 +541,36 @@ export function Conversation({ personality, onBuildRequest }: Props) {
 
         <div ref={endRef} />
       </div>
+
+      {/* The permission gate refused something and is waiting to be allowed.
+          Shown above the composer rather than as a modal: the reply that
+          explains what it wants to do stays readable behind it, which is the
+          context someone needs in order to answer. */}
+      {pendingConfirmation ? (
+        <div className="panel confirm-action" role="alertdialog" aria-label="Confirm action">
+          <strong className="confirm-title">Confirm action</strong>
+          <p className="confirm-verb">{pendingConfirmation.verb}</p>
+          {pendingConfirmation.target ? (
+            <p className="confirm-target mono">{pendingConfirmation.target}</p>
+          ) : null}
+          <p className="faint confirm-warning">
+            This cannot be undone from here.
+          </p>
+          <div className="row confirm-actions">
+            <button type="button" className="btn" disabled={busy}
+              onClick={() => void declineConfirmation()}>
+              Cancel
+            </button>
+            {/* Sends the same word a person would type, so the button and the
+                typed reply run the identical server path rather than a second
+                one that could drift from it. */}
+            <button type="button" className="btn btn-primary" disabled={busy}
+              onClick={() => void send("yes")}>
+              Confirm
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <footer className="composer">
         <textarea

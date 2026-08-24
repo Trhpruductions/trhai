@@ -49,6 +49,11 @@ import { isAllowedOrigin } from "./services/originPolicy.js";
 import { checkAvailability, readLocalModelConfig } from "./services/localModel.js";
 import { readPreferences, updatePreferences } from "./services/preferences.js";
 import { getBuildInfo } from "./services/buildInfo.js";
+import {
+  clearPendingConfirmation,
+  describePendingAction,
+  getPendingConfirmation
+} from "./services/pendingConfirmation.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -230,6 +235,9 @@ export function createApp() {
         // transcript still shows whether an answer was quoted or generated.
         appendTurn(sessionId, "assistant", result.assistantMessage, {
           strategy: result.strategy,
+          // Present only when the permission gate refused something. The
+          // client renders a confirmation dialog from it.
+          ...(result.pendingConfirmation ? { pendingConfirmation: result.pendingConfirmation } : {}),
           model: result.model
         });
       }
@@ -247,6 +255,9 @@ export function createApp() {
           usedMemoryEntries: result.groundedOn.length,
           savedMemoryEntries: savedMemories.length,
           strategy: result.strategy,
+          // Present only when the permission gate refused something. The
+          // client renders a confirmation dialog from it.
+          ...(result.pendingConfirmation ? { pendingConfirmation: result.pendingConfirmation } : {}),
           // What the client should scaffold from: the original request merged
           // with any clarifying answer, not just this turn's text.
           buildRequest: result.buildRequest,
@@ -458,6 +469,46 @@ export function createApp() {
     if (!sessionId) return;
 
     res.json({ data: { cleared: clearConversation(sessionId) }, traceId: "trace-local" });
+  });
+
+  /**
+   * Whatever destructive action is still awaiting approval, if any.
+   *
+   * Read on load. Without it a reload closed the dialog while the offer was
+   * still standing on the server — the user saw nothing pending, and a "yes"
+   * typed later would still have run it.
+   */
+  app.get("/v1/assist/confirmation", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId, res, req);
+    if (!sessionId) return;
+
+    const pending = getPendingConfirmation(sessionId);
+
+    res.json({
+      data: {
+        pendingConfirmation: pending
+          ? { tool: pending.tool, ...describePendingAction(pending) }
+          : null
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  /**
+   * Decline a pending destructive action.
+   *
+   * Without this, Cancel would only close the dialog: the offer would still
+   * be standing server-side, and an unrelated "yes" later in the session
+   * could land on the deletion the user had just declined.
+   */
+  app.delete("/v1/assist/confirmation", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId ?? req.body?.sessionId, res, req);
+    if (!sessionId) return;
+
+    const pending = getPendingConfirmation(sessionId);
+    clearPendingConfirmation(sessionId);
+
+    res.json({ data: { declined: Boolean(pending) }, traceId: "trace-local" });
   });
 
   app.get("/v1/assist/memory", (req, res) => {

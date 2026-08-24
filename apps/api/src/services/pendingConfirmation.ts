@@ -90,6 +90,36 @@ export function isAffirmative(message: unknown): boolean {
   return typeof message === "string" && affirmativePattern.test(message.trim());
 }
 
+/**
+ * The action, in the words a person would use to describe it.
+ *
+ * A dialog that says "Run forget" is asking someone to approve a function
+ * call. A dialog that says "Forget: the billing database is Postgres 16" is
+ * asking them about the thing that will actually be destroyed, which is the
+ * only version of the question they can answer meaningfully.
+ *
+ * Falls back to the tool name rather than inventing a description for a tool
+ * it does not know — a confirmation prompt is the last place to guess.
+ */
+export function describePendingAction(pending: PendingConfirmation): {
+  verb: string;
+  target: string;
+} {
+  const argument = (name: string): string => {
+    const value = pending.arguments?.[name];
+    return typeof value === "string" && value.trim() ? value.trim() : "";
+  };
+
+  switch (pending.tool) {
+    case "forget":
+      return { verb: "Forget this saved memory", target: argument("fact") };
+    case "delete_document":
+      return { verb: "Delete this document", target: argument("title") };
+    default:
+      return { verb: `Run ${pending.tool}`, target: "" };
+  }
+}
+
 /** Test seam. */
 export function resetPendingConfirmations(): void {
   pendingBySession.clear();

@@ -602,19 +602,32 @@ export async function runAgent(
       // round are rare, and running them concurrently would let a build and a
       // write race for the same workspace file with no ordering guarantee.
       const result = await runTool(call, context);
-      toolsUsed.push(call.name);
 
       // Refused for permission, not failed. Recorded so the caller can hold
       // the offer open for a "yes"; the model still sees the refusal text and
       // is told to ask rather than to route around it.
+      //
+      // Deliberately not counted as a tool used. toolsUsed drives a label
+      // saying what the assistant *did*, and a refused call did nothing — it
+      // was rendering "deleted from memory" under a reply that had deleted
+      // nothing. That a confirmation is outstanding is carried by
+      // awaitingConfirmation instead, which is the honest place for it.
       if (result.needsConfirmation) {
         awaitingConfirmation = { tool: call.name, arguments: call.arguments };
+      } else {
+        toolsUsed.push(call.name);
       }
       // The failure text goes back unchanged. "Nothing matches X" is what stops
       // the model inventing an answer; softening it here would undo that.
       messages.push({ role: "tool", content: result.content });
 
-      if (mutatingTools.has(call.name)) mutationResults.push(result.content);
+      // A refusal is not a mutation result. Appending it printed an
+      // instruction written for the model — "Tell the user plainly what it
+      // would do and ask them to confirm" — verbatim underneath the reply,
+      // where the user read internal plumbing addressed to someone else.
+      if (mutatingTools.has(call.name) && !result.needsConfirmation) {
+        mutationResults.push(result.content);
+      }
     }
   }
 
