@@ -151,6 +151,14 @@ test("tools can be chained across rounds", async () => {
 test("a model that never concludes is stopped rather than left running", async () => {
   // Without the bound this is a hang: the request runs until it times out and
   // the app looks like it stopped responding.
+  //
+  // This script also happens to be the exact shape the anti-repeat guard
+  // exists for — the same call, unchanged, every round — so the cheaper stop
+  // now fires first: two real attempts, then two refused repeats, then the
+  // round limit withholds tools on the final round and forces the same
+  // "kept searching" verdict this test has always checked for. The round
+  // limit is still real and still the backstop; it is just no longer what
+  // ends this particular scenario.
   const { server, baseUrl, received } = await fakeModel([toolCall("search_memory", { query: "again" })]);
 
   try {
@@ -158,7 +166,7 @@ test("a model that never concludes is stopped rather than left running", async (
     assert.equal(result.ok, false);
     if (result.ok) return;
     assert.match(result.reason, /without reaching an answer/);
-    assert.equal(result.toolsUsed.length, maxToolRounds);
+    assert.equal(result.toolsUsed.length, 2);
   } finally {
     server.close();
   }
@@ -1066,6 +1074,137 @@ test("the current date is stated to the model, not left to a tool call", async (
     // The fixed clock in this context is 17 August 2026.
     assert.match(system?.content ?? "", /2026/);
     assert.match(system?.content ?? "", /never say the date is unknown/);
+  } finally {
+    server.close();
+  }
+});
+
+// Anti-repeat protection.
+//
+// Caught live: asked a capability question with nothing to search for, the
+// model called search_memory, search_documents and list_documents — each one
+// told it plainly there was nothing to find — and kept calling them anyway,
+// sixteen calls in total before the round limit cut it off, three of them
+// writes. These tests hold the earlier, cheaper stop: the third identical
+// attempt at the same call never reaches the tool at all.
+
+test("the same call with the same arguments is refused on its third attempt", async () => {
+  const emptyMemoryContext: ToolContext = { ...context, memories: [] };
+
+  // Four identical requests, then a plain answer once tools are withheld on
+  // the final round — offerTools is false there regardless of what the
+  // script returns, so the loop cannot end any other way.
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("search_memory", { query: "billing" }),
+    toolCall("search_memory", { query: "billing" }),
+    toolCall("search_memory", { query: "billing" }),
+    toolCall("search_memory", { query: "billing" }),
+    answer("I don't have anything saved about that.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what is my billing setup", emptyMemoryContext);
+    assert.equal(result.ok, true);
+
+    // The tool itself only ever ran twice — toolsUsed is the record of real
+    // attempts, and a refused repeat is not one of them, the same way a
+    // permission refusal is not.
+    const realAttempts = result.ok ? result.toolsUsed.filter((used) => used.name === "search_memory") : [];
+    assert.equal(realAttempts.length, 2);
+
+    // The final round's request carries the whole conversation so far, which
+    // is where the refusal the model actually saw has to show up.
+    const finalRequest = received[received.length - 1] as { messages: Array<{ role: string; content: string }> };
+    const toolMessages = finalRequest.messages.filter((message) => message.role === "tool");
+
+    const refused = toolMessages.filter((message) => message.content.includes("did not produce"));
+    const ran = toolMessages.filter((message) => message.content.includes("Nothing in the user's saved memory"));
+
+    assert.equal(ran.length, 2, "expected exactly two real tool results");
+    assert.equal(refused.length, 2, "expected exactly two refused repeats");
+  } finally {
+    server.close();
+  }
+});
+
+test("a refused repeat is never counted as a real tool use", async () => {
+  const emptyMemoryContext: ToolContext = { ...context, memories: [] };
+  const { server, baseUrl } = await fakeModel([
+    toolCall("search_memory", { query: "billing" }),
+    toolCall("search_memory", { query: "billing" }),
+    toolCall("search_memory", { query: "billing" }),
+    answer("Nothing is recorded about that.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what is my billing setup", emptyMemoryContext);
+    assert.equal(result.ok, true);
+    // Not three — a label built from toolsUsed must describe what actually
+    // ran, and the third attempt did not.
+    if (result.ok) assert.equal(result.toolsUsed.length, 2);
+  } finally {
+    server.close();
+  }
+});
+
+test("the same tool with genuinely different arguments is never treated as a repeat", async () => {
+  // Two real questions, not one question asked twice — search_memory("billing")
+  // and search_memory("shipping") must each get their own real attempts.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("search_memory", { query: "billing" }),
+    toolCall("search_memory", { query: "shipping" }),
+    answer("Your billing database is Postgres 16; nothing is recorded about shipping.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "tell me about billing and shipping", context);
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.toolsUsed.length, 2);
+      assert.ok(result.toolsUsed.every((used) => used.name === "search_memory"));
+    }
+  } finally {
+    server.close();
+  }
+});
+
+test("argument order alone does not make two calls look different", async () => {
+  // {from, to} and {to, from} name the same call. If the signature were
+  // sensitive to key order, this would never trigger the guard at all, and
+  // all three attempts below would run for real.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("days_between", { from: "2026-01-01", to: "2026-01-10" }),
+    toolCall("days_between", { to: "2026-01-10", from: "2026-01-01" }),
+    toolCall("days_between", { to: "2026-01-10", from: "2026-01-01" }),
+    answer("That's 9 days.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "how many days between those dates", context);
+    assert.equal(result.ok, true);
+    // Two real attempts despite the keys being reordered on the second and
+    // third calls; the third is refused as a repeat of the second, not run
+    // as though it were a different question.
+    if (result.ok) assert.equal(result.toolsUsed.length, 2);
+  } finally {
+    server.close();
+  }
+});
+
+test("two attempts at the same call are both allowed to actually run", async () => {
+  // The guard only refuses the third attempt onward — a single rephrased
+  // retry, which is ordinary and reasonable, must never be blocked.
+  const emptyMemoryContext: ToolContext = { ...context, memories: [] };
+  const { server, baseUrl } = await fakeModel([
+    toolCall("search_memory", { query: "billing" }),
+    toolCall("search_memory", { query: "billing" }),
+    answer("Nothing is recorded about that.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what is my billing setup", emptyMemoryContext);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.toolsUsed.length, 2);
   } finally {
     server.close();
   }

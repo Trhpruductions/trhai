@@ -76,6 +76,35 @@ export type AgentResult =
 export const maxToolRounds = 4;
 
 /**
+ * How many times the exact same call — same tool, same arguments — may
+ * actually run before the loop refuses to repeat it.
+ *
+ * Two is enough for a genuine retry: the first attempt at search_memory came
+ * back empty and a rephrased second attempt is a reasonable thing to try.
+ * A third identical attempt is not a retry, it is the failure this exists to
+ * stop — the model re-running a call that already told it "no results"
+ * unchanged, hoping for a different answer from the same question. Caught
+ * live: asked a capability question with nothing to search for, the model
+ * called search_memory, search_documents and list_documents, got told
+ * exactly why each one had nothing to offer, and kept calling them anyway —
+ * sixteen calls in total, three of them writes, before the round limit above
+ * finally cut it off. This is the earlier, cheaper stop.
+ */
+const maxIdenticalAttempts = 2;
+
+/**
+ * A key that is the same for two calls that mean the same thing regardless
+ * of argument order, so `{query:"x", limit:5}` and `{limit:5, query:"x"}`
+ * collapse to one signature rather than being counted as different calls.
+ */
+function callSignature(call: ToolCall): string {
+  const sortedArguments = Object.fromEntries(
+    Object.entries(call.arguments).sort(([left], [right]) => left.localeCompare(right))
+  );
+  return `${call.name}:${JSON.stringify(sortedArguments)}`;
+}
+
+/**
  * Who the assistant is, and what it is not allowed to do.
  *
  * The identity matters less than the constraints. A tool-using model that
@@ -514,6 +543,12 @@ export async function runAgent(
   // than trusted to survive its retelling.
   const mutationResults: string[] = [];
 
+  // How many times each exact call has actually been run, across every round
+  // of this one request — not per round, since the failure this guards
+  // against is the model retrying the same call in a *later* round after the
+  // *earlier* round already told it there was nothing there.
+  const attemptsBySignature = new Map<string, number>();
+
   for (let round = 0; round <= maxToolRounds; round += 1) {
     // On the last round the tools are withheld, which forces an answer rather
     // than a fifth request for a search the model is not going to conclude on.
@@ -609,6 +644,25 @@ export async function runAgent(
 
     for (const call of calls) {
       onToolStart?.(call.name);
+
+      // Refused before it runs a third time, not after: a check that only
+      // notices the repeat once the identical call has already executed is
+      // not a guard against a mutating tool running twice, it is a log of it
+      // having happened.
+      const signature = callSignature(call);
+      const attempts = attemptsBySignature.get(signature) ?? 0;
+
+      if (attempts >= maxIdenticalAttempts) {
+        messages.push({
+          role: "tool",
+          content: `${call.name} was already called with these exact arguments and did not produce `
+            + "new information. Do not call it again with the same arguments — either try a genuinely "
+            + "different approach, or answer using what you already have."
+        });
+        continue;
+      }
+
+      attemptsBySignature.set(signature, attempts + 1);
 
       // Awaited in sequence rather than run in parallel. Two calls in one
       // round are rare, and running them concurrently would let a build and a
