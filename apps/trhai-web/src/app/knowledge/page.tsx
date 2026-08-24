@@ -1,54 +1,38 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { webEnv } from "../../env";
-import { prepareImport, summarizeImport, type ImportResult } from "@ascend/shared";
-import { Surface, Empty } from "../Surface";
+"use client";
 
-// Knowledge: documents the assistant may quote.
-//
-// The honesty rule this screen exists to communicate: matching is on wording,
-// not meaning. A user who expects semantic search will otherwise conclude the
-// feature is broken the first time a differently-worded question misses.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { prepareImport, summarizeImport, type ImportResult } from "@ascend/shared";
+import { apiDelete, apiGet, apiPost, sessionId } from "../../lib/api";
+import "./knowledge.css";
+
+// Knowledge: documents TRHAI may quote, against the existing
+// GET/POST/DELETE /v1/knowledge routes. Matching is on wording, not
+// meaning — a question phrased differently to the document may miss it,
+// and this screen says so rather than implying semantic search it does
+// not have.
 
 type Doc = { id: string; title: string; body: string; createdAt: string };
 
-function sessionId(): string {
-  return window.localStorage.getItem("ascend.assist.session.v1") ?? "";
-}
-
-export function KnowledgeSurface() {
+export default function KnowledgePage() {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
-    try {
-      const response = await fetch(`${webEnv.apiBaseUrl}/v1/knowledge?sessionId=${encodeURIComponent(sessionId())}`);
-      if (!response.ok) return;
-      const payload = await response.json();
-      setDocs(payload?.data?.documents ?? []);
-    } catch {
-      setNote("Could not reach the assistant service.");
-    }
+    const result = await apiGet<{ documents: Doc[] }>(`/v1/knowledge?sessionId=${sessionId()}`);
+    if (result.ok) setDocs(result.data.documents);
+    setLoaded(true);
   }, []);
 
   useEffect(() => { void load(); }, [load]);
 
   async function add(nextTitle: string, nextBody: string): Promise<boolean> {
-    try {
-      const response = await fetch(`${webEnv.apiBaseUrl}/v1/knowledge`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: sessionId(), title: nextTitle, body: nextBody })
-      });
-      return response.ok;
-    } catch {
-      // Unreachable service reads the same as a rejected save to every caller
-      // here — both mean the document was not actually stored.
-      return false;
-    }
+    const result = await apiPost<{ document: Doc }>("/v1/knowledge", { sessionId: sessionId(), title: nextTitle, body: nextBody });
+    return result.ok;
   }
 
   async function submitPasted() {
@@ -75,10 +59,6 @@ export function KnowledgeSurface() {
         const contents = await file.text().catch(() => "");
         const prepared = prepareImport(file.name, contents, file.size);
         results.push(prepared);
-        // summarizeImport only judges the file's own content — whether it read
-        // as text, whether it fit. It has no way to know the network call that
-        // follows also has to succeed, so a save failure is tracked and
-        // reported here rather than silently counted as "imported".
         if (prepared.ok && !(await add(prepared.title, prepared.body))) saveFailures += 1;
       }
       await load();
@@ -90,28 +70,25 @@ export function KnowledgeSurface() {
   }
 
   async function remove(doc: Doc) {
-    // No undo once this fetch fires — worth a pause, not a placeholder click.
+    // No undo once this fires — worth a pause, not a placeholder click.
     if (!window.confirm(`Remove "${doc.title}"? This cannot be undone.`)) return;
 
-    try {
-      const response = await fetch(
-        `${webEnv.apiBaseUrl}/v1/knowledge/${encodeURIComponent(doc.id)}?sessionId=${encodeURIComponent(sessionId())}`,
-        { method: "DELETE" }
-      );
-      await load();
-      setNote(response.ok ? "Document removed" : "Could not remove the document — it may still be there.");
-    } catch {
-      setNote("Could not reach the assistant service — nothing was removed.");
-    }
+    const result = await apiDelete(`/v1/knowledge/${doc.id}?sessionId=${sessionId()}`);
+    await load();
+    setNote(result.ok ? "Document removed" : "Could not remove the document — it may still be there.");
   }
 
   return (
-    <Surface
-      title="Knowledge"
-      summary="Paste or import text and the assistant can quote it back with its source. Matching is on wording rather than meaning, so a question phrased differently to the document may miss — it will say so rather than guess."
-      count={`${docs.length} document${docs.length === 1 ? "" : "s"}`}
-    >
-      <div className="col">
+    <div className="knowledge">
+      <header className="knowledge-head">
+        <h1>Knowledge</h1>
+        <p className="muted">
+          Paste or import text and TRHAI can quote it back with its source. Matching is on
+          wording, not meaning — a document is text on this machine, not a search index.
+        </p>
+      </header>
+
+      <div className="panel knowledge-card">
         <input
           className="field"
           value={title}
@@ -120,14 +97,14 @@ export function KnowledgeSurface() {
           onChange={(event) => setTitle(event.target.value)}
         />
         <textarea
-          className="field"
+          className="field knowledge-textarea"
           value={body}
           rows={5}
           placeholder="Paste notes, a runbook, a spec. Blank lines separate passages, and a passage is what gets quoted."
           aria-label="Document body"
           onChange={(event) => setBody(event.target.value)}
         />
-        <div className="row wrap">
+        <div className="knowledge-actions">
           <button type="button" className="btn btn-primary" disabled={busy || !title.trim() || !body.trim()}
             onClick={() => void submitPasted()}>
             {busy ? "Working…" : "Add document"}
@@ -139,29 +116,26 @@ export function KnowledgeSurface() {
             ref={fileRef}
             type="file"
             multiple
-            className="sr-only"
+            className="knowledge-file-input"
             aria-label="Import text files"
             onChange={(event) => { void importFiles(event.target.files); event.target.value = ""; }}
           />
-          <span className="faint">Text formats only — a PDF or image is refused rather than indexed as noise.</span>
         </div>
-        {note ? <span key={note} className="chip chip-arrive">{note}</span> : null}
+        <p className="faint">Text formats only — a PDF or image is refused rather than indexed as noise.</p>
+        {note ? <span key={note} className="chip knowledge-note">{note}</span> : null}
       </div>
 
-      {docs.length === 0 ? (
-        <Empty title="No documents yet">
-          Anything added here can be quoted back when you ask a question that matches its
-          wording. Nothing is uploaded — documents stay on this machine.
-        </Empty>
+      {!loaded ? null : docs.length === 0 ? (
+        <div className="panel knowledge-card">
+          <p className="muted">Nothing added yet. Documents stay on this machine — nothing is uploaded.</p>
+        </div>
       ) : (
-        <ul className="list">
+        <ul className="knowledge-list">
           {docs.map((doc) => (
-            <li key={doc.id} className="panel list-row">
+            <li key={doc.id} className="panel knowledge-item">
               <div className="grow">
                 <strong>{doc.title}</strong>
-                <p className="faint list-excerpt">
-                  {doc.body.slice(0, 150)}{doc.body.length > 150 ? "…" : ""}
-                </p>
+                <p className="faint">{doc.body.slice(0, 150)}{doc.body.length > 150 ? "…" : ""}</p>
               </div>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => void remove(doc)}>
                 Remove
@@ -170,6 +144,6 @@ export function KnowledgeSurface() {
           ))}
         </ul>
       )}
-    </Surface>
+    </div>
   );
 }

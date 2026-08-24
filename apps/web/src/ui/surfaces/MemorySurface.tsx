@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { webEnv } from "../../env";
-import { memoryBodyAddsInfo } from "../../memoryView";
+import { memoryBodyAddsInfo } from "@ascend/shared";
 import { Surface, Empty } from "../Surface";
 
 // Memory: what the assistant has been told to remember.
