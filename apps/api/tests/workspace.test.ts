@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -168,4 +168,71 @@ test("the default workspace is outside the repo", async () => {
     if (previous === undefined) delete process.env.ASCEND_WORKSPACE;
     else process.env.ASCEND_WORKSPACE = previous;
   }
+});
+
+// Symlink containment.
+//
+// path.resolve is lexical and never reads the disk, so a link inside the
+// workspace pointing out of it resolves to a path that looks perfectly
+// contained. This file asserted containment for years while nothing checked
+// for it, and a comment in workspace.ts claimed the protection existed.
+//
+// Junctions rather than symlinks: creating a real symlink on Windows needs
+// administrator rights or developer mode, while a junction needs neither —
+// which makes it the escape an unprivileged attacker would actually reach
+// for, and the one worth testing.
+
+const outsideRoot = mkdtempSync(path.join(tmpdir(), "ascend-outside-"));
+writeFileSync(path.join(outsideRoot, "secret.txt"), "should never be reachable", "utf8");
+
+/** Junction on Windows, directory symlink elsewhere. Null when unsupported. */
+function linkDirectory(target: string, linkPath: string): boolean {
+  try {
+    symlinkSync(target, linkPath, process.platform === "win32" ? "junction" : "dir");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("a link inside the workspace pointing outside it is refused", () => {
+  const linkPath = path.join(root, "escape-hatch");
+  if (!linkDirectory(outsideRoot, linkPath)) {
+    assert.fail("could not create a directory link, so this protection is untested");
+  }
+
+  // Every one of these is lexically inside the workspace. Only reading the
+  // disk reveals that they are not.
+  assert.equal(resolveInWorkspace("escape-hatch"), null);
+  assert.equal(resolveInWorkspace("escape-hatch/secret.txt"), null);
+  assert.equal(resolveInWorkspace("escape-hatch/newly-written.txt"), null);
+});
+
+test("reading and writing through such a link both fail", () => {
+  // The guard is only useful if the operations that depend on it stop too.
+  const read = readWorkspaceFile("escape-hatch/secret.txt");
+  assert.equal(read.ok, false);
+
+  const write = writeWorkspaceFile("escape-hatch/planted.txt", "should not land");
+  assert.equal(write.ok, false);
+
+  // And nothing was created outside on the way to failing.
+  assert.equal(existsSync(path.join(outsideRoot, "planted.txt")), false);
+});
+
+test("a link that stays inside the workspace still works", () => {
+  // The check must not refuse every link, only ones that leave. Without this
+  // the fix could be "return null more often" and still pass everything else.
+  const realDir = path.join(root, "real-target");
+  mkdirSync(realDir, { recursive: true });
+  writeFileSync(path.join(realDir, "inside.txt"), "reachable", "utf8");
+
+  const linkPath = path.join(root, "inside-link");
+  if (!linkDirectory(realDir, linkPath)) {
+    assert.fail("could not create a directory link, so this protection is untested");
+  }
+
+  assert.ok(resolveInWorkspace("inside-link/inside.txt"));
+  const read = readWorkspaceFile("inside-link/inside.txt");
+  assert.equal(read.ok, true);
 });

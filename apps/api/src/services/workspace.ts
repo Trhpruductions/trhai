@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync
+} from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 
@@ -51,6 +59,44 @@ export const maxListedFiles = 200;
  * Null means refused. It is never an error to be logged and continued past —
  * the caller must stop.
  */
+/** Whether `candidate` is `root` or sits underneath it. Purely lexical. */
+function isInside(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  if (relative === "") return true;
+  // `startsWith(root)` alone is wrong: "/workspace-evil" starts with
+  // "/workspace". The separator is what makes it a child, which is what
+  // path.relative encodes.
+  return !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+/**
+ * The path the filesystem would actually use, with every symlink followed.
+ *
+ * `path.resolve` is lexical and does not read the disk, so it cannot see a
+ * link. A path that has not been created yet cannot be resolved at all, so
+ * this walks up to the nearest ancestor that does exist, resolves that, and
+ * re-attaches the missing tail — which is what makes the check work for a
+ * write to a file that is about to be created.
+ */
+function resolveRealPath(target: string): string {
+  const absolute = path.resolve(target);
+  const missing: string[] = [];
+  let current = absolute;
+
+  for (;;) {
+    try {
+      const real = realpathSync(current);
+      return missing.length === 0 ? real : path.join(real, ...missing.slice().reverse());
+    } catch {
+      const parent = path.dirname(current);
+      // Reached the filesystem root without finding anything that exists.
+      if (parent === current) return absolute;
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
 export function resolveInWorkspace(relativePath: string): string | null {
   if (typeof relativePath !== "string" || !relativePath.trim()) return null;
 
@@ -61,12 +107,26 @@ export function resolveInWorkspace(relativePath: string): string | null {
   const root = path.resolve(workspaceRoot());
   const resolved = path.resolve(root, relativePath);
 
-  // The containment check. `startsWith(root)` alone is wrong: "/workspace-evil"
-  // starts with "/workspace". The separator is what makes it a child.
-  const relative = path.relative(root, resolved);
-  if (relative === "") return resolved;
-  if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
+  // Lexical containment: catches "..", an absolute path, a drive letter.
+  if (!isInside(root, resolved)) return null;
 
+  // Containment as the filesystem sees it.
+  //
+  // The lexical check above cannot see a symlink, and a link inside the
+  // workspace pointing outside it resolves to a path that looks perfectly
+  // contained. This file used to claim the opposite — that a link pointing
+  // out was refused here — and that was simply wrong: nothing read the disk.
+  // On Windows a junction is the same escape and needs no privileges to
+  // create.
+  //
+  // The root is resolved too, not just the target: a workspace that itself
+  // sits under a symlinked home directory would otherwise fail every check.
+  const realRoot = resolveRealPath(root);
+  const realTarget = resolveRealPath(resolved);
+  if (!isInside(realRoot, realTarget)) return null;
+
+  // The lexical path is what the caller asked for and what it will operate
+  // on. The real path was only ever needed to answer whether that is allowed.
   return resolved;
 }
 
@@ -105,8 +165,14 @@ export function listWorkspace(subdirectory = "."): WorkspaceEntry[] | null {
       const full = path.join(directory, entry);
       let info: ReturnType<typeof statSync>;
       try {
-        // lstat would be needed to spot a symlink, but resolveInWorkspace is
-        // applied on every read, so a link pointing outside is refused there.
+        // resolveInWorkspace refuses a link that points outside the
+        // workspace, so a listing that walks into one cannot lead anywhere a
+        // later read would be allowed to follow.
+        //
+        // That claim was false until the real-path check was added — this
+        // said the same thing while nothing in the codebase read the disk to
+        // check. A comment asserting a guarantee is worth exactly as much as
+        // the code implementing it.
         info = statSync(full);
       } catch {
         continue;

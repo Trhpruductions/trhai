@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { containPath, isSafeExternalUrl, isTrustedAppUrl } from "../src/pathGuard.js";
 
 const root = path.resolve("/workspace");
@@ -100,4 +102,72 @@ test("a project folder is inside the workspace but a sibling executable is not",
   assert.equal(containPath(root, "C:\\Windows\\System32\\cmd.exe").ok, false);
   assert.equal(containPath(root, "../../Windows/System32/calc.exe").ok, false);
   assert.equal(containPath(root, "\\\\evil-share\\payload.exe").ok, false);
+});
+
+// Symlink containment, the same gap that existed in the API's guard.
+//
+// path.resolve is lexical and never reads the disk, so a link inside the
+// workspace pointing out of it resolves to a path that looks contained.
+// create-scaffold writes through this guard, so the escape was a write
+// primitive, not only a read one.
+//
+// Junctions rather than symlinks: a real symlink on Windows needs
+// administrator rights, a junction needs none — so it is the escape actually
+// available to an attacker, and the one worth testing.
+
+/** Junction on Windows, directory symlink elsewhere. False when unsupported. */
+function linkDirectory(target: string, linkPath: string): boolean {
+  try {
+    symlinkSync(target, linkPath, process.platform === "win32" ? "junction" : "dir");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("a link inside the workspace pointing outside it is refused", () => {
+  const workspace = mkdtempSync(path.join(tmpdir(), "guard-workspace-"));
+  const outside = mkdtempSync(path.join(tmpdir(), "guard-outside-"));
+  writeFileSync(path.join(outside, "secret.txt"), "unreachable", "utf8");
+
+  const linkPath = path.join(workspace, "escape-hatch");
+  if (!linkDirectory(outside, linkPath)) {
+    assert.fail("could not create a directory link, so this protection is untested");
+  }
+
+  // Lexically these are all inside the workspace. Only the disk disagrees.
+  assert.equal(containPath(workspace, "escape-hatch").ok, false);
+  assert.equal(containPath(workspace, "escape-hatch", "secret.txt").ok, false);
+  // The one that matters for create-scaffold: a file that does not exist yet.
+  assert.equal(containPath(workspace, "escape-hatch", "planted.txt").ok, false);
+});
+
+test("a link that stays inside the workspace still resolves", () => {
+  // The fix must not simply refuse every link.
+  const workspace = mkdtempSync(path.join(tmpdir(), "guard-inside-"));
+  const realDir = path.join(workspace, "real-target");
+  mkdirSync(realDir, { recursive: true });
+
+  const linkPath = path.join(workspace, "inside-link");
+  if (!linkDirectory(realDir, linkPath)) {
+    assert.fail("could not create a directory link, so this protection is untested");
+  }
+
+  assert.equal(containPath(workspace, "inside-link", "notes.txt").ok, true);
+});
+
+test("a workspace that is itself reached through a link still passes its own check", () => {
+  // The root is resolved as well as the target. Without that, a workspace
+  // sitting under a linked path would fail every check it made about itself.
+  const realBase = mkdtempSync(path.join(tmpdir(), "guard-realbase-"));
+  const workspace = path.join(realBase, "workspace");
+  mkdirSync(workspace, { recursive: true });
+
+  const linkedBase = path.join(mkdtempSync(path.join(tmpdir(), "guard-linkbase-")), "link");
+  if (!linkDirectory(realBase, linkedBase)) {
+    assert.fail("could not create a directory link, so this protection is untested");
+  }
+
+  const workspaceViaLink = path.join(linkedBase, "workspace");
+  assert.equal(containPath(workspaceViaLink, "notes.txt").ok, true);
 });
