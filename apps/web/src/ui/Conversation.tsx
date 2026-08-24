@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useAssistant, type ChatMessage } from "../state/useAssistant";
 import { useSpeech } from "../state/useSpeech";
-import { personalityById, resolvePersonality, type PersonalityId } from "@ascend/shared";
-import { formatRelative, readEvents, upcomingEvents } from "../localCalendar";
+import {
+  activeAgent,
+  allAgents,
+  formatRelative,
+  isInstalled,
+  personalityById,
+  readEvents,
+  readMarketplaceState,
+  resolvePersonality,
+  upcomingEvents,
+  type Agent,
+  type PersonalityId
+} from "@ascend/shared";
 import { readFlow } from "../automation";
-import { activeAgent, allAgents, isInstalled, readMarketplaceState, type Agent } from "@ascend/shared";
 import { webEnv } from "../env";
 import { Core, type CoreState } from "./Core";
 import { greetingFor } from "../greeting";

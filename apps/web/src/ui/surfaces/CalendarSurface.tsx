@@ -9,7 +9,7 @@ import {
   upcomingEvents,
   writeEvents,
   type CalendarEvent
-} from "../../localCalendar";
+} from "@ascend/shared";
 import { Surface, Empty } from "../Surface";
 
 // Calendar: events kept on this machine.

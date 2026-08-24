@@ -8,18 +8,22 @@ import "./shell.css";
 
 // The shell every screen shares: a rail and a status strip.
 //
-// Dashboard, Chat, Settings, Agents, Security and Tasks are real
-// destinations in this phase — System and Files are later, and a nav entry
-// that opens onto an empty promise is worse than one that says plainly it is
-// not built yet. None of Agents, Security or Tasks were themselves named
-// phase-4 items, but all three are real, working screens backed by data the
-// API already had or a store built for exactly this: Agents by
-// @ascend/shared's marketplace module, Security by GET /v1/capabilities
-// wrapping the same registry runTool enforces, Tasks by taskListStore.ts (a
-// plain to-do list — not to be confused with the orchestrator's own
-// StoredTask, a different thing under a similar name).
+// Dashboard, Chat, Settings, Agents, Security, Tasks, Memory, Knowledge and
+// Calendar are real destinations in this phase — System and Files are later,
+// and a nav entry that opens onto an empty promise is worse than one that
+// says plainly it is not built yet. None of the six added after Settings
+// were themselves named phase-4 items, but all six are real, working
+// screens backed by data the API already had or a store built for exactly
+// this: Agents by @ascend/shared's marketplace module, Security by
+// GET /v1/capabilities wrapping the same registry runTool enforces, Tasks by
+// taskListStore.ts (a plain to-do list — not to be confused with the
+// orchestrator's own StoredTask, a different thing under a similar name),
+// Memory and Knowledge by the GET/PATCH/DELETE /v1/assist/memory and
+// /v1/knowledge routes that already existed for the chat surface to use,
+// and Calendar by @ascend/shared's localCalendar.ts — each only gives an
+// existing capability a screen of its own.
 //
-// System and Files stay planned for a different reason than the above three
+// System and Files stay planned for a different reason than the above six
 // did before this: both depend entirely on window.ascendDesktop, the
 // Electron-only bridge apps/desktop provides and this Next.js app does not
 // — porting either means standing up that bridge first, not writing this
@@ -31,6 +35,9 @@ const live: Destination[] = [
   { href: "/", label: "Dashboard", glyph: "◈", hint: "Command centre" },
   { href: "/chat", label: "Chat", glyph: "◉", hint: "Talk to TRHAI" },
   { href: "/tasks", label: "Tasks", glyph: "▤", hint: "A plain to-do list" },
+  { href: "/calendar", label: "Calendar", glyph: "▧", hint: "Your schedule, on this machine" },
+  { href: "/memory", label: "Memory", glyph: "◍", hint: "Facts you've asked TRHAI to keep" },
+  { href: "/knowledge", label: "Knowledge", glyph: "▥", hint: "Documents TRHAI can quote" },
   { href: "/agents", label: "Agents", glyph: "◆", hint: "Installable lenses on the same assistant" },
   { href: "/security", label: "Security", glyph: "◐", hint: "Every tool and the permission that gates it" },
   { href: "/settings", label: "Settings", glyph: "⚙", hint: "Voice, theme and defaults" }
