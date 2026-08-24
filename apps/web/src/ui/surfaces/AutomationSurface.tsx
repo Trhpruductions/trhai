@@ -15,7 +15,7 @@ import {
   type Flow,
   type NodeType,
   type RunResult
-} from "../../automation";
+} from "@ascend/shared";
 import { Surface } from "../Surface";
 import "./automation.css";
 

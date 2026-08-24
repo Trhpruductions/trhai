@@ -8,13 +8,13 @@ import {
   isInstalled,
   personalityById,
   readEvents,
+  readFlow,
   readMarketplaceState,
   resolvePersonality,
   upcomingEvents,
   type Agent,
   type PersonalityId
 } from "@ascend/shared";
-import { readFlow } from "../automation";
 import { webEnv } from "../env";
 import { Core, type CoreState } from "./Core";
 import { greetingFor } from "../greeting";
