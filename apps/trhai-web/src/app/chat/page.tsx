@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useAssistant, type ChatMessage } from "../../hooks/useAssistant";
+import { useAssistant, type AssistantStatus, type ChatMessage } from "../../hooks/useAssistant";
 import { useSpeech } from "../../hooks/useSpeech";
-import { Core } from "../../components/Core";
+import { Core, type CoreState } from "../../components/Core";
 import "./chat.css";
 
 // Chat: TRHAI's conversation surface, talking to the real local orchestrator.
@@ -16,6 +16,22 @@ import "./chat.css";
 
 function toolLabel(tool: { name: string; ok: boolean }): string {
   return `${tool.name.replace(/_/g, " ")}${tool.ok ? "" : " — nothing changed"}`;
+}
+
+/**
+ * What the core shows, and the words under it — one place mapping the real
+ * request status (plus real speech state, layered on top since it is not
+ * part of the same request) to what a person sees. Every branch here traces
+ * to something that actually happened; there is no state on this list that
+ * plays for its own sake.
+ */
+function presence(status: AssistantStatus, speaking: boolean): { core: CoreState; label: string } {
+  if (status.state === "executing") return { core: "executing", label: `Working: ${status.tool.replace(/_/g, " ")}…` };
+  if (status.state === "thinking") return { core: "thinking", label: "Thinking…" };
+  if (status.state === "success") return { core: "success", label: "Complete." };
+  if (status.state === "error") return { core: "error", label: status.detail };
+  if (speaking) return { core: "speaking", label: "Speaking…" };
+  return { core: "idle", label: "Standing by." };
 }
 
 function Turn({ message }: { message: ChatMessage }) {
@@ -77,7 +93,8 @@ export default function ChatPage() {
     speech.speak(newest.text);
   }, [messages, speech]);
 
-  const busy = status.state === "thinking";
+  const busy = status.state === "thinking" || status.state === "executing";
+  const { core, label } = presence(status, speech.speaking);
 
   function submit() {
     if (!draft.trim() || busy) return;
@@ -89,8 +106,11 @@ export default function ChatPage() {
     <section className="chat" aria-label="Conversation">
       <header className="chat-head">
         <div className="row">
-          <Core state={busy ? "thinking" : speech.speaking ? "speaking" : "idle"} size={30} />
-          <h2 className="chat-title">Chat</h2>
+          <Core state={core} size={30} />
+          <div className="col">
+            <h2 className="chat-title">Chat</h2>
+            <span className="faint chat-presence">{label}</span>
+          </div>
         </div>
         <div className="row">
           {speech.engine !== "none" ? (
@@ -127,8 +147,8 @@ export default function ChatPage() {
 
         {busy ? (
           <div className="turn turn-assistant chat-thinking" aria-live="polite">
-            <Core state="thinking" size={26} />
-            <span className="hud-label">Thinking…</span>
+            <Core state={core} size={26} />
+            <span className="hud-label">{label}</span>
           </div>
         ) : null}
 

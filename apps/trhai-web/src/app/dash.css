@@ -1,63 +1,511 @@
-.dash {
+/* The command centre. One screen: rail, stage, side panels, status strip. */
+
+.hud {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* A faint grid and starfield behind everything, so the black is not flat.
+   Pure CSS on one painted layer — no per-particle DOM, and the drift is a
+   single background-position animation the compositor handles. */
+.hud::before {
+  content: "";
+  position: absolute;
+  inset: -40px;
+  pointer-events: none;
+  background:
+    radial-gradient(1px 1px at 12% 22%, rgba(120, 200, 255, 0.40), transparent 60%),
+    radial-gradient(1px 1px at 78% 14%, rgba(120, 200, 255, 0.28), transparent 60%),
+    radial-gradient(1px 1px at 34% 76%, rgba(120, 200, 255, 0.34), transparent 60%),
+    radial-gradient(1px 1px at 88% 62%, rgba(120, 200, 255, 0.24), transparent 60%),
+    radial-gradient(1px 1px at 56% 42%, rgba(120, 200, 255, 0.20), transparent 60%),
+    radial-gradient(1px 1px at 22% 54%, rgba(120, 200, 255, 0.22), transparent 60%),
+    radial-gradient(1px 1px at 66% 84%, rgba(120, 200, 255, 0.26), transparent 60%),
+    linear-gradient(rgba(53, 199, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(53, 199, 255, 0.045) 1px, transparent 1px),
+    radial-gradient(900px 520px at 50% 46%, rgba(53, 199, 255, 0.07), transparent 70%);
+  background-size:
+    auto, auto, auto, auto, auto, auto, auto,
+    46px 46px, 46px 46px, auto;
+  animation: hud-drift 34s linear infinite;
+}
+
+@keyframes hud-drift {
+  from { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
+  to   { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 46px, 46px 0, 0 0; }
+}
+
+/* A slow scan passing down the screen — one translated element, the classic
+   HUD tell, and cheap because it never triggers layout. */
+.hud::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 180px;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(53, 199, 255, 0.055), transparent);
+  animation: hud-scan 9s linear infinite;
+}
+
+@keyframes hud-scan {
+  from { transform: translateY(-180px); }
+  to   { transform: translateY(100vh); }
+}
+
+/* ---- top bar ---- */
+
+.hud-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line-subtle);
+  position: relative;
+}
+
+.hud-top-left { display: flex; align-items: center; gap: 8px; }
+
+.hud-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.hud-dot.live {
+  background: var(--ok);
+  box-shadow: 0 0 10px var(--ok);
+  animation: hud-pulse 2.6s var(--ease) infinite;
+}
+
+@keyframes hud-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.hud-top-mark { display: flex; align-items: baseline; gap: 8px; }
+
+.hud-wordmark {
+  font-family: var(--font-display);
+  font-size: 19px;
+  letter-spacing: 0.22em;
+  color: var(--text);
+  text-shadow: var(--glow-soft);
+}
+
+.hud-version { font-size: 11px; color: var(--text-faint); }
+
+.hud-top-right { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; }
+.hud-clock { font-size: 15px; letter-spacing: 0.12em; color: var(--text); }
+.hud-date { font-size: 10px; letter-spacing: 0.1em; color: var(--text-faint); text-transform: uppercase; }
+
+/* ---- body ---- */
+
+.hud-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 300px;
+  gap: 16px;
+  padding: 16px 20px;
+  min-height: 0;
+  position: relative;
+}
+
+/* ---- left rail ---- */
+
+.hud-rail-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.hud-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.hud-quick { flex: none; gap: 4px; padding: 12px 14px; }
+
+.hud-quick-item {
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 5px 6px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+
+.hud-quick-item:hover { color: var(--accent-strong); background: var(--accent-quiet); }
+
+.rail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+
+.rail-item:hover { background: var(--bg-1); border-color: var(--line-subtle); }
+
+.rail-item.active {
+  background: var(--accent-quiet);
+  border-color: var(--line-strong);
+}
+
+.rail-label {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.rail-hint { font-size: 10.5px; color: var(--text-faint); }
+
+/* ---- centre stage ---- */
+
+.hud-stage {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
-  padding: 32px;
+  justify-content: center;
+  gap: 16px;
+  min-height: 0;
   overflow-y: auto;
-  height: 100%;
+  padding: 4px 0 8px;
 }
 
-.dash-head {
+.trace {
   width: 100%;
-  max-width: 640px;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-}
-
-.dash-head h1 {
-  font-size: 26px;
-  margin-top: 4px;
-}
-
-.dash-clock {
-  color: var(--text-faint);
-  font-size: 13px;
-}
-
-.dash-core-wrap {
-  margin: 8px 0;
-}
-
-.dash-status,
-.dash-ask {
-  width: 100%;
-  max-width: 640px;
-  padding: 16px 20px;
+  max-width: 560px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
 }
 
-.dash-ask-row {
+.trace-bars {
+  width: 100%;
+  height: 40px;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 16px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-pill);
+  background: rgba(10, 15, 22, 0.6);
+}
+
+.trace-bar {
+  flex: 1;
+  min-width: 1px;
+  max-width: 3px;
+  background: var(--accent);
+  border-radius: 1px;
+  opacity: 0.75;
+  transition: height 90ms linear;
+}
+
+.trace-label {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--text-faint);
+}
+
+.trace-label-live { color: var(--accent-strong); text-shadow: var(--glow-soft); }
+
+.hud-core-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.hud-core-text {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.hud-core-name {
+  font-family: var(--font-display);
+  font-size: 42px;
+  letter-spacing: 0.16em;
+  color: var(--text);
+  /* Sits directly over the lit orb, so it carries its own dark backing —
+     without this the glow behind it wins and the wordmark greys out. */
+  text-shadow:
+    0 0 18px rgba(5, 7, 10, 0.95),
+    0 0 34px rgba(5, 7, 10, 0.8),
+    0 0 26px rgba(53, 199, 255, 0.5);
+}
+
+/* Below the rings rather than across them: over the core's lit centre this
+   was unreadable at any weight, and a caption you have to squint through is
+   worse than one placed somewhere calmer. */
+.hud-core-tag {
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.hud-agent { font-size: 12px; color: var(--text-muted); }
+
+.hud-ask {
+  width: 100%;
+  max-width: 620px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 8px 8px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgba(10, 15, 22, 0.75);
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+
+.hud-ask:focus-within {
+  border-color: var(--line-strong);
+  box-shadow: var(--glow-soft);
+}
+
+.hud-ask-field {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.hud-ask-field::placeholder { color: var(--text-faint); }
+
+.hud-ask-go {
+  border: 1px solid var(--line-strong);
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+  border-radius: var(--radius-pill);
+  padding: 7px 18px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease);
+}
+
+.hud-ask-go:hover:not(:disabled) { background: rgba(53, 199, 255, 0.24); }
+.hud-ask-go:disabled { opacity: 0.4; cursor: default; }
+
+.hud-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 620px;
+}
+
+.hud-chip {
+  border: 1px solid var(--line-subtle);
+  background: var(--bg-1);
+  color: var(--text-muted);
+  border-radius: var(--radius-pill);
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.hud-chip:hover { border-color: var(--line-strong); color: var(--text); }
+
+/* ---- right panels ---- */
+
+.hud-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.hud-panel {
+  position: relative;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(53, 199, 255, 0.05), transparent 42%),
+    rgba(10, 15, 22, 0.72);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
-.dash-suggestions {
+/* Corner brackets: the detail that reads "instrument panel" rather than
+   "rounded card". Drawn with two gradients on a pseudo-element, so it costs
+   no extra DOM per panel. */
+.hud-panel::before,
+.hud-panel::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--line-strong);
+  border-style: solid;
+  pointer-events: none;
+}
+
+.hud-panel::before {
+  top: -1px; left: -1px;
+  border-width: 1px 0 0 1px;
+  border-top-left-radius: var(--radius-lg);
+}
+
+.hud-panel::after {
+  bottom: -1px; right: -1px;
+  border-width: 0 1px 1px 0;
+  border-bottom-right-radius: var(--radius-lg);
+}
+
+.hud-gauges { display: flex; gap: 10px; }
+
+.gauge { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+
+.gauge-ring {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--line);
+  background: radial-gradient(circle at 50% 50%, rgba(53, 199, 255, 0.10), transparent 70%);
+}
+
+.gauge-value {
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--accent-strong);
+}
+
+.gauge-label {
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.hud-readouts { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+
+.hud-readouts > div {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
 }
 
-.dash-agent-focus {
+.hud-readouts dt {
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+}
+
+.hud-readouts dd { margin: 0; color: var(--text); font-family: var(--font-mono); font-size: 11.5px; }
+.hud-readouts dd.ok { color: var(--ok); }
+.hud-readouts dd.warn { color: var(--warn); }
+.hud-readouts dd.danger { color: var(--danger); }
+
+.hud-say-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hud-say-model { font-size: 10px; color: var(--accent); }
+
+.hud-say-text {
   font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  /* A long reply must not push the panels below it off-screen — the command
+     centre stays one screen, and the full text is one click away on /chat. */
+  max-height: 168px;
+  overflow-y: auto;
 }
 
-.dash-note {
-  max-width: 52ch;
-  text-align: center;
-  font-size: 12.5px;
-  line-height: 1.6;
+.hud-say-tools { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.hud-tool-chip {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-subtle);
+  color: var(--text-faint);
+}
+
+.hud-flow { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+
+.hud-more {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.hud-more:hover { text-decoration: underline; }
+
+/* ---- bottom strip ---- */
+
+.hud-bottom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 20px;
+  border-top: 1px solid var(--line-subtle);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  position: relative;
+}
+
+.hud-sep { opacity: 0.5; }
+
+/* The whole HUD leans into the state the core is in — one signal, felt
+   everywhere, rather than each panel animating on its own schedule. */
+.hud-thinking .trace-bar { opacity: 0.9; }
+.hud-executing .trace-bar { opacity: 1; }
+.hud-error .trace-bar { background: var(--danger); }
+.hud-success .trace-bar { background: var(--ok); }
+
+@media (max-width: 1100px) {
+  .hud-body { grid-template-columns: 180px minmax(0, 1fr); }
+  .hud-side { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-dot.live { animation: none; }
+  .trace-bar { transition: none; }
+  .hud::before { animation: none; }
+  .hud::after { display: none; }
 }
