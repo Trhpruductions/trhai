@@ -65,3 +65,39 @@ test("the window may only sit on the local app", () => {
   assert.equal(isTrustedAppUrl("http://evil.com/?x=127.0.0.1"), false);
   assert.equal(isTrustedAppUrl("garbage"), false);
 });
+
+test("the same rule decides who may call in over IPC", () => {
+  // handleFromAppWindow gates every channel on this, using the frame's URL.
+  // ipcMain.handle answers any frame that knows a channel name, including an
+  // iframe or anything injected into the page, so the rule governing where
+  // the window may navigate has to be the rule governing who may call in —
+  // otherwise the two can disagree and the weaker one wins.
+  const senderUrls = [
+    ["http://127.0.0.1:5173/", true],
+    ["http://localhost:5173/", true],
+    ["file:///C:/app/index.html", true],
+    // An embedded frame pointed somewhere else is the case this closes.
+    ["https://ads.example.com/frame.html", false],
+    ["http://127.0.0.1.evil.com/", false],
+    // A frame with no URL at all must fail closed, not pass by default.
+    ["", false]
+  ] as const;
+
+  for (const [url, expected] of senderUrls) {
+    assert.equal(isTrustedAppUrl(url), expected, `sender ${url || "(none)"}`);
+  }
+});
+
+test("a project folder is inside the workspace but a sibling executable is not", () => {
+  // What ascend:open-path now enforces. It used to path.resolve() whatever the
+  // renderer sent and hand it to shell.openPath, which asks the OS to *act on*
+  // it — running an .exe or .bat. These are the shapes that must not resolve.
+  const root = path.resolve("/workspace");
+
+  assert.equal(containPath(root, "apps/web").ok, true);
+  assert.equal(containPath(root, "generated-projects/my-app").ok, true);
+
+  assert.equal(containPath(root, "C:\\Windows\\System32\\cmd.exe").ok, false);
+  assert.equal(containPath(root, "../../Windows/System32/calc.exe").ok, false);
+  assert.equal(containPath(root, "\\\\evil-share\\payload.exe").ok, false);
+});

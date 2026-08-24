@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
-import { constants as fsConstants, existsSync, statfsSync } from "node:fs";
+import { constants as fsConstants, existsSync, statSync, statfsSync } from "node:fs";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import os from "node:os";
 import path from "node:path";
@@ -249,7 +249,45 @@ function enumerateStorageDevices(): StorageDevice[] {
   return devices;
 }
 
-ipcMain.handle("ascend:get-build-info", async () => {
+/**
+ * Register a handler that only answers the app's own window.
+ *
+ * Every channel below can read the machine, start a process, or write a
+ * file, and `ipcMain.handle` will answer any frame in the renderer that
+ * knows the channel name — including an iframe, or anything injected into a
+ * page. `isTrustedAppUrl` already governs where the window may navigate;
+ * this applies the same rule to who may call in, so the two cannot disagree.
+ *
+ * A wrapper rather than a check inside each handler: a check you have to
+ * remember to write is one that eventually gets forgotten in a new handler,
+ * and the failure is silent.
+ */
+function handleFromAppWindow<T>(
+  channel: string,
+  // Matches ipcMain.handle's own payload type rather than narrowing it here.
+  // Every handler below already validates its own input — that is the check
+  // that matters, since the value arrives over IPC and a compile-time type
+  // proves nothing about it — and tightening it in this signature would turn
+  // a security change into a rewrite of five unrelated validators.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  listener: (event: Electron.IpcMainInvokeEvent, payload: any) => Promise<T> | T
+) {
+  ipcMain.handle(channel, async (event, payload: unknown) => {
+    const senderUrl = event.senderFrame?.url ?? "";
+
+    if (!isTrustedAppUrl(senderUrl)) {
+      // Logged because a refusal here means something is calling this bridge
+      // that should not exist, and that is worth seeing rather than only
+      // returning quietly to whatever asked.
+      console.warn(`[desktop] refused ${channel} from untrusted sender: ${senderUrl || "unknown"}`);
+      return { ok: false, error: "Refused: this request did not come from the app window." };
+    }
+
+    return listener(event, payload);
+  });
+}
+
+handleFromAppWindow("ascend:get-build-info", async () => {
   try {
     return {
       ok: true,
@@ -265,7 +303,7 @@ ipcMain.handle("ascend:get-build-info", async () => {
   }
 });
 
-ipcMain.handle("ascend:get-system-telemetry", async () => {
+handleFromAppWindow("ascend:get-system-telemetry", async () => {
   try {
     const cpuPercent = getCpuUsagePercent();
     const totalMemory = os.totalmem();
@@ -294,7 +332,7 @@ ipcMain.handle("ascend:get-system-telemetry", async () => {
   }
 });
 
-ipcMain.handle("ascend:list-project-inventory", async () => {
+handleFromAppWindow("ascend:list-project-inventory", async () => {
   try {
     const projects = await buildProjectInventory();
     return { ok: true, projects };
@@ -307,7 +345,7 @@ ipcMain.handle("ascend:list-project-inventory", async () => {
   }
 });
 
-ipcMain.handle("ascend:list-storage-devices", async () => {
+handleFromAppWindow("ascend:list-storage-devices", async () => {
   try {
     const devices = enumerateStorageDevices();
     return { ok: true, devices };
@@ -320,16 +358,36 @@ ipcMain.handle("ascend:list-storage-devices", async () => {
   }
 });
 
-ipcMain.handle("ascend:open-path", async (_event, targetPath) => {
+handleFromAppWindow("ascend:open-path", async (_event, targetPath) => {
   try {
     const candidate = typeof targetPath === "string" ? targetPath : "";
     if (!candidate) {
       return { ok: false, error: "Missing target path." };
     }
 
-    const normalized = path.resolve(candidate);
+    // `shell.openPath` asks the operating system to *act on* this path, and
+    // for an .exe or a .bat that means running it. This handler used to
+    // path.resolve() whatever the renderer sent and hand it straight over,
+    // with no containment at all — an arbitrary-execution path independent
+    // of the command channel, and the one hole left open when that channel
+    // was locked down to named checks.
+    //
+    // Contained the same way every other path in this file is.
+    const contained = containPath(workspaceRoot, candidate);
+    if (!contained.ok) {
+      return { ok: false, error: "That path is outside the workspace." };
+    }
+
+    const normalized = contained.path;
     if (!existsSync(normalized)) {
       return { ok: false, error: "Target path does not exist." };
+    }
+
+    // Directories only. Every real caller opens a project folder, and
+    // refusing files is what stops this from being a way to launch a binary
+    // that happens to sit inside the workspace.
+    if (!statSync(normalized).isDirectory()) {
+      return { ok: false, error: "Only folders can be opened from here." };
     }
 
     const openError = await shell.openPath(normalized);
@@ -346,7 +404,7 @@ ipcMain.handle("ascend:open-path", async (_event, targetPath) => {
   }
 });
 
-ipcMain.handle("ascend:create-scaffold", async (_event, payload) => {
+handleFromAppWindow("ascend:create-scaffold", async (_event, payload) => {
   try {
     const request = payload?.request as string | undefined;
     const spec = payload?.spec as { path?: string; fileName?: string; content?: string } | undefined;
@@ -383,11 +441,11 @@ ipcMain.handle("ascend:create-scaffold", async (_event, payload) => {
   }
 });
 
-ipcMain.handle("ascend:list-workspace-checks", async () => {
+handleFromAppWindow("ascend:list-workspace-checks", async () => {
   return { ok: true, checks: listWorkspaceChecks() };
 });
 
-ipcMain.handle("ascend:run-check", async (event, payload) => {
+handleFromAppWindow("ascend:run-check", async (event, payload) => {
   const requestedCheck: unknown = payload?.check;
   const requestedCwd = typeof payload?.cwd === "string" ? payload.cwd.trim() : "";
   const runId = randomUUID();
