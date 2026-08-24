@@ -44,6 +44,12 @@
   color: var(--accent-strong);
 }
 
+.settings-personality-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .settings-swatches {
   display: flex;
   gap: 12px;

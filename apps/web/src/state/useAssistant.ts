@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { webEnv } from "../env";
 import { createSubmissionLatch } from "../submissionLatch";
-import { applyResponseStyle, defaultPersonality, type PersonalityId } from "../personalities";
+import { applyResponseStyle, defaultPersonality, type PersonalityId } from "@ascend/shared";
 
 // Conversation state.
 //

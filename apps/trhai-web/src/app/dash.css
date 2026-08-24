@@ -45,6 +45,16 @@
   gap: 10px;
 }
 
+.dash-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dash-agent-focus {
+  font-size: 13px;
+}
+
 .dash-note {
   max-width: 52ch;
   text-align: center;

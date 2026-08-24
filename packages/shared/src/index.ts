@@ -1,6 +1,8 @@
 export * from "./projectPlan.js";
 export * from "./projectGenerator.js";
 export * from "./specRefinement.js";
+export * from "./personalities.js";
+export * from "./marketplace.js";
 
 export type AssistantMode = "general" | "coding" | "business" | "creator";
 

@@ -8,16 +8,20 @@ import "./shell.css";
 
 // The shell every screen shares: a rail and a status strip.
 //
-// Only Dashboard, Chat and Settings are real destinations in this phase —
+// Dashboard, Chat, Settings and Agents are real destinations in this phase —
 // the rest of the master spec (Tasks, System, Security, Files, Automation)
 // is later phases in the same document, and a nav entry that opens onto an
 // empty promise is worse than one that says plainly it is not built yet.
+// Agents was not itself a named phase-4 item, but it is a real, working
+// screen backed by @ascend/shared's marketplace module — installing and
+// activating an agent visibly changes the dashboard, the same as Vexora.
 
 type Destination = { href: string; label: string; glyph: string; hint: string };
 
 const live: Destination[] = [
   { href: "/", label: "Dashboard", glyph: "◈", hint: "Command centre" },
   { href: "/chat", label: "Chat", glyph: "◉", hint: "Talk to TRHAI" },
+  { href: "/agents", label: "Agents", glyph: "◆", hint: "Installable lenses on the same assistant" },
   { href: "/settings", label: "Settings", glyph: "⚙", hint: "Voice, theme and defaults" }
 ];
 
