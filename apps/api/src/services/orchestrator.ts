@@ -8,6 +8,8 @@ import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
 import {
   consumePendingConfirmation,
+  describePendingAction,
+  getPendingConfirmation,
   isAffirmative,
   recordPendingConfirmation
 } from "./pendingConfirmation.js";
@@ -55,6 +57,14 @@ export type OrchestratorResult = {
   buildRequest?: string;
   /** Tools the assistant actually called, in order. Empty when it used none. */
   toolsUsed?: string[];
+  /**
+   * A destructive action waiting on the user's approval.
+   *
+   * Present only when the permission gate refused something this turn. The
+   * client renders a confirmation dialog from it; without this the refusal
+   * is only a sentence in the reply, and the user has to know to type "yes".
+   */
+  pendingConfirmation?: { tool: string; verb: string; target: string };
   /** Memory ids the reply was actually grounded on, not merely retrieved. */
   groundedOn: string[];
   /** Conversation turns the reply was actually grounded on, not merely sent. */
@@ -248,6 +258,11 @@ export async function runAssistantOrchestrator(
         : { status: "blocked", error: "No local model was available to run this." });
     }
 
+    // Read back rather than reconstructed, so what the dialog offers is
+    // exactly what a later approval will consume.
+    const nowPending = input.sessionId ? getPendingConfirmation(input.sessionId) : null;
+    const described = nowPending ? describePendingAction(nowPending) : null;
+
     if (generated) {
       return {
         model: generated.model,
@@ -258,6 +273,9 @@ export async function runAssistantOrchestrator(
         // anything the user saved, and the client labels provenance from it.
         strategy: "generated",
         toolsUsed: generated.toolsUsed,
+        ...(nowPending && described
+          ? { pendingConfirmation: { tool: nowPending.tool, ...described } }
+          : {}),
         // No build offer here. Only a "create" plan survives to be built, and
         // neither case that reaches this branch is one — so carrying the
         // discarded plan's build request through put a "Build this" button

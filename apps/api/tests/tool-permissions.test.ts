@@ -215,3 +215,83 @@ test("a sentence that merely contains yes is not agreement", () => {
     assert.equal(isAffirmative(value), false);
   }
 });
+
+// What the user actually sees when the gate refuses something.
+//
+// Both of these were real defects, found by building the confirmation dialog
+// rather than by reading the code: the reply printed an instruction written
+// for the model, and the turn was labelled with a tool that had done nothing.
+
+const { runAgent } = await import("../src/services/agentLoop.js");
+const { createServer } = await import("node:http");
+
+/** A stand-in model that asks to forget, then answers. */
+function modelThatTriesToForget() {
+  const turns = [
+    { message: { content: "", tool_calls: [{ function: { name: "forget", arguments: { fact: "the codename" } } }] } },
+    { message: { content: "I need your confirmation before I delete that." } }
+  ];
+
+  return new Promise<{ server: import("node:http").Server; baseUrl: string }>((resolve) => {
+    let turn = 0;
+    const server = createServer((request, response) => {
+      request.on("data", () => {});
+      request.on("end", () => {
+        const body = turns[Math.min(turn, turns.length - 1)];
+        turn += 1;
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ model: "test-model", ...body }));
+      });
+    });
+
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as import("node:net").AddressInfo).port;
+      resolve({ server, baseUrl: `http://127.0.0.1:${port}` });
+    });
+  });
+}
+
+test("a refused tool is not reported as something the assistant did", async () => {
+  const { server, baseUrl } = await modelThatTriesToForget();
+
+  try {
+    const result = await runAgent(
+      { baseUrl, model: "test-model", modelFromEnv: true, timeoutMs: 4000 },
+      "Forget the codename",
+      context
+    );
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    // It was refused, so nothing was used. Counting it rendered "deleted from
+    // memory" under a reply that had deleted nothing.
+    assert.deepEqual(result.toolsUsed, [], "a refused call did nothing and must not be listed");
+    assert.equal(result.awaitingConfirmation?.tool, "forget");
+  } finally {
+    server.close();
+  }
+});
+
+test("the refusal written for the model never reaches the user's reply", async () => {
+  const { server, baseUrl } = await modelThatTriesToForget();
+
+  try {
+    const result = await runAgent(
+      { baseUrl, model: "test-model", modelFromEnv: true, timeoutMs: 4000 },
+      "Forget the codename",
+      context
+    );
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    // forget is a mutating tool, so its result used to be appended to the
+    // reply verbatim — printing an instruction addressed to the model.
+    assert.doesNotMatch(result.text, /Tell the user plainly/);
+    assert.doesNotMatch(result.text, /do not attempt it another way/);
+    assert.doesNotMatch(result.text, /needs the user's confirmation/);
+  } finally {
+    server.close();
+  }
+});

@@ -27,6 +27,15 @@ export type ChatMessage = {
   toolsUsed?: string[];
 };
 
+/** A destructive action the assistant is waiting to be allowed to take. */
+export type PendingConfirmation = {
+  tool: string;
+  /** "Forget this saved memory" — what will happen, in plain words. */
+  verb: string;
+  /** The thing it happens to. Empty when the tool takes no meaningful subject. */
+  target: string;
+};
+
 export type AssistantStatus =
   | { state: "idle" }
   | { state: "thinking" }
@@ -51,6 +60,7 @@ export function useAssistant(personality: PersonalityId = defaultPersonality) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [status, setStatus] = useState<AssistantStatus>({ state: "idle" });
   const [restored, setRestored] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
   // Guards a same-tick double submit, which `status` cannot: it is stale inside
   // a second call made before React has re-rendered.
   const latch = useRef(createSubmissionLatch());
@@ -91,6 +101,29 @@ export function useAssistant(personality: PersonalityId = defaultPersonality) {
         if (!cancelled) setRestored(true);
       }
     })();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // A destructive action may still be awaiting approval from before a reload.
+  //
+  // Its own effect rather than part of the transcript restore: that one
+  // returns early when there are no turns, and a standing offer has nothing
+  // to do with whether the conversation happens to be empty. Without this the
+  // dialog silently disappears while the offer stands on the server, and a
+  // "yes" typed later would still run it.
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch(`${webEnv.apiBaseUrl}/v1/assist/confirmation?sessionId=${encodeURIComponent(sessionId.current)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (!cancelled) setPendingConfirmation(payload?.data?.pendingConfirmation ?? null);
+      })
+      .catch(() => {
+        // Nothing to restore is indistinguishable from being unable to ask,
+        // and both mean the same thing here: show no dialog.
+      });
 
     return () => { cancelled = true; };
   }, []);
@@ -140,6 +173,9 @@ export function useAssistant(personality: PersonalityId = defaultPersonality) {
         buildRequest: data.buildRequest,
         toolsUsed: data.toolsUsed
       }]);
+      // Replaced wholesale, never merged: an absent field means the gate
+      // refused nothing this turn, so any earlier offer is finished.
+      setPendingConfirmation(data.pendingConfirmation ?? null);
       setStatus({ state: "idle" });
     } catch (error) {
       // Reported in the transcript rather than swallowed, so a failure never
@@ -164,6 +200,26 @@ export function useAssistant(personality: PersonalityId = defaultPersonality) {
     }
   }, [messages, personality]);
 
+  /**
+   * Decline the pending action.
+   *
+   * Clears it on the server as well as here. Closing the dialog alone would
+   * leave the offer standing, and an unrelated "yes" later in the session
+   * could then land on the deletion the user had just refused.
+   */
+  const declineConfirmation = useCallback(async () => {
+    setPendingConfirmation(null);
+    try {
+      await fetch(
+        `${webEnv.apiBaseUrl}/v1/assist/confirmation?sessionId=${encodeURIComponent(sessionId.current)}`,
+        { method: "DELETE" }
+      );
+    } catch {
+      // The dialog is already closed. A failed clear is worth no interruption:
+      // the offer expires on its own, and nothing runs without another yes.
+    }
+  }, []);
+
   const clear = useCallback(async () => {
     setMessages([]);
     setStatus({ state: "idle" });
@@ -183,6 +239,8 @@ export function useAssistant(personality: PersonalityId = defaultPersonality) {
     messages,
     status,
     restored,
+    pendingConfirmation,
+    declineConfirmation,
     sessionId: sessionId.current,
     send,
     clear
