@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAssistant, type ChatMessage } from "../state/useAssistant";
+import { useSpeech } from "../state/useSpeech";
 import { personalityById, resolvePersonality, type PersonalityId } from "../personalities";
 import { formatRelative, readEvents, upcomingEvents } from "../localCalendar";
 import { readFlow } from "../automation";
@@ -206,6 +207,11 @@ export function Conversation({ personality, onBuildRequest }: Props) {
     messages, status, restored, send, clear, sessionId,
     pendingConfirmation, declineConfirmation
   } = useAssistant(profile.id);
+  const speech = useSpeech();
+  // The last reply spoken, so a re-render never repeats one. Tracked by id
+  // rather than by count: clearing the conversation resets the count and
+  // would otherwise make the next reply read as already-spoken.
+  const lastSpokenId = useRef<string | null>(null);
   const [draft, setDraft] = useState("");
   const [stats, setStats] = useState<Array<{ label: string; value: string; title?: string }>>([]);
   const [recentActivity, setRecentActivity] = useState<AuditEntry[]>([]);
@@ -231,6 +237,23 @@ export function Conversation({ personality, onBuildRequest }: Props) {
   const [booted, setBooted] = useState(false);
   const [storeChecked, setStoreChecked] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+
+  // Speak a reply once, when it arrives.
+  //
+  // Driven by the newest message rather than by send(), so a reply restored
+  // from the transcript on load is never read aloud — arriving at a page and
+  // being talked at by an answer from yesterday is not the same feature.
+  useEffect(() => {
+    if (!speech.enabled) return;
+
+    const newest = messages[messages.length - 1];
+    if (!newest || newest.role !== "assistant") return;
+    if (newest.id.startsWith("restored-")) return;
+    if (lastSpokenId.current === newest.id) return;
+
+    lastSpokenId.current = newest.id;
+    speech.speak(newest.text, profile.id);
+  }, [messages, speech, profile.id]);
 
   // The clock on the home screen is the real one, ticking. It is the cheapest
   // honest signal that the app is running rather than a screenshot of itself.
@@ -406,6 +429,33 @@ export function Conversation({ personality, onBuildRequest }: Props) {
           <h2 className="label">Conversation</h2>
           <span className="chip">{profile.label}</span>
         </div>
+        <div className="row">
+          {/* Only offered when this machine can actually speak. A toggle that
+              silently does nothing is worse than no toggle: the user cannot
+              tell a broken feature from an unused one. */}
+          {speech.availability.available ? (
+            <>
+              {speech.speaking ? (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={speech.stop}>
+                  Stop speaking
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={`btn btn-ghost btn-sm${speech.enabled ? " btn-on" : ""}`}
+                aria-pressed={speech.enabled}
+                title={speech.usingRemoteVoice
+                  ? "No local voice is installed, so speaking would send the text off this machine."
+                  : "Read replies aloud, using this machine's own voices."}
+                onClick={() => speech.setEnabled(!speech.enabled)}
+              >
+                {speech.enabled ? "Voice on" : "Voice off"}
+              </button>
+            </>
+          ) : (
+            <span className="faint" title={speech.availability.reason}>No voice</span>
+          )}
+
         {messages.length > 0 ? (
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
             // No undo once this fires — the whole transcript goes with it.
@@ -414,6 +464,7 @@ export function Conversation({ personality, onBuildRequest }: Props) {
             Clear
           </button>
         ) : null}
+        </div>
       </header>
 
       <div className="conversation-scroll scroll-y">

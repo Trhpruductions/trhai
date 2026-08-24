@@ -3,6 +3,7 @@ import { allPersonalities, personalityById, type PersonalityId } from "../../per
 import { Surface } from "../Surface";
 import type { SurfaceContext } from "../AppShell";
 import { webEnv } from "../../env";
+import { useSpeech } from "../../state/useSpeech";
 
 // Settings: how the assistant sounds, and what it is obliged to say.
 //
@@ -136,6 +137,87 @@ function BuildInformation() {
   );
 }
 
+/**
+ * Which voice reads replies aloud.
+ *
+ * Speech synthesis here is the operating system's: the voices run on this
+ * machine, nothing is uploaded and no account is involved. What the machine
+ * has installed therefore decides how human it sounds, which is not something
+ * the app can change — so when only the older voices are present, this says
+ * so and says where the better ones come from, rather than leaving "it sounds
+ * robotic" unanswered.
+ */
+function VoiceSettings({ personality }: { personality: PersonalityId }) {
+  const speech = useSpeech();
+
+  if (!speech.availability.available) {
+    return (
+      <div className="panel voice-settings">
+        <strong>Voice</strong>
+        <p className="muted">{speech.availability.reason}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel voice-settings">
+      <div className="row spread">
+        <strong>Voice</strong>
+        <button
+          type="button"
+          className={`btn btn-sm${speech.enabled ? " btn-on" : ""}`}
+          aria-pressed={speech.enabled}
+          onClick={() => speech.setEnabled(!speech.enabled)}
+        >
+          {speech.enabled ? "On" : "Off"}
+        </button>
+      </div>
+
+      <p className="muted voice-desc">
+        Replies are read aloud by this machine&apos;s own voices. Nothing is uploaded, and
+        the speed and pitch follow whichever personality is active.
+      </p>
+
+      <label className="voice-field">
+        <span className="label">Which voice</span>
+        <select
+          className="field"
+          value={speech.voiceName ?? ""}
+          aria-label="Which voice"
+          onChange={(event) => speech.setVoiceName(event.target.value || null)}
+        >
+          <option value="">Best available</option>
+          {speech.voices.map((voice) => (
+            <option key={voice.name} value={voice.name}>
+              {voice.name}{voice.localService ? "" : " (sends text off this machine)"}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className="row voice-actions">
+        <button type="button" className="btn btn-sm"
+          onClick={() => speech.speaking
+            ? speech.stop()
+            : speech.speak("This is how I will read replies aloud.", personality)}>
+          {speech.speaking ? "Stop" : "Hear it"}
+        </button>
+      </div>
+
+      {/* The honest answer to "why does it sound robotic". These are Windows
+          settings, not something this app can install for you. */}
+      {speech.onlyLegacyVoices ? (
+        <p className="faint voice-note">
+          Only the older built-in voices are installed on this machine, which is why speech
+          sounds synthetic. Windows 11 has far more natural ones under
+          <b> Settings → Accessibility → Narrator → Add natural voices</b>. They run locally
+          too, and this app will use them automatically once they are installed.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function SettingsSurface({ context }: { context: SurfaceContext }) {
   const active = personalityById(context.personality);
 
@@ -171,6 +253,7 @@ export function SettingsSurface({ context }: { context: SurfaceContext }) {
         })}
       </div>
 
+      <VoiceSettings personality={context.personality} />
       <BuildInformation />
     </Surface>
   );
