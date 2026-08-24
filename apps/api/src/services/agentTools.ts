@@ -9,6 +9,7 @@ import {
   readWorkspaceFile,
   writeWorkspaceFile
 } from "./workspace.js";
+import { fetchWebPage } from "./webFetch.js";
 
 // What the assistant can actually do.
 //
@@ -113,6 +114,12 @@ export type ToolContext = {
   confirmedActions?: ReadonlySet<string>;
   /** Overridable so a test can assert on a fixed clock. */
   now?: () => Date;
+  /**
+   * Overridable so a test can exercise fetch_url's dispatch without a real
+   * network call — real fetchWebPage, with its own SSRF and size/timeout
+   * defences, when nothing is supplied.
+   */
+  fetchPage?: typeof fetchWebPage;
 };
 
 export const toolDefinitions: ToolDefinition[] = [
@@ -450,6 +457,25 @@ export const toolDefinitions: ToolDefinition[] = [
         "The current date and time on the user's machine. Use this for anything involving today, "
         + "now, or how long ago something was — you cannot know it otherwise.",
       parameters: { type: "object", properties: {}, required: [] }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "fetch_url",
+      description:
+        "Read a web page and return its text. This is the only tool that reaches the internet — "
+        + "use it when the user gives you a URL, or asks about something that needs a live page "
+        + "you were not given a link for as text some other way. It fetches exactly the one address "
+        + "you give it; it does not search, and there is no way to look something up without "
+        + "already having a URL for it.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The full address, including https://." }
+        },
+        required: ["url"]
+      }
     }
   }
 ];
@@ -976,6 +1002,18 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
           hour: "2-digit", minute: "2-digit"
         })} (local time on the user's machine)`
       };
+    }
+
+    case "fetch_url": {
+      const url = requireString(call.arguments.url);
+      if (!url) return { ok: false, content: "fetch_url needs a url." };
+
+      const fetchPage = context.fetchPage ?? fetchWebPage;
+      const result = await fetchPage(url);
+      if (!result.ok) return { ok: false, content: result.reason };
+
+      const notice = result.truncated ? " [showing the first part of this page]" : "";
+      return { ok: true, content: `From "${result.title}" (${result.url})${notice}:\n${result.text}` };
     }
 
     default:

@@ -14,6 +14,7 @@ import { webEnv } from "./env";
 // it is using, rather than offering a voice that produces silence.
 
 export type VoiceQuality = "x_low" | "low" | "medium" | "high";
+export type VoiceGender = "male" | "female";
 
 export type NeuralVoiceOption = {
   /** The model's file stem, e.g. "en_GB-alan-medium". */
@@ -23,13 +24,15 @@ export type NeuralVoiceOption = {
   /** e.g. "en_GB". */
   locale: string;
   quality: VoiceQuality;
+  /** Null when this build has no confirmed gender for the speaker — see piperSpeech.ts. */
+  gender: VoiceGender | null;
 };
 
 export type NeuralVoiceStatus =
   | { available: true; voice: string; voices: NeuralVoiceOption[]; maxCharacters: number }
   | { available: false; reason: string };
 
-/** How a voice is described in a picker: "Alan · British · high quality". */
+/** How a voice is described in a picker: "Alan · British · male · high quality". */
 export function describeVoice(voice: NeuralVoiceOption): string {
   const accents: Record<string, string> = {
     en_GB: "British",
@@ -39,12 +42,14 @@ export function describeVoice(voice: NeuralVoiceOption): string {
     en_IN: "Indian"
   };
 
-  // Locale rather than an inferred gender: the model cards do not reliably say,
-  // and guessing from a first name would get it wrong for a good fraction.
   const accent = accents[voice.locale] ?? voice.locale.replace("_", "-");
   const quality = voice.quality === "x_low" ? "lowest" : voice.quality;
+  // Omitted rather than shown as "unknown" when this build has no confirmed
+  // gender for the speaker — a blank is honest; a guess dressed up as a
+  // label is not.
+  const gender = voice.gender ? ` · ${voice.gender}` : "";
 
-  return `${voice.name} · ${accent} · ${quality} quality`;
+  return `${voice.name} · ${accent}${gender} · ${quality} quality`;
 }
 
 /**

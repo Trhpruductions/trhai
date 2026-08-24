@@ -68,6 +68,16 @@ const toolCall = (name: string, args: Record<string, unknown>) => ({
   message: { content: "", tool_calls: [{ function: { name, arguments: args } }] }
 });
 
+// Two calls the model asked for in the same response, neither having seen
+// the other's result yet — the shape a single `toolCall` cannot express, and
+// the shape the live fetch_url-then-build_app bug actually was.
+const multiToolCall = (...entries: Array<[string, Record<string, unknown>]>) => ({
+  message: {
+    content: "",
+    tool_calls: entries.map(([name, args]) => ({ function: { name, arguments: args } }))
+  }
+});
+
 const answer = (content: string) => ({ message: { content } });
 
 test("a plain answer needs no tools", async () => {
@@ -348,6 +358,76 @@ test("the clock is the real one on this machine", async () => {
 
   assert.equal(result.ok, true);
   assert.match(result.content, /2026/);
+});
+
+// fetch_url's own SSRF, size and timeout defences are covered directly in
+// web-fetch.test.ts; these check runTool's dispatch around it — argument
+// validation, and how a real result gets formatted into what the model
+// reads — using the injected fetchPage so no network call happens here.
+
+test("fetch_url needs a url argument", async () => {
+  const result = await runTool({ name: "fetch_url", arguments: {} }, context);
+  assert.equal(result.ok, false);
+  assert.match(result.content, /needs a url/);
+});
+
+test("a fetched page is handed back with its title and address", async () => {
+  const withFetch: ToolContext = {
+    ...context,
+    fetchPage: async () => ({
+      ok: true,
+      url: "https://example.com/",
+      title: "Example Domain",
+      text: "This domain is for use in illustrative examples.",
+      truncated: false
+    })
+  };
+
+  const result = await runTool({ name: "fetch_url", arguments: { url: "https://example.com/" } }, withFetch);
+  assert.equal(result.ok, true);
+  assert.match(result.content, /Example Domain/);
+  assert.match(result.content, /https:\/\/example\.com\//);
+  assert.match(result.content, /illustrative examples/);
+});
+
+test("a truncated page says so, so the model does not treat a partial read as the whole page", async () => {
+  const withFetch: ToolContext = {
+    ...context,
+    fetchPage: async () => ({
+      ok: true,
+      url: "https://example.com/long",
+      title: "A Long Page",
+      text: "the first part…",
+      truncated: true
+    })
+  };
+
+  const result = await runTool({ name: "fetch_url", arguments: { url: "https://example.com/long" } }, withFetch);
+  assert.equal(result.ok, true);
+  assert.match(result.content, /showing the first part/i);
+});
+
+test("a refused fetch passes its real reason back, not a generic failure", async () => {
+  const withFetch: ToolContext = {
+    ...context,
+    fetchPage: async () => ({ ok: false, reason: "That page is too large to read." })
+  };
+
+  const result = await runTool({ name: "fetch_url", arguments: { url: "https://example.com/huge" } }, withFetch);
+  assert.equal(result.ok, false);
+  assert.match(result.content, /too large to read/);
+});
+
+test("fetch_url runs without confirmation, the same as any other read-only tool", async () => {
+  // Reading a page changes nothing on this machine, so it belongs at the
+  // same level as search_memory or list_files, not gated like forget.
+  const withFetch: ToolContext = {
+    ...context,
+    fetchPage: async () => ({ ok: true, url: "https://example.com/", title: "x", text: "x", truncated: false })
+  };
+
+  const result = await runTool({ name: "fetch_url", arguments: { url: "https://example.com/" } }, withFetch);
+  assert.equal(result.needsConfirmation, undefined);
 });
 
 // ---- The tools added after the first four -------------------------------
@@ -1186,6 +1266,168 @@ test("argument order alone does not make two calls look different", async () => 
     // third calls; the third is refused as a repeat of the second, not run
     // as though it were a different question.
     if (result.ok) assert.equal(result.toolsUsed.length, 2);
+  } finally {
+    server.close();
+  }
+});
+
+// fetch_url failing withholds tools on the next round.
+//
+// Caught live, twice, even with an explicit system-prompt rule telling the
+// model not to do this: fetch_url was refused for reaching this machine's
+// own address, and the very next round called build_app instead — a real,
+// entirely unrelated app, written to disk, that nobody asked for. Prompt
+// language did not hold, so tools are withheld outright the round after a
+// fetch_url failure, the same way the final round already withholds them.
+
+test("a well-behaved model explaining a fetch_url failure is unaffected", async () => {
+  const emptyMemoryContext: ToolContext = { ...context, memories: [], fetchPage: async () => ({ ok: false, reason: "refused" }) };
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("fetch_url", { url: "http://127.0.0.1/" }),
+    answer("I can't fetch that — it points at this machine's own address.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "fetch http://127.0.0.1/", emptyMemoryContext);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.match(result.text, /own address/);
+
+    // The round after the failure must not have offered tools at all.
+    const secondRequest = received[1] as { tools?: unknown };
+    assert.equal(secondRequest.tools, undefined);
+  } finally {
+    server.close();
+  }
+});
+
+test("a model that tries to wander to an unrelated tool after a fetch_url failure cannot actually run it", async () => {
+  const emptyMemoryContext: ToolContext = { ...context, memories: [], fetchPage: async () => ({ ok: false, reason: "refused" }) };
+  // Round 2 asks for build_app anyway, simulating a model that ignores the
+  // prompt instruction — the same shape as what was caught live.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("fetch_url", { url: "http://127.0.0.1/" }),
+    toolCall("build_app", { description: "something unrelated" })
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "fetch http://127.0.0.1/", emptyMemoryContext);
+    // Not a success that quietly did the wrong thing — an honest failure,
+    // with build_app never having actually run.
+    assert.equal(result.ok, false);
+    assert.equal(result.toolsUsed.some((used) => used.name === "build_app"), false);
+  } finally {
+    server.close();
+  }
+});
+
+test("a model that asks for fetch_url and an unrelated tool in the SAME response cannot run the second one", async () => {
+  // This is the shape the live bug actually was, not the shape the two tests
+  // above cover: both calls arrived in one response, before either had a
+  // result, rather than build_app appearing on a later round. Withholding
+  // tools starting next round never got a chance to matter here — there was
+  // nothing left to withhold from by the time fetch_url's failure was known.
+  const emptyMemoryContext: ToolContext = { ...context, memories: [], fetchPage: async () => ({ ok: false, reason: "refused" }) };
+  const { server, baseUrl } = await fakeModel([
+    multiToolCall(
+      ["fetch_url", { url: "http://127.0.0.1:4000/v1/build-info" }],
+      ["build_app", { description: "something unrelated" }]
+    )
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "fetch http://127.0.0.1:4000/v1/build-info", emptyMemoryContext);
+    assert.equal(result.ok, false);
+    assert.equal(result.toolsUsed.some((used) => used.name === "build_app"), false);
+  } finally {
+    server.close();
+  }
+});
+
+test("the same-batch skip holds even when the model lists the unrelated tool BEFORE fetch_url", async () => {
+  // The two calls in one response have no ordering guarantee — the model
+  // chose it, not this code. If build_app happened to be listed first, it
+  // must still not run once its neighbour turns out to be a failed fetch_url.
+  const emptyMemoryContext: ToolContext = { ...context, memories: [], fetchPage: async () => ({ ok: false, reason: "refused" }) };
+  const { server, baseUrl } = await fakeModel([
+    multiToolCall(
+      ["build_app", { description: "something unrelated" }],
+      ["fetch_url", { url: "http://127.0.0.1:4000/v1/build-info" }]
+    )
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "fetch http://127.0.0.1:4000/v1/build-info", emptyMemoryContext);
+    assert.equal(result.ok, false);
+    assert.equal(result.toolsUsed.some((used) => used.name === "build_app"), false);
+  } finally {
+    server.close();
+  }
+});
+
+test("two unrelated calls in the same batch both run when neither is fetch_url", async () => {
+  // The fetch_url-first sort must not change anything for a batch that never
+  // involves it — both calls here should run exactly as before.
+  const emptyMemoryContext: ToolContext = { ...context, memories: [] };
+  const { server, baseUrl } = await fakeModel([
+    multiToolCall(
+      ["search_memory", { query: "billing" }],
+      ["current_datetime", {}]
+    ),
+    answer("Here is what I found.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what is my billing setup and what time is it", emptyMemoryContext);
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.toolsUsed.length, 2);
+      assert.ok(result.toolsUsed.some((used) => used.name === "search_memory"));
+      assert.ok(result.toolsUsed.some((used) => used.name === "current_datetime"));
+    }
+  } finally {
+    server.close();
+  }
+});
+
+test("an ordinary tool finding nothing does not withhold the next round — only fetch_url failing does", async () => {
+  // search_memory coming back empty and then trying search_documents is the
+  // normal, reasonable fallback chain this fix must not break.
+  const emptyMemoryContext: ToolContext = { ...context, memories: [] };
+  const { server, baseUrl } = await fakeModel([
+    toolCall("search_memory", { query: "billing" }),
+    toolCall("search_documents", { query: "billing" }),
+    answer("Nothing is recorded about that.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what is my billing setup", emptyMemoryContext);
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.toolsUsed.length, 2);
+      assert.ok(result.toolsUsed.some((used) => used.name === "search_documents"));
+    }
+  } finally {
+    server.close();
+  }
+});
+
+test("a successful fetch_url does not withhold anything — only a failure does", async () => {
+  const withFetch: ToolContext = {
+    ...context,
+    fetchPage: async () => ({ ok: true, url: "https://example.com/", title: "Example", text: "hello", truncated: false })
+  };
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("fetch_url", { url: "https://example.com/" }),
+    answer("The page says hello.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "fetch https://example.com/", withFetch);
+    assert.equal(result.ok, true);
+
+    // Tools were still offered on the round after a real success.
+    const secondRequest = received[1] as { tools?: unknown };
+    assert.notEqual(secondRequest.tools, undefined);
   } finally {
     server.close();
   }

@@ -30,9 +30,11 @@ export type SystemCapabilities = {
   documents: boolean;
   applicationBuilding: boolean;
   /**
-   * Neither exists in this build. Stated as fields rather than left implicit,
-   * so a capability report can say "unavailable" instead of staying silent
-   * about something a user might otherwise assume it has.
+   * `web` is fetch_url: a page read, given its exact URL — not search, and
+   * there is no tool that finds a URL for you. `codeExecution` has no tool at
+   * all. Both are stated as real fields rather than left implicit, so a
+   * capability report can say "unavailable" outright instead of staying
+   * silent about something a user might otherwise assume it has.
    */
   web: boolean;
   codeExecution: boolean;
@@ -77,7 +79,11 @@ export function getSystemCapabilities(model: string | null): SystemCapabilities 
     memory: hasAll(names, "search_memory", "remember"),
     documents: hasAll(names, "search_documents", "write_document"),
     applicationBuilding: hasAll(names, "build_app"),
-    web: false,
+    // Reading a page given its URL, via fetch_url — not search. codeExecution
+    // stays hard-false: there is genuinely no tool for that in this build,
+    // and unlike fetch_url that is a much larger decision to make later,
+    // not one to fold in quietly alongside it.
+    web: hasAll(names, "fetch_url"),
     codeExecution: false,
     integrations: []
   };

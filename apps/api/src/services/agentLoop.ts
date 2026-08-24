@@ -135,6 +135,16 @@ export const systemPrompt = [
   "  delete_document are only for the knowledge base, titled in plain language with no extension.",
   "  These are two different places; a file is never also a document under the same name.",
   "",
+  "A page on the live web - something the user linked you to, or asked about that needs",
+  "today's version of a page rather than what you already know:",
+  "- fetch_url reads exactly the one address you give it and returns its text.",
+  "- It is not a search engine. There is no tool that finds a URL for you - fetch_url only",
+  "  works when you already have one, from the user's own message or an earlier tool result.",
+  "  Never invent a URL to try; a guessed address is not a real lookup.",
+  "- If nothing in the conversation gives you a URL, you do not have a way to look this up.",
+  "  Say so plainly rather than answering from general knowledge as if it were current, or",
+  "  refusing the way an empty search result would.",
+  "",
   "Questions about the WORLD - what a semaphore is, how TCP works, what a word means.",
   "Answer these yourself, from what you know. Do not search the user's private notes",
   "for general knowledge: their documents are about their work, and finding nothing",
@@ -148,6 +158,12 @@ export const systemPrompt = [
   "- Quote the user's own documents and memories accurately; do not reword them into",
   "  something they did not say. Name the document when you use one.",
   "- If you genuinely do not know, say so. That is a complete answer.",
+  "- A tool refused or failing is not an invitation to try something unrelated instead.",
+  "  Caught live: fetch_url was refused for reaching an address on the user's own machine,",
+  "  and the reply built and wrote an entirely unrelated app nobody asked for, as though",
+  "  refusing one thing meant doing a different, unrequested thing instead. Explain the",
+  "  refusal in plain words and stop there. Only continue toward a different tool when the",
+  "  user's own message actually asked for more than the one thing that was refused.",
   "",
   "When a message asks for more than one thing, answer every part of it. Gather what",
   "each part needs, then reply once covering all of them — do not answer the first",
@@ -549,10 +565,28 @@ export async function runAgent(
   // *earlier* round already told it there was nothing there.
   const attemptsBySignature = new Map<string, number>();
 
+  // Whether fetch_url has failed this turn. A telling-it-plainly rule in the
+  // system prompt did not hold: refused for reaching this machine's own
+  // address, the reply built and wrote a real, entirely unrelated app to
+  // disk anyway — three times running, with three different invented names,
+  // even with the prompt explicit that a refusal is not an invitation to try
+  // something unrelated. A model that keeps doing this despite being told
+  // not to is fixed by removing the choice, not by asking again: tools are
+  // withheld outright the round after this happens, the same way the final
+  // round already withholds them to force an answer instead of a fifth
+  // search — and, below, anything queued alongside the failed call in its
+  // own batch is skipped too, since a round boundary is not the only place
+  // this needs to hold. Scoped to fetch_url specifically — a search tool
+  // finding nothing is ordinary and a real reason to reasonably try a
+  // different tool next; the network reaching outside the machine failing
+  // has no such reasonable next step.
+  let fetchUrlFailed = false;
+
   for (let round = 0; round <= maxToolRounds; round += 1) {
-    // On the last round the tools are withheld, which forces an answer rather
-    // than a fifth request for a search the model is not going to conclude on.
-    const offerTools = round < maxToolRounds;
+    // On the last round, or the round after fetch_url failed, tools are
+    // withheld, which forces an answer rather than another attempt at
+    // something the model was not going to conclude on.
+    const offerTools = round < maxToolRounds && !fetchUrlFailed;
 
     let response: ChatResponse;
     try {
@@ -635,15 +669,48 @@ export async function runAgent(
     }
 
     // Carry the model's own turn forward before the results, or the exchange
-    // stops making sense to it on the next pass.
+    // stops making sense to it on the next pass. Kept in the order the model
+    // actually asked for them — a transcript of its own turn, not of
+    // execution order below.
     messages.push({
       role: "assistant",
       content: text,
       tool_calls: calls.map((call) => ({ function: { name: call.name, arguments: call.arguments } }))
     });
 
-    for (const call of calls) {
+    // fetch_url runs before anything else offered in the same batch.
+    //
+    // Caught live: asked to fetch this machine's own address, the model
+    // requested fetch_url and build_app together in one response, before
+    // either had a result — the two calls could not have depended on each
+    // other, since the model had seen neither's outcome yet. Running them in
+    // request order meant build_app still executed and wrote a real,
+    // unrelated app to disk in the very same round fetch_url was refused in;
+    // withholding tools on the *next* round, below, never got a chance to
+    // matter, because there was nothing left to withhold from. Sorting
+    // fetch_url first — stably, so everything else keeps its relative order —
+    // means a failure is always known before its neighbours in the batch run,
+    // regardless of which order the model happened to list them in.
+    const orderedCalls = [...calls].sort((left, right) => {
+      if (left.name === "fetch_url" && right.name !== "fetch_url") return -1;
+      if (right.name === "fetch_url" && left.name !== "fetch_url") return 1;
+      return 0;
+    });
+
+    for (const call of orderedCalls) {
       onToolStart?.(call.name);
+
+      // The same removal, not the same request for restraint, for the part a
+      // round boundary cannot reach: once fetch_url has failed this turn,
+      // nothing queued alongside it in this same batch gets to run either.
+      if (fetchUrlFailed) {
+        messages.push({
+          role: "tool",
+          content: `${call.name} was not run: fetch_url failed earlier in this same turn, and that is `
+            + "not a reason to try something unrelated instead."
+        });
+        continue;
+      }
 
       // Refused before it runs a third time, not after: a check that only
       // notices the repeat once the identical call has already executed is
@@ -683,6 +750,7 @@ export async function runAgent(
       } else {
         toolsUsed.push({ name: call.name, ok: result.ok });
       }
+      if (call.name === "fetch_url" && !result.ok) fetchUrlFailed = true;
       // The failure text goes back unchanged. "Nothing matches X" is what stops
       // the model inventing an answer; softening it here would undo that.
       messages.push({ role: "tool", content: result.content });

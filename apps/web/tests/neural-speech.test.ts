@@ -79,8 +79,8 @@ test("a voice list that is not a list does not become one", async () => {
   assert.deepEqual(status.available === true ? status.voices : null, []);
 });
 
-test("a voice is described by accent and quality, not by a guessed gender", () => {
-  const described = describeVoice({ id: "en_GB-alan-medium", name: "Alan", locale: "en_GB", quality: "medium" });
+test("a voice is described by accent and quality", () => {
+  const described = describeVoice({ id: "en_GB-alan-medium", name: "Alan", locale: "en_GB", quality: "medium", gender: "male" });
 
   assert.match(described, /Alan/);
   assert.match(described, /British/);
@@ -88,10 +88,24 @@ test("a voice is described by accent and quality, not by a guessed gender", () =
 });
 
 test("an unfamiliar locale is shown rather than hidden", () => {
-  const described = describeVoice({ id: "fr_FR-siwis-low", name: "Siwis", locale: "fr_FR", quality: "low" });
+  const described = describeVoice({ id: "fr_FR-siwis-low", name: "Siwis", locale: "fr_FR", quality: "low", gender: null });
 
   // Better to show "fr-FR" than to drop the only clue about how it will sound.
   assert.match(described, /fr-FR/);
+});
+
+test("a confirmed gender is shown in the description", () => {
+  const male = describeVoice({ id: "en_US-ryan-high", name: "Ryan", locale: "en_US", quality: "high", gender: "male" });
+  const female = describeVoice({ id: "en_GB-cori-high", name: "Cori", locale: "en_GB", quality: "high", gender: "female" });
+
+  assert.match(male, /\bmale\b/);
+  assert.match(female, /\bfemale\b/);
+});
+
+test("an unconfirmed gender is omitted, not shown as a guess", () => {
+  const described = describeVoice({ id: "fr_FR-siwis-low", name: "Siwis", locale: "fr_FR", quality: "low", gender: null });
+
+  assert.doesNotMatch(described, /\b(male|female|unknown)\b/);
 });
 
 test("an absent neural voice carries the API's reason, not a generic one", async () => {
