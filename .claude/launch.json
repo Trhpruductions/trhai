@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "trhai-api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace", "@ascend/api"],
+      "port": 4000
+    },
+    {
+      "name": "trhai-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace", "@ascend/web"],
+      "port": 5173
+    },
+    {
+      "name": "trhai-next",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace", "trhai-web", "--", "-p", "3210"],
+      "port": 3210
+    }
+  ]
+}
