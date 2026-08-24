@@ -70,8 +70,34 @@ declare global {
         ok?: boolean;
         error?: string;
       }>;
-      runWorkspaceCommand?: (payload: {
-        command: string;
+      connectProject?: () => Promise<{
+        ok?: boolean;
+        canceled?: boolean;
+        project?: { root: string; name: string; connectedAt: string };
+        error?: string;
+      }>;
+      disconnectProject?: () => Promise<{ ok?: boolean; disconnected?: boolean }>;
+      getConnectedProject?: () => Promise<{
+        ok?: boolean;
+        project?: { root: string; name: string; connectedAt: string } | null;
+      }>;
+      listProjectFiles?: (payload: { subdirectory?: string }) => Promise<{
+        ok?: boolean;
+        entries?: Array<{ path: string; bytes: number; directory: boolean }>;
+        error?: string;
+      }>;
+      readProjectFile?: (payload: { path: string }) => Promise<{
+        ok?: boolean;
+        content?: string;
+        truncated?: boolean;
+        error?: string;
+      }>;
+      listWorkspaceChecks?: () => Promise<{
+        ok?: boolean;
+        checks?: Array<{ name: string; label: string }>;
+      }>;
+      runWorkspaceCheck?: (payload: {
+        check: string;
         cwd?: string;
       }) => Promise<{
         ok?: boolean;

@@ -368,7 +368,7 @@ test("forget matches the stored wording rather than trusting an id", async () =>
   const removed: string[] = [];
   const result = await runTool(
     { name: "forget", arguments: { fact: "The billing database is Postgres 16." } },
-    { ...richContext, forgetMemory: (id) => { removed.push(id); return true; } }
+    { ...richContext, forgetMemory: (id) => { removed.push(id); return true; }, confirmedActions: new Set(["forget"]) }
   );
 
   assert.equal(result.ok, true);
@@ -379,7 +379,7 @@ test("forget deletes nothing when nothing matches", async () => {
   const removed: string[] = [];
   const result = await runTool(
     { name: "forget", arguments: { fact: "my shoe size" } },
-    { ...richContext, forgetMemory: (id) => { removed.push(id); return true; } }
+    { ...richContext, forgetMemory: (id) => { removed.push(id); return true; }, confirmedActions: new Set(["forget"]) }
   );
 
   assert.equal(result.ok, false);
@@ -577,7 +577,7 @@ test("deleting a document reports what was deleted", async () => {
   const deleted: string[] = [];
   const result = await runTool(
     { name: "delete_document", arguments: { title: "Onboarding" } },
-    { ...editContext, deleteDocument: (id) => { deleted.push(id); return true; } }
+    { ...editContext, deleteDocument: (id) => { deleted.push(id); return true; }, confirmedActions: new Set(["delete_document"]) }
   );
 
   assert.equal(result.ok, true);
@@ -588,7 +588,7 @@ test("deleting a document that does not exist deletes nothing", async () => {
   const deleted: string[] = [];
   const result = await runTool(
     { name: "delete_document", arguments: { title: "Nonsense" } },
-    { ...editContext, deleteDocument: (id) => { deleted.push(id); return true; } }
+    { ...editContext, deleteDocument: (id) => { deleted.push(id); return true; }, confirmedActions: new Set(["delete_document"]) }
   );
 
   assert.equal(result.ok, false);

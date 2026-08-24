@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
-import { constants as fsConstants, existsSync, statfsSync } from "node:fs";
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { constants as fsConstants, existsSync, statSync, statfsSync } from "node:fs";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,27 @@ import { access, mkdir, readdir, writeFile } from "node:fs/promises";
 import { getDetachedSpawnConfig, getServiceSpawnOptions } from "./launcher.js";
 import { containPath, isSafeExternalUrl, isTrustedAppUrl } from "./pathGuard.js";
 import { getDesktopBuildInfo } from "./buildInfo.js";
+import {
+  checkEnvironment,
+  isWorkspaceCheck,
+  listWorkspaceChecks,
+  workspaceChecks
+} from "./workspaceChecks.js";
+import {
+  configureConnectedProjectStore,
+  connectProject,
+  disconnectProject,
+  getConnectedProject,
+  listProjectFiles,
+  readProjectFile
+} from "./connectedProject.js";
+
+// Per-user, not per-working-directory. The module's own default is relative
+// to process.cwd(), which for a desktop app depends entirely on how it was
+// launched — so a project connected via the launcher was invisible when the
+// app was started any other way. Done at import time, before anything reads
+// the store.
+configureConnectedProjectStore(path.join(app.getPath("userData"), "connected-project.json"));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -243,7 +264,45 @@ function enumerateStorageDevices(): StorageDevice[] {
   return devices;
 }
 
-ipcMain.handle("ascend:get-build-info", async () => {
+/**
+ * Register a handler that only answers the app's own window.
+ *
+ * Every channel below can read the machine, start a process, or write a
+ * file, and `ipcMain.handle` will answer any frame in the renderer that
+ * knows the channel name — including an iframe, or anything injected into a
+ * page. `isTrustedAppUrl` already governs where the window may navigate;
+ * this applies the same rule to who may call in, so the two cannot disagree.
+ *
+ * A wrapper rather than a check inside each handler: a check you have to
+ * remember to write is one that eventually gets forgotten in a new handler,
+ * and the failure is silent.
+ */
+function handleFromAppWindow<T>(
+  channel: string,
+  // Matches ipcMain.handle's own payload type rather than narrowing it here.
+  // Every handler below already validates its own input — that is the check
+  // that matters, since the value arrives over IPC and a compile-time type
+  // proves nothing about it — and tightening it in this signature would turn
+  // a security change into a rewrite of five unrelated validators.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  listener: (event: Electron.IpcMainInvokeEvent, payload: any) => Promise<T> | T
+) {
+  ipcMain.handle(channel, async (event, payload: unknown) => {
+    const senderUrl = event.senderFrame?.url ?? "";
+
+    if (!isTrustedAppUrl(senderUrl)) {
+      // Logged because a refusal here means something is calling this bridge
+      // that should not exist, and that is worth seeing rather than only
+      // returning quietly to whatever asked.
+      console.warn(`[desktop] refused ${channel} from untrusted sender: ${senderUrl || "unknown"}`);
+      return { ok: false, error: "Refused: this request did not come from the app window." };
+    }
+
+    return listener(event, payload);
+  });
+}
+
+handleFromAppWindow("ascend:get-build-info", async () => {
   try {
     return {
       ok: true,
@@ -259,7 +318,7 @@ ipcMain.handle("ascend:get-build-info", async () => {
   }
 });
 
-ipcMain.handle("ascend:get-system-telemetry", async () => {
+handleFromAppWindow("ascend:get-system-telemetry", async () => {
   try {
     const cpuPercent = getCpuUsagePercent();
     const totalMemory = os.totalmem();
@@ -288,7 +347,7 @@ ipcMain.handle("ascend:get-system-telemetry", async () => {
   }
 });
 
-ipcMain.handle("ascend:list-project-inventory", async () => {
+handleFromAppWindow("ascend:list-project-inventory", async () => {
   try {
     const projects = await buildProjectInventory();
     return { ok: true, projects };
@@ -301,7 +360,7 @@ ipcMain.handle("ascend:list-project-inventory", async () => {
   }
 });
 
-ipcMain.handle("ascend:list-storage-devices", async () => {
+handleFromAppWindow("ascend:list-storage-devices", async () => {
   try {
     const devices = enumerateStorageDevices();
     return { ok: true, devices };
@@ -314,16 +373,85 @@ ipcMain.handle("ascend:list-storage-devices", async () => {
   }
 });
 
-ipcMain.handle("ascend:open-path", async (_event, targetPath) => {
+handleFromAppWindow("ascend:connect-project", async (event) => {
+  // The folder comes from the operating system's own picker, never from the
+  // renderer. This is the security property the whole module rests on: a
+  // page can cause this dialog to open, and cannot decide what it returns or
+  // pre-fill it. There is deliberately no variant of this that takes a path.
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  const result = parent
+    ? await dialog.showOpenDialog(parent, {
+      title: "Connect a project",
+      properties: ["openDirectory"],
+      buttonLabel: "Connect"
+    })
+    : await dialog.showOpenDialog({
+      title: "Connect a project",
+      properties: ["openDirectory"],
+      buttonLabel: "Connect"
+    });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { ok: false, canceled: true, error: "No folder was chosen." };
+  }
+
+  return connectProject(result.filePaths[0]);
+});
+
+handleFromAppWindow("ascend:disconnect-project", async () => {
+  return { ok: true, disconnected: disconnectProject() };
+});
+
+handleFromAppWindow("ascend:get-connected-project", async () => {
+  return { ok: true, project: getConnectedProject() };
+});
+
+handleFromAppWindow("ascend:list-project-files", async (_event, payload) => {
+  const subdirectory = typeof payload?.subdirectory === "string" ? payload.subdirectory : ".";
+  const entries = listProjectFiles(subdirectory);
+
+  return entries
+    ? { ok: true, entries }
+    : { ok: false, error: "That folder is not readable inside the connected project." };
+});
+
+handleFromAppWindow("ascend:read-project-file", async (_event, payload) => {
+  const target = typeof payload?.path === "string" ? payload.path : "";
+  if (!target) return { ok: false, error: "No file was named." };
+
+  return readProjectFile(target);
+});
+
+handleFromAppWindow("ascend:open-path", async (_event, targetPath) => {
   try {
     const candidate = typeof targetPath === "string" ? targetPath : "";
     if (!candidate) {
       return { ok: false, error: "Missing target path." };
     }
 
-    const normalized = path.resolve(candidate);
+    // `shell.openPath` asks the operating system to *act on* this path, and
+    // for an .exe or a .bat that means running it. This handler used to
+    // path.resolve() whatever the renderer sent and hand it straight over,
+    // with no containment at all — an arbitrary-execution path independent
+    // of the command channel, and the one hole left open when that channel
+    // was locked down to named checks.
+    //
+    // Contained the same way every other path in this file is.
+    const contained = containPath(workspaceRoot, candidate);
+    if (!contained.ok) {
+      return { ok: false, error: "That path is outside the workspace." };
+    }
+
+    const normalized = contained.path;
     if (!existsSync(normalized)) {
       return { ok: false, error: "Target path does not exist." };
+    }
+
+    // Directories only. Every real caller opens a project folder, and
+    // refusing files is what stops this from being a way to launch a binary
+    // that happens to sit inside the workspace.
+    if (!statSync(normalized).isDirectory()) {
+      return { ok: false, error: "Only folders can be opened from here." };
     }
 
     const openError = await shell.openPath(normalized);
@@ -340,7 +468,7 @@ ipcMain.handle("ascend:open-path", async (_event, targetPath) => {
   }
 });
 
-ipcMain.handle("ascend:create-scaffold", async (_event, payload) => {
+handleFromAppWindow("ascend:create-scaffold", async (_event, payload) => {
   try {
     const request = payload?.request as string | undefined;
     const spec = payload?.spec as { path?: string; fileName?: string; content?: string } | undefined;
@@ -377,23 +505,37 @@ ipcMain.handle("ascend:create-scaffold", async (_event, payload) => {
   }
 });
 
-ipcMain.handle("ascend:run-command", async (event, payload) => {
-  const command = typeof payload?.command === "string" ? payload.command.trim() : "";
+handleFromAppWindow("ascend:list-workspace-checks", async () => {
+  return { ok: true, checks: listWorkspaceChecks() };
+});
+
+handleFromAppWindow("ascend:run-check", async (event, payload) => {
+  const requestedCheck: unknown = payload?.check;
   const requestedCwd = typeof payload?.cwd === "string" ? payload.cwd.trim() : "";
   const runId = randomUUID();
 
-  if (!command) {
-    return { ok: false, runId, exitCode: -1, error: "Missing command." };
+  // The gate. An unrecognised name never reaches spawn, and the refusal names
+  // what is actually runnable rather than only that this was not.
+  if (!isWorkspaceCheck(requestedCheck)) {
+    const known = listWorkspaceChecks().map((entry) => entry.name).join(", ");
+    return {
+      ok: false,
+      runId,
+      exitCode: -1,
+      error: `Unknown check. Available checks: ${known}.`
+    };
   }
+
+  const selected = workspaceChecks[requestedCheck];
 
   const containedCwd = requestedCwd ? containPath(workspaceRoot, requestedCwd) : { ok: true as const, path: workspaceRoot };
   if (!containedCwd.ok) {
-    return { ok: false, runId, exitCode: -1, error: "Command cwd must be inside workspace." };
+    return { ok: false, runId, exitCode: -1, error: "Check cwd must be inside workspace." };
   }
   const candidateCwd = containedCwd.path;
 
   if (!existsSync(candidateCwd)) {
-    return { ok: false, runId, exitCode: -1, error: "Command cwd does not exist." };
+    return { ok: false, runId, exitCode: -1, error: "Check cwd does not exist." };
   }
 
   const emitEvent = (kind: "start" | "stdout" | "stderr" | "exit", line: string, level: "info" | "ok" | "warn" | "error" = "info") => {
@@ -407,12 +549,21 @@ ipcMain.handle("ascend:run-command", async (event, payload) => {
   };
 
   return await new Promise<{ ok: boolean; runId: string; exitCode: number; error?: string }>((resolve) => {
-    emitEvent("start", `[run:${runId}] ${command}`, "info");
+    emitEvent("start", `[run:${runId}] ${selected.label}`, "info");
 
-    const child = spawn("cmd.exe", ["/d", "/s", "/c", command], {
+    // `shell: true` is required, not preferred: Node refuses to spawn the
+    // npm .cmd shim without it (EINVAL, its CVE-2024-27980 fix), so three of
+    // the four checks simply could not run otherwise. See workspaceChecks.ts.
+    //
+    // What makes that safe here is that `selected` came out of the frozen
+    // registry via isWorkspaceCheck. Every element of the command line below
+    // is a literal in that file. The caller chose which check runs; it
+    // contributed no part of what runs.
+    const child = spawn(selected.command, [...selected.args], {
       cwd: candidateCwd,
       windowsHide: true,
-      env: process.env
+      shell: true,
+      env: checkEnvironment()
     });
 
     let stdoutBuffer = "";
@@ -461,7 +612,7 @@ ipcMain.handle("ascend:run-command", async (event, payload) => {
 
       const ok = safeCode === 0;
       emitEvent("exit", `[run:${runId}] exit ${safeCode}`, ok ? "ok" : "error");
-      resolve({ ok, runId, exitCode: safeCode, ...(ok ? {} : { error: `Command exited with code ${safeCode}` }) });
+      resolve({ ok, runId, exitCode: safeCode, ...(ok ? {} : { error: `${selected.label} exited with code ${safeCode}` }) });
     });
   });
 });

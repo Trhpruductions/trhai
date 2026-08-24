@@ -25,7 +25,21 @@ type ChatMessage = {
 };
 
 export type AgentResult =
-  | { ok: true; text: string; model: string; toolsUsed: string[] }
+  | {
+    ok: true;
+    text: string;
+    model: string;
+    toolsUsed: string[];
+    /**
+     * A tool the permission gate refused for want of confirmation.
+     *
+     * Carried out so the caller can record what the user is being asked to
+     * approve. Only the last one is kept: the model is told to ask rather
+     * than to keep trying, so a turn proposing several destructive actions
+     * is not a case worth designing for.
+     */
+    awaitingConfirmation?: { tool: string; arguments: Record<string, unknown> };
+  }
   | {
     ok: false;
     reason: string;
@@ -474,6 +488,7 @@ export async function runAgent(
   ];
 
   const toolsUsed: string[] = [];
+  let awaitingConfirmation: { tool: string; arguments: Record<string, unknown> } | undefined;
 
   // Results from tools that changed something, kept so they can survive into
   // the final answer verbatim.
@@ -567,7 +582,8 @@ export async function runAgent(
         ok: true,
         text: withMutationResults(cleanedText, mutationResults),
         model: typeof response.model === "string" ? response.model : config.model,
-        toolsUsed
+        toolsUsed,
+        ...(awaitingConfirmation ? { awaitingConfirmation } : {})
       };
     }
 
@@ -587,6 +603,13 @@ export async function runAgent(
       // write race for the same workspace file with no ordering guarantee.
       const result = await runTool(call, context);
       toolsUsed.push(call.name);
+
+      // Refused for permission, not failed. Recorded so the caller can hold
+      // the offer open for a "yes"; the model still sees the refusal text and
+      // is told to ask rather than to route around it.
+      if (result.needsConfirmation) {
+        awaitingConfirmation = { tool: call.name, arguments: call.arguments };
+      }
       // The failure text goes back unchanged. "Nothing matches X" is what stops
       // the model inventing an answer; softening it here would undo that.
       messages.push({ role: "tool", content: result.content });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   appendNode,
   capabilityReason,
@@ -33,7 +33,7 @@ const starterFlow: Flow = {
   id: "flow-1",
   name: "Test and report",
   nodes: [
-    { id: "n1", type: "run-script", config: { command: "npm test" } },
+    { id: "n1", type: "run-script", config: { check: "tests" } },
     { id: "n2", type: "if", config: { left: "ok", op: "==", right: "true" } },
     { id: "n3", type: "discord-message", config: { channel: "builds" } },
     { id: "n4", type: "else", config: {} },
@@ -47,14 +47,22 @@ const palette: NodeType[] = [
   "open-website", "email", "call-api", "generate-image", "discord-message"
 ];
 
-const configFields: Partial<Record<NodeType, Array<{ key: string; label: string; placeholder: string }>>> = {
+type ConfigField = {
+  key: string;
+  label: string;
+  placeholder: string;
+  /** Renders a picker of the desktop shell's named checks instead of a text box. */
+  checkPicker?: true;
+};
+
+const configFields: Partial<Record<NodeType, ConfigField[]>> = {
   if: [
     { key: "left", label: "Variable", placeholder: "ok" },
     { key: "op", label: "Test", placeholder: "==" },
     { key: "right", label: "Value", placeholder: "true" }
   ],
   wait: [{ key: "seconds", label: "Seconds", placeholder: "30" }],
-  "run-script": [{ key: "command", label: "Command", placeholder: "npm test" }],
+  "run-script": [{ key: "check", label: "Check", placeholder: "", checkPicker: true }],
   "open-website": [{ key: "url", label: "URL", placeholder: "https://example.com" }],
   email: [{ key: "to", label: "To", placeholder: "me@example.com" }],
   "call-api": [
@@ -69,6 +77,24 @@ export function AutomationSurface() {
   const [flow, setFlow] = useState<Flow>(() => readFlow(window.localStorage, storageKey) ?? starterFlow);
   const [run, setRun] = useState<RunResult | null>(null);
   const [running, setRunning] = useState(false);
+  // Named checks the desktop shell will actually accept. Empty in a browser,
+  // where RUN SCRIPT is reported as skipped rather than offered.
+  const [checks, setChecks] = useState<Array<{ name: string; label: string }>>([]);
+
+  useEffect(() => {
+    const list = window.ascendDesktop?.listWorkspaceChecks;
+    if (!list) return;
+    let cancelled = false;
+
+    void list().then((result) => {
+      if (!cancelled && result?.ok) setChecks(result.checks ?? []);
+    }).catch(() => {
+      // An empty list leaves the picker showing only "Choose a check…",
+      // which is accurate: nothing is runnable from here.
+    });
+
+    return () => { cancelled = true; };
+  }, []);
 
   const issues = validateFlow(flow);
   const rewind = run ? rewindPoint(run) : null;
@@ -83,7 +109,7 @@ export function AutomationSurface() {
     setRunning(true);
 
     try {
-      const runner = window.ascendDesktop?.runWorkspaceCommand;
+      const runner = window.ascendDesktop?.runWorkspaceCheck;
       const result = await executeFlow(flow, {
         dryRun,
         stopAfter,
@@ -91,8 +117,8 @@ export function AutomationSurface() {
         // browser RUN SCRIPT reports that it was skipped, rather than appearing
         // to have succeeded.
         runScript: !dryRun && runner
-          ? async (command) => {
-            const outcome = await runner({ command });
+          ? async (check) => {
+            const outcome = await runner({ check });
             return { ok: Boolean(outcome?.ok), exitCode: outcome?.ok ? 0 : 1, output: outcome?.error ?? "" };
           }
           : undefined
@@ -170,13 +196,46 @@ export function AutomationSurface() {
                   {fields.map((field) => (
                     <label key={field.key} className="flow-field">
                       <span className="label">{field.label}</span>
-                      <input
-                        className="field"
-                        value={node.config[field.key] ?? ""}
-                        placeholder={field.placeholder}
-                        aria-label={`${nodeLabels[node.type]} ${field.label}`}
-                        onChange={(event) => commit(updateNodeConfig(flow, node.id, field.key, event.target.value))}
-                      />
+                      {field.checkPicker ? (
+                        // A fixed set, not typed text: RUN SCRIPT can only name
+                        // a check the desktop shell already defines, so a flow
+                        // cannot carry a command line for it to run.
+                        <select
+                          className="field"
+                          value={node.config[field.key] ?? ""}
+                          aria-label={`${nodeLabels[node.type]} ${field.label}`}
+                          onChange={(event) => commit(updateNodeConfig(flow, node.id, field.key, event.target.value))}
+                        >
+                          <option value="">
+                            {checks.length === 0 ? "Needs the desktop app" : "Choose a check…"}
+                          </option>
+                          {checks.map((check) => (
+                            <option key={check.name} value={check.name}>{check.label}</option>
+                          ))}
+                          {/* A saved flow opened in a browser has a check the
+                              list cannot confirm, because the list only exists
+                              in the desktop shell. Showing it anyway keeps the
+                              stored value visible and selected — without this
+                              the select falls back to the empty option and a
+                              perfectly good flow reads as unconfigured. */}
+                          {node.config[field.key]
+                            && !checks.some((check) => check.name === node.config[field.key])
+                            ? (
+                              <option value={node.config[field.key]}>
+                                {node.config[field.key]}
+                              </option>
+                            )
+                            : null}
+                        </select>
+                      ) : (
+                        <input
+                          className="field"
+                          value={node.config[field.key] ?? ""}
+                          placeholder={field.placeholder}
+                          aria-label={`${nodeLabels[node.type]} ${field.label}`}
+                          onChange={(event) => commit(updateNodeConfig(flow, node.id, field.key, event.target.value))}
+                        />
+                      )}
                     </label>
                   ))}
                 </div>

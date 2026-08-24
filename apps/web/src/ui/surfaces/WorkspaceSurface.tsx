@@ -14,6 +14,14 @@ import "./workspace.css";
 // the top, instead of every panel failing separately.
 
 type HostProject = { name: string; path: string; group: string };
+type ConnectedProject = { root: string; name: string; connectedAt: string };
+type ProjectEntry = { path: string; bytes: number; directory: boolean };
+
+/** The folder above `entryPath`, or the project root. */
+function parentOf(entryPath: string): string {
+  const cut = entryPath.lastIndexOf("/");
+  return cut === -1 ? "" : entryPath.slice(0, cut);
+}
 type Telemetry = { cpuPercent?: number; memoryPercent?: number; storagePercent?: number; networkPercent?: number };
 type LogLine = { id: string; text: string; level: string };
 
@@ -21,9 +29,15 @@ export function WorkspaceSurface() {
   const bridge = window.ascendDesktop;
   const [projects, setProjects] = useState<HostProject[]>([]);
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
-  const [command, setCommand] = useState("");
+  const [checks, setChecks] = useState<Array<{ name: string; label: string }>>([]);
   const [log, setLog] = useState<LogLine[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [connected, setConnected] = useState<ConnectedProject | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  /** Folder currently being browsed, relative to the project root. "" is the root. */
+  const [projectPath, setProjectPath] = useState("");
+  const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
+  const [fileView, setFileView] = useState<{ path: string; content: string; truncated: boolean } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!bridge?.listProjectInventory) return;
@@ -60,23 +74,109 @@ export function WorkspaceSurface() {
     });
   }, [bridge]);
 
-  async function runCommand() {
-    const trimmed = command.trim();
-    if (!trimmed || busy || !bridge?.runWorkspaceCommand) return;
+  // The runnable set comes from the main process rather than being listed
+  // here, so this screen cannot drift out of step with what will actually be
+  // accepted — an unknown name is refused at the dispatcher either way.
+  useEffect(() => {
+    if (!bridge?.listWorkspaceChecks) return;
+    let cancelled = false;
 
-    setBusy(true);
+    void bridge.listWorkspaceChecks().then((result) => {
+      if (!cancelled && result?.ok) setChecks(result.checks ?? []);
+    }).catch(() => {
+      // Leaves the list empty, which reads as "no checks available" rather
+      // than offering a button that cannot work.
+    });
+
+    return () => { cancelled = true; };
+  }, [bridge]);
+
+  const openFolder = useCallback(async (folder: string) => {
+    if (!bridge?.listProjectFiles) return;
+
+    const result = await bridge.listProjectFiles({ subdirectory: folder || "." });
+    // A refusal leaves the previous listing alone rather than blanking the
+    // panel, so a rejected path does not look like an empty folder.
+    if (result?.ok) {
+      setProjectPath(folder);
+      setProjectEntries(result.entries ?? []);
+      setFileView(null);
+    }
+  }, [bridge]);
+
+  const refreshConnected = useCallback(async () => {
+    if (!bridge?.getConnectedProject) return;
+
+    const result = await bridge.getConnectedProject();
+    const project = result?.ok ? result.project ?? null : null;
+    setConnected(project);
+    if (project) await openFolder("");
+  }, [bridge, openFolder]);
+
+  useEffect(() => { void refreshConnected(); }, [refreshConnected]);
+
+  async function connect() {
+    if (!bridge?.connectProject || connecting) return;
+
+    setConnecting(true);
     try {
-      await bridge.runWorkspaceCommand({ command: trimmed });
+      const result = await bridge.connectProject();
+      // Cancelling the picker is a normal outcome, not a failure to report.
+      if (result?.ok && result.project) {
+        setConnected(result.project);
+        await openFolder("");
+      }
     } finally {
-      setBusy(false);
+      setConnecting(false);
+    }
+  }
+
+  async function disconnect() {
+    if (!bridge?.disconnectProject) return;
+
+    await bridge.disconnectProject();
+    setConnected(null);
+    setProjectEntries([]);
+    setProjectPath("");
+    setFileView(null);
+  }
+
+  async function openFile(filePath: string) {
+    if (!bridge?.readProjectFile) return;
+
+    const result = await bridge.readProjectFile({ path: filePath });
+    setFileView(result?.ok
+      ? { path: filePath, content: result.content ?? "", truncated: Boolean(result.truncated) }
+      // Shown rather than swallowed: a file that could not be read must not
+      // look like a file that was empty.
+      : { path: filePath, content: result?.error ?? "That file could not be read.", truncated: false });
+  }
+
+  async function runCheck(check: string) {
+    if (busy || !bridge?.runWorkspaceCheck) return;
+
+    setBusy(check);
+    try {
+      const result = await bridge.runWorkspaceCheck({ check });
+      // A refusal from the dispatcher is reported in the same log as real
+      // output; without this a rejected check looks identical to one that ran
+      // and printed nothing.
+      if (result && !result.ok && result.error) {
+        setLog((current) => [
+          { id: crypto.randomUUID(), text: result.error!, level: "error" },
+          ...current
+        ].slice(0, 200));
+      }
+    } finally {
+      setBusy(null);
     }
   }
 
   if (!bridge?.getSystemTelemetry) {
     return (
-      <Surface title="Workspace" summary="Your projects, host readings and a terminal.">
+      <Surface title="Workspace" summary="Your projects, host readings and project checks.">
         <Empty title="Needs the desktop app">
-          This screen reads your machine — project folders, disk and CPU, and a shell — which a
+          This screen reads your machine — project folders, disk and CPU, and project checks — which a
           browser tab cannot do. Open Vexora AI from Launch-Vexora and it appears here.
         </Empty>
       </Surface>
@@ -93,7 +193,7 @@ export function WorkspaceSurface() {
   return (
     <Surface
       title="Workspace"
-      summary="Your projects, live host readings and a shell — all on this machine."
+      summary="Your projects, live host readings and project checks — all on this machine."
       count={`${projects.length} projects`}
       readable={false}
       actions={<button type="button" className="btn btn-sm" onClick={() => void refresh()}>Refresh</button>}
@@ -112,6 +212,81 @@ export function WorkspaceSurface() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Connected Project: a folder the user picked in the operating
+          system's own dialog. Read-only by construction — the bridge has no
+          write method because the main process has no write handler. */}
+      <div className="col connected-project">
+        <div className="row spread">
+          <span className="label">Connected project</span>
+          {connected ? (
+            <button type="button" className="btn btn-sm" onClick={() => void disconnect()}>
+              Disconnect
+            </button>
+          ) : (
+            <button type="button" className="btn btn-sm" disabled={connecting}
+              onClick={() => void connect()}>
+              {connecting ? "Choosing…" : "Connect a project"}
+            </button>
+          )}
+        </div>
+
+        {connected ? (
+          <>
+            <div className="panel list-row">
+              <div className="grow">
+                <strong>{connected.name}</strong>
+                <p className="faint list-excerpt mono">{connected.root}</p>
+              </div>
+              <span className="chip">read-only</span>
+            </div>
+
+            {projectPath ? (
+              <button type="button" className="btn btn-ghost btn-sm project-up"
+                onClick={() => void openFolder(parentOf(projectPath))}>
+                ← {projectPath}
+              </button>
+            ) : null}
+
+            {projectEntries.length === 0 ? (
+              <p className="faint">Nothing to show in this folder.</p>
+            ) : (
+              <ul className="list">
+                {projectEntries.map((entry) => (
+                  <li key={entry.path} className="panel list-row">
+                    <button type="button" className="btn btn-ghost grow project-entry"
+                      onClick={() => void (entry.directory ? openFolder(entry.path) : openFile(entry.path))}>
+                      {entry.directory ? "📁" : "📄"} {entry.path.split("/").pop()}
+                    </button>
+                    {!entry.directory ? <span className="faint">{entry.bytes} bytes</span> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {fileView ? (
+              <div className="panel project-file">
+                <div className="row spread">
+                  <strong className="mono">{fileView.path}</strong>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFileView(null)}>
+                    Close
+                  </button>
+                </div>
+                {fileView.truncated ? (
+                  <p className="faint">Showing the first part of this file; it is longer than displayed.</p>
+                ) : null}
+                <pre className="mono project-file-body">{fileView.content}</pre>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <Empty title="No project connected">
+            Connect a folder to browse and read its files here. You choose it in your own
+            file picker, and this app can only read what is inside it — there is no way to
+            write to it from this screen.
+          </Empty>
+        )}
       </div>
 
       <div className="workspace-split">
@@ -140,25 +315,35 @@ export function WorkspaceSurface() {
         </div>
 
         <div className="col">
-          <span className="label">Terminal</span>
-          <div className="row">
-            <input
-              className="field mono grow"
-              value={command}
-              placeholder="npm test"
-              aria-label="Command"
-              onChange={(event) => setCommand(event.target.value)}
-              onKeyDown={(event) => { if (event.key === "Enter") void runCommand(); }}
-            />
-            <button type="button" className="btn btn-primary" disabled={busy || !command.trim()}
-              onClick={() => void runCommand()}>
-              {busy ? "Running…" : "Run"}
-            </button>
-          </div>
+          <span className="label">Checks</span>
+          {/* Named checks rather than a command box. The executable and its
+              arguments live in the desktop shell; this screen can only ask
+              for one of them by name, so there is no command text for page
+              content to influence. */}
+          {checks.length === 0 ? (
+            <Empty title="No checks available">
+              The desktop shell reports nothing runnable. Checks run against your project
+              and are defined in the app itself, not typed here.
+            </Empty>
+          ) : (
+            <div className="row wrap">
+              {checks.map((check) => (
+                <button
+                  key={check.name}
+                  type="button"
+                  className="btn"
+                  disabled={busy !== null}
+                  onClick={() => void runCheck(check.name)}
+                >
+                  {busy === check.name ? `${check.label}…` : check.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="panel term-log">
             {log.length === 0 ? (
-              <p className="faint">Output appears here as a command runs.</p>
+              <p className="faint">Output appears here as a check runs.</p>
             ) : (
               log.map((line) => (
                 <p key={line.id} className={`mono term-line term-${line.level}`}>{line.text}</p>

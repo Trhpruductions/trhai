@@ -66,3 +66,44 @@
 .term-warn { color: var(--warn); }
 .term-error { color: var(--danger); }
 .term-ok { color: var(--ok); }
+
+/* ---- Connected project ---------------------------------------------------
+   A folder the user picked, browsed read-only. Sits above the split because
+   it is the subject of the screen when one is connected, not a side panel. */
+
+.connected-project {
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.project-up {
+  align-self: flex-start;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs);
+}
+
+/* A row that is a button but should read as a row, not a control. */
+.project-entry {
+  justify-content: flex-start;
+  text-align: left;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-sm);
+}
+
+.project-file {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.project-file-body {
+  margin: 0;
+  max-height: 22rem;
+  /* Both axes: source lines are long, and wrapping them would misrepresent
+     the file rather than display it. */
+  overflow: auto;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  white-space: pre;
+}
