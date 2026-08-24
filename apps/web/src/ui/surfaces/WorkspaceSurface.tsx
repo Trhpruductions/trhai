@@ -29,6 +29,9 @@ export function WorkspaceSurface() {
   const bridge = window.ascendDesktop;
   const [projects, setProjects] = useState<HostProject[]>([]);
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
+  // Bumped on every completed read, so the flash below marks a real sample
+  // having landed even on a tick where every percentage happens to repeat.
+  const [telemetrySeq, setTelemetrySeq] = useState(0);
   const [checks, setChecks] = useState<Array<{ name: string; label: string }>>([]);
   const [log, setLog] = useState<LogLine[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -55,7 +58,10 @@ export function WorkspaceSurface() {
 
     async function read() {
       const result = await bridge!.getSystemTelemetry!();
-      if (!cancelled && result?.ok) setTelemetry(result);
+      if (!cancelled && result?.ok) {
+        setTelemetry(result);
+        setTelemetrySeq((count) => count + 1);
+      }
     }
 
     void read();
@@ -205,6 +211,10 @@ export function WorkspaceSurface() {
             {/* A missing reading shows a dash, not a zero: "0%" is a
                 measurement and would be a false one. */}
             <strong className="reading-value">
+              {/* A separate layer so remounting it to replay the flash on
+                  every sample never remounts the number sitting in front of
+                  it — same reasoning as the stat rail on the home screen. */}
+              {reading.value !== undefined ? <span key={telemetrySeq} className="live-flash" /> : null}
               {reading.value === undefined ? "—" : `${clampPercent(reading.value)}%`}
             </strong>
             <div className="reading-bar">

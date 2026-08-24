@@ -48,6 +48,9 @@ async function readHost(): Promise<Pick<Readings, "cpu" | "memory" | "storage">>
 
 export function StatusBar() {
   const [readings, setReadings] = useState<Readings>(empty);
+  // Bumped on every completed sample, so the flash below marks a real check
+  // having run even on a tick where every reading happens to repeat.
+  const [sampleSeq, setSampleSeq] = useState(0);
   const [clock, setClock] = useState(() => new Date());
 
   useEffect(() => {
@@ -75,7 +78,10 @@ export function StatusBar() {
         online = false;
       }
 
-      if (!cancelled) setReadings({ ...host, apiMs, model, online });
+      if (!cancelled) {
+        setReadings({ ...host, apiMs, model, online });
+        setSampleSeq((count) => count + 1);
+      }
     }
 
     void sample();
@@ -107,7 +113,13 @@ export function StatusBar() {
             <span key={gauge.label} className="sb-gauge">
               <span className="sb-gauge-label">{gauge.label}</span>
               <span className="sb-bar"><i style={{ width: `${clampPercent(gauge.value)}%` }} /></span>
-              <span className="sb-gauge-value mono">{clampPercent(gauge.value)}%</span>
+              <span className="sb-gauge-value mono">
+                {/* A separate layer so remounting it to replay the flash on
+                    every sample never remounts the number sitting in front of
+                    it — same reasoning as the stat rail on the home screen. */}
+                <span key={sampleSeq} className="live-flash" />
+                {clampPercent(gauge.value)}%
+              </span>
             </span>
           ))}
         </>

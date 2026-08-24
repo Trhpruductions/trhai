@@ -1,0 +1,49 @@
+/* Atmosphere behind the home screen. Only tokens — no raw colours. */
+
+.ambient {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* Behind the frame and the assembly, which are later in the DOM and take
+     the default stacking order; this only needs to stay out of their way. */
+  z-index: 0;
+}
+
+.ambient-mote {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, var(--accent-quiet) 0%, transparent 70%);
+  opacity: 0.35;
+  /* Duration lives in a custom property rather than the shorthand, so the
+     busy-state rule below can scale it with calc(). An inline duration set
+     directly would out-rank that rule outright and the room would never
+     visibly answer to the app doing something. */
+  animation-name: ambient-drift;
+  animation-duration: var(--mote-duration, 24s);
+  animation-timing-function: var(--ease);
+  animation-iteration-count: infinite;
+  will-change: transform, opacity;
+}
+
+/* Quicker and a little brighter while the app is actually doing something —
+   the same rule the core follows, so the room feels connected to the machine
+   rather than decorated independently of it. */
+.ambient-active .ambient-mote {
+  animation-duration: calc(var(--mote-duration, 24s) * 0.35);
+  opacity: 0.5;
+}
+
+@keyframes ambient-drift {
+  0% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.22; }
+  50% { transform: translate(calc(-50% + 14px), calc(-50% - 10px)) scale(1.08); opacity: 0.42; }
+  100% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.22; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-mote {
+    animation: none;
+    opacity: 0.22;
+  }
+}

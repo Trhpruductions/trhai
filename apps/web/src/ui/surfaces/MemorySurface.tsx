@@ -77,7 +77,7 @@ export function MemorySurface() {
       title="Memory"
       summary="Facts you asked it to keep, in your own words. Say “remember that …” in a conversation to add one. Nothing here was inferred — if it is wrong, it is because it was told wrong."
       count={`${items.length} ${items.length === 1 ? "entry" : "entries"}`}
-      actions={note ? <span className="chip">{note}</span> : undefined}
+      actions={note ? <span key={note} className="chip chip-arrive">{note}</span> : undefined}
     >
       {items.length === 0 ? (
         <Empty title="Nothing remembered yet">

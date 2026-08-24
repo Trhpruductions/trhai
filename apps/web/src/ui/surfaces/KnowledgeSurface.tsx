@@ -145,7 +145,7 @@ export function KnowledgeSurface() {
           />
           <span className="faint">Text formats only — a PDF or image is refused rather than indexed as noise.</span>
         </div>
-        {note ? <span className="chip">{note}</span> : null}
+        {note ? <span key={note} className="chip chip-arrive">{note}</span> : null}
       </div>
 
       {docs.length === 0 ? (

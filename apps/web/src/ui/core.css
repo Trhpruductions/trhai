@@ -147,6 +147,57 @@
 .core-offline .core-pulse,
 .core-offline .core-bloom { animation-play-state: paused; }
 
+/* Speaking: a third live state, distinct from thinking (working) and idle
+   (waiting). Set whenever a reply is being read aloud, whichever engine is
+   doing it. Without a real reading to follow this still quickens the
+   assembly, honestly marking "something is happening" without claiming to
+   measure it. */
+.core-speaking .core-sweep { animation-duration: 5s; }
+.core-speaking .ring-mid-spin { animation-duration: 10s; }
+.core-speaking .core-pulse,
+.core-speaking .core-bloom,
+.core-speaking .core-mark { animation-duration: 1.6s; }
+
+/* Metered: `--amp` is a real reading of this machine's own neural voice,
+   sampled every frame while it plays — see audioAmplitude.ts. The canned
+   breathing keyframe is replaced outright rather than layered under it: a
+   value this real should not be fighting a loop that is faking the same
+   thing. Only ever present alongside `.core-speaking`, and only when the
+   caller actually has a reading to give — the browser's own voices expose no
+   waveform, so this class never appears for them. */
+.core-metered.core-speaking .core-pulse {
+  animation: none;
+  transform: scale(calc(1 + var(--amp, 0) * 0.55));
+  opacity: calc(0.35 + var(--amp, 0) * 0.55);
+  transition: transform 70ms linear, opacity 70ms linear;
+}
+
+.core-metered.core-speaking .core-bloom {
+  animation: none;
+  opacity: calc(0.45 + var(--amp, 0) * 0.55);
+  transition: opacity 70ms linear;
+}
+
+.core-metered.core-speaking .core-mark {
+  animation: none;
+  filter: drop-shadow(0 0 calc(8px + var(--amp, 0) * 20px) var(--accent));
+  transition: filter 70ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* A live reading updates every frame, which is exactly the kind of motion
+     this setting exists to remove, even though it is driven by a real signal
+     rather than a loop. The state still reads as "speaking" without moving. */
+  .core-metered.core-speaking .core-pulse,
+  .core-metered.core-speaking .core-bloom,
+  .core-metered.core-speaking .core-mark {
+    transform: none;
+    opacity: 0.75;
+    filter: drop-shadow(0 0 12px var(--accent));
+    transition: none;
+  }
+}
+
 @keyframes core-spin {
   to { transform: rotate(360deg); }
 }

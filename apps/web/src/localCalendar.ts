@@ -106,6 +106,15 @@ export function formatRelative(startsAt: string, now: Date): string {
   return `in ${days}d`;
 }
 
+/** Within `thresholdMinutes` of starting, and not already past — worth a second look. */
+export function isImminent(startsAt: string, now: Date, thresholdMinutes = 15): boolean {
+  const target = new Date(startsAt).getTime();
+  if (Number.isNaN(target)) return false;
+
+  const minutes = (target - now.getTime()) / 60000;
+  return minutes >= 0 && minutes <= thresholdMinutes;
+}
+
 export function parseEvents(value: unknown): CalendarEvent[] {
   if (!Array.isArray(value)) return [];
 

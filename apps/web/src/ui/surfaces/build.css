@@ -8,7 +8,22 @@
    The data model is the point of this screen, so it gets the most weight: a
    panel per record type, fields listed plainly with their inferred type. */
 
-.entity { padding: var(--space-4); }
+.entity {
+  padding: var(--space-4);
+  /* Plays once per mount: a stable key (the entity name) is what keeps an
+     entity already on screen from replaying this when the spec is re-read,
+     so only a genuinely new entity arrives. */
+  animation: entity-arrive 340ms var(--ease) both;
+}
+
+@keyframes entity-arrive {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .entity { animation: none; }
+}
 
 .entity-head {
   padding-bottom: var(--space-3);

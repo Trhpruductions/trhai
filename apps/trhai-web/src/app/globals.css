@@ -1,0 +1,291 @@
+@import "tailwindcss";
+
+/*
+ * TRHAI design tokens.
+ *
+ * The identity is a near-black HUD with a cyan/blue signal colour — the
+ * direction chosen for this rewrite, distinct from the violet accent the
+ * previous build settled on. One accent, used for the thing that matters on
+ * a screen; glow is reserved for live state, never sprayed on every border.
+ */
+
+:root {
+  --bg-0: #05070a;
+  --bg-1: #0a0f16;
+  --bg-2: #101825;
+  --bg-3: #16233a;
+
+  --line-subtle: rgba(120, 200, 255, 0.10);
+  --line: rgba(120, 200, 255, 0.20);
+  --line-strong: rgba(90, 200, 255, 0.45);
+
+  --text: #eaf6ff;
+  --text-muted: #92aec2;
+  --text-faint: #5c7688;
+
+  --accent: #35c7ff;
+  --accent-strong: #7fe3ff;
+  --accent-quiet: rgba(53, 199, 255, 0.14);
+
+  --ok: #4be3a8;
+  --warn: #ffc266;
+  --danger: #ff7a7a;
+  --ok-quiet: rgba(75, 227, 168, 0.12);
+  --warn-quiet: rgba(255, 194, 102, 0.12);
+  --danger-quiet: rgba(255, 122, 122, 0.12);
+
+  --glow: 0 0 22px rgba(53, 199, 255, 0.4);
+  --glow-soft: 0 0 12px rgba(53, 199, 255, 0.22);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 10px 30px rgba(0, 0, 0, 0.5);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  --fast: 120ms;
+  --slow: 260ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --font-display: var(--font-orbitron), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fast: 1ms;
+    --slow: 1ms;
+  }
+}
+
+/* ---- Accent ----------------------------------------------------------------
+   A short, considered list rather than a free colour picker — see theme.ts.
+   Cyan is the root default and needs no override block of its own. */
+
+:root[data-accent="violet"] {
+  --accent: #a855f7;
+  --accent-strong: #c98bff;
+  --accent-quiet: rgba(168, 85, 247, 0.14);
+  --glow: 0 0 22px rgba(168, 85, 247, 0.4);
+  --glow-soft: 0 0 12px rgba(168, 85, 247, 0.22);
+}
+
+:root[data-accent="emerald"] {
+  --accent: #34d399;
+  --accent-strong: #7bf0c4;
+  --accent-quiet: rgba(52, 211, 153, 0.14);
+  --glow: 0 0 22px rgba(52, 211, 153, 0.4);
+  --glow-soft: 0 0 12px rgba(52, 211, 153, 0.22);
+}
+
+:root[data-accent="amber"] {
+  --accent: #f5a524;
+  --accent-strong: #ffc861;
+  --accent-quiet: rgba(245, 165, 36, 0.14);
+  --glow: 0 0 22px rgba(245, 165, 36, 0.4);
+  --glow-soft: 0 0 12px rgba(245, 165, 36, 0.22);
+}
+
+@theme inline {
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-0);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  position: relative;
+}
+
+/* A faint field and a hairline grid, at the threshold of visibility — the
+   surface the interface sits on, never competing with a single character of
+   text. Fixed, so it never slides behind scrolling content. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(80ch 56ch at 20% -8%, rgba(53, 199, 255, 0.08), transparent 70%),
+    radial-gradient(60ch 44ch at 100% 0%, rgba(90, 140, 255, 0.05), transparent 70%);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    linear-gradient(rgba(130, 210, 255, 0.026) 1px, transparent 1px) 0 0 / 100% 44px,
+    linear-gradient(90deg, rgba(130, 210, 255, 0.026) 1px, transparent 1px) 0 0 / 44px 100%,
+    radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+#trhai-root {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+}
+
+h1, h2, h3, h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+}
+
+p {
+  margin: 0;
+}
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: var(--accent-quiet);
+  color: var(--text);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: var(--radius-pill);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* ---- Primitives ----------------------------------------------------------
+   The same small vocabulary the rest of this rewrite uses — panels, labels,
+   chips, buttons — kept here rather than repeated per component. */
+
+.panel {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.hud-label {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.muted { color: var(--text-muted); }
+.faint { color: var(--text-faint); }
+.mono { font-family: var(--font-mono); }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.chip-live { color: var(--accent); border-color: var(--line-strong); background: var(--accent-quiet); }
+.chip-ok { color: var(--ok); border-color: var(--ok); background: var(--ok-quiet); }
+.chip-warn { color: var(--warn); border-color: var(--warn); background: var(--warn-quiet); }
+.chip-danger { color: var(--danger); border-color: var(--danger); background: var(--danger-quiet); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+
+.btn:hover:not(:disabled) { border-color: var(--line-strong); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--accent-quiet);
+  border-color: var(--line-strong);
+  color: var(--accent-strong);
+}
+
+.btn-primary:hover:not(:disabled) { box-shadow: var(--glow); }
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.btn-ghost:hover:not(:disabled) { background: var(--bg-2); color: var(--text); }
+
+.field {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--bg-0);
+  color: var(--text);
+  font-size: 14px;
+  transition: border-color var(--fast) var(--ease);
+}
+
+.field::placeholder { color: var(--text-faint); }
+
+.field:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  box-shadow: var(--glow-soft);
+}

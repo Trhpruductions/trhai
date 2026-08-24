@@ -3,6 +3,7 @@ import {
   addEvent,
   formatEventTime,
   formatRelative,
+  isImminent,
   readEvents,
   removeEvent,
   upcomingEvents,
@@ -67,20 +68,28 @@ export function CalendarSurface() {
           Add
         </button>
       </div>
-      {note ? <span className="chip chip-warn">{note}</span> : null}
+      {note ? <span key={note} className="chip chip-warn chip-arrive">{note}</span> : null}
 
       {upcoming.length > 0 ? (
         <div className="col">
           <span className="label">Next up</span>
-          {upcoming.map((event) => (
-            <div key={event.id} className="row spread panel list-row">
-              <div className="row">
-                <span className="mono">{formatEventTime(event.startsAt)}</span>
-                <strong>{event.title}</strong>
+          {upcoming.map((event) => {
+            // A countdown that never changes its own urgency is just a label;
+            // this is the same clock formatRelative already reads, not a
+            // separate guess at how soon "soon" is.
+            const imminent = isImminent(event.startsAt, now);
+            return (
+              <div key={event.id} className="row spread panel list-row">
+                <div className="row">
+                  <span className="mono">{formatEventTime(event.startsAt)}</span>
+                  <strong>{event.title}</strong>
+                </div>
+                <span className={`chip chip-live${imminent ? " chip-imminent" : ""}`}>
+                  {formatRelative(event.startsAt, now)}
+                </span>
               </div>
-              <span className="chip chip-live">{formatRelative(event.startsAt, now)}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : null}
 
