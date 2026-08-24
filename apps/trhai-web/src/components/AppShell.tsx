@@ -8,13 +8,14 @@ import "./shell.css";
 
 // The shell every screen shares: a rail and a status strip.
 //
-// Dashboard, Chat, Settings and Agents are real destinations in this phase —
-// the rest of the master spec (Tasks, System, Security, Files, Automation)
-// is later phases in the same document, and a nav entry that opens onto an
-// empty promise is worse than one that says plainly it is not built yet.
-// Agents was not itself a named phase-4 item, but it is a real, working
-// screen backed by @ascend/shared's marketplace module — installing and
-// activating an agent visibly changes the dashboard, the same as Vexora.
+// Dashboard, Chat, Settings, Agents and Security are real destinations in
+// this phase — the rest of the master spec (Tasks, System, Files,
+// Automation) is later phases in the same document, and a nav entry that
+// opens onto an empty promise is worse than one that says plainly it is not
+// built yet. Agents and Security were not themselves named phase-4 items,
+// but both are real, working screens backed by data the API already had:
+// Agents by @ascend/shared's marketplace module, Security by
+// GET /v1/capabilities wrapping the same registry runTool enforces.
 
 type Destination = { href: string; label: string; glyph: string; hint: string };
 
@@ -22,13 +23,13 @@ const live: Destination[] = [
   { href: "/", label: "Dashboard", glyph: "◈", hint: "Command centre" },
   { href: "/chat", label: "Chat", glyph: "◉", hint: "Talk to TRHAI" },
   { href: "/agents", label: "Agents", glyph: "◆", hint: "Installable lenses on the same assistant" },
+  { href: "/security", label: "Security", glyph: "◐", hint: "Every tool and the permission that gates it" },
   { href: "/settings", label: "Settings", glyph: "⚙", hint: "Voice, theme and defaults" }
 ];
 
 const planned: Destination[] = [
   { href: "#", label: "Tasks", glyph: "▤", hint: "Phase 4 — not built yet" },
   { href: "#", label: "System", glyph: "▦", hint: "Phase 4 — not built yet" },
-  { href: "#", label: "Security", glyph: "◐", hint: "Phase 4 — not built yet" },
   { href: "#", label: "Files", glyph: "▣", hint: "Phase 4 — not built yet" }
 ];
 
