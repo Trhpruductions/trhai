@@ -62,6 +62,16 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiResul
   }
 }
 
+export async function apiDelete(path: string): Promise<ApiResult<void>> {
+  try {
+    const response = await fetch(`${apiBaseUrl}${path}`, { method: "DELETE" });
+    if (!response.ok) return { ok: false, reason: `The service answered with ${response.status}.` };
+    return { ok: true, data: undefined };
+  } catch {
+    return { ok: false, reason: "Could not reach the local service." };
+  }
+}
+
 /** A stable per-browser id, the same scheme the existing web client uses. */
 export function sessionId(): string {
   if (typeof window === "undefined") return "";

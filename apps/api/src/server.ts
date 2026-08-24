@@ -50,6 +50,7 @@ import { checkAvailability, readLocalModelConfig } from "./services/localModel.j
 import { readPreferences, updatePreferences } from "./services/preferences.js";
 import { getBuildInfo } from "./services/buildInfo.js";
 import { getSystemCapabilities, toolsByLevel } from "./services/systemCapabilities.js";
+import { addTask, listTasks, removeTask, setTaskDone } from "./services/taskListStore.js";
 import {
   clearPendingConfirmation,
   describePendingAction,
@@ -696,6 +697,63 @@ export function createApp() {
       },
       traceId: "trace-local"
     });
+  });
+
+  // E-Tasks: a plain to-do list, scoped per session exactly like knowledge
+  // documents. Not to be confused with the orchestrator's own StoredTask —
+  // that is one in-flight job per session, resolved on a "continue" follow
+  // up; this is a list the user wrote down themselves, and the two never
+  // read each other.
+  app.get("/v1/tasks", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId, res, req);
+    if (!sessionId) return;
+
+    res.json({ data: { tasks: listTasks(sessionId) }, traceId: "trace-local" });
+  });
+
+  app.post("/v1/tasks", (req, res) => {
+    const sessionId = requireSessionId(req.body?.sessionId, res, req);
+    if (!sessionId) return;
+
+    const title = typeof req.body?.title === "string" ? req.body.title : "";
+    const task = addTask(sessionId, { id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, title });
+
+    if (!task) {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "A task needs a title", traceId: "trace-local" });
+      return;
+    }
+
+    res.status(201).json({ data: { task }, traceId: "trace-local" });
+  });
+
+  app.patch("/v1/tasks/:taskId", (req, res) => {
+    const sessionId = requireSessionId(req.body?.sessionId, res, req);
+    if (!sessionId) return;
+
+    if (typeof req.body?.done !== "boolean") {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "done must be a boolean", traceId: "trace-local" });
+      return;
+    }
+
+    const task = setTaskDone(sessionId, req.params.taskId, req.body.done);
+    if (!task) {
+      res.status(404).json({ code: "NOT_FOUND", message: "Task not found", traceId: "trace-local" });
+      return;
+    }
+
+    res.json({ data: { task }, traceId: "trace-local" });
+  });
+
+  app.delete("/v1/tasks/:taskId", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId, res, req);
+    if (!sessionId) return;
+
+    if (!removeTask(sessionId, req.params.taskId)) {
+      res.status(404).json({ code: "NOT_FOUND", message: "Task not found", traceId: "trace-local" });
+      return;
+    }
+
+    res.status(204).end();
   });
 
   app.delete("/v1/knowledge/:documentId", (req, res) => {
