@@ -24,12 +24,23 @@ type ChatMessage = {
   tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }>;
 };
 
+/**
+ * One tool call and whether it actually achieved anything.
+ *
+ * The name alone was never enough. The interface labels a turn from this, and
+ * a label built from a name can only assert an intention — it rendered
+ * "deleted from memory" for a forget that matched nothing and deleted
+ * nothing. `ok` is the tool's own report of what happened, so the label can
+ * describe the outcome instead of the attempt.
+ */
+export type ToolOutcome = { name: string; ok: boolean };
+
 export type AgentResult =
   | {
     ok: true;
     text: string;
     model: string;
-    toolsUsed: string[];
+    toolsUsed: ToolOutcome[];
     /**
      * A tool the permission gate refused for want of confirmation.
      *
@@ -43,7 +54,7 @@ export type AgentResult =
   | {
     ok: false;
     reason: string;
-    toolsUsed: string[];
+    toolsUsed: ToolOutcome[];
     /**
      * True when this model could not be loaded at all, as opposed to loading
      * and then failing to answer. Ollama reports an out-of-memory or a failed
@@ -487,7 +498,7 @@ export async function runAgent(
     { role: "user", content: question }
   ];
 
-  const toolsUsed: string[] = [];
+  const toolsUsed: ToolOutcome[] = [];
   let awaitingConfirmation: { tool: string; arguments: Record<string, unknown> } | undefined;
 
   // Results from tools that changed something, kept so they can survive into
@@ -577,7 +588,8 @@ export async function runAgent(
           ? { ok: false, reason: "The assistant kept searching without reaching an answer.", toolsUsed }
           : { ok: false, reason: "The local model returned an empty reply.", toolsUsed };
       }
-      const cleanedText = toolsUsed.includes("build_app") ? withoutFabricatedLiveClaims(text) : text;
+      const builtAnApp = toolsUsed.some((used) => used.name === "build_app");
+      const cleanedText = builtAnApp ? withoutFabricatedLiveClaims(text) : text;
       return {
         ok: true,
         text: withMutationResults(cleanedText, mutationResults),
@@ -615,7 +627,7 @@ export async function runAgent(
       if (result.needsConfirmation) {
         awaitingConfirmation = { tool: call.name, arguments: call.arguments };
       } else {
-        toolsUsed.push(call.name);
+        toolsUsed.push({ name: call.name, ok: result.ok });
       }
       // The failure text goes back unchanged. "Nothing matches X" is what stops
       // the model inventing an answer; softening it here would undo that.
