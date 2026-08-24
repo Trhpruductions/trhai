@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, type CSSProperties } from "react";
 import "./core.css";
 
 // The core.
@@ -10,7 +10,7 @@ import "./core.css";
 // when the service is reachable and goes still and grey when it is not, so a
 // glance at it tells you the true state of the system.
 
-export type CoreState = "idle" | "thinking" | "offline";
+export type CoreState = "idle" | "thinking" | "speaking" | "offline";
 
 /** Evenly spaced marks around a circle, as line endpoints. */
 function ticks(count: number, radius: number, length: number) {
@@ -34,15 +34,34 @@ function ticks(count: number, radius: number, length: number) {
 
 const outerTicks = ticks(60, 104, 6);
 
-export function Core({ state = "idle", size = 300 }: { state?: CoreState; size?: number }) {
+export function Core({ state = "idle", size = 300, amplitude }: {
+  state?: CoreState;
+  size?: number;
+  /**
+   * Real loudness of the neural voice, 0..1, while `state` is "speaking".
+   *
+   * Undefined — not 0 — is how a caller says "no real reading exists": the
+   * browser's own voices expose no waveform, and the core falls back to a
+   * fixed animated pulse rather than sitting motionless or, worse, moving to
+   * a number that was never a measurement of anything.
+   */
+  amplitude?: number;
+}) {
   // Unique per instance: two cores can be mounted at once, and a duplicated
   // gradient id makes the second one reference the first one's definition.
   const instance = useId().replace(/:/g, "");
   const bloomId = `core-bloom-${instance}`;
   const sweepId = `core-sweep-${instance}`;
 
+  const style: CSSProperties & Record<"--amp", number | undefined> = {
+    width: size,
+    height: size,
+    "--amp": amplitude
+  };
+
   return (
-    <div className={`core core-${state}`} style={{ width: size, height: size }} aria-hidden="true">
+    <div className={`core core-${state}${amplitude !== undefined ? " core-metered" : ""}`}
+      style={style} aria-hidden="true">
       <svg viewBox="0 0 240 240" className="core-svg">
         <defs>
           <radialGradient id={bloomId}>

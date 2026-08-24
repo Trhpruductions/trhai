@@ -18,6 +18,7 @@ import {
   type NeuralVoiceOption,
   type NeuralVoiceStatus
 } from "../neuralSpeech";
+import { rmsAmplitude, smoothAmplitude } from "../audioAmplitude";
 import type { PersonalityId } from "../personalities";
 
 // Speaking, as state the interface can trust.
@@ -49,6 +50,14 @@ export type SpeechState = {
   speaking: boolean;
   /** True while neural audio is being generated but has not started playing. */
   preparing: boolean;
+  /**
+   * Real loudness of the neural voice's own audio, 0..1, read while it plays.
+   *
+   * Only ever non-zero for the neural engine — the browser's own voices give
+   * no access to their waveform, so there is nothing true to read for them,
+   * and this stays 0 rather than faking a reaction to nothing.
+   */
+  amplitude: number;
   /** Which engine would speak right now. */
   engine: SpeechEngine;
   /** The local neural engine, and why it is absent when it is. */
@@ -109,6 +118,7 @@ export function useSpeech(): SpeechState {
   const [enabled, setEnabledState] = useState<boolean>(readEnabled);
   const [speaking, setSpeaking] = useState(false);
   const [preparing, setPreparing] = useState(false);
+  const [amplitude, setAmplitude] = useState(0);
   const [neural, setNeural] = useState<NeuralVoiceStatus | null>(null);
   const [usingRemoteVoice, setUsingRemoteVoice] = useState(false);
   const [legacyBrowserVoices, setLegacyBrowserVoices] = useState(false);
@@ -122,6 +132,70 @@ export function useSpeech(): SpeechState {
   const audio = useRef<HTMLAudioElement | null>(null);
   const audioUrl = useRef<string | null>(null);
   const inFlight = useRef<AbortController | null>(null);
+
+  // The amplitude graph. One AudioContext, reused for the life of the hook —
+  // browsers cap how many can exist at once, and a fresh one per reply would
+  // eventually hit that ceiling. The analyser is rebuilt per utterance because
+  // `createMediaElementSource` can only ever wrap a given <audio> element once,
+  // and a new element is what each reply already gets.
+  const audioContext = useRef<AudioContext | null>(null);
+  const amplitudeFrame = useRef<number | null>(null);
+  const smoothedAmplitude = useRef(0);
+
+  const stopAmplitudeLoop = useCallback(() => {
+    if (amplitudeFrame.current !== null) {
+      cancelAnimationFrame(amplitudeFrame.current);
+      amplitudeFrame.current = null;
+    }
+    smoothedAmplitude.current = 0;
+    setAmplitude(0);
+  }, []);
+
+  /**
+   * Start reading real loudness from `element` while it plays.
+   *
+   * Best-effort: a browser that refuses to build this graph, or has no
+   * AudioContext at all, still plays the audio completely normally — this
+   * only ever adds a reading on top, and failing quietly here is the correct
+   * outcome, not a bug to surface. The alternative, refusing to speak because
+   * the meter could not be attached, would be a worse app in service of a
+   * decoration.
+   */
+  const startAmplitudeLoop = useCallback((element: HTMLAudioElement) => {
+    try {
+      if (!audioContext.current) {
+        const Ctor = window.AudioContext
+          ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctor) return;
+        audioContext.current = new Ctor();
+      }
+      const context = audioContext.current;
+      // Autoplay policy can start a context suspended; a rejected resume just
+      // means the reading stays at 0, which is still an honest value.
+      void context.resume().catch(() => {});
+
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+
+      // Wrapping an element for analysis replaces its own output routing, so
+      // the graph has to be rebuilt all the way to the speakers — otherwise
+      // attaching a meter would silence the very audio it is reading.
+      const source = context.createMediaElementSource(element);
+      source.connect(analyser);
+      analyser.connect(context.destination);
+
+      const buffer = new Uint8Array(analyser.fftSize);
+      const tick = () => {
+        analyser.getByteTimeDomainData(buffer);
+        smoothedAmplitude.current = smoothAmplitude(smoothedAmplitude.current, rmsAmplitude(buffer));
+        setAmplitude(smoothedAmplitude.current);
+        amplitudeFrame.current = requestAnimationFrame(tick);
+      };
+      amplitudeFrame.current = requestAnimationFrame(tick);
+    } catch {
+      // No meter for this reply. It still plays.
+    }
+  }, []);
 
   // Voices load asynchronously in several browsers, so the first read is
   // often empty and is not proof that nothing is installed.
@@ -169,6 +243,7 @@ export function useSpeech(): SpeechState {
       audio.current = null;
     }
     releaseAudio();
+    stopAmplitudeLoop();
 
     // Set directly rather than waiting for an event: neither cancel() nor
     // pause() reliably fires an end event, and a Stop button that leaves the
@@ -176,7 +251,7 @@ export function useSpeech(): SpeechState {
     // state exists to avoid.
     setSpeaking(false);
     setPreparing(false);
-  }, [synth, releaseAudio]);
+  }, [synth, releaseAudio, stopAmplitudeLoop]);
 
   // Anything still being spoken when the view goes away should stop with it.
   useEffect(() => () => {
@@ -184,7 +259,9 @@ export function useSpeech(): SpeechState {
     synth?.cancel();
     audio.current?.pause();
     releaseAudio();
-  }, [synth, releaseAudio]);
+    stopAmplitudeLoop();
+    void audioContext.current?.close().catch(() => {});
+  }, [synth, releaseAudio, stopAmplitudeLoop]);
 
   const setEnabled = useCallback((next: boolean) => {
     setEnabledState(next);
@@ -314,11 +391,14 @@ export function useSpeech(): SpeechState {
         audio.current = element;
 
         // Every transition below comes from the element itself, never from
-        // having asked it to play.
-        element.onplaying = () => setSpeaking(true);
-        element.onended = () => { setSpeaking(false); releaseAudio(); };
+        // having asked it to play. The amplitude reading starts alongside it,
+        // for the same reason: it is a measurement of this element, not a
+        // decoration running on its own clock.
+        element.onplaying = () => { setSpeaking(true); startAmplitudeLoop(element); };
+        element.onended = () => { setSpeaking(false); stopAmplitudeLoop(); releaseAudio(); };
         element.onerror = () => {
           setSpeaking(false);
+          stopAmplitudeLoop();
           releaseAudio();
           setError("The audio could not be played.");
         };
@@ -341,7 +421,10 @@ export function useSpeech(): SpeechState {
     }
 
     setError(availability.available ? "No voice is available." : availability.reason);
-  }, [enabled, engine, activeNeuralVoice, stop, speakWithBrowser, releaseAudio, availability]);
+  }, [
+    enabled, engine, activeNeuralVoice, stop, speakWithBrowser, releaseAudio, availability,
+    startAmplitudeLoop, stopAmplitudeLoop
+  ]);
 
   return {
     availability,
@@ -349,6 +432,7 @@ export function useSpeech(): SpeechState {
     setEnabled,
     speaking,
     preparing,
+    amplitude,
     engine,
     neural,
     neuralVoices,

@@ -628,6 +628,109 @@ test("both capability replies still describe what the app does", () => {
   }
 });
 
+test("the capability reply lists real tool names read from the registry", () => {
+  const reply = buildCapabilityReply("ollama/x");
+
+  // Not a claim invented for the reply — these are tool names runTool
+  // actually dispatches on, so the reply and the permission gate can never
+  // describe a different set of tools to each other.
+  assert.match(reply, /search_memory/);
+  assert.match(reply, /build_app/);
+  assert.match(reply, /forget/);
+  // And it says plainly what does not exist, rather than staying silent.
+  assert.match(reply, /no web or internet access/i);
+});
+
+// A capability question, unlike a request to retrieve something, must never
+// reach the agent loop at all — see agentLoop.ts's anti-repeat protection for
+// the second line of defence when a phrasing this pattern does not recognise
+// slips through anyway. These are the exact phrasings from the live failure:
+// a capability question was falling through to the model, which then called
+// sixteen tools — three of them writes — trying to search its way to an
+// answer about itself, including one write_document call that actually
+// created a document in response to "what can you do".
+test("a realistic, detailed capability question is recognised, not just the short forms", () => {
+  const message = "Explain what you can do, what tools you have, what permissions you have, "
+    + "what integrations are available, your limitations, and perform capability tests.";
+  const reply = composeReply({ mode: "general", message, memories: [], history: [] });
+
+  assert.equal(reply.strategy, "capability");
+});
+
+test("each individual clause of the failing message is independently recognised", () => {
+  const clauses = [
+    "explain what you can do",
+    "what tools you have",
+    "what permissions you have",
+    "your limitations",
+    "perform capability tests"
+  ];
+
+  for (const clause of clauses) {
+    const reply = composeReply({ mode: "general", message: clause, memories: [], history: [] });
+    assert.equal(reply.strategy, "capability", `"${clause}" produced ${reply.strategy}`);
+  }
+});
+
+test("more capability phrasings than the original short list", () => {
+  const questions = [
+    "What tools do you have?",
+    "What permissions do you currently have?",
+    "What model are you running?",
+    "What are your capabilities?",
+    "What are your limitations?",
+    "Give me a capability report.",
+    "Run a capability audit."
+  ];
+
+  for (const question of questions) {
+    const reply = composeReply({ mode: "general", message: question, memories: [], history: [] });
+    assert.equal(reply.strategy, "capability", `"${question}" produced ${reply.strategy}`);
+  }
+});
+
+// The other half of the fix: broadening the pattern must not turn genuine
+// retrieval, memory, and action requests into capability answers. Every one
+// of these needs its own real handling, not a description of what the
+// assistant could do in the abstract.
+test("broadening capability detection does not swallow real requests", () => {
+  const nonCapabilityMessages = [
+    "Search my documents for the VEXORA architecture.",
+    "What did I tell you about VEXORA yesterday?",
+    "Build me a Discord bot.",
+    "Run this program.",
+    "What time is it?",
+    "What is a REST API?"
+  ];
+
+  for (const message of nonCapabilityMessages) {
+    const reply = composeReply({ mode: "general", message, memories: [], history: [] });
+    assert.notEqual(reply.strategy, "capability", `"${message}" was misread as a capability question`);
+  }
+});
+
+test("remembering a fact is never misread as asking about capabilities", () => {
+  const reply = composeReply({
+    mode: "general",
+    message: "Remember that VEXORA is my AI assistant.",
+    memories: [],
+    history: []
+  });
+
+  assert.notEqual(reply.strategy, "capability");
+});
+
+test("creating a file is a tool request, not a capability question", () => {
+  const reply = composeReply({
+    mode: "general",
+    message: "Create a file called test.txt.",
+    memories: [],
+    history: []
+  });
+
+  assert.notEqual(reply.strategy, "capability");
+});
+
 test("an earlier instruction is never quoted back as an answer", () => {
   // Found in the rebuilt UI: "In one sentence, what is TypeScript?" was answered
   // with the user's own earlier "Explain what a REST API is in two sentences".

@@ -230,6 +230,48 @@ textarea.field {
 .chip-danger { color: var(--danger); border-color: var(--danger); background: var(--danger-quiet); }
 .chip-live { color: var(--accent); border-color: var(--line-strong); background: var(--accent-quiet); }
 
+/* A status chip whose key changes with its message — a save confirmed, a run
+   finished, an item forgotten — arrives rather than snapping in, the same
+   language turns and stat readouts already use for "this just happened".
+   Keying by the message itself is what makes React replay it: a genuinely new
+   sentence is a fresh element, an unchanged one is not. */
+.chip-arrive { animation: chip-arrive 380ms var(--ease) both; }
+
+@keyframes chip-arrive {
+  from { opacity: 0; transform: translateY(3px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip-arrive { animation: none; }
+}
+
+/* ---- Live flash -----------------------------------------------------------
+   A brief glow marking that a real, polled reading just refreshed — for a
+   percentage or a name that can easily repeat between samples, unlike a
+   count, so the value alone cannot always show that a check actually ran.
+   A separate layered element rather than a style on the value's own text, so
+   remounting it to replay never remounts whatever it sits beside. */
+.live-flash {
+  position: absolute;
+  inset: -3px -6px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-quiet);
+  box-shadow: var(--glow);
+  opacity: 0;
+  pointer-events: none;
+  animation: live-flash 700ms var(--ease);
+}
+
+@keyframes live-flash {
+  0%, 100% { opacity: 0; }
+  40% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-flash { animation: none; }
+}
+
 /* ---- Empty state --------------------------------------------------------
    Used wherever there is genuinely nothing to show. It always says why, which
    is the difference between an empty panel and a broken one. */

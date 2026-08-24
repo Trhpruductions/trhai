@@ -14,6 +14,7 @@
 }
 
 .reading-value {
+  position: relative;
   font-family: var(--font-display);
   font-size: var(--text-xl);
 }
@@ -61,6 +62,21 @@
   line-height: var(--leading-normal);
   white-space: pre-wrap;
   word-break: break-word;
+  /* Each line carries a fresh id from the moment the event actually arrived
+     (see onRuntimeEvent in WorkspaceSurface.tsx), so unlike a list rebuilt
+     from a poll, every mount here really is a new event landing in real
+     time — the animation is reporting something true, not decorating a
+     static list. */
+  animation: term-line-arrive 220ms var(--ease) both;
+}
+
+@keyframes term-line-arrive {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .term-line { animation: none; }
 }
 
 .term-warn { color: var(--warn); }

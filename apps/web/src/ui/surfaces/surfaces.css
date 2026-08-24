@@ -25,6 +25,20 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
+  /* Plays once per mount, same reasoning as .turn in conversation.css: a
+     stable key (the item's real id) is what keeps an existing row from
+     replaying this every time the list re-renders — only a genuinely new
+     row is a fresh element. */
+  animation: list-row-arrive 320ms var(--ease) both;
+}
+
+@keyframes list-row-arrive {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .list-row { animation: none; }
 }
 
 .list-excerpt {
@@ -123,7 +137,23 @@
   padding: var(--space-4);
 }
 
-.agent.active { border-color: var(--line-strong); box-shadow: var(--glow); }
+/* A slow breathing glow rather than a fixed one — the same distinction the
+   status dots make elsewhere between "this exists" and "this is live right
+   now". There is exactly one active agent at a time, so at most one card
+   ever carries this. */
+.agent.active {
+  border-color: var(--line-strong);
+  animation: agent-active-breathe 4s var(--ease) infinite;
+}
+
+@keyframes agent-active-breathe {
+  0%, 100% { box-shadow: 0 0 12px rgba(168, 85, 247, 0.22); }
+  50% { box-shadow: var(--glow); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent.active { animation: none; box-shadow: var(--glow); }
+}
 
 .agent-avatar { font-size: var(--text-xl); line-height: 1; }
 .agent-desc { font-size: var(--text-sm); }
@@ -147,6 +177,22 @@
 
 .calendar-form { align-items: stretch; }
 .calendar-form .field { width: auto; }
+
+/* Fifteen minutes or fewer to start — the same countdown, worth a second
+   look rather than a new colour: still the live chip, just pulsing while it
+   is genuinely close. */
+.chip-imminent {
+  animation: chip-imminent-pulse 1.6s var(--ease) infinite;
+}
+
+@keyframes chip-imminent-pulse {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: var(--glow); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip-imminent { animation: none; box-shadow: var(--glow); }
+}
 
 /* ---- Voice ---------------------------------------------------------------
    Two engines behind one panel: a local neural voice when it is installed, and

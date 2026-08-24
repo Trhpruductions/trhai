@@ -251,18 +251,29 @@
   100% { color: var(--text); text-shadow: none; }
 }
 
-/* readout-refresh crossfades into --text, which is right for the plain-text
-   readouts (model, link) but would leave one of these snapping back to
-   --accent-strong the instant the animation ends. This pulses the glow
-   instead of the colour, so it starts and ends on the same resting value
-   .home-readout-count already holds. */
-.home-readout-count-live {
-  animation: readout-count-refresh 700ms var(--ease);
+/* The count itself now travels between values rather than snapping (see
+   RollingCount in Conversation.tsx), so the refresh mark is a glow layered
+   behind the digits instead of a text-shadow on them — a separate element,
+   so remounting it to replay the animation on every poll never remounts the
+   number sitting in front of it. */
+.home-readout-count {
+  position: relative;
 }
 
-@keyframes readout-count-refresh {
-  0%, 100% { text-shadow: none; }
-  40% { text-shadow: var(--glow); }
+.home-readout-count-flash {
+  position: absolute;
+  inset: -3px -6px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-quiet);
+  box-shadow: var(--glow);
+  opacity: 0;
+  pointer-events: none;
+  animation: readout-count-flash 700ms var(--ease);
+}
+
+@keyframes readout-count-flash {
+  0%, 100% { opacity: 0; }
+  40% { opacity: 1; }
 }
 
 /* The rails arrive as their data does, rather than snapping in. */
@@ -294,7 +305,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .home-readout-live,
-  .home-readout-count-live,
+  .home-readout-count-flash,
   .home-rail .home-readout,
   .home-assembly,
   .home-greeting,

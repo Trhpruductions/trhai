@@ -5,6 +5,7 @@ import {
   dayOf,
   eventsOnDay,
   formatRelative,
+  isImminent,
   isValidStart,
   parseEvents,
   readEvents,
@@ -136,4 +137,38 @@ test("a saved calendar round-trips", () => {
 
   writeEvents(storage, "cal", sample);
   assert.deepEqual(readEvents(storage, "cal"), sample);
+});
+
+test("an event starting within the window is imminent", () => {
+  const now = new Date(2026, 7, 11, 9, 15);
+  assert.equal(isImminent("2026-08-11T09:20", now), true);
+  assert.equal(isImminent("2026-08-11T09:30", now), true);
+});
+
+test("an event further out is not imminent", () => {
+  const now = new Date(2026, 7, 11, 9, 15);
+  assert.equal(isImminent("2026-08-11T09:31", now), false);
+  assert.equal(isImminent("2026-08-11T11:00", now), false);
+});
+
+test("an event already started is not imminent", () => {
+  const now = new Date(2026, 7, 11, 9, 15);
+  // Urgency is for what is about to happen, not what already is — a started
+  // event reads as "started" elsewhere in this screen, not as more urgent.
+  assert.equal(isImminent("2026-08-11T09:00", now), false);
+});
+
+test("an event starting this instant is imminent", () => {
+  const now = new Date(2026, 7, 11, 9, 15);
+  assert.equal(isImminent("2026-08-11T09:15", now), true);
+});
+
+test("a custom threshold is honoured", () => {
+  const now = new Date(2026, 7, 11, 9, 15);
+  assert.equal(isImminent("2026-08-11T09:20", now, 3), false);
+  assert.equal(isImminent("2026-08-11T09:18", now, 3), true);
+});
+
+test("an unparseable time is never imminent", () => {
+  assert.equal(isImminent("not a date", new Date()), false);
 });

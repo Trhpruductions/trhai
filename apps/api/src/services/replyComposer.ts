@@ -12,6 +12,7 @@
 import { analyzeRequest, type RequestAnalysis } from "./requestAnalysis.js";
 import { selectRelevantMemories, type ScorableMemory, type ScoredMemory } from "./memoryRelevance.js";
 import { buildTaskPlan } from "./taskPlanning.js";
+import { getSystemCapabilities, toolsByLevel } from "./systemCapabilities.js";
 import {
   buildClarifyingQuestion,
   findSpecGaps,
@@ -264,9 +265,52 @@ const greetingPattern = /^(hi|hey|hello|yo|howdy|sup|good\s+(morning|afternoon|e
 const thanksPattern = /^(thanks|thank\s+you|ty|cheers|appreciate\s+it|nice|cool|great|awesome|perfect)\b[\s!.,]*$/i;
 const acknowledgementPattern = /^(ok|okay|k|sure|right|got\s+it|fine|yep|yes|no|nope|never\s*mind|nvm|forget\s+it)\b[\s!.,]*$/i;
 
-/** Asking what this thing is. The most common opening message there is. */
-const capabilityPattern =
-  /^(?:so\s+)?(?:hi|hey|hello)?[\s,]*(?:what|who)\s+(?:can|do|are)\s+you(?:\s+do|\s+for\s+me)?\b|^what(?:'s| is)\s+this\b|^help$|^what\s+are\s+your\s+(?:capabilities|features)\b/i;
+/**
+ * Asking what this thing is, or what it can do.
+ *
+ * Two different word orders carry the same question, and both have to match.
+ * "What can you do?" inverts the verb and subject the way a direct question
+ * does; "Explain what you can do" does not — English does not invert inside
+ * an embedded clause — so a pattern that only recognised the first missed
+ * exactly the phrasing a longer, more detailed capability question actually
+ * arrives in. Caught live: a request that opened "Explain what you can do,
+ * what tools you have, what permissions you have..." matched none of the
+ * original alternatives and fell through to the agent loop, which then
+ * called sixteen tools — including three that write — trying to search its
+ * way to an answer about itself.
+ *
+ * The "are you" branch requires a sentence boundary right after "you" —
+ * `(?=[?.!,]|\s*$)` — so "who are you" matches but "what are you doing this
+ * weekend" does not; without that lookahead the original pattern already
+ * matched the second one, since its trailing `(?:\s+do|\s+for\s+me)?` was
+ * optional and so satisfied by nothing at all.
+ */
+const capabilityPattern = new RegExp([
+  // "what can you do", "what do you do", "who are you" — direct question
+  // order, optionally opening with a greeting.
+  String.raw`^(?:so\s+)?(?:hi|hey|hello)?[\s,]*(?:what|who)\s+`
+    + String.raw`(?:can\s+you(?:\s+do|\s+for\s+me)?|do\s+you(?:\s+do|\s+for\s+me)?|are\s+you(?=[?.!,]|\s*$))\b`,
+  String.raw`^what(?:'s| is)\s+this\b`,
+  String.raw`^help$`,
+  // "what you can do", "what you're able to do" — embedded-clause order,
+  // unanchored: this is normally one clause inside a longer request rather
+  // than the whole message.
+  String.raw`\bwhat\s+you\s+(?:can|could)\s+do\b`,
+  String.raw`\bwhat\s+you(?:'re|\s+are)\s+able\s+to\s+do\b`,
+  // "your tools", "your permissions", "your limitations" — a possessive
+  // naming one of the assistant's own attributes is a strong, low-risk
+  // signal on its own, wherever in the message it falls.
+  String.raw`\byour\s+(?:tools?|capabilit(?:y|ies)|features?|permissions?|limitations?|integrations?)\b`,
+  // "what tools do you have", "what permissions you have", "what
+  // integrations are available" — direct and embedded order again, with room
+  // for a common adverb ("currently", "actually") between "have" and its
+  // subject, which real phrasing of this question often carries.
+  String.raw`\bwhat\s+(?:tools?|permissions?|integrations?|capabilit(?:y|ies)|features?)\s+`
+    + String.raw`(?:do\s+you\s+(?:currently\s+|actually\s+|really\s+|now\s+)?have`
+    + String.raw`|you\s+(?:currently\s+|actually\s+|really\s+|now\s+)?have|are\s+available)\b`,
+  String.raw`\bcapabilit(?:y|ies)\s+(?:tests?|reports?|audits?)\b`,
+  String.raw`\bwhat\s+model\s+(?:are\s+you|do\s+you)\b`
+].join("|"), "i");
 
 /**
  * What this build can actually do, stated plainly.
@@ -276,6 +320,38 @@ const capabilityPattern =
  * and getting "I don't have anything saved". Saying so up front is the whole
  * difference between a tool with limits and a tool that seems broken.
  */
+/**
+ * Every registered tool, grouped by what it is allowed to do without being
+ * asked — the same ladder toolPermissions.ts and runTool enforce, read from
+ * the registry rather than restated. A tool never appears here unless it is
+ * genuinely callable, and every tool that is callable appears here: this and
+ * the permission gate can never disagree about what exists.
+ */
+function toolInventorySection(localModel: string | null): string {
+  const capabilities = getSystemCapabilities(localModel);
+  const groups = toolsByLevel(capabilities);
+
+  const lines = groups.map((group) => {
+    const names = group.tools.map((tool) => tool.name).join(", ");
+    const needsOk = group.tools.some((tool) => tool.requiresConfirmation)
+      ? " — needs your confirmation first"
+      : "";
+    return `- ${group.label}${needsOk}: ${names}`;
+  });
+
+  const missing = [
+    !capabilities.web ? "no web or internet access" : null,
+    !capabilities.codeExecution ? "no arbitrary code execution" : null,
+    capabilities.integrations.length === 0 ? "no third-party integrations connected" : null
+  ].filter((entry): entry is string => entry !== null);
+
+  return [
+    `Full tool inventory (${capabilities.tools.length} registered):`,
+    ...lines,
+    missing.length > 0 ? `Also true right now: ${missing.join(", ")}.` : null
+  ].filter((line): line is string => line !== null).join("\n");
+}
+
 export function buildCapabilityReply(localModel?: string): string {
   // Two different true statements, depending on what is actually running.
   // Claiming there is no model while one is answering would be as wrong as
@@ -300,7 +376,12 @@ export function buildCapabilityReply(localModel?: string): string {
     "",
     "Ask me to build something, or tell me a fact to remember.",
     "",
-    closing
+    closing,
+    "",
+    // Read from the tool registry itself — see systemCapabilities.ts — so
+    // this section can never list a tool that was removed or omit one that
+    // was added after this paragraph above was written.
+    toolInventorySection(localModel ?? null)
   ].join("\n");
 }
 

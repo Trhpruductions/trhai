@@ -76,6 +76,10 @@ const configFields: Partial<Record<NodeType, ConfigField[]>> = {
 export function AutomationSurface() {
   const [flow, setFlow] = useState<Flow>(() => readFlow(window.localStorage, storageKey) ?? starterFlow);
   const [run, setRun] = useState<RunResult | null>(null);
+  // Bumped on every completed run, so a status chip that reads the same as
+  // the last one — "Run finished" twice in a row — still arrives as its own
+  // event rather than looking like it never updated.
+  const [runSeq, setRunSeq] = useState(0);
   const [running, setRunning] = useState(false);
   // Named checks the desktop shell will actually accept. Empty in a browser,
   // where RUN SCRIPT is reported as skipped rather than offered.
@@ -124,6 +128,7 @@ export function AutomationSurface() {
           : undefined
       });
       setRun(result);
+      setRunSeq((count) => count + 1);
     } finally {
       setRunning(false);
     }
@@ -161,7 +166,7 @@ export function AutomationSurface() {
       ) : null}
 
       {run ? (
-        <span className={`chip ${run.dryRun ? "chip-live" : run.failed ? "chip-warn" : "chip-ok"}`}>
+        <span key={runSeq} className={`chip chip-arrive ${run.dryRun ? "chip-live" : run.failed ? "chip-warn" : "chip-ok"}`}>
           {run.dryRun ? "Dry run — nothing was executed" : run.failed ? "Run failed" : "Run finished"}
         </span>
       ) : null}

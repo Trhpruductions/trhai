@@ -6,11 +6,13 @@ import { formatRelative, readEvents, upcomingEvents } from "../localCalendar";
 import { readFlow } from "../automation";
 import { activeAgent, allAgents, isInstalled, readMarketplaceState, type Agent } from "../marketplace";
 import { webEnv } from "../env";
-import { Core } from "./Core";
+import { Core, type CoreState } from "./Core";
 import { greetingFor } from "../greeting";
 import { Boot } from "./Boot";
 import { bootChecksFor } from "../bootChecks";
 import { Pulse } from "./Pulse";
+import { Ambient } from "./Ambient";
+import { interpolateCount } from "../countTransition";
 import "./conversation.css";
 
 // The home screen: a conversation.
@@ -131,6 +133,69 @@ function toolLabel(tool: { name: string; ok: boolean }): string {
     case "write_file": return ok ? "wrote a file" : "could not write the file";
     default: return `${name.replace(/_/g, " ")}${ok ? "" : " — nothing changed"}`;
   }
+}
+
+/**
+ * Which face the core shows.
+ *
+ * Priority, not a combination: a reply cannot be both generating and playing
+ * at once in this app (speech only ever starts after a reply has finished),
+ * so there is no state where two of these could honestly both apply.
+ */
+function coreStateFor(busy: boolean, speaking: boolean, offline: boolean): CoreState {
+  if (busy) return "thinking";
+  if (speaking) return "speaking";
+  if (offline) return "offline";
+  return "idle";
+}
+
+/** Whether motion should be held to a single frame rather than animated. */
+function prefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A stat's value, travelling from what it last showed to what it now reads.
+ *
+ * The number itself never lies about the current value — interpolateCount
+ * always lands exactly on the real target once the transition ends — this
+ * only changes how it gets there, the same way the existing glow already
+ * marked a refresh without changing what was refreshed.
+ */
+function RollingCount({ value }: { value: number }) {
+  const [displayed, setDisplayed] = useState(value);
+  const displayedRef = useRef(value);
+  const frame = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (displayedRef.current === value) return;
+
+    if (prefersReducedMotion()) {
+      displayedRef.current = value;
+      setDisplayed(value);
+      return;
+    }
+
+    const start = displayedRef.current;
+    const startedAt = performance.now();
+    const duration = 550;
+
+    const tick = (now: number) => {
+      const next = interpolateCount(start, value, now - startedAt, duration);
+      displayedRef.current = next;
+      setDisplayed(next);
+      if (now - startedAt < duration) frame.current = requestAnimationFrame(tick);
+    };
+
+    frame.current = requestAnimationFrame(tick);
+    return () => { if (frame.current !== null) cancelAnimationFrame(frame.current); };
+  }, [value]);
+
+  return <>{displayed}</>;
 }
 
 /** The same tools, in progress rather than reported after the fact. */
@@ -425,7 +490,11 @@ export function Conversation({ personality, onBuildRequest }: Props) {
               component already tracks, not a new poll: "thinking" mirrors the
               same busy flag the composer disables on, and "offline" only
               lights up after a real request has actually failed. */}
-          <Core state={busy ? "thinking" : status.state === "error" ? "offline" : "idle"} size={36} />
+          <Core
+            state={coreStateFor(busy, speech.speaking, status.state === "error")}
+            amplitude={speech.engine === "neural" ? speech.amplitude : undefined}
+            size={36}
+          />
           <h2 className="label">Conversation</h2>
           <span className="chip">{profile.label}</span>
         </div>
@@ -482,6 +551,11 @@ export function Conversation({ personality, onBuildRequest }: Props) {
                 conversation is noise. */}
             {!booted ? <Boot checks={bootChecks} onDone={() => setBooted(true)} /> : null}
 
+            {/* Atmosphere, behind everything else. Answers to the same
+                "busy" signal the core does, rather than drifting on a clock
+                of its own. */}
+            <Ambient busy={busy} />
+
             {/* Corner brackets. The home screen is a panel in an instrument
                 rather than a page in a document, and the brackets are what
                 say so without adding a single word. */}
@@ -512,7 +586,10 @@ export function Conversation({ personality, onBuildRequest }: Props) {
               </dl>
 
               <div className="home-core">
-                <Core state={busy ? "thinking" : online === false ? "offline" : "idle"} />
+                <Core
+                  state={coreStateFor(busy, speech.speaking, online === false)}
+                  amplitude={speech.engine === "neural" ? speech.amplitude : undefined}
+                />
 
                 {/* Sits inside the rings. The clock is live and the date is
                     today's, so the centre of the screen is never stale. */}
@@ -529,14 +606,22 @@ export function Conversation({ personality, onBuildRequest }: Props) {
               {/* Right rail: the store. What the app is actually holding.
                   These are counts it read, not figures it composed. */}
               <dl className="home-rail home-rail-right">
-                {stats.map((stat) => (
-                  <div key={stat.label} className="home-readout" title={stat.title}>
-                    <dt className="label">{stat.label}</dt>
-                    <dd key={statsPollCount} className="mono home-readout-count home-readout-count-live">
-                      {stat.value}
-                    </dd>
-                  </div>
-                ))}
+                {stats.map((stat) => {
+                  const parsed = Number(stat.value);
+                  return (
+                    <div key={stat.label} className="home-readout" title={stat.title}>
+                      <dt className="label">{stat.label}</dt>
+                      <dd className="mono home-readout-count">
+                        {/* A separate layer so remounting it to replay the
+                            flash never remounts the number beside it —
+                            RollingCount has to stay mounted to travel between
+                            two real values instead of snapping on refresh. */}
+                        <span key={statsPollCount} className="home-readout-count-flash" aria-hidden="true" />
+                        {Number.isFinite(parsed) ? <RollingCount value={parsed} /> : stat.value}
+                      </dd>
+                    </div>
+                  );
+                })}
               </dl>
             </div>
 

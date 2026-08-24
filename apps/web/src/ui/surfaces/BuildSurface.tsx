@@ -50,6 +50,9 @@ export function BuildSurface({ context }: { context: SurfaceContext }) {
   const [files, setFiles] = useState<Generated[] | null>(null);
   const [written, setWritten] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  // Which file is being written right now, out of how many — real progress
+  // from inside the loop below, not a spinner standing in for it.
+  const [writing, setWriting] = useState<{ index: number; total: number } | null>(null);
 
   // A request handed over from the conversation. Consumed once, so switching
   // back to this screen later does not silently re-run an old build.
@@ -78,7 +81,7 @@ export function BuildSurface({ context }: { context: SurfaceContext }) {
   }
 
   async function writeToDisk() {
-    if (!spec || !files) return;
+    if (!spec || !files || writing) return;
 
     if (!bridge) {
       // Said plainly rather than failing quietly: in a browser there is no way
@@ -89,19 +92,24 @@ export function BuildSurface({ context }: { context: SurfaceContext }) {
     }
 
     setProblem(null);
+    setWritten(null);
     let count = 0;
-    for (const file of files) {
+    for (let index = 0; index < files.length; index += 1) {
+      // Set before the await, not after: this is the file about to be
+      // written, and the point is to show that rather than what just finished.
+      setWriting({ index: index + 1, total: files.length });
       const result = await bridge({
         request: spec.title,
         spec: {
           kind: "file",
           path: `generated-projects/${spec.slug}`,
-          fileName: file.path,
-          content: file.content
+          fileName: files[index].path,
+          content: files[index].content
         }
       });
       if (result?.ok) count += 1;
     }
+    setWriting(null);
 
     setWritten(count === files.length
       ? `Wrote ${count} files to generated-projects/${spec.slug}`
@@ -135,8 +143,8 @@ export function BuildSurface({ context }: { context: SurfaceContext }) {
             <button type="button" className="btn" onClick={generate}>Generate files</button>
           ) : null}
           {files ? (
-            <button type="button" className="btn" onClick={() => void writeToDisk()}>
-              {bridge ? "Write to workspace" : "Write to workspace…"}
+            <button type="button" className="btn" disabled={writing !== null} onClick={() => void writeToDisk()}>
+              {writing ? `Writing ${writing.index} of ${writing.total}…` : bridge ? "Write to workspace" : "Write to workspace…"}
             </button>
           ) : null}
         </div>

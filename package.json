@@ -9,12 +9,14 @@
     "apps/api",
     "apps/desktop",
     "apps/web",
+    "apps/trhai-web",
     "packages/*"
   ],
   "scripts": {
     "dev": "npm run dev --workspace @ascend/api",
     "dev:api": "npm run dev --workspace @ascend/api",
     "dev:web": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-web-dev.ps1",
+    "dev:trhai": "npm run dev --workspace trhai-web",
     "dev:desktop": "npm run dev --workspace @ascend/desktop",
     "dev:all": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-local-dev.ps1",
     "build": "npm run build --workspaces",
