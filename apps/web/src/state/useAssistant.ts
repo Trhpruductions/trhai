@@ -23,8 +23,12 @@ export type ChatMessage = {
   model?: string;
   /** Set when the assistant decided this was a request to build software. */
   buildRequest?: string;
-  /** Tools the assistant called to produce this reply, in order. */
-  toolsUsed?: string[];
+  /**
+   * Tools the assistant called, in order, each with whether it achieved
+   * anything. `ok: false` is a real result — a search that matched nothing, a
+   * deletion that found nothing to delete — not an error to hide.
+   */
+  toolsUsed?: Array<{ name: string; ok: boolean }>;
 };
 
 /** A destructive action the assistant is waiting to be allowed to take. */

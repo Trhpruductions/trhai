@@ -295,3 +295,61 @@ test("the refusal written for the model never reaches the user's reply", async (
     server.close();
   }
 });
+
+test("a tool that runs but changes nothing reports that, rather than success", async () => {
+  // The defect this closes: the interface labelled a turn "deleted from
+  // memory" for a forget that matched nothing and deleted nothing — directly
+  // under a reply that said so, because the mutation result forced the truth
+  // into the text. The chip and the sentence contradicted each other.
+  //
+  // ok is the tool's own report. A forget that finds no match ran correctly
+  // and changed nothing, and both halves of that matter.
+  const missed = await runTool(
+    { name: "forget", arguments: { fact: "something never saved" } },
+    { ...context, confirmedActions: new Set(["forget"]) }
+  );
+
+  assert.equal(missed.ok, false, "a forget that matched nothing did not delete anything");
+
+  const hit = await runTool(
+    { name: "forget", arguments: { fact: "The billing database is Postgres 16." } },
+    { ...context, confirmedActions: new Set(["forget"]) }
+  );
+
+  assert.equal(hit.ok, true, "a forget that matched must report success");
+});
+
+test("the loop records what each call achieved, not only that it ran", async () => {
+  const turns = [
+    { message: { content: "", tool_calls: [{ function: { name: "search_memory", arguments: { query: "nothing here" } } }] } },
+    { message: { content: "I found nothing about that." } }
+  ];
+
+  const server = createServer((request, response) => {
+    request.on("data", () => {});
+    request.on("end", () => {
+      const body = turns.shift() ?? turns[0];
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ model: "test-model", ...body }));
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+
+  try {
+    const result = await runAgent(
+      { baseUrl: `http://127.0.0.1:${port}`, model: "test-model", modelFromEnv: true, timeoutMs: 4000 },
+      "What do you know about quantum llamas?",
+      context
+    );
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    // It searched, and found nothing. Both facts survive to the label.
+    assert.deepEqual(result.toolsUsed, [{ name: "search_memory", ok: false }]);
+  } finally {
+    server.close();
+  }
+});

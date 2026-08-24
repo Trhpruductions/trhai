@@ -1,7 +1,7 @@
 import { ModelRouter, type ComposerKnowledge, type MemoryWriteOutcome } from "./modelRouter.js";
 import { checkAvailability, generate, orderedCandidates, readLocalModelConfig } from "./localModel.js";
 import { buildCapabilityReply } from "./replyComposer.js";
-import { runAgent } from "./agentLoop.js";
+import { runAgent, type ToolOutcome } from "./agentLoop.js";
 import { setActivity } from "./agentActivity.js";
 import { isContinuationRequest } from "./requestAnalysis.js";
 import { detectTaskType } from "./taskPlanning.js";
@@ -55,8 +55,11 @@ export type OrchestratorResult = {
   strategy: string;
   /** The text a build should be generated from, when this was a build request. */
   buildRequest?: string;
-  /** Tools the assistant actually called, in order. Empty when it used none. */
-  toolsUsed?: string[];
+  /**
+   * Tools the assistant actually called, in order, each with whether it
+   * achieved anything. Empty when it used none.
+   */
+  toolsUsed?: ToolOutcome[];
   /**
    * A destructive action waiting on the user's approval.
    *
@@ -251,7 +254,13 @@ export async function runAssistantOrchestrator(
 
     if (input.sessionId) {
       updateTask(input.sessionId, generated
-        ? { status: "succeeded", toolsUsed: generated.toolsUsed, lastResult: generated.text }
+        ? {
+          status: "succeeded",
+          // Names only: the task store is a record of what ran, not the
+          // source of a user-facing label.
+          toolsUsed: generated.toolsUsed.map((used) => used.name),
+          lastResult: generated.text
+        }
         // No local model to ask. The work did not fail on its merits — it never
         // ran — so it stays resumable and says why, rather than being recorded
         // as a failure or quietly dropped.
@@ -330,7 +339,7 @@ async function answerWithLocalModel(
 ): Promise<{
   text: string;
   model: string;
-  toolsUsed: string[];
+  toolsUsed: ToolOutcome[];
   awaitingConfirmation?: { tool: string; arguments: Record<string, unknown> };
 } | null> {
   const config = readLocalModelConfig();

@@ -570,3 +570,11 @@
   justify-content: flex-end;
   gap: var(--space-2);
 }
+
+/* A tool that ran correctly and changed nothing — a search that matched
+   nothing, a deletion that found nothing to delete. Quieter than a chip
+   reporting real work, because nothing happened, but still present: hiding
+   it would leave the reply looking as though the tool was never tried. */
+.chip-tool-quiet {
+  opacity: 0.65;
+}

@@ -91,31 +91,44 @@ function provenanceOf(message: ChatMessage): { label: string; tone: string } | n
   }
 }
 
-/** Tool names as an action the reader recognises, not as an identifier. */
-function toolLabel(tool: string): string {
-  switch (tool) {
-    case "search_memory": return "searched memory";
-    case "search_documents": return "searched documents";
-    case "remember": return "saved to memory";
-    case "current_datetime": return "checked the time";
+/**
+ * What a tool call actually achieved, in words the reader recognises.
+ *
+ * Takes the outcome, not just the name. A label built from a name alone can
+ * only assert an intention: it rendered "deleted from memory" for a forget
+ * that matched nothing and deleted nothing, directly under a reply that said
+ * so. The chip and the sentence beside it now agree.
+ *
+ * `ok: false` is not an error here. A search that matched nothing and a
+ * deletion that found nothing to delete both ran correctly and both changed
+ * nothing, which is exactly what these say.
+ */
+function toolLabel(tool: { name: string; ok: boolean }): string {
+  const { name, ok } = tool;
+
+  switch (name) {
+    case "search_memory": return ok ? "searched memory" : "searched memory, no match";
+    case "search_documents": return ok ? "searched documents" : "searched documents, no match";
+    case "search_conversation": return ok ? "searched this conversation" : "searched this conversation, no match";
+    case "remember": return ok ? "saved to memory" : "could not save to memory";
+    case "forget": return ok ? "deleted from memory" : "found nothing to delete";
     case "list_memories": return "read memory";
-    case "forget": return "deleted from memory";
     case "list_documents": return "listed documents";
-    case "read_document": return "read a document";
-    case "write_document": return "wrote a document";
-    case "calculate": return "calculated";
-    case "plan_app": return "planned an app";
-    case "update_document": return "updated a document";
-    case "delete_document": return "deleted a document";
-    case "pin_memory": return "marked as important";
-    case "search_conversation": return "searched this conversation";
-    case "days_between": return "counted days";
-    case "shift_date": return "worked out a date";
-    case "build_app": return "built and verified an app";
-    case "list_files": return "listed files";
-    case "read_file": return "read a file";
-    case "write_file": return "wrote a file";
-    default: return tool.replace(/_/g, " ");
+    case "read_document": return ok ? "read a document" : "could not read that document";
+    case "write_document": return ok ? "wrote a document" : "could not write the document";
+    case "update_document": return ok ? "updated a document" : "could not update the document";
+    case "delete_document": return ok ? "deleted a document" : "found no document to delete";
+    case "pin_memory": return ok ? "marked as important" : "found nothing to mark";
+    case "current_datetime": return "checked the time";
+    case "calculate": return ok ? "calculated" : "could not work that out";
+    case "plan_app": return ok ? "planned an app" : "could not plan that";
+    case "days_between": return ok ? "counted days" : "could not read those dates";
+    case "shift_date": return ok ? "worked out a date" : "could not read that date";
+    case "build_app": return ok ? "built and verified an app" : "could not build that";
+    case "list_files": return ok ? "listed files" : "could not list those files";
+    case "read_file": return ok ? "read a file" : "could not read that file";
+    case "write_file": return ok ? "wrote a file" : "could not write the file";
+    default: return `${name.replace(/_/g, " ")}${ok ? "" : " — nothing changed"}`;
   }
 }
 
@@ -167,7 +180,12 @@ function Turn({ message, onBuildRequest }: { message: ChatMessage; onBuildReques
       {message.toolsUsed && message.toolsUsed.length > 0 ? (
         <div className="turn-tools">
           {message.toolsUsed.map((tool, index) => (
-            <span key={`${tool}-${index}`} className="chip chip-tool">{toolLabel(tool)}</span>
+            <span
+              key={`${tool.name}-${index}`}
+              className={`chip ${tool.ok ? "chip-tool" : "chip-tool chip-tool-quiet"}`}
+            >
+              {toolLabel(tool)}
+            </span>
           ))}
         </div>
       ) : null}

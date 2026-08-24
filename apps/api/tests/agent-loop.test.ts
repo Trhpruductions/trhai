@@ -95,7 +95,7 @@ test("the model can look something up and answer from it", async () => {
     assert.equal(result.ok, true);
     if (!result.ok) return;
 
-    assert.deepEqual(result.toolsUsed, ["search_memory"]);
+    assert.deepEqual(result.toolsUsed, [{ name: "search_memory", ok: true }]);
     assert.match(result.text, /Postgres 16/);
 
     // The real memory reached the model, rather than the loop answering for it.
@@ -139,7 +139,10 @@ test("tools can be chained across rounds", async () => {
     const result = await runAgent(configFor(baseUrl), "Database and rollback?", context);
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    assert.deepEqual(result.toolsUsed, ["search_memory", "search_documents"]);
+    assert.deepEqual(result.toolsUsed, [
+      { name: "search_memory", ok: true },
+      { name: "search_documents", ok: true }
+    ]);
   } finally {
     server.close();
   }
@@ -904,7 +907,7 @@ test("tool calls written as text are run, not shown and not ignored", async () =
     const result = await runAgent(configFor(baseUrl), "what is the date?", context);
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    assert.deepEqual(result.toolsUsed, ["current_datetime"]);
+    assert.deepEqual(result.toolsUsed, [{ name: "current_datetime", ok: true }]);
     assert.match(result.text, /August 2026/);
   } finally {
     server.close();
@@ -1021,7 +1024,7 @@ test("a bare call is actually run, not shown and not ignored", async () => {
     const result = await runAgent(configFor(baseUrl), "what time is it?", context);
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    assert.deepEqual(result.toolsUsed, ["current_datetime"]);
+    assert.deepEqual(result.toolsUsed, [{ name: "current_datetime", ok: true }]);
     // The bare-call text itself must never reach the user as the answer.
     assert.ok(!result.text.includes("current_datetime("), `leaked call syntax: ${result.text}`);
   } finally {
