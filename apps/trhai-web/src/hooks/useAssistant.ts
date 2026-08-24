@@ -20,9 +20,18 @@ export type ChatMessage = {
   toolsUsed?: Array<{ name: string; ok: boolean }>;
 };
 
-export type AssistantStatus = { state: "idle" } | { state: "thinking" } | { state: "error"; detail: string };
+export type AssistantStatus =
+  | { state: "idle" }
+  | { state: "thinking" }
+  | { state: "executing"; tool: string }
+  | { state: "success" }
+  | { state: "error"; detail: string };
 
 const historyTurns = 8;
+/** How often to check which tool is running — see /v1/assist/activity. */
+const activityPollMs = 500;
+/** How long the core shows a finished reply as "success" before settling to idle. */
+const successHoldMs = 1200;
 
 export function useAssistant() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -30,6 +39,11 @@ export function useAssistant() {
   const [restored, setRestored] = useState(false);
   const session = useRef(resolveSessionId());
   const busy = useRef(false);
+  // Bumped once per send() call. A poll tick or a success-hold timeout only
+  // acts while its own call is still the most recent one — this is what
+  // stops a stale callback from a superseded call clobbering the status a
+  // newer call is actively setting.
+  const generation = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,12 +72,35 @@ export function useAssistant() {
     const text = input.trim();
     if (!text || busy.current) return;
     busy.current = true;
+    const myGeneration = ++generation.current;
+    const stillCurrent = () => generation.current === myGeneration;
 
     const userTurn: ChatMessage = { id: crypto.randomUUID(), role: "user", text, at: Date.now() };
-    setMessages((current) => [...current, userTurn]);
+    setMessages((prior) => [...prior, userTurn]);
     setStatus({ state: "thinking" });
 
     const history = messages.slice(-historyTurns).map((entry) => ({ role: entry.role, content: entry.text }));
+
+    // Which tool is actually running right now, if any — real activity from
+    // the orchestrator (see /v1/assist/activity), not a guess dressed up as
+    // one. Absent is the ordinary case for most turns, which stay "thinking"
+    // the whole way through.
+    const activityPoll = window.setInterval(() => {
+      fetch(`${apiBaseUrl}/v1/assist/activity?sessionId=${encodeURIComponent(session.current)}`)
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          if (!stillCurrent()) return;
+          const tool = payload?.data?.tool;
+          setStatus((existing) => {
+            // Only ever steers a turn already in progress — a poll response
+            // that lands after the request itself resolved must not drag a
+            // finished turn's status back toward "thinking".
+            if (existing.state !== "thinking" && existing.state !== "executing") return existing;
+            return typeof tool === "string" ? { state: "executing", tool } : { state: "thinking" };
+          });
+        })
+        .catch(() => { /* a missed poll just leaves the last known status showing */ });
+    }, activityPollMs);
 
     try {
       const response = await fetch(`${apiBaseUrl}/v1/assist`, {
@@ -77,7 +114,7 @@ export function useAssistant() {
       const payload = await response.json();
       const data = payload?.data ?? {};
 
-      setMessages((current) => [...current, {
+      setMessages((prior) => [...prior, {
         id: crypto.randomUUID(),
         role: "assistant",
         text: data.assistantMessage ?? "",
@@ -86,11 +123,18 @@ export function useAssistant() {
         model: data.model,
         toolsUsed: data.toolsUsed
       }]);
-      setStatus({ state: "idle" });
+      if (stillCurrent()) {
+        setStatus({ state: "success" });
+        // A brief confirmation, not a resting state — see core.css's
+        // core-confirm animation, built to finish well within this window.
+        // Deliberately not guarded by busy/generation cleanup in `finally`
+        // below: this timeout has to outlive that block to ever fire.
+        window.setTimeout(() => { if (stillCurrent()) setStatus({ state: "idle" }); }, successHoldMs);
+      }
     } catch (error) {
       const detail = error instanceof Error ? error.message : "The assistant could not be reached.";
-      setStatus({ state: "error", detail });
-      setMessages((current) => [...current, {
+      if (stillCurrent()) setStatus({ state: "error", detail });
+      setMessages((prior) => [...prior, {
         id: crypto.randomUUID(),
         role: "assistant",
         text: `${detail}\n\nThe local API runs on this machine; if this persists, it may not be running.`,
@@ -98,6 +142,10 @@ export function useAssistant() {
         strategy: "error"
       }]);
     } finally {
+      // Stops polling and frees the next send() to start — deliberately
+      // does not touch `generation`, which stays valid through the success
+      // hold above until a genuinely newer call moves it forward.
+      window.clearInterval(activityPoll);
       busy.current = false;
     }
   }, [messages]);

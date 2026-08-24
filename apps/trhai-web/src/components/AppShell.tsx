@@ -109,6 +109,14 @@ function StatusFooter() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
+  // The dashboard is the command centre: it carries its own labelled rail,
+  // its own status strip, and the core at the middle of the screen. Wrapping
+  // it in this shell would put a second rail beside its rail and a second
+  // status bar under its status bar, which is exactly the "navigating a
+  // website" feeling that screen exists to avoid. Every other route is an
+  // ordinary page and keeps the shell.
+  if (pathname === "/") return <>{children}</>;
+
   return (
     <div className="trhai-shell">
       <nav className="trhai-rail" aria-label="Sections">
