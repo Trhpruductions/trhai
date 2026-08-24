@@ -40,7 +40,7 @@ export type LocalModelConfig = {
 export function readLocalModelConfig(env: NodeJS.ProcessEnv = process.env): LocalModelConfig {
   return {
     baseUrl: (env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/+$/, ""),
-    model: env.OLLAMA_MODEL ?? "llama3.2",
+    model: env.OLLAMA_MODEL ?? "vexora:latest",
     modelFromEnv: Boolean(env.OLLAMA_MODEL),
     // Local inference on CPU is slow, and the first request after a launch is
     // slower still: the model has to be read into memory before it can answer
@@ -92,14 +92,12 @@ async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<
  * explicit OLLAMA_MODEL always wins — this picks a good default, it does not
  * overrule a choice.
  */
-export const preferredModels = [
-  "llama3.1:8b",
-  "llama3.1",
-  "llama3.2",
-  "mistral",
-  "qwen2.5"
+const preferredModels = [
+  "vexora:latest",
+  "vexora",
+  "qwen2.5",
+  "llama3.2"
 ];
-
 /**
  * Which installed model to use.
  *
