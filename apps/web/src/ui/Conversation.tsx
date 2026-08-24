@@ -430,30 +430,37 @@ export function Conversation({ personality, onBuildRequest }: Props) {
           <span className="chip">{profile.label}</span>
         </div>
         <div className="row">
-          {/* Only offered when this machine can actually speak. A toggle that
-              silently does nothing is worse than no toggle: the user cannot
-              tell a broken feature from an unused one. */}
-          {speech.availability.available ? (
+          {/* Only offered when this machine can actually speak — by either
+              engine. A toggle that silently does nothing is worse than no
+              toggle: the user cannot tell a broken feature from an unused one. */}
+          {speech.engine !== "none" ? (
             <>
-              {speech.speaking ? (
+              {/* Offered while audio is still being generated too: that is a
+                  moment where the user has committed to hearing something and
+                  may well change their mind before it starts. */}
+              {speech.speaking || speech.preparing ? (
                 <button type="button" className="btn btn-ghost btn-sm" onClick={speech.stop}>
-                  Stop speaking
+                  {speech.preparing ? "Cancel" : "Stop speaking"}
                 </button>
               ) : null}
               <button
                 type="button"
                 className={`btn btn-ghost btn-sm${speech.enabled ? " btn-on" : ""}`}
                 aria-pressed={speech.enabled}
-                title={speech.usingRemoteVoice
-                  ? "No local voice is installed, so speaking would send the text off this machine."
-                  : "Read replies aloud, using this machine's own voices."}
+                title={speech.engine === "neural"
+                  ? "Read replies aloud, using the neural voice running on this machine."
+                  : speech.usingRemoteVoice
+                    ? "No local voice is installed, so speaking would send the text off this machine."
+                    : "Read replies aloud, using this machine's own voices."}
                 onClick={() => speech.setEnabled(!speech.enabled)}
               >
                 {speech.enabled ? "Voice on" : "Voice off"}
               </button>
             </>
           ) : (
-            <span className="faint" title={speech.availability.reason}>No voice</span>
+            <span className="faint" title={speech.availability.available ? undefined : speech.availability.reason}>
+              No voice
+            </span>
           )}
 
         {messages.length > 0 ? (

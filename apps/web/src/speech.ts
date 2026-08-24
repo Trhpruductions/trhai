@@ -226,6 +226,18 @@ export function voiceSettingsFor(personality: PersonalityId): { rate: number; pi
 }
 
 /**
+ * How a personality carries itself, for the neural voice.
+ *
+ * The browser's synthesizer has no equivalent — it takes a rate and a pitch and
+ * nothing else — so cadence goes unused there. The neural engine can act on it,
+ * and it is the difference between speech that is merely clear and speech that
+ * sounds like it means something.
+ */
+export function cadenceFor(personality: PersonalityId): "measured" | "brisk" | "playful" | "deliberate" {
+  return personalityById(resolvePersonality(personality)).voice.cadence;
+}
+
+/**
  * Why speech *recognition* is not here.
  *
  * The browser exposes SpeechRecognition, and it would have been easy to wire

@@ -4,6 +4,7 @@ import { Surface } from "../Surface";
 import type { SurfaceContext } from "../AppShell";
 import { webEnv } from "../../env";
 import { useSpeech } from "../../state/useSpeech";
+import { describeVoice } from "../../neuralSpeech";
 
 // Settings: how the assistant sounds, and what it is obliged to say.
 //
@@ -140,24 +141,34 @@ function BuildInformation() {
 /**
  * Which voice reads replies aloud.
  *
- * Speech synthesis here is the operating system's: the voices run on this
- * machine, nothing is uploaded and no account is involved. What the machine
- * has installed therefore decides how human it sounds, which is not something
- * the app can change — so when only the older voices are present, this says
- * so and says where the better ones come from, rather than leaving "it sounds
- * robotic" unanswered.
+ * Two engines, one panel. The neural voice runs as a local process and sounds
+ * like a person; the browser's own voices are the fallback and, on a machine
+ * with only the legacy SAPI voices, sound like a synthesizer from two decades
+ * ago. Both are local — nothing is uploaded and no account is involved — so
+ * the choice is about how it sounds, not about privacy.
+ *
+ * Which one is actually speaking is stated rather than implied, because they
+ * sound entirely different and "why does it sound robotic" deserves an answer.
  */
 function VoiceSettings({ personality }: { personality: PersonalityId }) {
   const speech = useSpeech();
 
-  if (!speech.availability.available) {
+  // Nothing can speak: no neural voice and no browser voices either.
+  if (speech.engine === "none") {
     return (
       <div className="panel voice-settings">
         <strong>Voice</strong>
-        <p className="muted">{speech.availability.reason}</p>
+        <p className="muted">
+          {speech.availability.available ? "No voice is available." : speech.availability.reason}
+        </p>
+        {speech.neural && !speech.neural.available ? (
+          <p className="faint voice-note">{speech.neural.reason}</p>
+        ) : null}
       </div>
     );
   }
+
+  const neuralReady = speech.neuralVoices.length > 0;
 
   return (
     <div className="panel voice-settings">
@@ -174,9 +185,20 @@ function VoiceSettings({ personality }: { personality: PersonalityId }) {
       </div>
 
       <p className="muted voice-desc">
-        Replies are read aloud by this machine&apos;s own voices. Nothing is uploaded, and
-        the speed and pitch follow whichever personality is active.
+        Replies are read aloud on this machine. Nothing is uploaded, no account is
+        involved, and the pacing follows whichever personality is active.
       </p>
+
+      {/* Which engine is live, stated plainly. The two sound nothing alike, so
+          leaving the user to guess would be the same as not saying. */}
+      <div className="row voice-engine">
+        {speech.engine === "neural" && speech.activeNeuralVoice ? (
+          <span className="chip chip-live">Neural · {describeVoice(speech.activeNeuralVoice)}</span>
+        ) : (
+          <span className="chip">Browser voice</span>
+        )}
+        {speech.preparing ? <span className="chip chip-warn">Generating audio…</span> : null}
+      </div>
 
       <label className="voice-field">
         <span className="label">Which voice</span>
@@ -186,33 +208,60 @@ function VoiceSettings({ personality }: { personality: PersonalityId }) {
           aria-label="Which voice"
           onChange={(event) => speech.setVoiceName(event.target.value || null)}
         >
-          <option value="">Best available</option>
-          {speech.voices.map((voice) => (
-            <option key={voice.name} value={voice.name}>
-              {voice.name}{voice.localService ? "" : " (sends text off this machine)"}
-            </option>
-          ))}
+          <option value="">
+            {neuralReady ? "Best available (neural)" : "Best available"}
+          </option>
+
+          {/* Grouped, because the two lists are not comparable: everything in
+              the first sounds like a person and everything in the second
+              sounds like a synthesizer. */}
+          {neuralReady ? (
+            <optgroup label="Neural — runs on this machine">
+              {speech.neuralVoices.map((voice) => (
+                <option key={voice.id} value={voice.id}>{describeVoice(voice)}</option>
+              ))}
+            </optgroup>
+          ) : null}
+
+          {speech.voices.length > 0 ? (
+            <optgroup label="Built into Windows">
+              {speech.voices.map((voice) => (
+                <option key={voice.name} value={voice.name}>
+                  {voice.name}{voice.localService ? "" : " (sends text off this machine)"}
+                </option>
+              ))}
+            </optgroup>
+          ) : null}
         </select>
       </label>
 
       <div className="row voice-actions">
         <button type="button" className="btn btn-sm"
+          disabled={speech.preparing}
           onClick={() => speech.speaking
             ? speech.stop()
             : speech.speak("This is how I will read replies aloud.", personality)}>
-          {speech.speaking ? "Stop" : "Hear it"}
+          {speech.speaking ? "Stop" : speech.preparing ? "Generating…" : "Hear it"}
         </button>
       </div>
 
-      {/* The honest answer to "why does it sound robotic". These are Windows
-          settings, not something this app can install for you. */}
+      {/* A failure the user can hear the consequence of — usually a fallback
+          to the browser voice — needs saying, not swallowing. */}
+      {speech.error ? <p className="faint voice-note">{speech.error}</p> : null}
+
+      {/* The honest answer to "why does it sound robotic", shown only when the
+          neural voice is not covering for the old ones. */}
       {speech.onlyLegacyVoices ? (
         <p className="faint voice-note">
-          Only the older built-in voices are installed on this machine, which is why speech
-          sounds synthetic. Windows 11 has far more natural ones under
-          <b> Settings → Accessibility → Narrator → Add natural voices</b>. They run locally
-          too, and this app will use them automatically once they are installed.
+          Only the older built-in voices are installed, which is why speech sounds
+          synthetic. Two fixes, both local: Windows 11 has far more natural voices under
+          <b> Settings → Accessibility → Narrator → Add natural voices</b>, or install the
+          neural voice for a better one still. Either is picked up automatically.
         </p>
+      ) : null}
+
+      {speech.neural && !speech.neural.available ? (
+        <p className="faint voice-note">Neural voice: {speech.neural.reason}</p>
       ) : null}
     </div>
   );

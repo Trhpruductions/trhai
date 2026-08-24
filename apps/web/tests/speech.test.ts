@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { allPersonalities } from "../src/personalities.js";
 import {
+  cadenceFor,
   chooseVoice,
   maxSpokenCharacters,
   onlyRemoteVoicesAvailable,
@@ -133,6 +135,18 @@ test("voice settings stay inside what the speech API accepts", () => {
 test("an unknown personality falls back rather than throwing", () => {
   const settings = voiceSettingsFor("nonsense" as never);
   assert.ok(settings.rate > 0);
+});
+
+test("a personality's cadence is read, not just stored", () => {
+  // Every personality has carried a cadence since personalities were added and
+  // nothing read it. The neural voice acts on it, so it has to come back
+  // faithfully rather than as one value for everyone.
+  const cadences = new Set(allPersonalities().map((profile) => cadenceFor(profile.id as never)));
+  assert.ok(cadences.size > 1, "every personality resolved to the same cadence");
+});
+
+test("an unknown personality still yields a usable cadence", () => {
+  assert.ok(["measured", "brisk", "playful", "deliberate"].includes(cadenceFor("nonsense" as never)));
 });
 
 test("speech recognition is recorded as not local, and is not implemented", () => {
