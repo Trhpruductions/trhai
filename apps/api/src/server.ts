@@ -48,6 +48,7 @@ import {
 import { isAllowedOrigin } from "./services/originPolicy.js";
 import { checkAvailability, readLocalModelConfig } from "./services/localModel.js";
 import { readPreferences, updatePreferences } from "./services/preferences.js";
+import { getBuildInfo } from "./services/buildInfo.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -115,6 +116,14 @@ export function createApp() {
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", service: "ascend-api" });
+  });
+
+  // Which build is actually answering. Found live: three differently-aged,
+  // differently-architected installs of this app existed on one machine at
+  // once, all under the same name, with no way to tell them apart from the
+  // running window alone. This is the answer to "which one is this".
+  app.get("/v1/build-info", (_req, res) => {
+    res.json({ data: getBuildInfo(), traceId: "trace-local" });
   });
 
   app.post("/v1/assist", async (req, res, next) => {

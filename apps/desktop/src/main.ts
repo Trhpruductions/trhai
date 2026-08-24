@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { access, mkdir, readdir, writeFile } from "node:fs/promises";
 import { getDetachedSpawnConfig, getServiceSpawnOptions } from "./launcher.js";
 import { containPath, isSafeExternalUrl, isTrustedAppUrl } from "./pathGuard.js";
+import { getDesktopBuildInfo } from "./buildInfo.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -241,6 +242,22 @@ function enumerateStorageDevices(): StorageDevice[] {
 
   return devices;
 }
+
+ipcMain.handle("ascend:get-build-info", async () => {
+  try {
+    return {
+      ok: true,
+      ...getDesktopBuildInfo({
+        version: app.getVersion(),
+        packaged: app.isPackaged,
+        appPath: app.getAppPath(),
+        workspaceRoot
+      })
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Failed to read build info." };
+  }
+});
 
 ipcMain.handle("ascend:get-system-telemetry", async () => {
   try {

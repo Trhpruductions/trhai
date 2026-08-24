@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("ascendDesktop", {
   appName: "Vexora AI",
   version: "0.1.4",
   createWorkspaceScaffold: (payload: unknown) => ipcRenderer.invoke("ascend:create-scaffold", payload),
+  getBuildInfo: () => ipcRenderer.invoke("ascend:get-build-info"),
   getSystemTelemetry: () => ipcRenderer.invoke("ascend:get-system-telemetry"),
   listProjectInventory: () => ipcRenderer.invoke("ascend:list-project-inventory"),
   listStorageDevices: () => ipcRenderer.invoke("ascend:list-storage-devices"),

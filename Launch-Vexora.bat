@@ -67,6 +67,9 @@ if not exist "apps\desktop\dist\main.js" (
 )
 
 echo [%time%] starting desktop shell>> "%LOG%"
+REM Read by the build-info IPC handler, so About can say how the running
+REM window was actually started rather than just that it was.
+set "ASCEND_LAUNCHED_VIA=Launch-Vexora.bat"
 REM Electron output is not redirected into the log: doing so held the file open
 REM for as long as the app ran, so a second launch could not write it at all.
 call "%~dp0apps\desktop\node_modules\.bin\electron.cmd" "%~dp0apps\desktop\dist\main.js" >nul 2>&1

@@ -20,6 +20,20 @@ declare global {
         message?: string;
         error?: string;
       }>;
+      getBuildInfo?: () => Promise<{
+        ok?: boolean;
+        version?: string;
+        environment?: "development" | "production";
+        appPath?: string;
+        workspaceRoot?: string;
+        launchedVia?: string;
+        gitCommit?: string | null;
+        gitCommitShort?: string | null;
+        gitBranch?: string | null;
+        gitCommitDate?: string | null;
+        gitDirty?: boolean | null;
+        error?: string;
+      }>;
       getSystemTelemetry?: () => Promise<{
         ok?: boolean;
         source?: string;
