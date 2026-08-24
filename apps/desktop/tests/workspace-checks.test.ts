@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   checkEnvironment,
   isWorkspaceCheck,
@@ -130,4 +133,98 @@ test("environment matching is case-insensitive, as Windows treats it", () => {
 test("an undefined environment value is dropped rather than passed through", () => {
   const filtered = checkEnvironment({ PATH: undefined });
   assert.equal("PATH" in filtered, false);
+});
+
+// Everything above tests the gate. None of it spawns, which is exactly how
+// the first version of this shipped with three of its four checks unable to
+// run at all: `shell: false` reads as the safer setting, and Node refuses to
+// start a .cmd shim without a shell (EINVAL, its CVE-2024-27980 fix). The
+// suite was green and the feature was dead.
+//
+// These start the real process. They are slower than the rest of the file
+// and that is the trade being made deliberately: a check that cannot be
+// spawned is the failure most worth catching, and it is invisible to every
+// test that stops short of spawning.
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+
+/** Runs a check the way the IPC handler does, and resolves how it ended. */
+function runCheck(name: keyof typeof workspaceChecks): Promise<{
+  spawnError?: string;
+  exitCode: number | null;
+  output: string;
+}> {
+  const selected = workspaceChecks[name];
+
+  return new Promise((resolve) => {
+    const child = spawn(selected.command, [...selected.args], {
+      cwd: repoRoot,
+      windowsHide: true,
+      shell: true,
+      env: checkEnvironment()
+    });
+
+    let output = "";
+    child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      resolve({ spawnError: error.code ?? error.message, exitCode: null, output });
+    });
+    child.on("close", (code) => resolve({ exitCode: code, output }));
+  });
+}
+
+/**
+ * Whether the process starts, and nothing else.
+ *
+ * It is killed the moment it reports itself started. Letting these run to
+ * completion is not an option: `tests` at the repo root runs every
+ * workspace's suite, which includes this file, so the test would recurse
+ * into itself — and `build` is minutes of work to answer a question that is
+ * settled in milliseconds.
+ */
+function canSpawn(name: keyof typeof workspaceChecks): Promise<string | null> {
+  const selected = workspaceChecks[name];
+
+  return new Promise((resolve) => {
+    const child = spawn(selected.command, [...selected.args], {
+      cwd: repoRoot,
+      windowsHide: true,
+      shell: true,
+      env: checkEnvironment()
+    });
+
+    child.on("error", (error: NodeJS.ErrnoException) => resolve(error.code ?? error.message));
+    child.on("spawn", () => {
+      child.kill();
+      resolve(null);
+    });
+  });
+}
+
+test("every check can actually be spawned on this platform", { timeout: 60_000 }, async () => {
+  // The regression this file exists for. Asserts only that the process
+  // started — whether the repo currently typechecks is not this test's
+  // business, and a genuinely failing build must not fail this.
+  for (const name of Object.keys(workspaceChecks) as Array<keyof typeof workspaceChecks>) {
+    const spawnError = await canSpawn(name);
+    assert.equal(
+      spawnError,
+      null,
+      `${name} could not be spawned (${spawnError}) — unrunnable, whatever the gate says`
+    );
+  }
+});
+
+test("gitStatus runs against the real repository and reports its branch", { timeout: 60_000 }, async () => {
+  // The end-to-end one: a real process, real output, parsed the way the run
+  // log shows it. `--branch` always prints a `##` header line, even in a
+  // clean tree, so there is something to assert on that does not depend on
+  // the working tree being dirty.
+  const result = await runCheck("gitStatus");
+
+  assert.equal(result.spawnError, undefined);
+  assert.equal(result.exitCode, 0, `git status exited ${result.exitCode}: ${result.output}`);
+  assert.match(result.output, /^##\s/m, `expected a branch header, got: ${result.output.slice(0, 200)}`);
 });

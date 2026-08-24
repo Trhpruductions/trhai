@@ -429,13 +429,18 @@ ipcMain.handle("ascend:run-check", async (event, payload) => {
   return await new Promise<{ ok: boolean; runId: string; exitCode: number; error?: string }>((resolve) => {
     emitEvent("start", `[run:${runId}] ${selected.label}`, "info");
 
-    // `shell: false` is the point of this call: the executable and every
-    // argument are passed as separate values, so nothing in them is ever
-    // parsed as an operator, a redirect, or a second command.
+    // `shell: true` is required, not preferred: Node refuses to spawn the
+    // npm .cmd shim without it (EINVAL, its CVE-2024-27980 fix), so three of
+    // the four checks simply could not run otherwise. See workspaceChecks.ts.
+    //
+    // What makes that safe here is that `selected` came out of the frozen
+    // registry via isWorkspaceCheck. Every element of the command line below
+    // is a literal in that file. The caller chose which check runs; it
+    // contributed no part of what runs.
     const child = spawn(selected.command, [...selected.args], {
       cwd: candidateCwd,
       windowsHide: true,
-      shell: false,
+      shell: true,
       env: checkEnvironment()
     });
 

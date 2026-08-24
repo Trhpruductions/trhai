@@ -206,10 +206,26 @@ export function AutomationSurface() {
                           aria-label={`${nodeLabels[node.type]} ${field.label}`}
                           onChange={(event) => commit(updateNodeConfig(flow, node.id, field.key, event.target.value))}
                         >
-                          <option value="">Choose a check…</option>
+                          <option value="">
+                            {checks.length === 0 ? "Needs the desktop app" : "Choose a check…"}
+                          </option>
                           {checks.map((check) => (
                             <option key={check.name} value={check.name}>{check.label}</option>
                           ))}
+                          {/* A saved flow opened in a browser has a check the
+                              list cannot confirm, because the list only exists
+                              in the desktop shell. Showing it anyway keeps the
+                              stored value visible and selected — without this
+                              the select falls back to the empty option and a
+                              perfectly good flow reads as unconfigured. */}
+                          {node.config[field.key]
+                            && !checks.some((check) => check.name === node.config[field.key])
+                            ? (
+                              <option value={node.config[field.key]}>
+                                {node.config[field.key]}
+                              </option>
+                            )
+                            : null}
                         </select>
                       ) : (
                         <input

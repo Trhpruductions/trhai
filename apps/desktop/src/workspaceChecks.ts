@@ -21,7 +21,23 @@
 // with no confirmation step, so a check that could delete, reset, push, or
 // install does not belong in this set.
 
-/** Resolved once: with `shell: false`, Windows needs the .cmd shim by name. */
+/**
+ * Windows needs the .cmd shim by name; every other platform uses `npm`.
+ *
+ * Caught live: the first version of this ran with `shell: false`, which
+ * reads as the safer setting and is not available here. Node 24 refuses to
+ * spawn a .bat or .cmd without a shell — its fix for CVE-2024-27980 — so
+ * `spawn("npm.cmd", args, { shell: false })` throws EINVAL and three of the
+ * four checks below could never have run. The unit tests did not catch it
+ * because they exercised the gate and never actually spawned anything.
+ *
+ * These therefore run with `shell: true`, and the safety comes from the
+ * argument list instead of from the spawn flag. That is a real difference
+ * from the code this replaced, not a return to it: there, the entire command
+ * was a string from the renderer. Here every element of every command below
+ * is a literal in this file, and `isWorkspaceCheck` guarantees the caller can
+ * only choose *which* of them runs, never contribute a character to one.
+ */
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 
 export type WorkspaceCheckDefinition = {
