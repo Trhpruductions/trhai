@@ -45,7 +45,10 @@ test("configuration falls back to the usual local defaults", () => {
   const config = readLocalModelConfig({} as NodeJS.ProcessEnv);
 
   assert.equal(config.baseUrl, "http://127.0.0.1:11434");
-  assert.equal(config.model, "llama3.2");
+  // Must match the head of preferredModels in localModel.ts. That list is
+  // private, so this is coupled by hand: if the default is renamed again,
+  // this is the assertion that says so.
+  assert.equal(config.model, "vexora:latest");
   assert.ok(config.timeoutMs >= 10000, "local inference is slow; a short timeout abandons live replies");
 });
 
@@ -205,11 +208,13 @@ test("an explicitly configured model always wins", () => {
   assert.equal(pickModel("mistral", ["llama3.1:8b", "mistral:latest"]), "mistral:latest");
 });
 
-test("the larger model is preferred when the configured one is absent", () => {
+test("the most preferred installed model wins when the configured one is absent", () => {
   // The tools raised the ceiling on capability and the model became the limit:
-  // a 3B model answers from its own knowledge where it should have looked
-  // something up. A bigger one follows the tool instructions more reliably.
-  assert.equal(pickModel("nonexistent", ["llama3.2:latest", "llama3.1:8b"]), "llama3.1:8b");
+  // a weaker model answers from its own knowledge where it should have looked
+  // something up. The preference list is what expresses that ranking, so the
+  // higher-ranked installed model must win even though both are available.
+  // qwen2.5 outranks llama3.2 in preferredModels.
+  assert.equal(pickModel("nonexistent", ["llama3.2:latest", "qwen2.5:latest"]), "qwen2.5:latest");
 });
 
 test("a model that is installed beats none at all", () => {
@@ -227,19 +232,22 @@ test("a bare name matches the tagged form Ollama reports", () => {
 });
 
 test("the built-in default does not block a better model", () => {
-  // The bug this exists to stop: OLLAMA_MODEL unset means model is "llama3.2",
-  // which is itself installed — so it looked like a deliberate choice and
-  // llama3.1:8b sitting next to it was never picked up. Pulling a better model
-  // changed nothing at all.
+  // The bug this exists to stop: with OLLAMA_MODEL unset the config still
+  // carries a model name, and that name is often itself installed — so it
+  // looked like a deliberate choice and a higher-ranked model sitting next to
+  // it was never picked up. Pulling a better model changed nothing at all.
+  //
+  // Written with a default that is *not* the top preference, because that is
+  // the only shape in which the bug can occur at all.
   assert.equal(
-    pickModel("llama3.2", ["llama3.2:latest", "llama3.1:8b"], false),
-    "llama3.1:8b"
+    pickModel("llama3.2", ["llama3.2:latest", "qwen2.5:latest"], false),
+    "qwen2.5:latest"
   );
 });
 
 test("a model named in the environment still wins", () => {
   assert.equal(
-    pickModel("llama3.2", ["llama3.2:latest", "llama3.1:8b"], true),
+    pickModel("llama3.2", ["llama3.2:latest", "qwen2.5:latest"], true),
     "llama3.2:latest"
   );
 });
@@ -267,16 +275,18 @@ test("the timeout can still be set explicitly", () => {
 });
 
 test("candidates are ordered best first, with the named model at the front", () => {
+  // Named model first, then the preference list, then anything unranked.
   assert.deepEqual(
-    orderedCandidates("llama3.2", ["phi3:latest", "llama3.1:8b", "llama3.2:latest"], true),
-    ["llama3.2:latest", "llama3.1:8b", "phi3:latest"]
+    orderedCandidates("llama3.2", ["phi3:latest", "qwen2.5:latest", "llama3.2:latest"], true),
+    ["llama3.2:latest", "qwen2.5:latest", "phi3:latest"]
   );
 });
 
 test("without a named model the preference list leads", () => {
+  // qwen2.5 outranks llama3.2, and phi3 is unranked so it goes last.
   assert.deepEqual(
-    orderedCandidates("llama3.2", ["phi3:latest", "llama3.2:latest", "llama3.1:8b"], false),
-    ["llama3.1:8b", "llama3.2:latest", "phi3:latest"]
+    orderedCandidates("llama3.2", ["phi3:latest", "llama3.2:latest", "qwen2.5:latest"], false),
+    ["qwen2.5:latest", "llama3.2:latest", "phi3:latest"]
   );
 });
 
