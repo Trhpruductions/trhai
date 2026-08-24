@@ -49,6 +49,7 @@ import { isAllowedOrigin } from "./services/originPolicy.js";
 import { checkAvailability, readLocalModelConfig } from "./services/localModel.js";
 import { readPreferences, updatePreferences } from "./services/preferences.js";
 import { getBuildInfo } from "./services/buildInfo.js";
+import { getSystemCapabilities, toolsByLevel } from "./services/systemCapabilities.js";
 import {
   clearPendingConfirmation,
   describePendingAction,
@@ -548,6 +549,22 @@ export function createApp() {
       data: availability.available
         ? { available: true, model: availability.model }
         : { available: false, model: null, reason: availability.reason },
+      traceId: "trace-local"
+    });
+  });
+
+  // What the assistant can actually do, read from the same registry runTool
+  // enforces — see systemCapabilities.ts. Existed only as prose inside a chat
+  // reply before this: a "Security" screen showing real tools and real
+  // permission levels needs the same data as structured JSON, not a page that
+  // re-describes the registry from memory and can drift from what the gate
+  // actually allows.
+  app.get("/v1/capabilities", async (_req, res) => {
+    const availability = await checkAvailability(readLocalModelConfig());
+    const capabilities = getSystemCapabilities(availability.available ? availability.model : null);
+
+    res.json({
+      data: { ...capabilities, groups: toolsByLevel(capabilities) },
       traceId: "trace-local"
     });
   });
