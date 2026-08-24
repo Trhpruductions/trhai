@@ -23,6 +23,7 @@ import path from "node:path";
 // any part of what is executed.
 
 export type VoiceQuality = "x_low" | "low" | "medium" | "high";
+export type VoiceGender = "male" | "female";
 
 export type NeuralVoice = {
   /** The model's file stem, e.g. "en_GB-alan-medium". Stable, and the id clients send. */
@@ -32,7 +33,33 @@ export type NeuralVoice = {
   /** e.g. "en_GB". */
   locale: string;
   quality: VoiceQuality;
+  /** Null for a speaker this build does not have a documented gender for. */
+  gender: VoiceGender | null;
   modelPath: string;
+};
+
+/**
+ * Which speakers are known to sound male or female.
+ *
+ * Piper publishes no gender field anywhere — not in the model's own JSON, not
+ * in the upstream voices.json index, not on the model cards. Checked directly
+ * before writing this. What exists instead is the convention the dataset
+ * curators themselves used: a voice is named after a person whose name
+ * matches how it sounds, which is the same reasoning behind "Ryan" and
+ * "Alan" versus "Cori" and "Amy" here. Confirmed against the actual audio —
+ * these four were generated and listened to when the voices were installed.
+ *
+ * Keyed by speaker name lower-cased, not by full voice id, so a future
+ * quality tier of a known speaker (a "high" Alan, say) is recognised without
+ * this needing an update. A speaker not listed here gets `gender: null`
+ * rather than a guess — an unfamiliar voice is exactly the case where
+ * inventing an answer would be worse than admitting this does not know.
+ */
+const knownSpeakerGender: Record<string, VoiceGender> = {
+  ryan: "male",
+  alan: "male",
+  cori: "female",
+  amy: "female"
 };
 
 export type PiperStatus =
@@ -96,7 +123,8 @@ export function describeVoiceFile(fileName: string): Omit<NeuralVoice, "modelPat
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" "),
     locale,
-    quality: parseQuality(quality)
+    quality: parseQuality(quality),
+    gender: knownSpeakerGender[speaker.toLowerCase()] ?? null
   };
 }
 
@@ -132,7 +160,14 @@ export function installedVoices(): NeuralVoice[] {
   return voices.sort((left, right) => {
     const byQuality = qualityRank[right.quality] - qualityRank[left.quality];
     if (byQuality !== 0) return byQuality;
-    // Among equals, the British voices first: this is an assistant, and that
+    // Among equal quality, a male voice first — asked for directly. A voice
+    // of unknown gender sorts as neither first nor last on this step, so an
+    // unfamiliar future addition is not silently pushed to the back for a
+    // reason nobody asked for.
+    const genderRank = (voice: NeuralVoice) => (voice.gender === "male" ? 0 : voice.gender === "female" ? 2 : 1);
+    const byGender = genderRank(left) - genderRank(right);
+    if (byGender !== 0) return byGender;
+    // Among those, the British voices next: this is an assistant, and that
     // is the register the user asked for. Stable beyond that so the default
     // does not move around between reads.
     const leftBritish = left.locale === "en_GB" ? 0 : 1;

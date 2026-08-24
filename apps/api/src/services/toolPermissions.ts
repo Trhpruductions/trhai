@@ -58,6 +58,11 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   shift_date: 1,
   // plan_app only describes what would be built; build_app is what builds it.
   plan_app: 1,
+  // The one exception to "reads nothing but what is already stored": it
+  // reads a page from the internet instead. Still level 1 by this ladder's
+  // own definition — it changes nothing on this machine — but see
+  // webFetch.ts for why that exception is safe to make at all.
+  fetch_url: 1,
 
   // 2 — creates or changes something, inside a bounded workspace.
   remember: 2,

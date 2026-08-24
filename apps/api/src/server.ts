@@ -565,7 +565,7 @@ export function createApp() {
             voice: status.voice.id,
             // The full list, so the picker offers what is actually on disk
             // rather than a hardcoded menu that can drift out of date.
-            voices: status.voices.map(({ id, name, locale, quality }) => ({ id, name, locale, quality })),
+            voices: status.voices.map(({ id, name, locale, quality, gender }) => ({ id, name, locale, quality, gender })),
             maxCharacters: maxSynthesisCharacters
           }
         : { available: false, voice: null, voices: [], reason: status.reason },

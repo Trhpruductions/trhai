@@ -66,6 +66,16 @@ test("a model filename becomes a named voice", () => {
   assert.equal(voice?.name, "Alan");
   assert.equal(voice?.locale, "en_GB");
   assert.equal(voice?.quality, "medium");
+  assert.equal(voice?.gender, "male");
+});
+
+test("a speaker this build has no confirmed gender for is null, not guessed", () => {
+  // Piper publishes no gender field anywhere for its voices — checked
+  // directly against the model's own JSON, the upstream voices.json index,
+  // and the model cards. A speaker outside the small confirmed list must
+  // stay unknown rather than have one invented for it.
+  const voice = describeVoiceFile("fr_FR-siwis-medium.onnx");
+  assert.equal(voice?.gender, null);
 });
 
 test("a speaker name with underscores reads as words", () => {
@@ -94,11 +104,35 @@ test("voices are listed best quality first", async () => {
   });
 });
 
-test("among equal quality, the assistant's own register comes first", async () => {
+test("among equal quality, a male voice comes first", async () => {
+  // Asked for directly. Ryan is American and Cori is British — if locale
+  // still decided this ahead of gender, Cori would win; it does not.
   const dir = fakeInstall({ binary: true, models: ["en_US-ryan-high", "en_GB-cori-high"] });
 
   await withInstall(dir, () => {
-    assert.equal(installedVoices()[0]?.id, "en_GB-cori-high");
+    assert.equal(installedVoices()[0]?.id, "en_US-ryan-high");
+  });
+});
+
+test("among equal quality and gender, the assistant's own register comes next", async () => {
+  const dir = fakeInstall({ binary: true, models: ["en_US-ryan-high", "en_GB-alan-high"] });
+
+  await withInstall(dir, () => {
+    // Both male, both high quality — British wins the remaining tiebreak.
+    assert.equal(installedVoices()[0]?.id, "en_GB-alan-high");
+  });
+});
+
+test("a voice of unknown gender is never pushed behind a female one for it", async () => {
+  // "unknown" must not silently rank as though it meant "not male" — the
+  // whole point of null is that this build does not know, not that it
+  // assumes female.
+  const dir = fakeInstall({ binary: true, models: ["en_US-amy-high", "en_GB-siwis-high"] });
+
+  await withInstall(dir, () => {
+    // amy is confirmed female; siwis has no confirmed gender at all — the
+    // unconfirmed voice ranks ahead of the confirmed-female one on this step.
+    assert.equal(installedVoices()[0]?.id, "en_GB-siwis-high");
   });
 });
 

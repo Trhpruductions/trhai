@@ -637,8 +637,11 @@ test("the capability reply lists real tool names read from the registry", () => 
   assert.match(reply, /search_memory/);
   assert.match(reply, /build_app/);
   assert.match(reply, /forget/);
-  // And it says plainly what does not exist, rather than staying silent.
-  assert.match(reply, /no web or internet access/i);
+  assert.match(reply, /fetch_url/);
+  // fetch_url is real now, so this must not claim otherwise — and code
+  // execution genuinely still has no tool, so that one stays honest too.
+  assert.doesNotMatch(reply, /no web or internet access/i);
+  assert.match(reply, /no arbitrary code execution/i);
 });
 
 // A capability question, unlike a request to retrieve something, must never

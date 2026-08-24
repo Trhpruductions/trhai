@@ -45,11 +45,15 @@ test("filesystem, memory, documents and app-building are true because the tools 
   assert.equal(capabilities.applicationBuilding, true);
 });
 
-test("web access and code execution are reported unavailable, because no such tool exists", () => {
-  // Not a placeholder value — there is genuinely no tool registered for
-  // either, and a capability report that said otherwise would be inventing.
+test("web access is reported available, because fetch_url is genuinely registered", () => {
   const capabilities = getSystemCapabilities(null);
-  assert.equal(capabilities.web, false);
+  assert.equal(capabilities.web, true);
+});
+
+test("code execution is reported unavailable, because no such tool exists", () => {
+  // Not a placeholder value — there is genuinely no tool registered for
+  // this, and a capability report that said otherwise would be inventing.
+  const capabilities = getSystemCapabilities(null);
   assert.equal(capabilities.codeExecution, false);
 });
 

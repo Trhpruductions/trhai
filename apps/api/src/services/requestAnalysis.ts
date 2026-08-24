@@ -76,7 +76,12 @@ const commandVerbs = new Set([
   // anyway so a compound request ("Remember X, then build Y") is recognised
   // as a command from the start rather than depending on a different branch
   // to notice the rest of the sentence.
-  "remember", "forget", "pin", "unpin", "calculate", "save", "recall"
+  "remember", "forget", "pin", "unpin", "calculate", "save", "recall",
+  // Caught live, same failure again, the day fetch_url was added: "Fetch
+  // https://example.com and tell me what it says" got "Got it — I'll keep
+  // that in mind" and fetch_url was never called. The verb is the tool's own
+  // name — about as natural a phrasing as exists — and it was still missing.
+  "fetch", "visit", "browse"
 ]);
 
 const questionLeads: Array<{ pattern: RegExp; type: QuestionType }> = [
