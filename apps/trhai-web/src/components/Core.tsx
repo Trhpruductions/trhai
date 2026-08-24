@@ -70,6 +70,25 @@ const orbiters = [
   { r: 70, delay: "-3.5s", dur: "9s" }
 ];
 
+/**
+ * Six angular brackets standing off the outer ring.
+ *
+ * This is TRHAI's own mark, and it is deliberately hexagonal rather than a
+ * ring or a segmented disc: circular HUDs are a genre convention anyone may
+ * use, but the recognisable arc-reactor silhouette is somebody's protected
+ * iconography and is not ours to borrow. A six-point bracket frame reads as
+ * this product rather than as a costume of another one.
+ */
+const brackets = Array.from({ length: 6 }, (_, index) => {
+  const angle = (index / 6) * Math.PI * 2 - Math.PI / 2;
+  return {
+    key: index,
+    x: round(120 + Math.cos(angle) * 112),
+    y: round(120 + Math.sin(angle) * 112),
+    rotate: round((index / 6) * 360)
+  };
+});
+
 export function Core({ state = "idle", size = 300, amplitude }: {
   state?: CoreState;
   size?: number;
@@ -103,6 +122,19 @@ export function Core({ state = "idle", size = 300, amplitude }: {
         </defs>
 
         <circle cx="120" cy="120" r="112" fill={`url(#${bloomId})`} className="core-bloom" />
+
+        {/* TRHAI's own frame: six angular brackets standing off the rings,
+            counter-rotating slowly against them. */}
+        <g className="bracket-spin">
+          {brackets.map((bracket) => (
+            <path
+              key={bracket.key}
+              d="M -9 -3 L -9 3 M -9 0 L 9 0 M 9 -3 L 9 3"
+              className="bracket"
+              transform={`translate(${bracket.x} ${bracket.y}) rotate(${bracket.rotate})`}
+            />
+          ))}
+        </g>
 
         <g className="core-ticks">
           {outerTicks.map((tick) => (
