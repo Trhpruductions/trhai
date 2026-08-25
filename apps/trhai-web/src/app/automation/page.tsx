@@ -18,6 +18,7 @@ import {
   type NodeType,
   type RunResult
 } from "@ascend/shared";
+import { Schedules } from "../../components/Schedules";
 import "./automation.css";
 
 // Automation: flows you can actually run, against @ascend/shared's
@@ -204,6 +205,13 @@ export default function AutomationPage() {
           </button>
         ))}
       </div>
+
+      {/* Separate from the flow above on purpose. A flow is a thing you run
+          by hand from this page; a schedule is a thing the API runs on a
+          timer without anyone here. They are not yet connected — a schedule
+          asks TRHAI a question, it cannot trigger the flow — and pretending
+          otherwise by putting them in one box would be the wrong shape. */}
+      <Schedules />
     </div>
   );
 }
