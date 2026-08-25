@@ -1,4 +1,4 @@
-# Starts TRHAI and opens it.
+﻿# Starts TRHAI and opens it.
 #
 # Two processes: the local API on 4000 and the app on 3210. Both are started
 # here rather than by the app itself, because the app is a web page and a web
@@ -62,6 +62,55 @@ function Start-Service-IfDown([int]$port, [string]$name, [string]$argumentList) 
         -WorkingDirectory $root -WindowStyle Hidden
 }
 
+# Ollama, which the assistant answers with.
+#
+# It installs into the Startup folder rather than as a service, so it is
+# usually already running — but if it has been closed, the app would open with
+# no model and only a small "none" on the System panel to explain why. Starting
+# it here is the difference between the shortcut opening a working assistant
+# and opening one that cannot answer.
+#
+# Found by looking rather than assumed: `ollama` is on PATH, and `ollama serve`
+# is the process the API actually talks to on 11434.
+function Start-Ollama-IfDown {
+    if (Test-Port 11434) {
+        Write-Log "ollama already listening on 11434"
+        return
+    }
+
+    # The tray app, not `ollama serve`.
+    #
+    # This mattered and was nearly missed. Starting `ollama serve` directly
+    # brought 11434 up and reported llama3.1 and llama3.2 as the installed
+    # models — when the models actually installed on this machine are
+    # vexora:latest, qwen2.5-coder:7b and qwen2.5:3b. The bare server resolves
+    # a different model store from the one the tray app uses, so the launcher
+    # would have "recovered" Ollama into a state where the assistant's own
+    # model did not exist. Starting it the way Windows does at login is the
+    # only version that gives the same machine back.
+    $tray = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama app.exe"
+    if (Test-Path $tray) {
+        Write-Log "starting ollama (tray app)"
+        Start-Process -FilePath $tray
+        return
+    }
+
+    # Fallback for an install without the tray app. Better than nothing, and
+    # the model list on the System panel will show what it actually found.
+    $ollama = Get-Command ollama -ErrorAction SilentlyContinue
+    if (-not $ollama) {
+        # Not an error to stop the launch for. The app runs without it and says
+        # plainly that no model is loaded, which is more useful than refusing
+        # to open at all.
+        Write-Log "ollama is not installed; the app will open without a model"
+        return
+    }
+
+    Write-Log "starting ollama (serve)"
+    Start-Process -FilePath $ollama.Source -ArgumentList "serve" -WindowStyle Hidden
+}
+
+Start-Ollama-IfDown
 Start-Service-IfDown 4000 "API" "run start --workspace @ascend/api"
 Start-Service-IfDown 3210 "app" "run start --workspace trhai-web -- -p 3210"
 
@@ -86,12 +135,20 @@ if (-not $ready) {
     exit 1
 }
 
-# Reported separately: the app can serve pages while the API is down, and it
-# says so on screen rather than looking broken. Worth knowing at launch too.
+# Reported separately, and not as failures. The app serves pages without the
+# API, and answers without Ollama only to say it cannot — in both cases it
+# shows the gap plainly on screen, so opening it is still the right move.
+# Saying so here means you know before you look.
 if (-not (Test-Port 4000)) {
     Write-Log "app is up but the API is not answering on 4000"
     Write-Host "The app started, but the local API is not answering."
     Write-Host "TRHAI will open and show that plainly. See $log."
+}
+
+if (-not (Test-Port 11434)) {
+    Write-Log "app is up but ollama is not answering on 11434"
+    Write-Host "The app started, but Ollama is not running, so TRHAI cannot generate replies."
+    Write-Host "Everything else works: files, schedules, memory and the machine readings."
 }
 
 Write-Log "opening"
