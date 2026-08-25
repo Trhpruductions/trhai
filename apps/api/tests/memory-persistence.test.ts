@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -14,6 +14,7 @@ const {
   forgetMemory,
   getMemoryAudit,
   listSessionMemories,
+  memoryPersistenceError,
   recordMemoriesFromMessage,
   recordSingleMemory,
   relabelMemory,
@@ -115,6 +116,32 @@ test("malformed entries are dropped without discarding good ones", () => {
   const rows = listSessionMemories("mixed");
   assert.equal(rows.length, 1);
   assert.equal(rows[0].id, "good");
+});
+
+test("a write that cannot succeed is recorded rather than swallowed", () => {
+  // This is what made "the pinned flag survives a restart" flaky: the save
+  // silently failed, memory held the change, disk did not, and nothing
+  // anywhere said so. A machine that had stopped persisting looked exactly
+  // like one that was fine.
+  resetAssistMemory();
+  recordMemoriesFromMessage("durable7", "Remember that failures are reported.");
+  assert.equal(memoryPersistenceError(), null, "a healthy write reports no error");
+
+  // Make the target impossible to write: a directory cannot be renamed over.
+  rmSync(memoryFile, { force: true });
+  mkdirSync(memoryFile, { recursive: true });
+
+  try {
+    // Still must not throw — a failed save cannot take the request down.
+    assert.doesNotThrow(() => recordMemoriesFromMessage("durable7", "Remember that this cannot be saved."));
+    assert.ok(memoryPersistenceError(), "the failure must be knowable, not silent");
+  } finally {
+    rmSync(memoryFile, { recursive: true, force: true });
+  }
+
+  // And it recovers: once the obstruction is gone, the next write clears it.
+  recordMemoriesFromMessage("durable7", "Remember that recovery works.");
+  assert.equal(memoryPersistenceError(), null, "a later successful write clears the error");
 });
 
 test("writes leave no temp file behind", () => {

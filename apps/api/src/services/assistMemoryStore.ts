@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { extractMemoryCandidates, suppressDuplicateMemories, type MemoryCandidate } from "./memoryExtraction.js";
 
@@ -109,22 +109,69 @@ function loadFromDisk(): void {
   }
 }
 
+/**
+ * The last time persisting failed, and why. Null when the last write worked.
+ *
+ * Exists because the alternative was worse: this used to swallow every error
+ * with no trace at all, so a machine that had silently stopped saving looked
+ * exactly like one that was working. A save that fails must still not take
+ * the request down — but it must be knowable.
+ */
+let lastPersistError: string | null = null;
+
+export function memoryPersistenceError(): string | null {
+  return lastPersistError;
+}
+
+/**
+ * How many times to attempt the atomic rename.
+ *
+ * On Windows a rename over an existing file fails with EPERM or EBUSY while
+ * anything else holds a handle on the target — a virus scanner, the indexer,
+ * or another process reading it. It is transient and clears in milliseconds.
+ * Caught as a genuinely intermittent test failure under the parallel load of
+ * the full workspace suite: memory held a pinned flag that disk did not,
+ * because the write had quietly failed and nothing said so.
+ */
+const persistAttempts = 3;
+
 function saveToDisk(): void {
   if (!persistenceEnabled) return;
 
-  try {
-    const payload: PersistedShape = {
-      version: 1,
-      sessions: [...memoriesBySession.entries()].map(([key, memories]) => ({ key, memories })),
-      audit: auditLog
-    };
-    mkdirSync(path.dirname(memoryFilePath), { recursive: true });
-    const tempPath = `${memoryFilePath}.tmp`;
-    writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
-    renameSync(tempPath, memoryFilePath);
-  } catch {
-    // Losing durability is bad; taking the request down with it is worse.
+  const payload: PersistedShape = {
+    version: 1,
+    sessions: [...memoriesBySession.entries()].map(([key, memories]) => ({ key, memories })),
+    audit: auditLog
+  };
+  const tempPath = `${memoryFilePath}.tmp`;
+
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= persistAttempts; attempt += 1) {
+    try {
+      mkdirSync(path.dirname(memoryFilePath), { recursive: true });
+      writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
+      renameSync(tempPath, memoryFilePath);
+      lastPersistError = null;
+      return;
+    } catch (error) {
+      lastError = error;
+      // Deliberately a spin rather than a timer: this function is synchronous
+      // and every caller depends on the write having happened by the time it
+      // returns. A few milliseconds is enough for a transient lock to clear,
+      // and this path is rare.
+      const until = Date.now() + attempt * 5;
+      while (Date.now() < until) { /* brief backoff */ }
+    }
   }
+
+  // Still not the place to throw — losing durability is bad, taking the
+  // request down with it is worse. But it is recorded and said out loud,
+  // rather than vanishing.
+  lastPersistError = lastError instanceof Error ? lastError.message : String(lastError);
+  console.error(`assist memory could not be saved after ${persistAttempts} attempts: ${lastPersistError}`);
+
+  // A half-written temp file left behind would be the next reader's problem.
+  try { rmSync(tempPath, { force: true }); } catch { /* nothing more to do */ }
 }
 
 function recordAudit(
