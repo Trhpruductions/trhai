@@ -15,7 +15,7 @@
 }
 
 .sysrings-stale {
-  font-size: 9px;
+  font-size: 12.5px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--warn, #f5a524);
@@ -76,21 +76,21 @@
 .sysring-value {
   position: relative;
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: 16px;
   color: var(--accent-strong);
 }
 
 .sysring-unknown .sysring-value { color: var(--text-faint); }
 
 .sysring-label {
-  font-size: 9.5px;
+  font-size: 12.5px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-faint);
 }
 
 .sysring-caption {
-  font-size: 9px;
+  font-size: 12.5px;
   color: var(--text-faint);
   text-align: center;
   line-height: 1.25;

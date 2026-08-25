@@ -133,11 +133,16 @@ function Metric({ label, reading }: { label: string; reading: Reading | null | u
   );
 }
 
-const quickAccess = [
-  { href: "/automation", label: "Projects & flows", glyph: "◇" },
-  { href: "/files", label: "Files & documents", glyph: "▣" },
-  { href: "/security", label: "AI tools", glyph: "◐" },
-  { href: "/system", label: "System logs", glyph: "▦" }
+const navigation = [
+  { href: "/", label: "Home", glyph: "◈", hint: "The command centre" },
+  { href: "/chat", label: "Chat", glyph: "◉", hint: "Talk to TRHAI" },
+  { href: "/tasks", label: "Tasks", glyph: "▤", hint: "Your to-do list" },
+  { href: "/memory", label: "Memory", glyph: "◍", hint: "Facts TRHAI has kept" },
+  { href: "/knowledge", label: "Knowledge", glyph: "▥", hint: "Documents TRHAI can quote" },
+  { href: "/automation", label: "Automation", glyph: "◇", hint: "Flows and schedules" },
+  { href: "/system", label: "System", glyph: "▦", hint: "What is running, and which build" },
+  { href: "/files", label: "Files", glyph: "▣", hint: "The workspace on disk" },
+  { href: "/settings", label: "Settings", glyph: "⚙", hint: "Voice, theme, personality" }
 ];
 
 const tiles: Tile[] = [
@@ -564,18 +569,29 @@ export default function DashboardPage() {
             {mic.error ? <p className="cc-note">{mic.error}</p> : null}
           </section>
 
-          <section className="hud-panel">
-            <span className="hud-label">Quick access</span>
-            <div className="quick">
-              {quickAccess.map((item) => (
-                <button key={item.href} type="button" className="quick-item"
-                  onClick={() => setSurface(surfaceFor(item.href))}>
-                  <span className="quick-glyph" aria-hidden="true">{item.glyph}</span>
+          {/* Navigation, where navigation belongs. This was a "quick access"
+              list of four links buried under the console, which is why nothing
+              on the left read as a way to get anywhere. Every surface is here
+              now, with the current one unmistakable. */}
+          <nav className="cc-nav" aria-label="Sections">
+            {navigation.map((item) => {
+              const id = surfaceFor(item.href);
+              const isActive = surface === id;
+              return (
+                <button
+                  key={item.href}
+                  type="button"
+                  className={`cc-nav-item${isActive ? " active" : ""}`}
+                  aria-current={isActive ? "true" : undefined}
+                  title={item.hint}
+                  onClick={() => setSurface(id)}
+                >
+                  <span className="cc-nav-glyph" aria-hidden="true">{item.glyph}</span>
                   <span>{item.label}</span>
                 </button>
-              ))}
-            </div>
-          </section>
+              );
+            })}
+          </nav>
         </aside>
 
         <main className="cc-stage">
@@ -690,6 +706,26 @@ export default function DashboardPage() {
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => { if (event.key === "Enter") ask(draft); }}
             />
+            {/* The microphone belongs beside the thing you speak into, not in
+                a row of buttons above it. The ring lights and breathes while
+                listening, driven by mic.listening rather than by a timer. */}
+            {mic.supported ? (
+              <button
+                type="button"
+                className={`cc-mic${mic.listening ? " live" : ""}`}
+                aria-pressed={mic.listening}
+                aria-label={mic.listening ? "Stop listening" : "Speak your request"}
+                disabled={mic.transcribing}
+                title={mic.listening
+                  ? "Stop and transcribe"
+                  : mic.transcriptionAvailable === false
+                    ? `${mic.transcriptionReason} The microphone still works as a level meter.`
+                    : "Speak your request. Transcribed on this machine, never uploaded."}
+                onClick={() => void handleMic()}
+              >
+                {mic.transcribing ? "…" : "◉"}
+              </button>
+            ) : null}
             {/* Send becomes Stop while a request is in flight. One control in
                 one place beats a second button that is dead most of the time,
                 and Stop is only offered when there is genuinely something to
