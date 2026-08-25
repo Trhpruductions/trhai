@@ -68,6 +68,25 @@ project's own `samples/jfk.wav` — 11 seconds of speech — in **1.4 seconds**,
 verbatim correct. That is comfortably fast enough for spoken commands on CPU
 alone, which is why `base` and `small` are preferred over the larger models.
 
+The browser's own encoder was checked against it separately, because unit
+tests on `lib/wav.ts` and tests on the API would both pass even if the two
+disagreed about the format. Real speech was upsampled to 48 kHz to stand in
+for a capture device, pushed back through the actual `resampleMono` +
+`encodeWav` client path, and sent to the running API:
+
+```
+device-rate samples: 528051 @48kHz (11.0s)
+client-encoded WAV:  352078 bytes, audio/wav
+header:              RIFF/WAVE 16000Hz 1ch 16bit
+HTTP 200 → "And so my fellow Americans, ask not what your country can do
+            for you, ask what you can do for your country."
+```
+
+A 16 k → 48 k → 16 k round trip through the client resampler therefore
+survives transcription verbatim. The one part still unproven is
+`getUserMedia` itself — actual capture from a physical microphone, which no
+automated environment here can exercise.
+
 ## Which model gets picked
 
 Best-first, but *not* simply biggest-first — which is the obvious ordering and
