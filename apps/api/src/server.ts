@@ -69,6 +69,7 @@ import {
   setScheduleEnabled
 } from "./services/scheduleStore.js";
 import { getFlow, saveFlow } from "./services/flowStore.js";
+import { readTelemetry } from "./services/systemTelemetry.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -740,6 +741,14 @@ export function createApp() {
       return;
     }
     res.json({ data: { flow: saved }, traceId: "trace-local" });
+  });
+
+  // Live hardware readings for the dashboard rings. Measured per request
+  // rather than cached: a ring showing a number from thirty seconds ago is
+  // not showing what the machine is doing now, which is the only thing it
+  // claims to show.
+  app.get("/v1/system-telemetry", async (_req, res) => {
+    res.json({ data: await readTelemetry(), traceId: "trace-local" });
   });
 
   app.post("/v1/schedules", (req, res) => {

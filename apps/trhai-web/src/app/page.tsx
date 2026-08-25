@@ -7,6 +7,7 @@ import { useAssistant, type AssistantStatus } from "../hooks/useAssistant";
 import { useSpeech } from "../hooks/useSpeech";
 import { ParticleField } from "../components/ParticleField";
 import { useMicrophone } from "../hooks/useMicrophone";
+import { SystemRings } from "../components/SystemRings";
 import { apiBaseUrl, apiGet, apiPatch, sessionId } from "../lib/api";
 import { readStoredPersonality } from "../lib/personality";
 import { activeAgent, personalityById, readMarketplaceState, readFlow, type Agent } from "@ascend/shared";
@@ -17,11 +18,13 @@ import "./dash.css";
 //
 // Every reading on this screen is something this machine actually knows. The
 // panels are shaped like the HUD they were designed from, but nothing is
-// filled with a plausible-looking number to complete the picture — where a
-// figure would have to be invented (host CPU and RAM, which need the desktop
-// bridge this app does not have), the panel reports something real instead
-// rather than a convincing fiction. A HUD that lies to look finished is
-// worse than one with fewer dials.
+// filled with a plausible-looking number to complete the picture. A HUD that
+// lies to look finished is worse than one with fewer dials.
+//
+// Host CPU, memory and GPU are real now, via /v1/system-telemetry — the local
+// API is a Node process on this machine, so it can read them without the
+// desktop bridge this app still does not have. Any sensor that cannot be read
+// there shows a dash and its reason rather than a number.
 
 type ModelInfo = { available: true; model: string } | { available: false; reason: string };
 
@@ -441,6 +444,11 @@ export default function DashboardPage() {
         </main>
 
         <aside className="hud-side">
+          {/* Hardware first: what the machine is doing outranks what this app
+              has counted, and it is the one panel here that changes on its
+              own while nobody is interacting. */}
+          <SystemRings />
+
           <section className="hud-panel">
             <span className="hud-label">System status</span>
             <div className="hud-gauges">
