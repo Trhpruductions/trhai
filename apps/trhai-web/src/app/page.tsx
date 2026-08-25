@@ -7,7 +7,7 @@ import { useAssistant, type AssistantStatus } from "../hooks/useAssistant";
 import { useSpeech } from "../hooks/useSpeech";
 import { ParticleField } from "../components/ParticleField";
 import { useMicrophone } from "../hooks/useMicrophone";
-import { apiBaseUrl, apiGet, sessionId } from "../lib/api";
+import { apiBaseUrl, apiGet, apiPatch, sessionId } from "../lib/api";
 import { readStoredPersonality } from "../lib/personality";
 import { activeAgent, personalityById, readMarketplaceState, readFlow, type Agent } from "@ascend/shared";
 import { marketplaceStorageKey } from "../lib/agents";
@@ -24,6 +24,16 @@ import "./dash.css";
 // worse than one with fewer dials.
 
 type ModelInfo = { available: true; model: string } | { available: false; reason: string };
+
+/** A schedule as the API reports it, with the label already formatted server-side. */
+type ScheduleView = {
+  id: string;
+  name: string;
+  cadenceLabel: string;
+  enabled: boolean;
+  lastRunAt: string | null;
+  lastStatus: "ok" | "failed" | "missed" | null;
+};
 
 type Presence = {
   core: "idle" | "listening" | "thinking" | "executing" | "speaking" | "success" | "error";
@@ -148,6 +158,9 @@ export default function DashboardPage() {
 
   const mic = useMicrophone();
   const speech = useSpeech();
+  // Null until the first read, so "nothing scheduled" is never shown before
+  // anyone has actually looked.
+  const [schedules, setSchedules] = useState<ScheduleView[] | null>(null);
   const { core, label } = presence(status, mic.listening, speech.speaking);
 
   /**
@@ -158,6 +171,23 @@ export default function DashboardPage() {
    * and firing a request off a guess the user has not seen is how a voice
    * feature does something they did not ask for.
    */
+  /**
+   * Flip a schedule on or off, then re-read rather than assuming.
+   *
+   * The server recomputes the next due time when a schedule is re-enabled,
+   * so guessing the new state locally would show a next-run time the
+   * scheduler does not agree with.
+   */
+  async function toggleSchedule(schedule: ScheduleView) {
+    const result = await apiPatch<{ schedule: ScheduleView }>(
+      `/v1/schedules/${schedule.id}`,
+      { enabled: !schedule.enabled }
+    );
+    if (!result.ok) return;
+    const refreshed = await apiGet<{ schedules: ScheduleView[] }>("/v1/schedules");
+    if (refreshed.ok) setSchedules(refreshed.data.schedules);
+  }
+
   async function handleMic() {
     if (!mic.listening) {
       // Stop any reply already being read. Without this the microphone opens
@@ -253,14 +283,18 @@ export default function DashboardPage() {
       apiGet<{ tools: unknown[] }>("/v1/capabilities"),
       apiGet<{ memories: unknown[] }>(`/v1/assist/memory?sessionId=${id}`),
       apiGet<{ documents: unknown[] }>(`/v1/knowledge?sessionId=${id}`),
-      apiGet<{ tasks: Array<{ done: boolean }> }>(`/v1/tasks?sessionId=${id}`)
-    ]).then(([capabilities, memory, knowledge, tasks]) => {
+      apiGet<{ tasks: Array<{ done: boolean }> }>(`/v1/tasks?sessionId=${id}`),
+      // Machine-wide rather than per-session: the scheduler runs these from
+      // the API process, so they are not this browser's to own.
+      apiGet<{ schedules: ScheduleView[] }>("/v1/schedules")
+    ]).then(([capabilities, memory, knowledge, tasks, scheduled]) => {
       setCounts({
         tools: capabilities.ok ? capabilities.data.tools.length : null,
         memories: memory.ok ? memory.data.memories.length : null,
         documents: knowledge.ok ? knowledge.data.documents.length : null,
         tasks: tasks.ok ? tasks.data.tasks.filter((task) => !task.done).length : null
       });
+      if (scheduled.ok) setSchedules(scheduled.data.schedules);
     });
   }, []);
 
@@ -478,15 +512,46 @@ export default function DashboardPage() {
           </section>
 
           <section className="hud-panel">
-            <span className="hud-label">Automation</span>
-            {flowName ? (
-              <div className="hud-flow">
-                <b>{flowName}</b>
-                <span className="faint">Saved on this machine · run it from Automation</span>
-              </div>
+            <span className="hud-label">Active schedules</span>
+            {schedules === null ? (
+              <p className="faint">Checking…</p>
+            ) : schedules.length === 0 ? (
+              <p className="faint">Nothing scheduled. Add one from Automation.</p>
             ) : (
-              <p className="faint">No flow saved yet.</p>
+              <ul className="hud-sched-list">
+                {schedules.map((schedule) => (
+                  <li key={schedule.id} className="hud-sched">
+                    <div className="hud-sched-body">
+                      <b>{schedule.name}</b>
+                      <span className="faint">{schedule.cadenceLabel}</span>
+                      {/* What it actually did, not just what it intends to do.
+                          A schedule that has never run says so. */}
+                      <span className={`hud-sched-last${schedule.lastStatus === "failed" ? " danger" : ""}`}>
+                        {schedule.lastStatus === null
+                          ? "Not run yet"
+                          : schedule.lastStatus === "missed"
+                            ? "Missed — machine was off"
+                            : schedule.lastStatus === "failed"
+                              ? "Last run failed"
+                              : `Last ran ${new Date(schedule.lastRunAt!).toLocaleString(undefined, {
+                                  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+                                })}`}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className={`hud-sched-toggle${schedule.enabled ? " on" : ""}`}
+                      aria-pressed={schedule.enabled}
+                      aria-label={`${schedule.enabled ? "Disable" : "Enable"} ${schedule.name}`}
+                      onClick={() => void toggleSchedule(schedule)}
+                    >
+                      <span className="hud-sched-knob" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
+            {flowName ? <span className="faint hud-flow">Flow saved: {flowName}</span> : null}
             <Link href="/automation" className="hud-more">Open automation</Link>
           </section>
         </aside>

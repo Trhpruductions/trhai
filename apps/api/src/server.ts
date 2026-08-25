@@ -58,6 +58,14 @@ import {
 } from "./services/pendingConfirmation.js";
 import { maxSynthesisCharacters, piperStatus, synthesize, type Cadence } from "./services/piperSpeech.js";
 import { maxAudioBytes, requiredChannels, requiredSampleRate, transcribe, whisperStatus } from "./services/whisperTranscribe.js";
+import {
+  addSchedule,
+  describeCadence,
+  isCadence,
+  listSchedules,
+  removeSchedule,
+  setScheduleEnabled
+} from "./services/scheduleStore.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -693,6 +701,84 @@ export function createApp() {
 
       res.json({ data: { text: result.text, model: result.model }, traceId: "trace-local" });
     });
+
+  // Scheduled work. These are machine-wide rather than per-session: the
+  // scheduler runs them from the API process whether or not anyone has a tab
+  // open, which is the only arrangement under which "every day at 9:00 AM"
+  // is a true statement rather than a picture of one.
+  app.get("/v1/schedules", (_req, res) => {
+    res.json({
+      data: {
+        schedules: listSchedules().map((schedule) => ({
+          ...schedule,
+          cadenceLabel: describeCadence(schedule.cadence)
+        }))
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  app.post("/v1/schedules", (req, res) => {
+    const name = typeof req.body?.name === "string" ? req.body.name : "";
+    const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+    const cadence = req.body?.cadence;
+
+    if (!isCadence(cadence)) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "cadence must be {kind:'daily',minuteOfDay} or {kind:'interval',minutes}",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    const schedule = addSchedule({
+      id: `sched-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      prompt,
+      cadence
+    });
+
+    if (!schedule) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "A schedule needs a name and a prompt, and there is a limit on how many can exist",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    res.status(201).json({
+      data: { schedule: { ...schedule, cadenceLabel: describeCadence(schedule.cadence) } },
+      traceId: "trace-local"
+    });
+  });
+
+  app.patch("/v1/schedules/:scheduleId", (req, res) => {
+    if (typeof req.body?.enabled !== "boolean") {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "enabled must be a boolean", traceId: "trace-local" });
+      return;
+    }
+
+    const schedule = setScheduleEnabled(req.params.scheduleId, req.body.enabled);
+    if (!schedule) {
+      res.status(404).json({ code: "NOT_FOUND", message: "Schedule not found", traceId: "trace-local" });
+      return;
+    }
+
+    res.json({
+      data: { schedule: { ...schedule, cadenceLabel: describeCadence(schedule.cadence) } },
+      traceId: "trace-local"
+    });
+  });
+
+  app.delete("/v1/schedules/:scheduleId", (req, res) => {
+    if (!removeSchedule(req.params.scheduleId)) {
+      res.status(404).json({ code: "NOT_FOUND", message: "Schedule not found", traceId: "trace-local" });
+      return;
+    }
+    res.status(204).end();
+  });
 
   // Which tool the agent is running right now, for a client to poll while a
   // reply is in flight. Absent is a real answer — the model is still thinking,

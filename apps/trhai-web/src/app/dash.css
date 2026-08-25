@@ -365,6 +365,72 @@
   animation: hud-pulse 1.6s var(--ease) infinite;
 }
 
+.hud-sched-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hud-sched {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.hud-sched-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.hud-sched-body b { font-size: 12px; }
+.hud-sched-body .faint { font-size: 10.5px; }
+
+.hud-sched-last {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.hud-sched-last.danger { color: var(--danger); }
+
+/* A real switch, because a schedule being on or off is a real thing the
+   scheduler reads — not a decorative pill. */
+.hud-sched-toggle {
+  flex: none;
+  width: 34px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+
+.hud-sched-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  transition: transform var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+
+.hud-sched-toggle.on {
+  background: var(--accent-quiet);
+  border-color: var(--ok);
+}
+
+.hud-sched-toggle.on .hud-sched-knob {
+  transform: translateX(16px);
+  background: var(--ok);
+}
+
 .hud-voice {
   border: 1px solid var(--line);
   background: transparent;
