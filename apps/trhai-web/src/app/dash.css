@@ -491,45 +491,6 @@
   min-height: 0;
 }
 
-.hud-panel {
-  position: relative;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-lg);
-  background:
-    linear-gradient(180deg, rgba(53, 199, 255, 0.05), transparent 42%),
-    rgba(10, 15, 22, 0.72);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* Corner brackets: the detail that reads "instrument panel" rather than
-   "rounded card". Drawn with two gradients on a pseudo-element, so it costs
-   no extra DOM per panel. */
-.hud-panel::before,
-.hud-panel::after {
-  content: "";
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  border-color: var(--line-strong);
-  border-style: solid;
-  pointer-events: none;
-}
-
-.hud-panel::before {
-  top: -1px; left: -1px;
-  border-width: 1px 0 0 1px;
-  border-top-left-radius: var(--radius-lg);
-}
-
-.hud-panel::after {
-  bottom: -1px; right: -1px;
-  border-width: 0 1px 1px 0;
-  border-bottom-right-radius: var(--radius-lg);
-}
-
 .hud-gauges { display: flex; gap: 10px; }
 
 .gauge { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; }
@@ -556,28 +517,6 @@
   text-transform: uppercase;
   color: var(--text-faint);
 }
-
-.hud-readouts { display: flex; flex-direction: column; gap: 6px; margin: 0; }
-
-.hud-readouts > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-}
-
-.hud-readouts dt {
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 10px;
-}
-
-.hud-readouts dd { margin: 0; color: var(--text); font-family: var(--font-mono); font-size: 11.5px; }
-.hud-readouts dd.ok { color: var(--ok); }
-.hud-readouts dd.warn { color: var(--warn); }
-.hud-readouts dd.danger { color: var(--danger); }
 
 .hud-say-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .hud-say-model { font-size: 10px; color: var(--accent); }

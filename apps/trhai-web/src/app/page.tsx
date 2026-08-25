@@ -132,6 +132,8 @@ const navItems = [
   { href: "/automation", label: "Automation", hint: "Flows & runs" },
   { href: "/agents", label: "Agents", hint: "Installed lenses" },
   { href: "/security", label: "Security", hint: "Tools & permissions" },
+  { href: "/system", label: "System", hint: "What's running, which build" },
+  { href: "/files", label: "Files", hint: "The assistant's workspace" },
   { href: "/settings", label: "Settings", hint: "Voice, theme, personality" }
 ];
 

@@ -70,6 +70,13 @@ import {
 } from "./services/scheduleStore.js";
 import { getFlow, saveFlow } from "./services/flowStore.js";
 import { readTelemetry } from "./services/systemTelemetry.js";
+import {
+  listWorkspace,
+  looksBinary,
+  maxListedFiles,
+  readWorkspaceFile,
+  workspaceRoot
+} from "./services/workspace.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -749,6 +756,74 @@ export function createApp() {
   // claims to show.
   app.get("/v1/system-telemetry", async (_req, res) => {
     res.json({ data: await readTelemetry(), traceId: "trace-local" });
+  });
+
+  // The workspace, over HTTP.
+  //
+  // Until now the only way to see these files was to ask the model to list
+  // them, which is a strange way to look at your own disk. Both routes go
+  // through the same resolveInWorkspace the tools use rather than reading
+  // paths directly: a browser can send "../../.ssh/id_rsa" exactly as easily
+  // as a model can, and there is no reason for a second, weaker check to
+  // exist alongside the one that already refuses it.
+  app.get("/v1/files", (req, res) => {
+    const requested = typeof req.query.path === "string" && req.query.path.trim() ? req.query.path : ".";
+    const entries = listWorkspace(requested);
+    if (entries === null) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "That path is outside the workspace.",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    // The walk stops at maxListedFiles. Without saying so, a listing that hit
+    // the cap looks exactly like a complete one, and the page would imply
+    // "this is everything" about a directory it only partly read.
+    res.json({
+      data: {
+        root: workspaceRoot(),
+        path: requested,
+        entries,
+        truncated: entries.length >= maxListedFiles,
+        limit: maxListedFiles
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  app.get("/v1/files/content", (req, res) => {
+    const requested = typeof req.query.path === "string" ? req.query.path : "";
+    const result = readWorkspaceFile(requested);
+    if (!result.ok) {
+      // 404 only for a genuinely missing file; a refused path is a bad
+      // request, and conflating the two would tell a caller probing for
+      // paths outside the workspace which ones exist.
+      const missing = result.reason.startsWith("There is no file at");
+      res.status(missing ? 404 : 400).json({
+        code: missing ? "NOT_FOUND" : "INVALID_REQUEST",
+        message: result.reason,
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    // Whether it is really text is answered from the content, not the file
+    // name — ".git/config", "HEAD" and "COMMIT_EDITMSG" have no extension and
+    // are plainly readable, and a name-based guess calls all three binary.
+    // Binary content is not sent at all: it is megabytes of noise that would
+    // render as mojibake and make the file look corrupted.
+    const binary = looksBinary(result.content);
+    res.json({
+      data: {
+        path: requested,
+        content: binary ? "" : result.content,
+        truncated: result.truncated,
+        binary
+      },
+      traceId: "trace-local"
+    });
   });
 
   app.post("/v1/schedules", (req, res) => {
