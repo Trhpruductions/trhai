@@ -1,0 +1,169 @@
+/* The split work view: files, a reader, and the terminal underneath.
+   See WorkView.tsx for why it opens on real work rather than on intent. */
+
+.work {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(10, 15, 22, 0.94);
+  overflow: hidden;
+}
+
+.work-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--accent-quiet);
+}
+
+.work-live {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ok);
+}
+
+.work-close {
+  margin-left: auto;
+  padding: 3px 12px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 999px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.work-close:hover { color: var(--accent-strong); border-color: var(--accent); }
+
+.work-body {
+  display: grid;
+  /* File list beside the reader, the proportion the backlog describes. */
+  grid-template-columns: minmax(150px, 230px) minmax(0, 1fr);
+  gap: 0;
+  min-height: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.work-sub { padding: 6px 10px 4px; display: block; }
+
+.work-files {
+  border-right: 1px solid var(--line);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.work-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.work-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.work-file:hover { background: var(--accent-quiet); }
+.work-file.selected { border-color: var(--line-strong, var(--line)); color: var(--accent-strong); }
+
+.work-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  /* Truncates from the left so the filename stays visible on a deep path,
+     which is the part you are actually looking for. */
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.work-file-size { flex: none; font-size: 9.5px; }
+
+.work-viewer { min-width: 0; display: flex; flex-direction: column; }
+
+.work-note { font-size: 11px; margin: 0; padding: 0 10px 10px; line-height: 1.45; }
+
+.work-code {
+  margin: 0;
+  padding: 0 10px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 220px;
+  /* Code scrolls sideways rather than wrapping: indentation is meaning. */
+  overflow: auto;
+  white-space: pre;
+}
+
+.work-terminal { display: flex; flex-direction: column; min-height: 0; }
+
+.work-out { padding: 0 10px 10px; max-height: 180px; overflow-y: auto; }
+
+.work-run + .work-run { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+
+.work-cmd { display: flex; align-items: center; gap: 6px; font-size: 11px; min-width: 0; }
+
+.work-prompt { color: var(--accent); flex: none; }
+
+.work-cmd .mono {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.work-exit { flex: none; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+.work-exit.ok { color: var(--ok); }
+.work-exit.bad { color: var(--danger, #ff5c5c); }
+
+.work-stdout {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text-faint);
+  max-height: 110px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 1200px) {
+  /* Stacks rather than hiding anything: the backlog is explicit that the
+     execution trace must stay visible when the layout collapses. */
+  .work-body { grid-template-columns: 1fr; }
+  .work-files { border-right: none; border-bottom: 1px solid var(--line); }
+  .work-list { max-height: 140px; }
+}

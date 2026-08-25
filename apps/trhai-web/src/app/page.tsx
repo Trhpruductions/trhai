@@ -11,6 +11,7 @@ import { Markdown } from "../components/Markdown";
 import { Subsystems, type Subsystem } from "../components/Subsystems";
 import { CommandAccess } from "../components/CommandAccess";
 import { ExecutionTrace } from "../components/ExecutionTrace";
+import { WorkView } from "../components/WorkView";
 import {
   ActiveTasks, ConnectedServices, MemoryStatus, PersonalityCard, SystemOverview, ToolsGrid,
   type AgentTask, type HealthRow, type Tile
@@ -204,6 +205,15 @@ function surfaceFor(href: string): SurfaceId {
 
 export default function DashboardPage() {
   const [surface, setSurface] = useState<SurfaceId>("home");
+  // Whether the split work view is open.
+  //
+  // Opened by real work, not by intent. The backlog asks for "coding intent
+  // triggers the split layout"; guessing that from the wording would open an
+  // empty editor beside an empty terminal for anyone who said "build", and
+  // stay shut for anyone who phrased it another way. Waiting for the first
+  // file to actually land costs a fraction of a second and is never wrong.
+  const [working, setWorking] = useState(false);
+  const [dismissedWork, setDismissedWork] = useState(false);
   const { messages, status, send } = useAssistant();
   const mic = useMicrophone();
   const speech = useSpeech();
@@ -299,6 +309,21 @@ export default function DashboardPage() {
       setWorkspace({ files: files.length, bytes: files.reduce((sum, entry) => sum + entry.bytes, 0) });
     }
     if (taskResult.ok) setAgentTasks(taskResult.data.tasks);
+
+    // The split view opens on evidence, not on a guess. A write, an install,
+    // a test or a command having genuinely happened is what makes a files-and-
+    // terminal layout the right thing to be looking at.
+    const execution = await apiGet<{ events: Array<{ kind: string }> }>(
+      `/v1/execution?sessionId=${encodeURIComponent(id)}`
+    );
+    if (execution.ok) {
+      const didWork = execution.data.events.some((event) =>
+        ["write", "install", "test", "command", "launch"].includes(event.kind));
+      setWorking(didWork);
+      // A new turn with nothing built yet clears the dismissal, so closing it
+      // once does not hide it for every build afterwards.
+      if (!didWork) setDismissedWork(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -560,6 +585,13 @@ export default function DashboardPage() {
               the core, the machine readings, the console and the state rail
               all stay where they are while you use it. Nothing unmounts, so a
               reply still arriving keeps arriving. */}
+          {/* Files and terminal, once there is genuinely something in them.
+              Yields to a surface the user opened deliberately — an explicit
+              choice outranks an automatic one. */}
+          {surface === "home" && working && !dismissedWork ? (
+            <WorkView live={busy} onClose={() => setDismissedWork(true)} />
+          ) : null}
+
           {surface !== "home" ? (
             <section className="cc-surface" aria-label={surfaceTitles[surface]}>
               <header className="cc-surface-head">

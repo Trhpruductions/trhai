@@ -434,3 +434,11 @@
   text-overflow: ellipsis;
   max-width: 40%;
 }
+
+/* The core and its controls stand down while the work view has the stage,
+   the same as for a surface. Still mounted and still live; just not
+   competing for the same space. */
+.cc-stage:has(.work) .cc-core-row,
+.cc-stage:has(.work) .cc-actions,
+.cc-stage:has(.work) .cc-suggestions,
+.cc-stage:has(.work) .cc-core-title { display: none; }
