@@ -109,3 +109,21 @@
   resize: vertical;
   min-height: 44px;
 }
+
+.chat-mic {
+  flex: none;
+  width: 38px;
+  padding: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.chat-mic:hover:not(:disabled) { color: var(--accent-strong); }
+
+/* Live is deliberately loud: an open microphone is the one state a person
+   must never be unsure about. */
+.chat-mic-live {
+  color: var(--ok);
+  border-color: var(--ok);
+  box-shadow: 0 0 12px rgba(75, 227, 168, 0.5);
+}
