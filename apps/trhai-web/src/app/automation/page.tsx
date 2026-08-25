@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   appendNode,
   capabilityReason,
@@ -19,6 +19,7 @@ import {
   type RunResult
 } from "@ascend/shared";
 import { Schedules } from "../../components/Schedules";
+import { apiGet, apiPut } from "../../lib/api";
 import "./automation.css";
 
 // Automation: flows you can actually run, against @ascend/shared's
@@ -77,11 +78,48 @@ function readStoredFlow(): Flow {
   return readFlow(window.localStorage, storageKey) ?? starterFlow;
 }
 
+/**
+ * Keep the server's copy of the flow in step with this editor's.
+ *
+ * The scheduler runs flows from the API process, which cannot see
+ * localStorage — so a flow that existed only here could be scheduled and
+ * never actually run. Pushed automatically on every change rather than
+ * behind a Save button: there was no save step before, and adding one now
+ * would mean a flow that looks saved locally but is invisible to the thing
+ * that runs it.
+ */
+async function syncFlowToServer(flow: Flow): Promise<void> {
+  await apiPut("/v1/flow", { flow });
+}
+
 export default function AutomationPage() {
   const [flow, setFlow] = useState<Flow>(readStoredFlow);
   const [run, setRun] = useState<RunResult | null>(null);
   const [runSeq, setRunSeq] = useState(0);
   const [running, setRunning] = useState(false);
+
+  // Reconcile this editor with the server once on load, so nothing has to be
+  // migrated by hand. A flow that already existed here is pushed up so the
+  // scheduler can see it; if the server has one and this browser does not —
+  // a second machine, a cleared cache — that one is adopted instead.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const remote = await apiGet<{ flow: Flow | null }>("/v1/flow");
+      if (cancelled || !remote.ok) return;
+
+      const localSaved = readFlow(window.localStorage, storageKey);
+      if (!remote.data.flow) {
+        void syncFlowToServer(localSaved ?? starterFlow);
+        return;
+      }
+      if (!localSaved) {
+        setFlow(remote.data.flow);
+        writeFlow(window.localStorage, storageKey, remote.data.flow);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const issues = validateFlow(flow);
   const rewind = run ? rewindPoint(run) : null;
@@ -89,6 +127,9 @@ export default function AutomationPage() {
   function commit(next: Flow) {
     setFlow(next);
     writeFlow(window.localStorage, storageKey, next);
+    // Mirrored to the API so the scheduler can run it. Fire-and-forget: a
+    // failed sync must not block editing, and the next edit retries anyway.
+    void syncFlowToServer(next);
   }
 
   async function execute(dryRun: boolean, stopAfter?: number) {

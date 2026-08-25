@@ -19,10 +19,14 @@ type Cadence =
   | { kind: "daily"; minuteOfDay: number }
   | { kind: "interval"; minutes: number };
 
+type ScheduleAction = { kind: "ask"; prompt: string } | { kind: "flow" };
+
 type Schedule = {
   id: string;
   name: string;
   prompt: string;
+  action: ScheduleAction;
+  actionLabel: string;
   cadence: Cadence;
   cadenceLabel: string;
   enabled: boolean;
@@ -61,6 +65,11 @@ export function Schedules() {
   const [minutes, setMinutes] = useState<number>(60);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // What the schedule does. Only offered as a choice when there is actually a
+  // flow to run — a picker whose second option does nothing is worse than no
+  // picker, and this way the common case needs no decision at all.
+  const [doWhat, setDoWhat] = useState<"ask" | "flow">("ask");
+  const [flowName, setFlowName] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const result = await apiGet<{ schedules: Schedule[] }>("/v1/schedules");
@@ -72,6 +81,17 @@ export function Schedules() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // Whether a flow exists at all, which decides whether running one is even
+  // offered. Read once; the automation editor above keeps the server copy in
+  // step on its own.
+  useEffect(() => {
+    let cancelled = false;
+    void apiGet<{ flow: { name: string } | null }>("/v1/flow").then((result) => {
+      if (!cancelled && result.ok) setFlowName(result.data.flow?.name ?? null);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   function cadenceFromForm(): Cadence {
     if (kind === "interval") return { kind: "interval", minutes };
     const [hours, mins] = time.split(":").map(Number);
@@ -79,13 +99,15 @@ export function Schedules() {
   }
 
   async function create() {
-    if (!name.trim() || !prompt.trim() || busy) return;
+    // A flow schedule needs no prompt — the flow is the instruction.
+    if (!name.trim() || busy) return;
+    if (doWhat === "ask" && !prompt.trim()) return;
     setBusy(true);
     setNote(null);
     try {
       const result = await apiPost<{ schedule: Schedule }>("/v1/schedules", {
         name,
-        prompt,
+        action: doWhat === "flow" ? { kind: "flow" } : { kind: "ask", prompt },
         cadence: cadenceFromForm()
       });
       if (!result.ok) {
@@ -164,16 +186,34 @@ export function Schedules() {
           )}
         </div>
 
-        <label className="schedules-field">
-          <span className="hud-label">Ask</span>
-          <input className="field" value={prompt} placeholder="Summarise what changed today"
-            onChange={(event) => setPrompt(event.target.value)}
-            onKeyDown={(event) => { if (event.key === "Enter") void create(); }} />
-        </label>
+        {flowName ? (
+          <label className="schedules-field">
+            <span className="hud-label">Do what</span>
+            <select className="field" value={doWhat}
+              onChange={(event) => setDoWhat(event.target.value === "flow" ? "flow" : "ask")}>
+              <option value="ask">Ask TRHAI something</option>
+              <option value="flow">Run the saved flow ({flowName})</option>
+            </select>
+          </label>
+        ) : null}
+
+        {doWhat === "ask" ? (
+          <label className="schedules-field">
+            <span className="hud-label">Ask</span>
+            <input className="field" value={prompt} placeholder="Summarise what changed today"
+              onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") void create(); }} />
+          </label>
+        ) : (
+          <p className="faint schedules-note">
+            Runs every step of “{flowName}”. Steps needing the desktop bridge or credentials this
+            build does not carry are skipped and say so, exactly as they do when run by hand.
+          </p>
+        )}
 
         <div className="schedules-row">
           <button type="button" className="btn btn-primary btn-sm"
-            disabled={busy || !name.trim() || !prompt.trim()} onClick={() => void create()}>
+            disabled={busy || !name.trim() || (doWhat === "ask" && !prompt.trim())} onClick={() => void create()}>
             {busy ? "Adding…" : "Add schedule"}
           </button>
           {note ? <span className="faint schedules-note">{note}</span> : null}
@@ -193,7 +233,7 @@ export function Schedules() {
                   <b>{schedule.name}</b>
                   <span className="chip">{schedule.cadenceLabel}</span>
                 </div>
-                <p className="faint schedules-prompt">&ldquo;{schedule.prompt}&rdquo;</p>
+                <p className="faint schedules-prompt">{schedule.actionLabel}</p>
                 <p className={`schedules-last${schedule.lastStatus === "failed" ? " danger" : ""}`}>
                   {whenText(schedule)}
                   {schedule.enabled ? (

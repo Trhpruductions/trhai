@@ -1,5 +1,7 @@
+import { executeFlow } from "@ascend/shared";
 import { runAssistantOrchestrator } from "./orchestrator.js";
-import { dueVerdict, listSchedules, recordRun } from "./scheduleStore.js";
+import { getFlow } from "./flowStore.js";
+import { dueVerdict, listSchedules, recordRun, type ScheduleAction } from "./scheduleStore.js";
 
 // The thing that makes a schedule real.
 //
@@ -30,14 +32,51 @@ let timer: NodeJS.Timeout | null = null;
 /** Ids currently executing, so a slow run is never started twice. */
 const inFlight = new Set<string>();
 
-async function runSchedule(id: string, name: string, prompt: string): Promise<void> {
+/**
+ * Run the saved automation flow.
+ *
+ * No script runner is passed, exactly as in a browser tab: RUN SCRIPT goes
+ * through the desktop shell's fixed list of named checks, and giving the API
+ * process the ability to run commands on a timer would be a far larger
+ * decision than "schedules can trigger flows". executeFlow already reports
+ * that step as skipped with its reason, so a scheduled flow says what it did
+ * and did not do rather than quietly appearing to have run everything.
+ */
+async function runFlowAction(id: string): Promise<{ status: "ok" | "failed"; detail: string }> {
+  const flow = getFlow();
+  if (!flow) {
+    return { status: "failed", detail: "No flow is saved, so there was nothing to run." };
+  }
+
+  const run = await executeFlow(flow, { dryRun: false });
+  const counts = run.steps.reduce<Record<string, number>>((tally, step) => {
+    tally[step.status] = (tally[step.status] ?? 0) + 1;
+    return tally;
+  }, {});
+
+  const summary = Object.entries(counts).map(([status, count]) => `${count} ${status}`).join(", ");
+  const detail = `${flow.name}: ${summary || "nothing to do"}`;
+
+  // A flow whose own steps failed is a failed run. Reporting it as ok
+  // because the runner itself did not throw would be the quiet kind of wrong.
+  return { status: run.failed ? "failed" : "ok", detail };
+}
+
+async function runSchedule(id: string, name: string, action: ScheduleAction): Promise<void> {
   if (inFlight.has(id)) return;
   inFlight.add(id);
 
   try {
+    if (action.kind === "flow") {
+      const { status, detail } = await runFlowAction(id);
+      recordRun(id, status, detail);
+      console.log(`schedule "${name}" ${status === "ok" ? "ran the flow" : "failed"}: ${detail}`);
+      return;
+    }
+
     const result = await runAssistantOrchestrator({
       mode: "general",
-      userMessage: prompt,
+      userMessage: action.prompt,
       // A schedule gets its own conversation, kept apart from whatever the
       // user is doing: a summary firing at nine should not appear in the
       // middle of a conversation they are having, or take context from it.
@@ -74,7 +113,7 @@ export async function tick(now = new Date()): Promise<void> {
       // Deliberately not awaited: one slow schedule must not hold up the
       // others, and each guards itself against overlapping with a second
       // copy of itself.
-      void runSchedule(schedule.id, schedule.name, schedule.prompt);
+      void runSchedule(schedule.id, schedule.name, schedule.action);
     }
   }
 }

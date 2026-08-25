@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   addSchedule,
   dailyGraceMs,
+  describeAction,
   describeCadence,
   dueVerdict,
   isCadence,
+  isScheduleAction,
   listSchedules,
   nextDueAfter,
   recordRun,
@@ -192,6 +194,50 @@ test("removing a schedule takes it out; removing it again reports nothing change
   assert.equal(removeSchedule("s1"), true);
   assert.deepEqual(listSchedules(), []);
   assert.equal(removeSchedule("s1"), false);
+});
+
+test("a bare prompt still creates an ask schedule, so nothing has to be chosen", () => {
+  resetSchedules();
+  const created = addSchedule({
+    id: "s1", name: "Brief", prompt: "Summarise today",
+    cadence: { kind: "daily", minuteOfDay: 540 }
+  });
+
+  assert.ok(created);
+  assert.deepEqual(created.action, { kind: "ask", prompt: "Summarise today" });
+});
+
+test("a flow schedule needs no prompt at all", () => {
+  resetSchedules();
+  const created = addSchedule({
+    id: "s2", name: "Nightly flow", action: { kind: "flow" },
+    cadence: { kind: "daily", minuteOfDay: 180 }
+  });
+
+  assert.ok(created, "a flow is the instruction; there is nothing to ask");
+  assert.deepEqual(created.action, { kind: "flow" });
+  assert.equal(created.prompt, "");
+});
+
+test("a schedule with neither a prompt nor an action is refused", () => {
+  resetSchedules();
+  assert.equal(
+    addSchedule({ id: "s3", name: "Nothing", cadence: { kind: "daily", minuteOfDay: 540 } }),
+    null
+  );
+});
+
+test("an action is described the way the interface shows it", () => {
+  assert.equal(describeAction({ kind: "flow" }), "Runs the saved flow");
+  assert.match(describeAction({ kind: "ask", prompt: "Summarise today" }), /Summarise today/);
+});
+
+test("a malformed action is refused rather than half-accepted", () => {
+  assert.equal(isScheduleAction({ kind: "ask" }), false, "ask with no prompt");
+  assert.equal(isScheduleAction({ kind: "ask", prompt: "   " }), false, "ask with a blank prompt");
+  assert.equal(isScheduleAction({ kind: "elsewhere" }), false);
+  assert.equal(isScheduleAction(null), false);
+  assert.equal(isScheduleAction({ kind: "flow" }), true);
 });
 
 test("listing returns copies, so a caller cannot mutate the store by accident", () => {

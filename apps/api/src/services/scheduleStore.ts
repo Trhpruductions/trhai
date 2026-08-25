@@ -19,11 +19,40 @@ export type Cadence =
 
 export type ScheduleRunStatus = "ok" | "failed" | "missed";
 
+/**
+ * What a schedule does when it fires.
+ *
+ * "ask" puts a question to the assistant; "flow" runs the saved automation
+ * flow. Kept as a tagged union rather than a nullable flow id because the two
+ * are genuinely different actions, and a field that is sometimes a prompt and
+ * sometimes not is how a store starts lying about its own contents.
+ */
+export type ScheduleAction =
+  | { kind: "ask"; prompt: string }
+  | { kind: "flow" };
+
+export function isScheduleAction(value: unknown): value is ScheduleAction {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { kind?: unknown; prompt?: unknown };
+  if (candidate.kind === "flow") return true;
+  return candidate.kind === "ask" && typeof candidate.prompt === "string" && candidate.prompt.trim().length > 0;
+}
+
+/** What the interface calls this action. */
+export function describeAction(action: ScheduleAction): string {
+  return action.kind === "flow" ? "Runs the saved flow" : `Asks: “${action.prompt}”`;
+}
+
 export type Schedule = {
   id: string;
   name: string;
-  /** What to ask the assistant when this fires. */
+  /**
+   * What to ask when the action is "ask". Retained alongside `action` so a
+   * schedule written before actions existed still loads — see loadFromDisk,
+   * which fills the action in from it.
+   */
   prompt: string;
+  action: ScheduleAction;
   cadence: Cadence;
   enabled: boolean;
   createdAt: string;
@@ -158,6 +187,18 @@ function isSchedule(value: unknown): value is Schedule {
     && isCadence(entry.cadence);
 }
 
+/**
+ * Fill in an action for a schedule stored before actions existed.
+ *
+ * Migrating on read rather than asking anyone to do anything: a schedule
+ * written by an older build is a perfectly good "ask" schedule, and it should
+ * simply keep working.
+ */
+function withAction(entry: Schedule): Schedule {
+  if (isScheduleAction(entry.action)) return entry;
+  return { ...entry, action: { kind: "ask", prompt: entry.prompt } };
+}
+
 function loadFromDisk(): void {
   if (loaded) return;
   loaded = true;
@@ -166,7 +207,7 @@ function loadFromDisk(): void {
   try {
     const parsed = JSON.parse(readFileSync(scheduleFilePath, "utf8")) as Partial<PersistedShape>;
     if (Array.isArray(parsed.schedules)) {
-      schedules = parsed.schedules.filter(isSchedule);
+      schedules = parsed.schedules.filter(isSchedule).map(withAction);
     }
   } catch {
     // A corrupt file must never take the API down; start clean instead.
@@ -208,20 +249,30 @@ export function listSchedules(): Schedule[] {
 }
 
 export function addSchedule(
-  input: { id: string; name: string; prompt: string; cadence: Cadence; now?: Date }
+  input: { id: string; name: string; prompt?: string; action?: ScheduleAction; cadence: Cadence; now?: Date }
 ): Schedule | null {
   loadFromDisk();
 
   const name = input.name.trim();
-  const prompt = input.prompt.trim();
-  if (!name || !prompt || !isCadence(input.cadence)) return null;
+  // The action is what actually matters; `prompt` is the older way of saying
+  // the same thing for an "ask". Either is accepted so a caller never has to
+  // supply both.
+  const action: ScheduleAction | null = isScheduleAction(input.action)
+    ? input.action
+    : typeof input.prompt === "string" && input.prompt.trim()
+      ? { kind: "ask", prompt: input.prompt.trim() }
+      : null;
+
+  if (!name || !action || !isCadence(input.cadence)) return null;
   if (schedules.length >= maxSchedules) return null;
 
+  const prompt = action.kind === "ask" ? action.prompt.slice(0, maxPromptLength) : "";
   const now = input.now ?? new Date();
   const schedule: Schedule = {
     id: input.id,
     name: name.slice(0, 120),
-    prompt: prompt.slice(0, maxPromptLength),
+    prompt,
+    action: action.kind === "ask" ? { kind: "ask", prompt } : action,
     cadence: input.cadence,
     enabled: true,
     createdAt: now.toISOString(),

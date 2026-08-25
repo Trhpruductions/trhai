@@ -60,12 +60,15 @@ import { maxSynthesisCharacters, piperStatus, synthesize, type Cadence } from ".
 import { maxAudioBytes, requiredChannels, requiredSampleRate, transcribe, whisperStatus } from "./services/whisperTranscribe.js";
 import {
   addSchedule,
+  describeAction,
   describeCadence,
   isCadence,
+  isScheduleAction,
   listSchedules,
   removeSchedule,
   setScheduleEnabled
 } from "./services/scheduleStore.js";
+import { getFlow, saveFlow } from "./services/flowStore.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -711,16 +714,38 @@ export function createApp() {
       data: {
         schedules: listSchedules().map((schedule) => ({
           ...schedule,
-          cadenceLabel: describeCadence(schedule.cadence)
+          cadenceLabel: describeCadence(schedule.cadence),
+          actionLabel: describeAction(schedule.action)
         }))
       },
       traceId: "trace-local"
     });
   });
 
+  // The saved automation flow, kept server-side so the scheduler can reach
+  // it. It used to live only in a browser's localStorage, where nothing but
+  // that one tab could see it.
+  app.get("/v1/flow", (_req, res) => {
+    res.json({ data: { flow: getFlow() }, traceId: "trace-local" });
+  });
+
+  app.put("/v1/flow", (req, res) => {
+    const saved = saveFlow(req.body?.flow);
+    if (!saved) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "flow must have an id, a name and a list of known node types",
+        traceId: "trace-local"
+      });
+      return;
+    }
+    res.json({ data: { flow: saved }, traceId: "trace-local" });
+  });
+
   app.post("/v1/schedules", (req, res) => {
     const name = typeof req.body?.name === "string" ? req.body.name : "";
     const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+    const action = req.body?.action;
     const cadence = req.body?.cadence;
 
     if (!isCadence(cadence)) {
@@ -736,6 +761,9 @@ export function createApp() {
       id: `sched-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name,
       prompt,
+      // Either shape is accepted; addSchedule turns a bare prompt into an
+      // "ask" action so a caller never has to send both.
+      action: isScheduleAction(action) ? action : undefined,
       cadence
     });
 
@@ -749,7 +777,8 @@ export function createApp() {
     }
 
     res.status(201).json({
-      data: { schedule: { ...schedule, cadenceLabel: describeCadence(schedule.cadence) } },
+      data: { schedule: { ...schedule, cadenceLabel: describeCadence(schedule.cadence),
+          actionLabel: describeAction(schedule.action) } },
       traceId: "trace-local"
     });
   });
@@ -767,7 +796,8 @@ export function createApp() {
     }
 
     res.json({
-      data: { schedule: { ...schedule, cadenceLabel: describeCadence(schedule.cadence) } },
+      data: { schedule: { ...schedule, cadenceLabel: describeCadence(schedule.cadence),
+          actionLabel: describeAction(schedule.action) } },
       traceId: "trace-local"
     });
   });
