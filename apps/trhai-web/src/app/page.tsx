@@ -138,6 +138,24 @@ export default function DashboardPage() {
 
   const mic = useMicrophone();
   const { core, label } = presence(status, mic.listening);
+
+  /**
+   * The microphone button. Starting listens; stopping transcribes and puts
+   * what was said in the command box for the user to check and send.
+   *
+   * Deliberately not sent automatically: a transcript is a guess at speech,
+   * and firing a request off a guess the user has not seen is how a voice
+   * feature does something they did not ask for.
+   */
+  async function handleMic() {
+    if (!mic.listening) {
+      await mic.start();
+      return;
+    }
+
+    const said = await mic.stop();
+    if (said) setDraft((existing) => (existing ? `${existing} ${said}` : said));
+  }
   // While the microphone is open the trace shows the room's actual loudness;
   // otherwise it shows how hard the core is working. Both are real readings,
   // and neither is a stand-in for the other.
@@ -298,13 +316,16 @@ export default function DashboardPage() {
                 type="button"
                 className={`hud-mic${mic.listening ? " hud-mic-live" : ""}`}
                 aria-pressed={mic.listening}
+                disabled={mic.transcribing}
                 aria-label={mic.listening ? "Stop listening" : "Start listening"}
                 title={mic.listening
-                  ? "Stop the microphone"
-                  : "Open the microphone. Audio is read on this machine only and never uploaded."}
-                onClick={() => (mic.listening ? mic.stop() : void mic.start())}
+                  ? "Stop and transcribe"
+                  : mic.transcriptionAvailable === false
+                    ? `${mic.transcriptionReason} The microphone still works as a level meter.`
+                    : "Speak your request. The audio is transcribed on this machine and never uploaded."}
+                onClick={() => void handleMic()}
               >
-                ●
+                {mic.transcribing ? "…" : "●"}
               </button>
             ) : null}
             <button type="button" className="hud-ask-go" onClick={() => ask(draft)} disabled={!draft.trim() || busy}>
@@ -313,10 +334,14 @@ export default function DashboardPage() {
           </div>
 
           {mic.error ? <p className="hud-mic-note">{mic.error}</p> : null}
-          {mic.listening ? (
+
+          {mic.transcribing ? (
+            <p className="hud-mic-note">Transcribing on this machine&hellip;</p>
+          ) : mic.listening ? (
             <p className="hud-mic-note">
-              Microphone open — the level above is this machine&rsquo;s own audio, read locally and never
-              uploaded. Speech-to-text is not installed yet, so type your request while it listens.
+              {mic.transcriptionAvailable
+                ? "Listening. Press again to stop — what you said is transcribed on this machine and never uploaded."
+                : `Listening, but only as a level meter: ${mic.transcriptionReason}`}
             </p>
           ) : null}
 

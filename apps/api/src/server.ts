@@ -57,6 +57,7 @@ import {
   getPendingConfirmation
 } from "./services/pendingConfirmation.js";
 import { maxSynthesisCharacters, piperStatus, synthesize, type Cadence } from "./services/piperSpeech.js";
+import { maxAudioBytes, requiredChannels, requiredSampleRate, transcribe, whisperStatus } from "./services/whisperTranscribe.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -636,6 +637,62 @@ export function createApp() {
     res.setHeader("Cache-Control", "no-store");
     res.send(result.audio);
   });
+
+  // Whether local speech-to-text is installed, so the interface can offer the
+  // microphone honestly instead of a button that would hear nothing. Absent is
+  // a normal state with a reason attached, exactly as for the neural voice.
+  app.get("/v1/transcribe", (_req, res) => {
+    const status = whisperStatus();
+
+    res.json({
+      data: status.available
+        ? {
+            available: true,
+            model: status.model.id,
+            models: status.models.map(({ id, size, englishOnly }) => ({ id, size, englishOnly })),
+            sampleRate: requiredSampleRate,
+            channels: requiredChannels,
+            maxBytes: maxAudioBytes
+          }
+        : { available: false, model: null, models: [], reason: status.reason },
+      traceId: "trace-local"
+    });
+  });
+
+  // Audio in, text out. The transcription runs on this machine — no account,
+  // no key, nothing uploaded — which is the entire reason for preferring
+  // whisper.cpp over the browser's own SpeechRecognition, which would have
+  // streamed the microphone to a third party to do the same job.
+  app.post("/v1/transcribe",
+    express.raw({ type: ["audio/wav", "audio/wave", "audio/x-wav", "application/octet-stream"], limit: maxAudioBytes }),
+    async (req, res) => {
+      const audio = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      if (audio.length === 0) {
+        res.status(400).json({
+          code: "INVALID_REQUEST",
+          message: "audio is required, as a 16 kHz mono WAV body",
+          traceId: "trace-local"
+        });
+        return;
+      }
+
+      const result = await transcribe(audio);
+
+      if (!result.ok) {
+        // 503 rather than 500: the usual cause is that whisper.cpp is not
+        // installed, which is a state of the machine, not a bug in the
+        // request. The one exception is audio this cannot read, which is.
+        const isRequestFault = /not a WAV|must be .* kHz/i.test(result.reason);
+        res.status(isRequestFault ? 400 : 503).json({
+          code: isRequestFault ? "INVALID_REQUEST" : "TRANSCRIPTION_UNAVAILABLE",
+          message: result.reason,
+          traceId: "trace-local"
+        });
+        return;
+      }
+
+      res.json({ data: { text: result.text, model: result.model }, traceId: "trace-local" });
+    });
 
   // Which tool the agent is running right now, for a client to poll while a
   // reply is in flight. Absent is a real answer — the model is still thinking,
