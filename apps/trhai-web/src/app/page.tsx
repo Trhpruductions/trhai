@@ -556,7 +556,21 @@ export default function DashboardPage() {
           {surface !== "home" ? (
             <section className="cc-surface" aria-label={surfaceTitles[surface]}>
               <header className="cc-surface-head">
+                {/* The core follows you in. Hiding it while a surface is open
+                    meant the one thing on this screen that is actually alive
+                    disappeared the moment you started using the app — and it
+                    is the same component reading the same state, not a badge
+                    standing in for it, so it still listens, thinks and speaks
+                    here exactly as it does at full size. */}
+                <div className="cc-surface-core" title={label}>
+                  <Core
+                    state={core}
+                    size={26}
+                    amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
+                  />
+                </div>
                 <span className="hud-label">{surfaceTitles[surface]}</span>
+                <span className="cc-surface-state">{label}</span>
                 <button type="button" className="cc-surface-close" onClick={() => setSurface("home")}>
                   Close
                 </button>

@@ -419,3 +419,18 @@
 .cc-stage:has(.cc-surface) .cc-actions,
 .cc-stage:has(.cc-surface) .cc-suggestions,
 .cc-stage:has(.cc-surface) .cc-core-title { display: none; }
+
+/* The core stays with you into a surface. Same component, same live state —
+   it listens, thinks and speaks here exactly as it does at full size. */
+.cc-surface-core { flex: none; display: grid; place-items: center; }
+
+.cc-surface-state {
+  margin-left: auto;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
