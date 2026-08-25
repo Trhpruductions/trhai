@@ -3,6 +3,7 @@ import { availableTools, runTool, toolDefinitions, type ToolContext, type ToolCa
 import { commandsArmed } from "./commandRunner.js";
 import { readStream, toLines } from "./streamReader.js";
 import { enterStage, stageForTool } from "./reasoningStage.js";
+import { increment, observe } from "./metrics.js";
 
 // The agent loop.
 //
@@ -808,7 +809,18 @@ export async function runAgent(
       // Awaited in sequence rather than run in parallel. Two calls in one
       // round are rare, and running them concurrently would let a build and a
       // write race for the same workspace file with no ordering guarantee.
+      // Timed around the real dispatch, so a slow tool shows up as a slow
+      // tool rather than as a slow request with no explanation.
+      const toolBegan = Date.now();
       const result = await runTool(call, context);
+      observe("trhai_tool_duration", Date.now() - toolBegan, { tool: call.name });
+      increment("trhai_tool_calls_total", {
+        tool: call.name,
+        // Three outcomes, because a refusal is neither a success nor a
+        // failure — nothing was attempted, and counting it as an error would
+        // make the permission ladder look like a fault.
+        outcome: result.needsConfirmation ? "refused" : result.ok ? "ok" : "failed"
+      });
 
       // Refused for permission, not failed. Recorded so the caller can hold
       // the offer open for a "yes"; the model still sees the refusal text and

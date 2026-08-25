@@ -13,6 +13,7 @@ import { fetchWebPage } from "./webFetch.js";
 import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
 import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
 import { enterStage } from "./reasoningStage.js";
+import { increment, observe } from "./metrics.js";
 
 // What the assistant can actually do.
 //

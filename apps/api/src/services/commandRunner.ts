@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
+import { increment, observe } from "./metrics.js";
 
 // Running commands on this machine.
 //
@@ -163,6 +164,10 @@ export async function runCommand(
         startedAt: startedAt.toISOString()
       };
 
+      increment("trhai_commands_total", {
+        outcome: run.timedOut ? "timeout" : run.exitCode === 0 ? "ok" : "failed"
+      });
+      observe("trhai_command_duration", run.durationMs);
       history.unshift(run);
       if (history.length > maxHistory) history.length = maxHistory;
       console.warn(`[command] ${command} -> exit ${exitCode ?? "killed"} in ${run.durationMs}ms`);

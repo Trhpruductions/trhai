@@ -1,3 +1,5 @@
+import { observe } from "./metrics.js";
+
 // Which part of the pipeline a request is actually in.
 //
 // The interface could say THINKING for thirty seconds, which is true and
@@ -58,11 +60,19 @@ export function enterStage(sessionId: string | undefined, stage: Stage, now = Da
   const existing = current.get(sessionId);
   if (existing?.stage === stage) return;
 
-  const completed = existing
-    ? [...existing.completed, { stage: existing.stage, durationMs: Math.max(0, now - existing.startedAt) }]
-    : [];
+  const finished = existing
+    ? { stage: existing.stage, durationMs: Math.max(0, now - existing.startedAt) }
+    : null;
 
-  current.set(sessionId, { stage, startedAt: now, completed });
+  // Recorded where the duration is already known, so the metric and the panel
+  // can never report different numbers for the same stage.
+  if (finished) observe("trhai_stage_duration", finished.durationMs, { stage: finished.stage });
+
+  current.set(sessionId, {
+    stage,
+    startedAt: now,
+    completed: finished ? [...existing!.completed, finished] : []
+  });
 }
 
 export function getStage(sessionId: string | undefined): StageRecord | null {

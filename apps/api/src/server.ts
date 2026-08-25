@@ -73,6 +73,7 @@ import { readTelemetry } from "./services/systemTelemetry.js";
 import { getTask } from "./services/taskStore.js";
 import { clearEvents, listEvents } from "./services/executionLog.js";
 import { finishStages, getStage, stageLabels } from "./services/reasoningStage.js";
+import { increment, observe, snapshot, toPrometheus } from "./services/metrics.js";
 import {
   armCommands,
   armedUntil,
@@ -961,6 +962,23 @@ export function createApp() {
     } finally {
       res.end();
     }
+  });
+
+  // Telemetry for this process, in the Prometheus text format.
+  //
+  // E10 asks for OpenTelemetry with Prometheus, Grafana and Loki. The
+  // instrumentation is worth having; three server processes beside an app
+  // whose premise is running on one machine with nothing else installed are
+  // not, and the two are separable. Point Prometheus at this and it scrapes;
+  // read it in a browser and it is legible without one.
+  app.get("/v1/metrics", (_req, res) => {
+    res.type("text/plain; version=0.0.4").send(toPrometheus());
+  });
+
+  // The same numbers as JSON, for anything that would rather not parse the
+  // text format — the System surface, mostly.
+  app.get("/v1/metrics.json", (_req, res) => {
+    res.json({ data: snapshot(), traceId: "trace-local" });
   });
 
   // What the assistant actually did, step by step, as it happens.
