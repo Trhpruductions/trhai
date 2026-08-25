@@ -113,6 +113,17 @@ export type ToolContext = {
    * given in would mean "yes" to one deletion quietly permitting the next.
    */
   confirmedActions?: ReadonlySet<string>;
+  /**
+   * True when this turn runs with nobody watching — a schedule firing in the
+   * background rather than someone at the machine.
+   *
+   * Command access is withheld whatever the arming window says. Switching
+   * machine control on is a grant for working at the machine, and a scheduled
+   * run must not inherit it because the window happens to still be open when
+   * the timer fires. Checked here as well as at the tool list, so a call the
+   * model writes as text rather than through the interface is caught too.
+   */
+  unattended?: boolean;
   /** Overridable so a test can assert on a fixed clock. */
   now?: () => Date;
   /**
@@ -610,6 +621,19 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
   // is visible on the front screen while it is on, and every command that
   // runs is recorded with its output. Other level-3 tools are unaffected —
   // forget and delete_document still ask.
+  // Refused before the confirmation gate, and for a different reason. Falling
+  // through to "ask the user to confirm" would be nonsense on a scheduled run
+  // — there is nobody there to ask — and worse, it implies a confirmation
+  // would let it through, which nothing can.
+  if (call.name === "run_command" && context.unattended) {
+    return {
+      ok: false,
+      content: "Nothing was run. This is a scheduled run with nobody watching, and command access "
+        + "is only ever granted for working at the machine — it cannot be confirmed into being "
+        + "here. Say what you would have run and why."
+    };
+  }
+
   const preAuthorised = call.name === "run_command" && commandsArmed();
 
   if (isRegistered && requiresConfirmation(call.name)
@@ -1081,6 +1105,14 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // window can lapse between the model being offered the tool and the
       // call arriving, and the check that matters is the one at the moment
       // something actually runs.
+      if (context.unattended) {
+        return {
+          ok: false,
+          content: "Nothing was run: this is a scheduled run with nobody watching, and command "
+            + "access is only ever granted for working at the machine. Say what you would have run."
+        };
+      }
+
       if (!commandsArmed()) {
         return {
           ok: false,

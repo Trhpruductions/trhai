@@ -75,6 +75,9 @@ async function runSchedule(id: string, name: string, action: ScheduleAction): Pr
     }
 
     const result = await runAssistantOrchestrator({
+      // Nobody is watching a timer fire, so this turn never gets command
+      // access even if machine control happens to be switched on.
+      unattended: true,
       mode: "general",
       userMessage: action.prompt,
       // A schedule gets its own conversation, kept apart from whatever the

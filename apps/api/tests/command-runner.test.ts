@@ -228,3 +228,51 @@ test("a command that fails is reported as not ok, not as done", async () => {
     disarmCommands();
   }
 });
+
+// Unattended runs never get command access.
+//
+// Found while documenting this: the scheduler calls the same orchestrator the
+// chat surface does, so a schedule firing while machine control happened to
+// be armed could have run commands with nobody watching. Switching machine
+// control on is a grant for working at the machine — a timer must not inherit
+// it because the thirty-minute window is still open when it fires.
+
+test("a scheduled run is refused command access even while armed", async () => {
+  armCommands();
+  try {
+    const result = await runTool(
+      { name: "run_command", arguments: { command: "echo should-not-run" } },
+      { memories: [], knowledge: [], unattended: true }
+    );
+
+    assert.equal(result.ok, false);
+    assert.ok(!result.content.includes("should-not-run"), "it must not have executed");
+    assert.match(result.content, /nobody watching/i);
+    assert.equal(commandHistory().length, 0, "and must not appear in the run log");
+  } finally {
+    disarmCommands();
+  }
+});
+
+test("an unattended turn is not offered the tool in the first place", () => {
+  // Withheld at the list as well as refused at the call: a model that cannot
+  // see the tool will not spend a round trying to use it.
+  armCommands();
+  try {
+    assert.ok(availableTools(true).some((d) => d.function.name === "run_command"),
+      "armed and attended still offers it");
+  } finally {
+    disarmCommands();
+  }
+});
+
+test("the same scheduled run keeps every other tool", async () => {
+  // The gate is for commands, not a blanket refusal — a schedule still has to
+  // be able to do its actual job.
+  const result = await runTool(
+    { name: "current_datetime", arguments: {} },
+    { memories: [], knowledge: [], unattended: true }
+  );
+
+  assert.equal(result.ok, true);
+});

@@ -538,7 +538,17 @@ export async function runAgent(
    * Only prose arrives here. streamReader withholds anything that might be a
    * text-encoded tool call, which this model does emit.
    */
-  onToken?: (text: string) => void
+  onToken?: (text: string) => void,
+  /**
+   * True when this turn runs with nobody watching — a schedule firing in the
+   * background rather than someone sitting at the machine.
+   *
+   * Command access is withheld whatever the arming window says. Switching
+   * machine control on is a grant for working at the machine; a scheduled run
+   * must not inherit it merely because the thirty-minute window happens to
+   * still be open when the timer fires.
+   */
+  unattended?: boolean
 ): Promise<AgentResult> {
   // The date is stated outright rather than left to a tool call.
   //
@@ -624,7 +634,7 @@ export async function runAgent(
             // Withheld while disarmed rather than offered and refused: a
             // model that can see run_command will reason about it and try to
             // talk its way into it; one that never sees it cannot.
-            ...(offerTools ? { tools: availableTools(commandsArmed()) } : {})
+            ...(offerTools ? { tools: availableTools(commandsArmed() && !unattended) } : {})
           }),
           signal
         }));

@@ -54,6 +54,16 @@ export type OrchestratorInput = {
    * has nothing to stream — it is already whole when it is found.
    */
   onToken?: (text: string) => void;
+  /**
+   * True when nothing is watching this turn — a schedule firing on a timer
+   * rather than someone sitting at the machine.
+   *
+   * Command access is withheld whatever the arming window says. Switching
+   * machine control on is a grant for working at the machine; a scheduled run
+   * must not inherit it merely because the window happens to still be open
+   * when the timer fires.
+   */
+  unattended?: boolean;
 };
 
 export type OrchestratorResult = {
@@ -415,10 +425,11 @@ async function answerWithLocalModel(
     deleteDocument: input.deleteDocument,
     pinMemory: input.pinMemory,
     confirmedActions,
+    unattended: input.unattended,
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history
-  }, fetch, onToolStart, input.onToken);
+  }, fetch, onToolStart, input.onToken, input.unattended);
 
     if (result.ok) {
       return {
