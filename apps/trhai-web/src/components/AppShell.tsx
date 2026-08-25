@@ -56,7 +56,12 @@ function StatusFooter() {
   const [online, setOnline] = useState<boolean | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const [apiMs, setApiMs] = useState<number | null>(null);
-  const [clock, setClock] = useState(() => new Date());
+  // Null until mounted, deliberately. Reading the clock during render makes
+  // the server and the browser disagree by whatever fraction of a second sat
+  // between them, which React reports as a hydration mismatch on every single
+  // load — the time is genuinely unknowable server-side, so it is not
+  // rendered there at all.
+  const [clock, setClock] = useState<Date | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +86,7 @@ function StatusFooter() {
     }
 
     void sample();
+    setClock(new Date());
     const poller = window.setInterval(sample, 4000);
     const ticker = window.setInterval(() => setClock(new Date()), 1000);
     return () => { cancelled = true; window.clearInterval(poller); window.clearInterval(ticker); };
@@ -100,7 +106,12 @@ function StatusFooter() {
       </span>
       <span className="grow" />
       <span className="mono sb-item sb-clock">
-        {clock.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+        {/* Em dashes rather than a blank until the first tick: the strip has a
+            fixed layout, and an empty slot that suddenly fills reads as a
+            glitch where a placeholder reads as a reading not yet taken. */}
+        {clock
+          ? clock.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+          : "--:--:--"}
       </span>
     </footer>
   );
