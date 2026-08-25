@@ -1,0 +1,169 @@
+/* Command-centre side panels. See CommandPanels.tsx for why Active Tasks has
+   no progress bars and Connected Services is empty. */
+
+.overview { display: flex; align-items: center; gap: 12px; }
+
+.health {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+.health svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+.health-track { fill: none; stroke: var(--line); stroke-width: 4; }
+
+.health-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: stroke-dasharray 600ms ease-out;
+}
+
+.health-ok .health-fill { stroke: var(--ok); }
+.health-warn .health-fill { stroke: var(--warn, #f5a524); }
+.health-danger .health-fill { stroke: var(--danger, #ff5c5c); }
+
+.health-value {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--accent-strong);
+  line-height: 1;
+}
+
+.health-word {
+  position: relative;
+  margin-top: 1px;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.overview-rows { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; margin: 0; }
+
+.overview-rows > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.overview-rows dt { color: var(--text-faint); }
+
+.overview-rows dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.overview-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.overview-dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.overview-dot.off { background: var(--danger, #ff5c5c); }
+
+.tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.task { display: flex; flex-direction: column; gap: 4px; }
+.task + .task { padding-top: 8px; border-top: 1px solid var(--line); }
+
+.task-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+
+.task-request {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-status {
+  flex: none;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.task-executing .task-status { color: var(--accent-strong); }
+.task-succeeded .task-status { color: var(--ok); }
+.task-failed .task-status,
+.task-blocked .task-status { color: var(--danger, #ff5c5c); }
+
+.task-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.task-tool {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--accent-quiet);
+  color: var(--text-faint);
+}
+
+.task-error { margin: 0; font-size: 10.5px; color: var(--danger, #ff5c5c); line-height: 1.35; }
+
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 4px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 6px;
+  background: rgba(53, 199, 255, 0.04);
+  color: var(--text-faint);
+  text-decoration: none;
+  min-width: 0;
+}
+
+.tile:hover { border-color: var(--line-strong); color: var(--accent-strong); background: var(--accent-quiet); }
+
+.tile-glyph { font-size: 15px; line-height: 1; color: var(--accent); }
+
+.tile-label {
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.services-none { font-size: 11px; line-height: 1.45; margin: 0; }
+
+.persona { display: flex; flex-direction: column; gap: 3px; }
+
+.persona-name { font-family: var(--font-display); font-size: 14px; color: var(--accent-strong); }
+
+.persona-traits {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.persona-focus { font-size: 11px; margin: 2px 0 0; line-height: 1.4; }
+.persona-agent { font-size: 10.5px; }
+
+@media (max-width: 1500px) {
+  .tiles { grid-template-columns: repeat(3, 1fr); }
+}

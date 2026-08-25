@@ -1,594 +1,361 @@
-/* The command centre. One screen: rail, stage, side panels, status strip. */
+/* The command centre.
+   Layout follows the reference design; see page.tsx for which numbers in that
+   reference are real here and which were replaced with measurements. */
 
-.hud {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  position: relative;
-}
-
-/* A faint grid and starfield behind everything, so the black is not flat.
-   Pure CSS on one painted layer — no per-particle DOM, and the drift is a
-   single background-position animation the compositor handles. */
-.hud::before {
-  content: "";
-  position: absolute;
-  inset: -40px;
-  pointer-events: none;
-  background:
-    radial-gradient(1px 1px at 12% 22%, rgba(120, 200, 255, 0.40), transparent 60%),
-    radial-gradient(1px 1px at 78% 14%, rgba(120, 200, 255, 0.28), transparent 60%),
-    radial-gradient(1px 1px at 34% 76%, rgba(120, 200, 255, 0.34), transparent 60%),
-    radial-gradient(1px 1px at 88% 62%, rgba(120, 200, 255, 0.24), transparent 60%),
-    radial-gradient(1px 1px at 56% 42%, rgba(120, 200, 255, 0.20), transparent 60%),
-    radial-gradient(1px 1px at 22% 54%, rgba(120, 200, 255, 0.22), transparent 60%),
-    radial-gradient(1px 1px at 66% 84%, rgba(120, 200, 255, 0.26), transparent 60%),
-    linear-gradient(rgba(53, 199, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(53, 199, 255, 0.045) 1px, transparent 1px),
-    radial-gradient(900px 520px at 50% 46%, rgba(53, 199, 255, 0.07), transparent 70%);
-  background-size:
-    auto, auto, auto, auto, auto, auto, auto,
-    46px 46px, 46px 46px, auto;
-  animation: hud-drift 34s linear infinite;
-}
-
-@keyframes hud-drift {
-  from { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
-  to   { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 46px, 46px 0, 0 0; }
-}
-
-/* A slow scan passing down the screen — one translated element, the classic
-   HUD tell, and cheap because it never triggers layout. */
-.hud::after {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  height: 180px;
-  pointer-events: none;
-  background: linear-gradient(180deg, transparent, rgba(53, 199, 255, 0.055), transparent);
-  animation: hud-scan 9s linear infinite;
-}
-
-@keyframes hud-scan {
-  from { transform: translateY(-180px); }
-  to   { transform: translateY(100vh); }
+.cc {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 100%;
 }
 
 /* ---- top bar ---- */
 
-.hud-top {
+.cc-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--line-subtle);
-  position: relative;
+  padding: 8px 14px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(10, 15, 22, 0.78);
 }
 
-.hud-top-left { display: flex; align-items: center; gap: 8px; }
+.cc-brand { display: flex; align-items: center; gap: 9px; flex: none; }
 
-.hud-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-faint);
+.cc-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  color: var(--accent-strong);
+  font-size: 14px;
+  box-shadow: 0 0 12px rgba(53, 199, 255, 0.28) inset;
 }
 
-.hud-dot.live {
-  background: var(--ok);
-  box-shadow: 0 0 10px var(--ok);
-  animation: hud-pulse 2.6s var(--ease) infinite;
+.cc-brand-text { display: flex; flex-direction: column; line-height: 1.05; }
+
+.cc-wordmark { font-family: var(--font-display); font-size: 15px; letter-spacing: 0.16em; color: var(--text); }
+
+.cc-sub { font-size: 8px; letter-spacing: 0.42em; color: var(--text-faint); }
+
+.cc-top-status { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+.cc-status-word { font-size: 11px; letter-spacing: 0.14em; color: var(--text-faint); }
+.cc-status-word.ok { color: var(--ok); }
+.cc-status-word.danger { color: var(--danger, #ff5c5c); }
+
+.cc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
+.cc-dot.live { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+
+.cc-status-note {
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-@keyframes hud-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
+.cc-metrics { display: flex; gap: 6px; margin-left: auto; flex: none; }
+
+.metric {
+  min-width: 62px;
+  padding: 4px 9px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 6px;
+  background: rgba(53, 199, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
 }
 
-.hud-top-mark { display: flex; align-items: baseline; gap: 8px; }
+.metric-label { font-size: 8.5px; letter-spacing: 0.14em; color: var(--text-faint); }
 
-.hud-wordmark {
-  font-family: var(--font-display);
-  font-size: 19px;
-  letter-spacing: 0.22em;
-  color: var(--text);
-  text-shadow: var(--glow-soft);
-}
+.metric-value { font-family: var(--font-display); font-size: 14px; color: var(--accent-strong); line-height: 1.1; }
+.metric-value.warn { color: var(--warn, #f5a524); }
+.metric-value.danger { color: var(--danger, #ff5c5c); }
 
-.hud-version { font-size: 11px; color: var(--text-faint); }
-
-.hud-top-right { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; }
-.hud-clock { font-size: 15px; letter-spacing: 0.12em; color: var(--text); }
-.hud-date { font-size: 10px; letter-spacing: 0.1em; color: var(--text-faint); text-transform: uppercase; }
+.cc-clock { display: flex; flex-direction: column; align-items: flex-end; flex: none; line-height: 1.15; }
+.cc-time { font-size: 17px; color: var(--accent-strong); }
+.cc-date { font-size: 8.5px; letter-spacing: 0.14em; color: var(--text-faint); }
 
 /* ---- body ---- */
 
-.hud-body {
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 300px;
-  gap: 16px;
-  padding: 16px 20px;
-  min-height: 0;
-  position: relative;
-}
-
-/* ---- left rail ---- */
-
-.hud-rail-col {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-}
-
-.hud-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.hud-quick { flex: none; gap: 4px; padding: 12px 14px; }
-
-.hud-quick-item {
-  text-align: left;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 5px 6px;
-  font: inherit;
-  font-size: 11.5px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
-}
-
-.hud-quick-item:hover { color: var(--accent-strong); background: var(--accent-quiet); }
-
-.rail-item {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  text-decoration: none;
-  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
-}
-
-.rail-item:hover { background: var(--bg-1); border-color: var(--line-subtle); }
-
-.rail-item.active {
-  background: var(--accent-quiet);
-  border-color: var(--line-strong);
-}
-
-.rail-label {
-  font-family: var(--font-display);
-  font-size: 12px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text);
-}
-
-.rail-hint { font-size: 10.5px; color: var(--text-faint); }
-
-/* ---- centre stage ---- */
-
-.hud-stage {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px 0 8px;
-  /* Containing block for the particle canvas below, which is absolutely
-     positioned so it fills the stage without taking part in the column
-     layout — as a flex child it would push the core off centre. */
-  position: relative;
-}
-
-.hud-particles {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  /* Behind every real element, and never intercepting a click: it is
-     ambience, not a control. */
-  z-index: 0;
-  pointer-events: none;
-}
-
-/* Everything the user actually reads or presses sits above the field. */
-.hud-stage > *:not(.hud-particles) {
-  position: relative;
-  z-index: 1;
-}
-
-.trace {
-  width: 100%;
-  max-width: 560px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.trace-bars {
-  width: 100%;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  padding: 0 16px;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-pill);
-  background: rgba(10, 15, 22, 0.6);
-}
-
-.trace-bar {
+.cc-body {
   flex: 1;
-  min-width: 1px;
-  max-width: 3px;
-  background: var(--accent);
-  border-radius: 1px;
-  opacity: 0.75;
-  transition: height 90ms linear;
-}
-
-.trace-label {
-  font-family: var(--font-display);
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  color: var(--text-faint);
-}
-
-.trace-label-live { color: var(--accent-strong); text-shadow: var(--glow-soft); }
-
-.hud-core-wrap {
-  position: relative;
+  min-height: 0;
   display: grid;
-  place-items: center;
-  flex: none;
-}
-
-.hud-core-text {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  pointer-events: none;
-}
-
-.hud-core-name {
-  font-family: var(--font-display);
-  font-size: 42px;
-  letter-spacing: 0.16em;
-  color: var(--text);
-  /* Sits directly over the lit orb, so it carries its own dark backing —
-     without this the glow behind it wins and the wordmark greys out. */
-  text-shadow:
-    0 0 18px rgba(5, 7, 10, 0.95),
-    0 0 34px rgba(5, 7, 10, 0.8),
-    0 0 26px rgba(53, 199, 255, 0.5);
-}
-
-/* Below the rings rather than across them: over the core's lit centre this
-   was unreadable at any weight, and a caption you have to squint through is
-   worse than one placed somewhere calmer. */
-.hud-core-tag {
-  font-size: 9.5px;
-  letter-spacing: 0.2em;
-  color: var(--text-faint);
-  text-align: center;
-}
-
-.hud-agent { font-size: 12px; color: var(--text-muted); }
-
-.hud-ask {
-  width: 100%;
-  max-width: 620px;
-  display: flex;
+  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr) minmax(250px, 310px);
   gap: 10px;
-  align-items: center;
-  padding: 8px 8px 8px 18px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: rgba(10, 15, 22, 0.75);
-  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+  align-items: start;
 }
 
-.hud-ask:focus-within {
-  border-color: var(--line-strong);
-  box-shadow: var(--glow-soft);
-}
-
-.hud-ask-field {
-  flex: 1;
-  background: none;
-  border: none;
-  outline: none;
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
-}
-
-.hud-ask-field::placeholder { color: var(--text-faint); }
-
-.hud-ask-go {
-  border: 1px solid var(--line-strong);
-  background: var(--accent-quiet);
-  color: var(--accent-strong);
-  border-radius: var(--radius-pill);
-  padding: 7px 18px;
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  cursor: pointer;
-  transition: background var(--fast) var(--ease);
-}
-
-.hud-ask-go:hover:not(:disabled) { background: rgba(53, 199, 255, 0.24); }
-.hud-ask-go:disabled { opacity: 0.4; cursor: default; }
-
-.hud-mic {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--text-faint);
-  font-size: 11px;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
-}
-
-.hud-mic:hover { color: var(--accent-strong); border-color: var(--line-strong); }
-
-/* Live is deliberately loud: an open microphone is the one state a person
-   must never be unsure about. */
-.hud-mic-live {
-  color: var(--ok);
-  border-color: var(--ok);
-  box-shadow: 0 0 12px rgba(75, 227, 168, 0.5);
-  animation: hud-pulse 1.6s var(--ease) infinite;
-}
-
-.hud-sched-list {
+.cc-left, .cc-right {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+  /* The columns scroll on their own so the stage in the middle stays put —
+     the core should not slide away while reading a panel. */
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
 }
 
-.hud-sched {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
+/* ---- console ---- */
 
-.hud-sched-body {
+.cc-console { min-height: 0; }
+
+.console-feed {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 9px;
+  max-height: 280px;
+  overflow-y: auto;
   min-width: 0;
 }
 
-.hud-sched-body b { font-size: 12px; }
-.hud-sched-body .faint { font-size: 10.5px; }
+.console-turn { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 
-.hud-sched-last {
-  font-size: 10px;
+.console-turn + .console-turn { padding-top: 8px; border-top: 1px solid var(--line); }
+
+.console-who {
+  font-size: 8.5px;
+  letter-spacing: 0.16em;
   color: var(--text-faint);
 }
 
-.hud-sched-last.danger { color: var(--danger); }
+.console-assistant .console-who { color: var(--accent); }
 
-/* A real switch, because a schedule being on or off is a real thing the
-   scheduler reads — not a decorative pill. */
-.hud-sched-toggle {
-  flex: none;
-  width: 34px;
-  height: 18px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--line);
-  background: transparent;
-  cursor: pointer;
-  padding: 0;
-  position: relative;
-  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
-}
+.console-text { margin: 0; font-size: 11.5px; line-height: 1.5; word-break: break-word; }
 
-.hud-sched-knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--text-faint);
-  transition: transform var(--fast) var(--ease), background var(--fast) var(--ease);
-}
-
-.hud-sched-toggle.on {
-  background: var(--accent-quiet);
-  border-color: var(--ok);
-}
-
-.hud-sched-toggle.on .hud-sched-knob {
-  transform: translateX(16px);
-  background: var(--ok);
-}
-
-.hud-voice {
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--text-faint);
-  font-family: var(--font-orbitron), var(--font-geist-sans), sans-serif;
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-  cursor: pointer;
-  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
-}
-
-.hud-voice:hover { color: var(--accent-strong); border-color: var(--line-strong); }
-
-.hud-voice-on {
-  color: var(--accent-strong);
-  border-color: var(--line-strong);
-  background: var(--accent-quiet);
-}
-
-.hud-mic-note {
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-faint);
-  max-width: 560px;
-  text-align: center;
-}
-
-.hud-suggestions {
+.console-wave {
   display: flex;
-  flex-wrap: wrap;
+  align-items: flex-end;
   justify-content: center;
-  gap: 8px;
-  max-width: 620px;
+  gap: 2px;
+  height: 28px;
+  padding: 0 2px;
 }
 
-.hud-chip {
-  border: 1px solid var(--line-subtle);
-  background: var(--bg-1);
-  color: var(--text-muted);
-  border-radius: var(--radius-pill);
-  padding: 6px 14px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease);
+.console-wave span {
+  flex: 1;
+  min-width: 1px;
+  background: var(--accent);
+  border-radius: 1px;
+  opacity: 0.85;
+  transition: height 90ms linear;
 }
 
-.hud-chip:hover { border-color: var(--line-strong); color: var(--text); }
-
-/* ---- right panels ---- */
-
-.hud-side {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.hud-gauges { display: flex; gap: 10px; }
-
-.gauge { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; }
-
-.gauge-ring {
-  width: 58px;
-  height: 58px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  border: 2px solid var(--line);
-  background: radial-gradient(circle at 50% 50%, rgba(53, 199, 255, 0.10), transparent 70%);
-}
-
-.gauge-value {
-  font-family: var(--font-display);
-  font-size: 15px;
-  color: var(--accent-strong);
-}
-
-.gauge-label {
-  font-size: 9.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.hud-say-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.hud-say-model { font-size: 10px; color: var(--accent); }
-
-.hud-say-text {
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--text-muted);
-  white-space: pre-wrap;
-  /* A long reply must not push the panels below it off-screen — the command
-     centre stays one screen, and the full text is one click away on /chat. */
-  max-height: 168px;
-  overflow-y: auto;
-}
-
-.hud-say-tools { display: flex; flex-wrap: wrap; gap: 5px; }
-
-.hud-tool-chip {
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  padding: 3px 8px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--line-subtle);
-  color: var(--text-faint);
-}
-
-.hud-flow { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
-
-.hud-more {
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.hud-more:hover { text-decoration: underline; }
-
-/* ---- bottom strip ---- */
-
-.hud-bottom {
+.console-voice {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 20px;
-  border-top: 1px solid var(--line-subtle);
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 6px;
+}
+
+.console-voice-state { font-size: 10.5px; color: var(--text-faint); }
+.console-voice-state.live { color: var(--ok); }
+
+.quick { display: flex; flex-direction: column; gap: 2px; }
+
+.quick-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: 6px;
   color: var(--text-faint);
-  text-transform: uppercase;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.quick-item:hover { background: var(--accent-quiet); color: var(--accent-strong); }
+
+.quick-glyph { color: var(--accent); font-size: 13px; }
+
+/* ---- stage ---- */
+
+.cc-stage {
   position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 10px;
 }
 
-.hud-sep { opacity: 0.5; }
+.cc-particles { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
 
-/* The whole HUD leans into the state the core is in — one signal, felt
-   everywhere, rather than each panel animating on its own schedule. */
-.hud-thinking .trace-bar { opacity: 0.9; }
-.hud-executing .trace-bar { opacity: 1; }
-.hud-error .trace-bar { background: var(--danger); }
-.hud-success .trace-bar { background: var(--ok); }
-.hud-listening .trace-bar { background: var(--ok); opacity: 1; }
-.hud-listening .trace-label-live { color: var(--ok); }
+.cc-core-title { position: relative; z-index: 1; text-align: center; }
 
-@media (max-width: 1100px) {
-  .hud-body { grid-template-columns: 180px minmax(0, 1fr); }
-  .hud-side { display: none; }
+.cc-core-title h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 21px;
+  letter-spacing: 0.22em;
+  color: var(--accent-strong);
+  text-shadow: var(--glow-soft);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .hud-dot.live { animation: none; }
-  .trace-bar { transition: none; }
-  .hud::before { animation: none; }
-  .hud::after { display: none; }
+.cc-core-state {
+  font-size: 9.5px;
+  letter-spacing: 0.26em;
+  color: var(--text-faint);
+}
+
+.cc-core-row {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 340px;
+}
+
+.cc-core-wrap { position: relative; display: grid; place-items: center; }
+
+.cc-actions { position: relative; z-index: 1; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+.cc-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 76px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 8px;
+  background: rgba(10, 15, 22, 0.72);
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.cc-action:hover:not(:disabled) { border-color: var(--line-strong); color: var(--accent-strong); }
+
+.cc-action:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.cc-action-glyph { font-size: 16px; color: var(--accent); line-height: 1; }
+
+.cc-action-main { border-color: var(--accent); color: var(--accent-strong); }
+
+.cc-action.live { border-color: var(--ok); color: var(--ok); }
+.cc-action.live .cc-action-glyph { color: var(--ok); }
+
+.cc-ask {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 620px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 5px 5px 14px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  background: rgba(10, 15, 22, 0.82);
+}
+
+.cc-ask-field {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.cc-ask-field::placeholder { color: var(--text-faint); }
+
+.cc-ask-go {
+  flex: none;
+  padding: 7px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.cc-ask-go:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.cc-note {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  text-align: center;
+  max-width: 560px;
+  line-height: 1.45;
+}
+
+.cc-suggestions { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+
+/* ---- state rail ---- */
+
+.cc-states {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 7px 14px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(10, 15, 22, 0.78);
+  flex-wrap: wrap;
+}
+
+.cc-stage-word {
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+  color: var(--text-faint);
+  opacity: 0.5;
+}
+
+/* Lit only by real state, which is why this is a class and not an
+   animation cycling through the five words. */
+.cc-stage-word.on {
+  opacity: 1;
+  color: var(--accent-strong);
+  text-shadow: var(--glow-soft);
+}
+
+.cc-states-note { margin-left: auto; font-size: 10px; }
+
+/* ---- narrower screens ---- */
+
+@media (max-width: 1500px) {
+  .cc-body { grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(230px, 280px); }
+  .cc-core-row { min-height: 300px; }
+}
+
+@media (max-width: 1200px) {
+  .cc-body { grid-template-columns: 1fr; }
+  .cc-left, .cc-right { max-height: none; overflow: visible; }
+  /* Stage first on a narrow screen: the core is the point of this screen,
+     and burying it under the console would be the wrong order. */
+  .cc-stage { order: -1; }
+  .cc-metrics { margin-left: 0; }
+  .cc-top { flex-wrap: wrap; }
+}
+
+@media (max-width: 700px) {
+  .cc-clock { align-items: flex-start; }
+  .cc-states { gap: 12px; }
+  .cc-states-note { margin-left: 0; width: 100%; text-align: center; }
 }

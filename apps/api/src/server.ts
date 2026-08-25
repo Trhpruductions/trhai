@@ -70,6 +70,7 @@ import {
 } from "./services/scheduleStore.js";
 import { getFlow, saveFlow } from "./services/flowStore.js";
 import { readTelemetry } from "./services/systemTelemetry.js";
+import { getTask } from "./services/taskStore.js";
 import {
   listWorkspace,
   looksBinary,
@@ -756,6 +757,29 @@ export function createApp() {
   // claims to show.
   app.get("/v1/system-telemetry", async (_req, res) => {
     res.json({ data: await readTelemetry(), traceId: "trace-local" });
+  });
+
+  // What the assistant is actually working on.
+  //
+  // Not the to-do list at /v1/tasks — that is a list you write. These are
+  // recorded by the orchestrator when a request reaches the agent, so the
+  // panel shows real work with a real status rather than a progress bar
+  // ticking towards a number nobody measured. There is no percentage here on
+  // purpose: nothing in the loop knows how far through a request it is, and
+  // a bar filling to 72% would be an animation, not a measurement.
+  app.get("/v1/agent-tasks", (req, res) => {
+    const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : "";
+    if (!sessionId) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "sessionId is required",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    const task = getTask(sessionId);
+    res.json({ data: { tasks: task ? [task] : [] }, traceId: "trace-local" });
   });
 
   // The workspace, over HTTP.

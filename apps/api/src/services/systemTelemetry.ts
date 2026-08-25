@@ -27,7 +27,7 @@ export type Reading = {
 export type SystemTelemetry = {
   cpu: Reading & { model: string; cores: number };
   memory: Reading;
-  gpu: Reading & { name: string | null };
+  gpu: Reading & { name: string | null; vram: Reading | null };
   /**
    * Third-party services in use. Always empty: everything this build does
    * runs against this machine. The dashboard's "Cloud" card reports that as a
@@ -80,7 +80,13 @@ export function formatGigabytes(bytes: number): string {
 }
 
 /** Parses one CSV line of `nvidia-smi` output. */
-export function parseGpuLine(line: string): { name: string; fraction: number; detail: string } | null {
+export function parseGpuLine(line: string): {
+  name: string;
+  fraction: number;
+  detail: string;
+  /** Video memory, as its own reading. Null when the card did not report it. */
+  vram: Reading | null;
+} | null {
   // name, utilisation %, memory used MiB, memory total MiB
   const parts = line.split(",").map((part) => part.trim());
   if (parts.length < 4) return null;
@@ -91,14 +97,23 @@ export function parseGpuLine(line: string): { name: string; fraction: number; de
   const totalMib = Number.parseFloat(total);
   if (!name || !Number.isFinite(percent)) return null;
 
-  const memory = Number.isFinite(usedMib) && Number.isFinite(totalMib) && totalMib > 0
-    ? ` · ${(usedMib / 1024).toFixed(1)} of ${(totalMib / 1024).toFixed(1)} GB`
-    : "";
+  // Video memory is a separate fact from GPU load — a card can sit at 2% busy
+  // with its memory nearly full, and a dashboard showing only one of those is
+  // hiding the number that actually explains a stall.
+  const haveMemory = Number.isFinite(usedMib) && Number.isFinite(totalMib) && totalMib > 0;
+  const vram: Reading | null = haveMemory
+    ? {
+      fraction: Math.min(1, Math.max(0, usedMib / totalMib)),
+      detail: `${(usedMib / 1024).toFixed(1)} of ${(totalMib / 1024).toFixed(1)} GB`,
+      unavailable: null
+    }
+    : null;
 
   return {
     name,
     fraction: Math.min(1, Math.max(0, percent / 100)),
-    detail: `${Math.round(percent)}% busy${memory}`
+    detail: `${Math.round(percent)}% busy${vram ? ` · ${vram.detail}` : ""}`,
+    vram
   };
 }
 
@@ -117,7 +132,8 @@ export async function readGpu(): Promise<SystemTelemetry["gpu"]> {
     name: null,
     fraction: null,
     detail: "",
-    unavailable: reason
+    unavailable: reason,
+    vram: null
   });
 
   const output = await new Promise<string | null>((resolve) => {
@@ -139,7 +155,13 @@ export async function readGpu(): Promise<SystemTelemetry["gpu"]> {
     return absent("The GPU answered in a format this build could not read.");
   }
 
-  return { name: parsed.name, fraction: parsed.fraction, detail: parsed.detail, unavailable: null };
+  return {
+    name: parsed.name,
+    fraction: parsed.fraction,
+    detail: parsed.detail,
+    unavailable: null,
+    vram: parsed.vram
+  };
 }
 
 export function readMemory(): Reading {

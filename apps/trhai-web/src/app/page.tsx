@@ -7,37 +7,50 @@ import { useAssistant, type AssistantStatus } from "../hooks/useAssistant";
 import { useSpeech } from "../hooks/useSpeech";
 import { ParticleField } from "../components/ParticleField";
 import { useMicrophone } from "../hooks/useMicrophone";
-import { SystemRings } from "../components/SystemRings";
 import { Markdown } from "../components/Markdown";
-import { apiBaseUrl, apiGet, apiPatch, sessionId } from "../lib/api";
+import { Subsystems, type Subsystem } from "../components/Subsystems";
+import {
+  ActiveTasks, ConnectedServices, MemoryStatus, PersonalityCard, SystemOverview, ToolsGrid,
+  type AgentTask, type HealthRow, type Tile
+} from "../components/CommandPanels";
+import { apiGet, sessionId } from "../lib/api";
 import { readStoredPersonality } from "../lib/personality";
-import { activeAgent, personalityById, readMarketplaceState, readFlow, speakableText, type Agent } from "@ascend/shared";
+import {
+  activeAgent, personalityById, readMarketplaceState, readFlow, speakableText, type Agent
+} from "@ascend/shared";
 import { marketplaceStorageKey } from "../lib/agents";
 import "./dash.css";
 
-// The command centre: one screen, with TRHAI's core at the middle of it.
+// The command centre.
 //
-// Every reading on this screen is something this machine actually knows. The
-// panels are shaped like the HUD they were designed from, but nothing is
-// filled with a plausible-looking number to complete the picture. A HUD that
-// lies to look finished is worse than one with fewer dials.
+// Built to the reference design: a core at the middle, subsystems flanking
+// it, a console down the left, instruments down the right, and a state rail
+// across the bottom. The layout is followed closely because it is a good
+// layout — a machine you can read at a glance.
 //
-// Host CPU, memory and GPU are real now, via /v1/system-telemetry — the local
-// API is a Node process on this machine, so it can read them without the
-// desktop bridge this app still does not have. Any sensor that cannot be read
-// there shows a dash and its reason rather than a number.
+// What is not followed is any number the reference invents. It shows a health
+// dial pinned at 100%, task bars at 72% and 45%, "13.2 GB / 15.0 GB" of
+// memory, five connected services, and subsystems at v4.2.1 and v3.8.7 all
+// lit green. None of those are things this build can measure, and a dial that
+// always reads 100% is not an instrument — it is a picture of one. So every
+// panel keeps its place in the design and is filled from something real:
+// health is the fraction of checks that actually passed, tasks show the tools
+// that genuinely ran instead of a bar nothing measures, and a subsystem that
+// is not installed says so rather than showing ACTIVE.
+//
+// That is the difference between a screen that looks alive and one that is.
 
-type ModelInfo = { available: true; model: string } | { available: false; reason: string };
-
-/** A schedule as the API reports it, with the label already formatted server-side. */
-type ScheduleView = {
-  id: string;
-  name: string;
-  cadenceLabel: string;
-  enabled: boolean;
-  lastRunAt: string | null;
-  lastStatus: "ok" | "failed" | "missed" | null;
+type ModelInfo = { available: boolean; model?: string; reason?: string };
+type SpeechInfo = { available: boolean; voice?: string; reason?: string };
+type TranscribeInfo = { available: boolean; model?: string; reason?: string };
+type Reading = { fraction: number | null; detail: string; unavailable: string | null };
+type Telemetry = {
+  cpu: Reading & { cores: number; model: string };
+  memory: Reading;
+  gpu: Reading & { name: string | null; vram: Reading | null };
+  cloud: { services: string[] };
 };
+type ScheduleView = { id: string; enabled: boolean };
 
 type Presence = {
   core: "idle" | "listening" | "thinking" | "executing" | "speaking" | "success" | "error";
@@ -53,14 +66,28 @@ type Presence = {
  */
 function presence(status: AssistantStatus, listening: boolean, speaking: boolean): Presence {
   if (listening) return { core: "listening", label: "LISTENING" };
-  if (status.state === "executing") return { core: "executing", label: `WORKING · ${status.tool.replace(/_/g, " ").toUpperCase()}` };
+  if (status.state === "executing") {
+    return { core: "executing", label: `EXECUTING · ${status.tool.replace(/_/g, " ").toUpperCase()}` };
+  }
   if (status.state === "thinking") return { core: "thinking", label: "THINKING" };
   if (status.state === "success") return { core: "success", label: "COMPLETE" };
   if (status.state === "error") return { core: "error", label: "ERROR" };
-  // Below the request states: speaking happens after a reply has landed, so
-  // it never competes with them for the same moment.
   if (speaking) return { core: "speaking", label: "SPEAKING" };
   return { core: "idle", label: "STANDING BY" };
+}
+
+/** The bottom rail. At most one is lit, and it is lit by real state. */
+const stages = ["ENGAGED", "LISTENING", "THINKING", "EXECUTING", "COMPLETE"] as const;
+
+function activeStage(core: Presence["core"], hasConversation: boolean): string | null {
+  if (core === "listening") return "LISTENING";
+  if (core === "thinking" || core === "speaking") return "THINKING";
+  if (core === "executing") return "EXECUTING";
+  if (core === "success") return "COMPLETE";
+  // "Engaged" means a conversation is genuinely under way, not merely that
+  // the page is open — otherwise the rail would light before anything had
+  // happened and would mean nothing at all.
+  return hasConversation ? "ENGAGED" : null;
 }
 
 function greetingFor(date: Date): string {
@@ -71,180 +98,74 @@ function greetingFor(date: Date): string {
   return "Good evening";
 }
 
-/**
- * The activity trace across the top.
- *
- * Bars are a rolling window of the core's own real activity level — 0 when
- * idle, higher while the model is working — not a synthesised audio signal.
- * There is no microphone in this build, so a waveform claiming to show a
- * voice would be showing nothing at all.
- */
-function ActivityTrace({ level, label }: { level: number; label: string }) {
-  const bars = 72;
-  const [seed, setSeed] = useState(0);
-
-  // Idle still advances, just slowly and shallowly: an instrument at rest
-  // shows a live baseline, not a flat line, and a flat line here reads as
-  // "disconnected" rather than "ready". The amplitude below is what carries
-  // the real distinction between resting and working.
-  //
-  // Deliberately keyed on *whether* there is activity, not on the level
-  // itself: while the microphone is open the level changes every animation
-  // frame, and depending on it here would tear down and rebuild this
-  // interval dozens of times a second.
-  const active = level > 0;
-  useEffect(() => {
-    const period = active ? 90 : 420;
-    const timer = window.setInterval(() => setSeed((value) => value + 1), period);
-    return () => window.clearInterval(timer);
-  }, [active]);
+/** A top-bar metric. Shows a dash, never a number, when it cannot be read. */
+function Metric({ label, reading }: { label: string; reading: Reading | null | undefined }) {
+  const fraction = reading?.fraction;
+  const known = fraction !== null && fraction !== undefined;
+  const percent = known ? Math.round(fraction * 100) : null;
+  const tone = !known ? "" : fraction >= 0.9 ? " danger" : fraction >= 0.7 ? " warn" : "";
 
   return (
-    <div className="trace" aria-hidden="true">
-      <div className="trace-bars">
-        {Array.from({ length: bars }, (_, index) => {
-          // Deterministic per (index, seed): a stable shape that advances,
-          // rather than a fresh random field every frame.
-          const wave = Math.sin((index + seed) * 0.55) * Math.sin((index + seed) * 0.17);
-          const raw = active
-            ? 3 + Math.abs(wave) * level * 26
-            : 2 + Math.abs(wave) * 4;
-          // Rounded for the same reason Core.tsx rounds its tick geometry:
-          // Math.sin is only required to be implementation-approximated, so
-          // Node's V8 and the browser's V8 can legitimately differ in the
-          // last digits for identical input. Full precision made the first
-          // paint a hydration mismatch on every bar.
-          const height = Math.round(raw * 100) / 100;
-          return <span key={index} className="trace-bar" style={{ height: `${height}px` }} />;
-        })}
-      </div>
-      <span className={`trace-label${level > 0 ? " trace-label-live" : ""}`}>{label}</span>
+    <div className="metric" title={reading?.unavailable ?? reading?.detail ?? ""}>
+      <span className="metric-label">{label}</span>
+      <span className={`metric-value${tone}`}>{percent === null ? "—" : `${percent}%`}</span>
     </div>
   );
 }
 
-const navItems = [
-  { href: "/", label: "Dashboard", hint: "Overview & system status" },
-  { href: "/chat", label: "AI Chat", hint: "Talk to TRHAI" },
-  { href: "/tasks", label: "Tasks", hint: "Your to-do list" },
-  { href: "/calendar", label: "Calendar", hint: "Your schedule" },
-  { href: "/memory", label: "Memory Core", hint: "Stored knowledge" },
-  { href: "/knowledge", label: "Knowledge", hint: "Documents & sources" },
-  { href: "/automation", label: "Automation", hint: "Flows & runs" },
-  { href: "/agents", label: "Agents", hint: "Installed lenses" },
-  { href: "/security", label: "Security", hint: "Tools & permissions" },
-  { href: "/system", label: "System", hint: "What's running, which build" },
-  { href: "/files", label: "Files", hint: "The assistant's workspace" },
-  { href: "/settings", label: "Settings", hint: "Voice, theme, personality" }
+const quickAccess = [
+  { href: "/automation", label: "Projects & flows", glyph: "◇" },
+  { href: "/files", label: "Files & documents", glyph: "▣" },
+  { href: "/security", label: "AI tools", glyph: "◐" },
+  { href: "/system", label: "System logs", glyph: "▦" }
 ];
 
-const quickCommands = [
-  "What can you do?",
-  "Summarise what changed today",
-  "What is on my task list?",
-  "What do you remember about me?"
+const tiles: Tile[] = [
+  { href: "/chat", label: "Chat", glyph: "◉", hint: "Talk to TRHAI" },
+  { href: "/files", label: "Files", glyph: "▣", hint: "The workspace on disk" },
+  { href: "/knowledge", label: "Knowledge", glyph: "▥", hint: "Documents TRHAI can quote" },
+  { href: "/system", label: "System", glyph: "▦", hint: "What is running, and which build" },
+  { href: "/automation", label: "Automation", glyph: "◇", hint: "Flows and schedules" },
+  { href: "/memory", label: "Memory", glyph: "◍", hint: "Facts TRHAI has kept" },
+  { href: "/tasks", label: "Tasks", glyph: "▤", hint: "Your to-do list" },
+  { href: "/calendar", label: "Calendar", glyph: "▧", hint: "Your schedule" },
+  { href: "/agents", label: "Agents", glyph: "◆", hint: "Installable lenses" },
+  { href: "/security", label: "Security", glyph: "◐", hint: "Tools and permissions" },
+  { href: "/settings", label: "Settings", glyph: "⚙", hint: "Voice, theme, personality" }
 ];
 
 export default function DashboardPage() {
   const { messages, status, send } = useAssistant();
+  const mic = useMicrophone();
+  const speech = useSpeech();
+
   const [clock, setClock] = useState<Date | null>(null);
   const [draft, setDraft] = useState("");
   const [online, setOnline] = useState<boolean | null>(null);
-  const [info, setInfo] = useState<ModelInfo | null>(null);
-  const [latency, setLatency] = useState<number | null>(null);
-  const [counts, setCounts] = useState<{ tools: number | null; memories: number | null; documents: number | null; tasks: number | null }>({
-    tools: null, memories: null, documents: null, tasks: null
-  });
+  const [model, setModel] = useState<ModelInfo | null>(null);
+  const [voice, setVoice] = useState<SpeechInfo | null>(null);
+  const [stt, setStt] = useState<TranscribeInfo | null>(null);
+  const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
+  const [tools, setTools] = useState<number | null>(null);
+  const [memories, setMemories] = useState<{ total: number; pinned: number } | null>(null);
+  const [documents, setDocuments] = useState<number | null>(null);
+  const [schedules, setSchedules] = useState<ScheduleView[] | null>(null);
+  const [workspace, setWorkspace] = useState<{ files: number; bytes: number } | null>(null);
+  const [agentTasks, setAgentTasks] = useState<AgentTask[] | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [personality, setPersonality] = useState<{ name: string; traits: string[]; summary: string } | null>(null);
   const [flowName, setFlowName] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+
   const inputRef = useRef<HTMLInputElement>(null);
-  /** The reply already read aloud, so a re-render never repeats one. */
   const lastSpokenId = useRef<string | null>(null);
 
-  const mic = useMicrophone();
-  const speech = useSpeech();
-  // Null until the first read, so "nothing scheduled" is never shown before
-  // anyone has actually looked.
-  const [schedules, setSchedules] = useState<ScheduleView[] | null>(null);
   const { core, label } = presence(status, mic.listening, speech.speaking);
-
-  /**
-   * The microphone button. Starting listens; stopping transcribes and puts
-   * what was said in the command box for the user to check and send.
-   *
-   * Deliberately not sent automatically: a transcript is a guess at speech,
-   * and firing a request off a guess the user has not seen is how a voice
-   * feature does something they did not ask for.
-   */
-  /**
-   * Flip a schedule on or off, then re-read rather than assuming.
-   *
-   * The server recomputes the next due time when a schedule is re-enabled,
-   * so guessing the new state locally would show a next-run time the
-   * scheduler does not agree with.
-   */
-  async function toggleSchedule(schedule: ScheduleView) {
-    const result = await apiPatch<{ schedule: ScheduleView }>(
-      `/v1/schedules/${schedule.id}`,
-      { enabled: !schedule.enabled }
-    );
-    if (!result.ok) return;
-    const refreshed = await apiGet<{ schedules: ScheduleView[] }>("/v1/schedules");
-    if (refreshed.ok) setSchedules(refreshed.data.schedules);
-  }
-
-  async function handleMic() {
-    if (!mic.listening) {
-      // Stop any reply already being read. Without this the microphone opens
-      // into TRHAI's own voice and transcribes it back as though the user
-      // had said it.
-      speech.stop();
-      await mic.start();
-      return;
-    }
-
-    const said = await mic.stop();
-    if (said) setDraft((existing) => (existing ? `${existing} ${said}` : said));
-  }
-  // While the microphone is open the trace shows the room's actual loudness;
-  // otherwise it shows how hard the core is working. Both are real readings,
-  // and neither is a stand-in for the other.
-  const level = mic.listening
-    ? mic.amplitude
-    : speech.speaking && speech.amplitude !== undefined
-      ? speech.amplitude
-      : status.state === "executing" ? 1 : status.state === "thinking" ? 0.6 : 0;
   const busy = status.state === "thinking" || status.state === "executing";
   const lastReply = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
 
-  // Read the newest reply aloud when voice is on. Same rules as the chat
-  // surface, which this deliberately mirrors rather than reinvents: restored
-  // history is never spoken (a reload would recite the last answer at you),
-  // and each reply is spoken at most once.
-  useEffect(() => {
-    if (!speech.enabled) return;
-    const newest = messages[messages.length - 1];
-    if (!newest || newest.role !== "assistant") return;
-    if (newest.id.startsWith("restored-")) return;
-    if (lastSpokenId.current === newest.id) return;
-
-    // Marked spoken either way. With the microphone open, speaking would be
-    // recorded and transcribed back as though the user had said it — and
-    // deferring instead of skipping would be worse, since the reply would
-    // then blurt out later once they had moved on.
-    lastSpokenId.current = newest.id;
-    if (mic.listening) return;
-
-    // Spoken as prose, not as markup: the reply renders as formatted text,
-    // so reading "asterisk asterisk" aloud would say something different
-    // from what is on screen.
-    speech.speak(speakableText(newest.text));
-  }, [messages, speech, mic.listening]);
-
-  // Clock starts null and fills in on the client: rendering a time on the
-  // server guarantees it disagrees with the client a second later, which is
-  // a real hydration error rather than a cosmetic one.
+  // Clock fills in on the client. Rendering a time on the server guarantees
+  // it disagrees with the client a second later.
   useEffect(() => {
     setClock(new Date());
     const ticker = window.setInterval(() => setClock(new Date()), 1000);
@@ -252,67 +173,100 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const personality = personalityById(readStoredPersonality(window.localStorage));
+    const chosen = personalityById(readStoredPersonality(window.localStorage));
     const installed = activeAgent(readMarketplaceState(window.localStorage, marketplaceStorageKey));
     setAgent(installed);
-    setSuggestions(installed?.suggestions ?? personality.suggestions);
+    // label and voice.tone, which is what a personality genuinely carries —
+    // there is no `traits` field, and personalities.ts enforces by test that
+    // one cannot be added, because capability lives in the permission layer
+    // rather than in a profile you can switch with a click.
+    setPersonality({
+      name: chosen.label,
+      traits: [chosen.voice.cadence, chosen.responseStyle.formality],
+      summary: chosen.summary
+    });
+    setSuggestions(installed?.suggestions ?? chosen.suggestions ?? []);
     setFlowName(readFlow(window.localStorage, "trhai.automation.flow.v1")?.name ?? null);
   }, []);
 
-  const probe = useCallback(async () => {
-    const startedAt = performance.now();
-    try {
-      const response = await fetch(`${apiBaseUrl}/v1/assist/model`);
-      const elapsed = Math.round(performance.now() - startedAt);
-      setOnline(response.ok);
-      setLatency(response.ok ? elapsed : null);
-      if (response.ok) {
-        const payload = await response.json();
-        setInfo(payload?.data?.available
-          ? { available: true, model: payload.data.model }
-          : { available: false, reason: payload?.data?.reason ?? "No local model is running." });
-      }
-    } catch {
-      setOnline(false);
-      setLatency(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    void probe();
-    const poller = window.setInterval(probe, 5000);
-    return () => window.clearInterval(poller);
-  }, [probe]);
-
-  // Real counts from the real routes. Anything unreachable stays null and
-  // renders as a dash — never as a zero, which would be a measurement.
-  useEffect(() => {
+  const readAll = useCallback(async () => {
     const id = sessionId();
-    void Promise.all([
+    const [
+      modelResult, telemetryResult, speechResult, sttResult,
+      capabilityResult, memoryResult, knowledgeResult, scheduleResult,
+      filesResult, taskResult
+    ] = await Promise.all([
+      apiGet<ModelInfo>("/v1/assist/model"),
+      apiGet<Telemetry>("/v1/system-telemetry"),
+      apiGet<SpeechInfo>("/v1/speech"),
+      apiGet<TranscribeInfo>("/v1/transcribe"),
       apiGet<{ tools: unknown[] }>("/v1/capabilities"),
-      apiGet<{ memories: unknown[] }>(`/v1/assist/memory?sessionId=${id}`),
+      apiGet<{ memories: Array<{ pinned?: boolean }> }>(`/v1/assist/memory?sessionId=${id}`),
       apiGet<{ documents: unknown[] }>(`/v1/knowledge?sessionId=${id}`),
-      apiGet<{ tasks: Array<{ done: boolean }> }>(`/v1/tasks?sessionId=${id}`),
-      // Machine-wide rather than per-session: the scheduler runs these from
-      // the API process, so they are not this browser's to own.
-      apiGet<{ schedules: ScheduleView[] }>("/v1/schedules")
-    ]).then(([capabilities, memory, knowledge, tasks, scheduled]) => {
-      setCounts({
-        tools: capabilities.ok ? capabilities.data.tools.length : null,
-        memories: memory.ok ? memory.data.memories.length : null,
-        documents: knowledge.ok ? knowledge.data.documents.length : null,
-        tasks: tasks.ok ? tasks.data.tasks.filter((task) => !task.done).length : null
+      apiGet<{ schedules: ScheduleView[] }>("/v1/schedules"),
+      apiGet<{ entries: Array<{ directory: boolean; bytes: number }> }>("/v1/files"),
+      apiGet<{ tasks: AgentTask[] }>(`/v1/agent-tasks?sessionId=${id}`)
+    ]);
+
+    // One reachability answer for the screen, from the request that would
+    // fail first. Marking each panel separately unreachable would be ten ways
+    // of saying the same thing.
+    setOnline(modelResult.ok);
+    if (modelResult.ok) setModel(modelResult.data);
+    if (telemetryResult.ok) setTelemetry(telemetryResult.data);
+    if (speechResult.ok) setVoice(speechResult.data);
+    if (sttResult.ok) setStt(sttResult.data);
+    if (capabilityResult.ok) setTools(capabilityResult.data.tools.length);
+    if (memoryResult.ok) {
+      setMemories({
+        total: memoryResult.data.memories.length,
+        pinned: memoryResult.data.memories.filter((entry) => entry.pinned).length
       });
-      if (scheduled.ok) setSchedules(scheduled.data.schedules);
-    });
+    }
+    if (knowledgeResult.ok) setDocuments(knowledgeResult.data.documents.length);
+    if (scheduleResult.ok) setSchedules(scheduleResult.data.schedules);
+    if (filesResult.ok) {
+      const files = filesResult.data.entries.filter((entry) => !entry.directory);
+      setWorkspace({ files: files.length, bytes: files.reduce((sum, entry) => sum + entry.bytes, 0) });
+    }
+    if (taskResult.ok) setAgentTasks(taskResult.data.tasks);
   }, []);
 
-  // Answered right here rather than by handing the request to another screen.
-  // The core reacting to your own question, on the screen you asked it from,
-  // is the entire point of a command centre — bouncing to /chat to watch it
-  // happen somewhere else is the "navigating a website" feeling this screen
-  // exists to avoid. The full transcript still lives on /chat; this shows
-  // the latest exchange.
+  useEffect(() => {
+    void readAll();
+    const poller = window.setInterval(() => void readAll(), 4000);
+    return () => window.clearInterval(poller);
+  }, [readAll]);
+
+  // Read the newest reply aloud when voice is on. Restored history is never
+  // spoken, and each reply is spoken at most once.
+  useEffect(() => {
+    if (!speech.enabled) return;
+    const newest = messages[messages.length - 1];
+    if (!newest || newest.role !== "assistant") return;
+    if (newest.id.startsWith("restored-")) return;
+    if (lastSpokenId.current === newest.id) return;
+
+    lastSpokenId.current = newest.id;
+    if (mic.listening) return;
+    // Spoken as prose, not as markup: the reply renders as formatted text, so
+    // reading "asterisk asterisk" aloud would say something different from
+    // what is on screen.
+    speech.speak(speakableText(newest.text));
+  }, [messages, speech, mic.listening]);
+
+  async function handleMic() {
+    if (!mic.listening) {
+      // Stop any reply already being read, or the microphone opens into
+      // TRHAI's own voice and transcribes it back.
+      speech.stop();
+      await mic.start();
+      return;
+    }
+    const said = await mic.stop();
+    if (said) setDraft((existing) => (existing.trim() ? `${existing.trim()} ${said}` : said));
+  }
+
   function ask(text: string) {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
@@ -320,128 +274,298 @@ export default function DashboardPage() {
     void send(trimmed);
   }
 
-  const modelName = info?.available ? info.model.replace(/^ollama\//, "").replace(/:latest$/, "") : null;
+  const modelName = model?.available && model.model
+    ? model.model.replace(/^ollama\//, "").replace(/:latest$/, "")
+    : null;
+
+  // While the microphone is open this shows the room's real loudness; while
+  // speaking, the voice's own amplitude; otherwise how hard the core is
+  // working. All three are real, and it is flat when there is genuinely
+  // nothing to measure.
+  const level = mic.listening
+    ? mic.amplitude
+    : speech.speaking && speech.amplitude !== undefined
+      ? speech.amplitude
+      : status.state === "executing" ? 1 : status.state === "thinking" ? 0.6 : 0;
+
+  const enabledSchedules = schedules?.filter((schedule) => schedule.enabled).length ?? null;
+
+  const leftSubsystems: Subsystem[] = [
+    {
+      name: "Language model",
+      detail: modelName,
+      online: model === null ? null : model.available,
+      reason: model?.reason ?? "No local model is running."
+    },
+    {
+      name: "Transcription",
+      detail: stt?.model ?? null,
+      online: stt === null ? null : stt.available,
+      reason: stt?.reason ?? "No whisper model installed."
+    },
+    {
+      name: "Memory core",
+      detail: memories === null ? null : `${memories.total} kept · ${memories.pinned} pinned`,
+      online: memories === null ? null : true
+    },
+    {
+      name: "Tool registry",
+      detail: tools === null ? null : `${tools} registered`,
+      online: tools === null ? null : tools > 0
+    }
+  ];
+
+  const rightSubsystems: Subsystem[] = [
+    {
+      name: "Speech synthesis",
+      detail: voice?.voice ?? null,
+      online: voice === null ? null : voice.available,
+      reason: voice?.reason ?? "Piper is not installed.",
+      // The one subsystem with a genuine live signal: the neural voice
+      // exposes its audio, so this bar is the real amplitude.
+      level: speech.speaking ? speech.amplitude ?? 0 : 0
+    },
+    {
+      name: "Scheduler",
+      detail: enabledSchedules === null ? null : `${enabledSchedules} active of ${schedules?.length ?? 0}`,
+      online: schedules === null ? null : true
+    },
+    {
+      name: "Workspace",
+      detail: workspace === null ? null : `${workspace.files} files`,
+      online: workspace === null ? null : true
+    },
+    {
+      name: "Automation",
+      detail: flowName,
+      online: flowName === null ? false : true,
+      reason: "No flow saved yet."
+    }
+  ];
+
+  const healthRows: HealthRow[] = [
+    {
+      label: "Local API",
+      state: online === null ? "checking" : online ? "connected" : "unreachable",
+      ok: online
+    },
+    {
+      label: "Model",
+      state: model === null ? "checking" : model.available ? "loaded" : "none",
+      ok: model === null ? null : model.available
+    },
+    {
+      label: "Voice",
+      state: voice === null ? "checking" : voice.available ? "ready" : "absent",
+      ok: voice === null ? null : voice.available
+    },
+    {
+      label: "Transcription",
+      state: stt === null ? "checking" : stt.available ? "ready" : "absent",
+      ok: stt === null ? null : stt.available
+    },
+    {
+      label: "Scheduler",
+      state: schedules === null ? "checking" : "running",
+      ok: schedules === null ? null : true
+    }
+  ];
+
+  const stage = activeStage(core, messages.length > 0);
+  const failing = healthRows.filter((row) => row.ok === false).length;
 
   return (
-    <div className={`hud hud-${core}`}>
-      <header className="hud-top">
-        <div className="hud-top-left">
-          <span className={`hud-dot${online ? " live" : ""}`} aria-hidden="true" />
-          <span className="hud-label">TRHAI {online === null ? "CONNECTING" : online ? "ONLINE" : "OFFLINE"}</span>
+    <div className={`cc cc-${core}`}>
+      <header className="cc-top">
+        <div className="cc-brand">
+          <span className="cc-mark" aria-hidden="true">▽</span>
+          <div className="cc-brand-text">
+            <span className="cc-wordmark">TRH AI</span>
+            <span className="cc-sub">VEXORA</span>
+          </div>
         </div>
-        <div className="hud-top-mark">
-          <span className="hud-wordmark">TRHAI</span>
-          <span className="hud-version">v1.0</span>
+
+        <div className="cc-top-status">
+          <span className="hud-label">System status</span>
+          <span className={`cc-status-word${online ? " ok" : online === false ? " danger" : ""}`}>
+            {online === null ? "CONNECTING" : online ? "ONLINE" : "OFFLINE"}
+          </span>
+          <span className={`cc-dot${online ? " live" : ""}`} aria-hidden="true" />
+          {/* Not "all systems operational" as a fixed caption. It counts the
+              checks that actually failed, so it can say something different
+              when something is wrong. */}
+          <span className="faint cc-status-note">
+            {online === false
+              ? "The local API is not responding"
+              : failing === 0
+                ? "All checks passing"
+                : `${failing} not available`}
+          </span>
         </div>
-        <div className="hud-top-right mono">
+
+        <div className="cc-metrics">
+          <Metric label="CPU" reading={telemetry?.cpu} />
+          <Metric label="RAM" reading={telemetry?.memory} />
+          <Metric label="GPU" reading={telemetry?.gpu} />
+          <Metric label="VRAM" reading={telemetry?.gpu.vram} />
+        </div>
+
+        <div className="cc-clock mono">
           {clock ? (
             <>
-              <span className="hud-clock">{clock.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
-              <span className="hud-date">{clock.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</span>
+              <span className="cc-time">
+                {clock.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </span>
+              <span className="cc-date">
+                {clock.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }).toUpperCase()}
+              </span>
             </>
-          ) : <span className="hud-clock">--:--</span>}
+          ) : <span className="cc-time">--:--:--</span>}
         </div>
       </header>
 
-      <div className="hud-body">
-        <div className="hud-rail-col">
-          <nav className="hud-rail" aria-label="Sections">
-            {navItems.map((item) => (
-              <Link key={item.href} href={item.href} className={`rail-item${item.href === "/" ? " active" : ""}`}>
-                <span className="rail-label">{item.label}</span>
-                <span className="rail-hint">{item.hint}</span>
-              </Link>
-            ))}
-          </nav>
-
-          <section className="hud-panel hud-quick">
-            <span className="hud-label">Quick commands</span>
-            {quickCommands.map((command) => (
-              <button key={command} type="button" className="hud-quick-item" onClick={() => ask(command)}>
-                {command}
-              </button>
-            ))}
-          </section>
-        </div>
-
-        <main className="hud-stage">
-          {/* Behind everything, reading the same state the core does — the
-              field quickens while the model works and pulls inward while a
-              tool actually runs, rather than drifting for its own sake. */}
-          <ParticleField state={core} className="hud-particles" />
-
-          <ActivityTrace level={level} label={label} />
-
-          <div className="hud-core-wrap">
-            {/* One amplitude input, two real sources: the microphone while
-                listening, the neural voice while speaking. Undefined in any
-                other state, and for the browser fallback voice, which exposes
-                no audio to read — Core treats undefined as "breathe on your
-                own" rather than as silence. */}
-            <Core
-              state={core}
-              size={380}
-              amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
-            />
-            <div className="hud-core-text">
-              <span className="hud-core-name">TRHAI</span>
+      <div className="cc-body">
+        <aside className="cc-left">
+          <section className="hud-panel cc-console">
+            <span className="hud-label">TRH AI console</span>
+            <div className="console-feed">
+              {messages.length === 0 ? (
+                <p className="faint">
+                  {modelName
+                    ? `${greetingFor(clock ?? new Date())}, Hank. Answering with ${modelName}.`
+                    : "No local model is loaded yet."}
+                </p>
+              ) : (
+                messages.slice(-6).map((message) => (
+                  <article key={message.id} className={`console-turn console-${message.role}`}>
+                    <span className="console-who">{message.role === "user" ? "YOU" : "TRH AI"}</span>
+                    {message.role === "assistant"
+                      ? <Markdown text={message.text} className="console-text" />
+                      : <p className="console-text">{message.text}</p>}
+                  </article>
+                ))
+              )}
             </div>
+
+            {/* The room, or TRHAI's own voice — whichever is genuinely being
+                measured. Flat when neither is, rather than idling for show. */}
+            <div className="console-wave" aria-hidden="true">
+              {Array.from({ length: 48 }, (_, index) => {
+                const profile = Math.abs(Math.sin((index / 48) * Math.PI * 3));
+                const height = Math.max(1, Math.round(level * profile * 26));
+                return <span key={index} style={{ height: `${height}px` }} />;
+              })}
+            </div>
+
+            <div className="console-voice">
+              <span className="hud-label">Voice input</span>
+              <span className={`console-voice-state${mic.listening ? " live" : ""}`}>
+                {mic.transcribing ? "Transcribing…" : mic.listening ? "Listening…" : "Idle"}
+              </span>
+            </div>
+            {mic.error ? <p className="cc-note">{mic.error}</p> : null}
+          </section>
+
+          <section className="hud-panel">
+            <span className="hud-label">Quick access</span>
+            <div className="quick">
+              {quickAccess.map((item) => (
+                <Link key={item.href} href={item.href} className="quick-item">
+                  <span className="quick-glyph" aria-hidden="true">{item.glyph}</span>
+                  <span>{item.label}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        </aside>
+
+        <main className="cc-stage">
+          <ParticleField state={core} className="cc-particles" />
+
+          <div className="cc-core-title">
+            <h1>TRH AI CORE</h1>
+            <span className="cc-core-state">{label}</span>
           </div>
-          <span className="hud-core-tag">YOUR MACHINE · YOUR MODEL · NO KEYS</span>
 
-          {agent ? (
-            <p className="hud-agent">
-              <span aria-hidden="true">{agent.avatar}</span> <b>{agent.name}</b> — {agent.focus}
-            </p>
-          ) : null}
+          <div className="cc-core-row">
+            <Subsystems items={leftSubsystems} side="left" />
 
-          <div className="hud-ask">
+            <div className="cc-core-wrap">
+              <Core
+                state={core}
+                size={330}
+                amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
+              />
+            </div>
+
+            <Subsystems items={rightSubsystems} side="right" />
+          </div>
+
+          <div className="cc-actions">
+            <button
+              type="button"
+              className={`cc-action${mic.listening ? " live" : ""}`}
+              disabled={!mic.supported || mic.transcribing}
+              onClick={() => void handleMic()}
+              title={mic.supported
+                ? "Speak your request. Transcribed on this machine, never uploaded."
+                : "This browser exposes no microphone."}
+            >
+              <span className="cc-action-glyph" aria-hidden="true">◉</span>
+              <span>TALK</span>
+            </button>
+            {/* The reference has a VISION button. There is no vision system in
+                this build, and a button that opens nothing is worse than one
+                fewer button — so this is FILES, which does something. */}
+            <Link className="cc-action" href="/files" title="The workspace, read straight from disk">
+              <span className="cc-action-glyph" aria-hidden="true">▣</span>
+              <span>FILES</span>
+            </Link>
+            <button
+              type="button"
+              className={`cc-action cc-action-main${busy ? " live" : ""}`}
+              onClick={() => (draft.trim() ? ask(draft) : inputRef.current?.focus())}
+              title="Ask TRHAI"
+            >
+              <span className="cc-action-glyph" aria-hidden="true">▽</span>
+              <span>THINK</span>
+            </button>
+            <Link className="cc-action" href="/knowledge" title="Documents TRHAI can quote">
+              <span className="cc-action-glyph" aria-hidden="true">◎</span>
+              <span>SEARCH</span>
+            </Link>
+            <Link className="cc-action" href="/automation" title="Flows and schedules that run on their own">
+              <span className="cc-action-glyph" aria-hidden="true">◇</span>
+              <span>AUTONOMY</span>
+            </Link>
+          </div>
+
+          <div className="cc-ask">
             <input
               ref={inputRef}
-              className="hud-ask-field"
+              className="cc-ask-field"
               value={draft}
-              placeholder={busy ? "TRHAI is working…" : "Ask TRHAI anything…"}
+              placeholder={busy ? "TRHAI is working…" : "How can I help you, Hank?"}
               aria-label="Ask TRHAI anything"
               disabled={busy}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => { if (event.key === "Enter") ask(draft); }}
             />
-            {mic.supported ? (
-              <button
-                type="button"
-                className={`hud-mic${mic.listening ? " hud-mic-live" : ""}`}
-                aria-pressed={mic.listening}
-                disabled={mic.transcribing}
-                aria-label={mic.listening ? "Stop listening" : "Start listening"}
-                title={mic.listening
-                  ? "Stop and transcribe"
-                  : mic.transcriptionAvailable === false
-                    ? `${mic.transcriptionReason} The microphone still works as a level meter.`
-                    : "Speak your request. The audio is transcribed on this machine and never uploaded."}
-                onClick={() => void handleMic()}
-              >
-                {mic.transcribing ? "…" : "●"}
-              </button>
-            ) : null}
-            <button type="button" className="hud-ask-go" onClick={() => ask(draft)} disabled={!draft.trim() || busy}>
+            <button type="button" className="cc-ask-go" onClick={() => ask(draft)} disabled={!draft.trim() || busy}>
               {busy ? "…" : "Send"}
             </button>
           </div>
 
-          {mic.error ? <p className="hud-mic-note">{mic.error}</p> : null}
-
-          {mic.transcribing ? (
-            <p className="hud-mic-note">Transcribing on this machine&hellip;</p>
-          ) : mic.listening ? (
-            <p className="hud-mic-note">
+          {mic.listening ? (
+            <p className="cc-note">
               {mic.transcriptionAvailable
-                ? "Listening. Press again to stop — what you said is transcribed on this machine and never uploaded."
-                : `Listening, but only as a level meter: ${mic.transcriptionReason}`}
+                ? "Listening. Press TALK again to stop — transcribed on this machine, never uploaded."
+                : `Listening as a level meter only: ${mic.transcriptionReason}`}
             </p>
           ) : null}
 
-          <div className="hud-suggestions">
-            {(suggestions.length > 0 ? suggestions : quickCommands).slice(0, 4).map((suggestion) => (
+          <div className="cc-suggestions">
+            {suggestions.slice(0, 4).map((suggestion) => (
               <button key={suggestion} type="button" className="hud-chip" onClick={() => ask(suggestion)}>
                 {suggestion}
               </button>
@@ -449,151 +573,37 @@ export default function DashboardPage() {
           </div>
         </main>
 
-        <aside className="hud-side">
-          {/* Hardware first: what the machine is doing outranks what this app
-              has counted, and it is the one panel here that changes on its
-              own while nobody is interacting. */}
-          <SystemRings />
-
-          <section className="hud-panel">
-            <span className="hud-label">System status</span>
-            <div className="hud-gauges">
-              <Gauge label="Tools" value={counts.tools} suffix="" />
-              <Gauge label="Memory" value={counts.memories} suffix="" />
-              <Gauge label="Docs" value={counts.documents} suffix="" />
-            </div>
-            <dl className="hud-readouts">
-              <div><dt>Model</dt><dd className={modelName ? "ok" : "warn"}>{modelName ?? "none"}</dd></div>
-              <div><dt>Latency</dt><dd>{latency === null ? "—" : `${latency}ms`}</dd></div>
-              <div><dt>Open tasks</dt><dd>{counts.tasks === null ? "—" : counts.tasks}</dd></div>
-              <div><dt>Core</dt><dd className={online ? "ok" : "danger"}>{online === null ? "—" : online ? "OPERATIONAL" : "UNREACHABLE"}</dd></div>
-            </dl>
-          </section>
-
-          <section className="hud-panel hud-say">
-            <div className="hud-say-head">
-              <span className="hud-label">TRHAI</span>
-              {/* Voice is off by default and the control sits next to what it
-                  reads. A screen that started talking with no visible way to
-                  stop it would be the worst version of this feature. */}
-              {speech.engine !== "none" ? (
-                <button
-                  type="button"
-                  className={`hud-voice${speech.enabled ? " hud-voice-on" : ""}`}
-                  aria-pressed={speech.enabled}
-                  onClick={() => speech.setEnabled(!speech.enabled)}
-                  title={speech.enabled
-                    ? "Stop reading replies aloud"
-                    : speech.engine === "neural"
-                      ? "Read replies aloud using the local neural voice"
-                      : "Read replies aloud using this browser's voices"}
-                >
-                  {speech.enabled ? "VOICE ON" : "VOICE OFF"}
-                </button>
-              ) : null}
-              {speech.speaking || speech.preparing ? (
-                <button type="button" className="hud-voice" onClick={speech.stop}>
-                  {speech.preparing ? "CANCEL" : "STOP"}
-                </button>
-              ) : null}
-              {lastReply?.model ? (
-                <span className="hud-say-model mono">{lastReply.model.replace(/^ollama\//, "").replace(/:latest$/, "")}</span>
-              ) : null}
-            </div>
-            {/* A reply gets its formatting; every other case here is a plain
-                status sentence this screen wrote itself, not model output. */}
-            {!busy && status.state !== "error" && online !== false && lastReply ? (
-              <Markdown text={lastReply.text} className="hud-say-text" />
-            ) : (
-              <p className="hud-say-text">
-                {status.state === "error"
-                  ? status.detail
-                  : busy
-                    ? label === "THINKING" ? "Thinking…" : "Working on it…"
-                    : online === false
-                      ? "The local API is not responding. Start it and this updates on its own."
-                      : modelName
-                        ? `${greetingFor(clock ?? new Date())}, Hank. Answering with ${modelName}. How can I help?`
-                        : "Reachable, but no local model is loaded — I can't generate a reply yet."}
-              </p>
-            )}
-            {lastReply?.toolsUsed && lastReply.toolsUsed.length > 0 && !busy ? (
-              <div className="hud-say-tools">
-                {lastReply.toolsUsed.map((tool, index) => (
-                  <span key={`${tool.name}-${index}`} className="hud-tool-chip">
-                    {tool.name.replace(/_/g, " ")}{tool.ok ? "" : " — nothing changed"}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {lastReply ? <Link href="/chat" className="hud-more">Full conversation</Link> : null}
-          </section>
-
-          <section className="hud-panel">
-            <span className="hud-label">Active schedules</span>
-            {schedules === null ? (
-              <p className="faint">Checking…</p>
-            ) : schedules.length === 0 ? (
-              <p className="faint">Nothing scheduled. Add one from Automation.</p>
-            ) : (
-              <ul className="hud-sched-list">
-                {schedules.map((schedule) => (
-                  <li key={schedule.id} className="hud-sched">
-                    <div className="hud-sched-body">
-                      <b>{schedule.name}</b>
-                      <span className="faint">{schedule.cadenceLabel}</span>
-                      {/* What it actually did, not just what it intends to do.
-                          A schedule that has never run says so. */}
-                      <span className={`hud-sched-last${schedule.lastStatus === "failed" ? " danger" : ""}`}>
-                        {schedule.lastStatus === null
-                          ? "Not run yet"
-                          : schedule.lastStatus === "missed"
-                            ? "Missed — machine was off"
-                            : schedule.lastStatus === "failed"
-                              ? "Last run failed"
-                              : `Last ran ${new Date(schedule.lastRunAt!).toLocaleString(undefined, {
-                                  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
-                                })}`}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className={`hud-sched-toggle${schedule.enabled ? " on" : ""}`}
-                      aria-pressed={schedule.enabled}
-                      aria-label={`${schedule.enabled ? "Disable" : "Enable"} ${schedule.name}`}
-                      onClick={() => void toggleSchedule(schedule)}
-                    >
-                      <span className="hud-sched-knob" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {flowName ? <span className="faint hud-flow">Flow saved: {flowName}</span> : null}
-            <Link href="/automation" className="hud-more">Open automation</Link>
-          </section>
+        <aside className="cc-right">
+          <SystemOverview rows={healthRows} />
+          <ActiveTasks tasks={agentTasks} />
+          <ToolsGrid tiles={tiles} />
+          <ConnectedServices services={telemetry?.cloud.services ?? []} />
+          <MemoryStatus
+            entries={memories?.total ?? null}
+            pinned={memories?.pinned ?? null}
+            documents={documents}
+            workspaceBytes={workspace?.bytes ?? null}
+            workspaceFiles={workspace?.files ?? null}
+          />
+          <PersonalityCard
+            name={personality?.name ?? "—"}
+            traits={personality?.traits ?? []}
+            focus={agent?.focus ?? personality?.summary ?? null}
+            agentName={agent?.name ?? null}
+          />
         </aside>
       </div>
 
-      <footer className="hud-bottom mono">
-        <span>{label}</span>
-        <span className="hud-sep">·</span>
-        <span>{counts.tools === null ? "—" : `${counts.tools} tools registered`}</span>
-        <span className="hud-sep">·</span>
-        <span>Everything on this screen is measured on this machine.</span>
+      <footer className="cc-states mono">
+        {stages.map((name) => (
+          <span key={name} className={`cc-stage-word${stage === name ? " on" : ""}`}>{name}</span>
+        ))}
+        <span className="cc-states-note faint">
+          {lastReply?.model
+            ? `Answered by ${lastReply.model.replace(/^ollama\//, "")}`
+            : "Everything on this screen is measured on this machine."}
+        </span>
       </footer>
-    </div>
-  );
-}
-
-/** A count, or a dash. Never a zero standing in for "not known". */
-function Gauge({ label, value, suffix }: { label: string; value: number | null; suffix: string }) {
-  return (
-    <div className="gauge">
-      <div className="gauge-ring">
-        <span className="gauge-value">{value === null ? "—" : `${value}${suffix}`}</span>
-      </div>
-      <span className="gauge-label">{label}</span>
     </div>
   );
 }
