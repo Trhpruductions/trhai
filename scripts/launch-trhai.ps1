@@ -13,9 +13,14 @@
 # debugging time. Here the same work is a few readable lines.
 
 param(
-    # Skips opening a browser. Used by the smoke check, which cares whether the
+    # Skips opening the app. Used by the smoke check, which cares whether the
     # services came up, not whether a window appeared.
-    [switch]$NoOpen
+    [switch]$NoOpen,
+
+    # Opens in the default browser instead of the desktop window. Kept because
+    # the browser is genuinely useful for looking at devtools, and because a
+    # broken Electron build should not make the app unreachable.
+    [switch]$Browser
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +50,18 @@ if (-not (Test-Path (Join-Path $root "apps\trhai-web\.next"))) {
     Write-Log "refused: no build"
     if (-not $NoOpen) { Read-Host "Press Enter to close" }
     exit 1
+}
+
+# Stop a window that is already open rather than stacking a second one on the
+# same services. Matched on the command line so this only ever touches this
+# app's own shell, never another Electron app that happens to be running.
+if (-not $NoOpen -and -not $Browser) {
+    Get-CimInstance Win32_Process -Filter "Name = 'electron.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like "*apps\desktop\dist\main.js*" } |
+        ForEach-Object {
+            Write-Log "closing an already-open window (pid $($_.ProcessId))"
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
 }
 
 Write-Log "launch requested"
@@ -152,5 +169,41 @@ if (-not (Test-Port 11434)) {
 }
 
 Write-Log "opening"
-if (-not $NoOpen) { Start-Process "http://localhost:3210" }
+if ($NoOpen) { exit 0 }
+
+if ($Browser) {
+    Start-Process "http://localhost:3210"
+    exit 0
+}
+
+# The desktop window, not a browser tab.
+#
+# The Electron shell already exists in this repo and knows how to be an app
+# window — it just pointed at the older web client on 5173. Two environment
+# variables aim it here instead:
+#
+#   ASCEND_WEB_PORT       load TRHAI on 3210 rather than the old client
+#   ASCEND_DISABLE_AUTOSTART  do not start its own services; this script has
+#                             already started them, in production mode, and
+#                             two things racing for the same ports is how the
+#                             old launcher ended up with a web server running
+#                             behind no vite at all
+$electron = Join-Path $root "apps\desktop\node_modules\.bin\electron.cmd"
+$mainJs = Join-Path $root "apps\desktop\dist\main.js"
+
+if ((Test-Path $electron) -and (Test-Path $mainJs)) {
+    Write-Log "opening desktop window"
+    $env:ASCEND_WEB_PORT = "3210"
+    $env:ASCEND_DISABLE_AUTOSTART = "1"
+    Start-Process -FilePath $electron -ArgumentList $mainJs -WorkingDirectory $root -WindowStyle Hidden
+    exit 0
+}
+
+# No desktop build. The app itself is running and reachable, so opening a
+# browser is a better outcome than refusing to show it at all — and it says
+# which command produces the window.
+Write-Log "no desktop build; opening a browser instead"
+Write-Host "The desktop window is not built yet, so this opened in your browser."
+Write-Host "Run: npm run build --workspace @ascend/desktop"
+Start-Process "http://localhost:3210"
 exit 0

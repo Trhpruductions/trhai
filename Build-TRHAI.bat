@@ -19,6 +19,11 @@ if errorlevel 1 goto failed
 call npm run build --workspace trhai-web
 if errorlevel 1 goto failed
 
+REM The desktop window. Without this the launcher still works but falls back to
+REM opening a browser, which is the thing the app is not supposed to be.
+call npm run build --workspace @ascend/desktop
+if errorlevel 1 goto failed
+
 echo.
 echo Done. Use the TRHAI shortcut on your desktop to open it.
 echo.
