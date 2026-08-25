@@ -14,7 +14,7 @@ import { selectRelevantMemories, type ScorableMemory, type ScoredMemory } from "
 import { buildTaskPlan } from "./taskPlanning.js";
 import { getSystemCapabilities, toolsByLevel } from "./systemCapabilities.js";
 import {
-  buildClarifyingQuestion,
+  describeAssumptions,
   findSpecGaps,
   isAwaitingRefinement,
   mergeRefinement,
@@ -584,19 +584,22 @@ export function composeReply(input: ComposerInput): ComposedReply {
   // Only a create-shaped request produces an app, so only that is worth
   // questioning. Asking someone to specify fields for "fix the flaky test"
   // would be noise.
+  // A vague build request is built anyway, with the assumptions stated.
+  //
+  // This used to stop and ask what each record should store. Being asked
+  // "what should each one store?" after saying "build a todo list app" is the
+  // assistant handing the work back, and the answer is nearly always the
+  // obvious one — so the question bought a round trip and very little else.
+  // Told to build something, it builds it.
+  //
+  // Not the same as guessing quietly. The reply says which fields were
+  // assumed and that they can be changed, so a wrong guess costs one sentence
+  // rather than being discovered later inside the finished app.
+  let assumptions = "";
   if (plan.taskType === "create") {
     const spec = planProject(buildRequest);
     const gaps = findSpecGaps(spec);
-
-    // Never ask twice: if this turn is already the answer, build with what we have.
-    if (gaps.length > 0 && !refining) {
-      return {
-        text: buildClarifyingQuestion(spec, gaps),
-        strategy: "clarify-build",
-        groundedOn: [],
-        groundedOnHistory: 0
-      };
-    }
+    if (gaps.length > 0 && !refining) assumptions = describeAssumptions(spec, gaps);
   }
 
   const relevant = selectRelevantMemories(buildRequest, input.memories, 2);
@@ -607,8 +610,13 @@ export function composeReply(input: ComposerInput): ComposedReply {
     ? `Building from: "${buildRequest}"\n\n`
     : "";
 
+  // Assumptions ride along with the plan so they reach the reply whichever
+  // way this turn is answered — the agent usually replaces this text with a
+  // real build, and the note belongs with the built thing either way.
+  const assumptionNote = assumptions ? `\n\n${assumptions}` : "";
+
   return {
-    text: `${preamble}${plan.steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}${constraints}`,
+    text: `${preamble}${plan.steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}${constraints}${assumptionNote}`,
     strategy: "plan",
     planTaskType: plan.taskType,
     groundedOn: relevant.map((entry) => entry.memory.id),

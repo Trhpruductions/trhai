@@ -1,5 +1,6 @@
 import type { LocalModelConfig } from "./localModel.js";
-import { runTool, toolDefinitions, type ToolContext, type ToolCall } from "./agentTools.js";
+import { availableTools, runTool, toolDefinitions, type ToolContext, type ToolCall } from "./agentTools.js";
+import { commandsArmed } from "./commandRunner.js";
 
 // The agent loop.
 //
@@ -130,6 +131,11 @@ export const systemPrompt = [
   "- build_app when they want something built. It writes a working app to disk.",
   "  Do not describe what you would build and stop; build it, then say where it is.",
   "- list_files, read_file, write_file for the workspace where those apps live.",
+  "- run_command runs a real command on this machine and returns its real output. It only",
+  "  appears when the user has switched command access on. Use it for anything outside the",
+  "  workspace: installing, building, running tests, opening an app, inspecting the system.",
+  "  Say what you are about to run. A non-zero exit code means it FAILED - report that, do",
+  "  not describe a failed command as done.",
   "- A name with a file extension - test.txt, notes.md, server.js - is a workspace FILE: use",
   "  list_files, read_file, write_file. write_document, update_document, read_document and",
   "  delete_document are only for the knowledge base, titled in plain language with no extension.",
@@ -467,7 +473,7 @@ export function parseTextToolCalls(text: string, known = advertisedToolNames()):
 
 /** The tools this app offers, by name. */
 function advertisedToolNames(): string[] {
-  return toolDefinitions.map((definition) => definition.function.name);
+  return availableTools(commandsArmed()).map((definition) => definition.function.name);
 }
 
 function parseToolCalls(response: ChatResponse): ToolCall[] {
@@ -598,7 +604,10 @@ export async function runAgent(
             model: config.model,
             messages,
             stream: false,
-            ...(offerTools ? { tools: toolDefinitions } : {})
+            // Withheld while disarmed rather than offered and refused: a
+            // model that can see run_command will reason about it and try to
+            // talk its way into it; one that never sees it cannot.
+            ...(offerTools ? { tools: availableTools(commandsArmed()) } : {})
           }),
           signal
         }));

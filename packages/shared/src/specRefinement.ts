@@ -75,7 +75,61 @@ export function buildClarifyingQuestion(spec: ProjectSpec, gaps: SpecGap[]): str
  * incoming message is the answer to it.
  */
 export function isAwaitingRefinement(lastAssistantMessage: string | undefined): boolean {
-  return typeof lastAssistantMessage === "string" && lastAssistantMessage.startsWith(clarifyBuildPrefix);
+  if (typeof lastAssistantMessage !== "string") return false;
+  // Either shape pairs with the next turn: the old blocking question, and the
+  // build that went ahead on assumptions. Refinement is worth keeping now
+  // that nothing stops to ask — "add email and phone" after a built app has
+  // to reach the builder, or not asking would just mean not listening.
+  return lastAssistantMessage.startsWith(clarifyBuildPrefix)
+    || lastAssistantMessage.includes(assumedSpecMarker);
+}
+
+/**
+ * Closing sentence on a build that filled in a gap.
+ *
+ * Doubles as the marker that lets the next turn refine this build. Written as
+ * an ordinary sentence rather than a hidden token, so the thing that makes
+ * refinement work is also the thing that tells you refinement is available.
+ */
+export const assumedSpecMarker = "and I'll rebuild it";
+
+/**
+ * What was assumed, when a request left something unsaid.
+ *
+ * Replaces asking. Being asked "what should each one store?" after saying
+ * "build a todo list app" is the assistant handing the work back — and the
+ * answer is nearly always the obvious one, so the question buys a round trip
+ * and very little else.
+ *
+ * Stating the assumption is the honest version of not asking. It is not the
+ * same as guessing quietly: the reply says which fields were chosen and that
+ * they can be changed, so a wrong guess costs one sentence instead of leaving
+ * someone to discover it in the built app.
+ */
+export function describeAssumptions(spec: ProjectSpec, gaps: SpecGap[]): string {
+  if (gaps.length === 0) return "";
+
+  const primary = spec.entities[0];
+  const fields = primary.fields.map((field) => field.name).join(", ");
+  const lines: string[] = [];
+
+  if (gaps.includes("entity")) {
+    // Nothing in the request named what it keeps track of, so the generic
+    // record is what got built. Worth saying outright — this is the assumption
+    // most likely to be wrong.
+    lines.push(`You didn't say what this should keep track of, so I've built it around a generic `
+      + `"${primary.name}" record.`);
+  }
+
+  if (gaps.includes("fields")) {
+    lines.push(`Each ${primary.name} has ${fields}.`);
+  }
+
+  // Always closed with the marker, whichever gap was filled: it is both the
+  // offer to change the guess and what lets the next turn actually do it.
+  lines.push(`Name the fields you want — "add email, phone and amount" — ${assumedSpecMarker}.`);
+
+  return lines.join(" ");
 }
 
 /**

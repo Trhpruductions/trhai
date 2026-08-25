@@ -10,6 +10,7 @@ import {
   writeWorkspaceFile
 } from "./workspace.js";
 import { fetchWebPage } from "./webFetch.js";
+import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
 
 // What the assistant can actually do.
 //
@@ -477,8 +478,48 @@ export const toolDefinitions: ToolDefinition[] = [
         required: ["url"]
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "run_command",
+      description:
+        "Run a command on the user's machine and get back its real output and exit code. Use this "
+        + "for anything outside the workspace: installing packages, running builds and tests, "
+        + "opening applications, inspecting the system. The command runs as the user, so it can do "
+        + "anything they can do — say what you are about to run and why. Report failures as "
+        + "failures: a non-zero exit code means it did not work, whatever the output says.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: {
+            type: "string",
+            description: "The exact command line to run, as the user would type it in a terminal."
+          },
+          reason: {
+            type: "string",
+            description: "One short line on what this is for, shown to the user in the run log."
+          }
+        },
+        required: ["command"]
+      }
+    }
   }
 ];
+
+/**
+ * The tools actually offered on a given turn.
+ *
+ * run_command is withheld entirely while disarmed rather than being offered
+ * and then refused. A model that can see a tool will reason about it, mention
+ * it, and try to talk its way into it; one that never sees it cannot. This is
+ * the same reason the capability report reads from the registry — what is
+ * described and what is enforced have to be the same thing.
+ */
+export function availableTools(armed: boolean): ToolDefinition[] {
+  if (armed) return toolDefinitions;
+  return toolDefinitions.filter((definition) => definition.function.name !== "run_command");
+}
 
 /** How many results a search hands back before it stops being useful context. */
 const searchLimit = 3;
@@ -556,7 +597,23 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
   // confirm a tool that does not exist.
   const isRegistered = toolDefinitions.some((definition) => definition.function.name === call.name);
 
-  if (isRegistered && requiresConfirmation(call.name) && !context.confirmedActions?.has(call.name)) {
+  // Switching machine control on IS the authorisation for run_command.
+  //
+  // Asking again per command would make the switch pointless: the user has
+  // just made an explicit, scoped, expiring grant, and answering "are you
+  // sure" to every line afterwards is the same question twice. It is also how
+  // a confirmation prompt stops being read — a dialog that appears on every
+  // command is one people click through without looking, which is worse than
+  // one clear decision up front.
+  //
+  // The grant stays bounded by everything around it: it lapses on its own, it
+  // is visible on the front screen while it is on, and every command that
+  // runs is recorded with its output. Other level-3 tools are unaffected —
+  // forget and delete_document still ask.
+  const preAuthorised = call.name === "run_command" && commandsArmed();
+
+  if (isRegistered && requiresConfirmation(call.name)
+    && !preAuthorised && !context.confirmedActions?.has(call.name)) {
     return { ok: false, content: describeConfirmationNeeded(call.name), needsConfirmation: true };
   }
 
@@ -1014,6 +1071,29 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
 
       const notice = result.truncated ? " [showing the first part of this page]" : "";
       return { ok: true, content: `From "${result.title}" (${result.url})${notice}:\n${result.text}` };
+    }
+
+    case "run_command": {
+      const command = requireString(call.arguments.command);
+      if (!command) return { ok: false, content: "run_command needs a command." };
+
+      // Re-checked here, not only where the tool list is built. The arming
+      // window can lapse between the model being offered the tool and the
+      // call arriving, and the check that matters is the one at the moment
+      // something actually runs.
+      if (!commandsArmed()) {
+        return {
+          ok: false,
+          content: "Command access is not switched on, so nothing was run. Tell the user they can "
+            + "turn it on from the dashboard, and what you would have run."
+        };
+      }
+
+      const run = await runCommand(command);
+      // ok tracks whether the command succeeded, not whether the tool worked.
+      // A failed command that was reported accurately is still a failure, and
+      // labelling it ok would let the reply describe it as done.
+      return { ok: run.exitCode === 0 && !run.timedOut, content: describeRun(run) };
     }
 
     default:

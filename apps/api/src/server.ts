@@ -72,6 +72,13 @@ import { getFlow, saveFlow } from "./services/flowStore.js";
 import { readTelemetry } from "./services/systemTelemetry.js";
 import { getTask } from "./services/taskStore.js";
 import {
+  armCommands,
+  armedUntil,
+  commandHistory,
+  commandsArmed,
+  disarmCommands
+} from "./services/commandRunner.js";
+import {
   listWorkspace,
   looksBinary,
   maxListedFiles,
@@ -757,6 +764,30 @@ export function createApp() {
   // claims to show.
   app.get("/v1/system-telemetry", async (_req, res) => {
     res.json({ data: await readTelemetry(), traceId: "trace-local" });
+  });
+
+  // Command access: the switch, and what it has actually run.
+  //
+  // Deliberately a switch with a horizon rather than a permanent setting. A
+  // grant that never expires is one nobody remembers making, and this is the
+  // only capability in the app that is not bounded by the workspace.
+  app.get("/v1/commands", (_req, res) => {
+    res.json({
+      data: { armed: commandsArmed(), armedUntil: armedUntil(), history: commandHistory() },
+      traceId: "trace-local"
+    });
+  });
+
+  app.post("/v1/commands/arm", (_req, res) => {
+    const { armedUntil: until } = armCommands();
+    console.warn(`[command] access armed until ${until}`);
+    res.json({ data: { armed: true, armedUntil: until }, traceId: "trace-local" });
+  });
+
+  app.post("/v1/commands/disarm", (_req, res) => {
+    disarmCommands();
+    console.warn("[command] access switched off");
+    res.json({ data: { armed: false, armedUntil: null }, traceId: "trace-local" });
   });
 
   // What the assistant is actually working on.

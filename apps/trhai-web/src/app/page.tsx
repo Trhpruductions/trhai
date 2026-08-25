@@ -9,6 +9,7 @@ import { ParticleField } from "../components/ParticleField";
 import { useMicrophone } from "../hooks/useMicrophone";
 import { Markdown } from "../components/Markdown";
 import { Subsystems, type Subsystem } from "../components/Subsystems";
+import { CommandAccess } from "../components/CommandAccess";
 import {
   ActiveTasks, ConnectedServices, MemoryStatus, PersonalityCard, SystemOverview, ToolsGrid,
   type AgentTask, type HealthRow, type Tile
@@ -574,6 +575,7 @@ export default function DashboardPage() {
         </main>
 
         <aside className="cc-right">
+          <CommandAccess />
           <SystemOverview rows={healthRows} />
           <ActiveTasks tasks={agentTasks} />
           <ToolsGrid tiles={tiles} />
