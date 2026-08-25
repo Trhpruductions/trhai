@@ -1,0 +1,102 @@
+/* The machine-control switch and its run log. See CommandAccess.tsx for why
+   both halves are on the front screen rather than in settings. */
+
+.cmd-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+/* Armed is a state the screen should not let you overlook. */
+.cmd-armed {
+  border-color: var(--warn, #f5a524);
+  box-shadow: 0 0 0 1px rgba(245, 165, 36, 0.18);
+}
+
+.cmd-left {
+  font-size: 12.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--warn, #f5a524);
+}
+
+.cmd-what { font-size: 12.5px; line-height: 1.45; margin: 0; }
+
+.cmd-toggle {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 6px;
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.cmd-toggle:hover:not(:disabled) { border-color: var(--accent); }
+.cmd-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.cmd-toggle.on {
+  border-color: var(--warn, #f5a524);
+  color: var(--warn, #f5a524);
+  background: rgba(245, 165, 36, 0.08);
+}
+
+.cmd-log { display: flex; flex-direction: column; gap: 5px; }
+
+.cmd-log ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+
+.cmd-run { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.cmd-run-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.cmd-run-head:hover { background: var(--accent-quiet); }
+
+.cmd-text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-outcome {
+  flex: none;
+  font-size: 12.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.cmd-outcome.ok { color: var(--ok); }
+.cmd-outcome.warn { color: var(--warn, #f5a524); }
+.cmd-outcome.danger { color: var(--danger, #ff5c5c); }
+
+.cmd-output {
+  margin: 0 0 4px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.45;
+  max-height: 180px;
+  /* Scrolls in both directions inside its own box, so a wide log line never
+     pushes the column out of shape. */
+  overflow: auto;
+  white-space: pre;
+}

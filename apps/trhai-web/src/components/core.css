@@ -238,9 +238,34 @@
   60% { transform: scale(0.97); }
 }
 
-/* Metered: `--amp` is a real reading of the neural voice's own audio (see
-   useSpeech.ts's future amplitude work) — when present, it replaces the
-   canned breathing outright rather than fighting it. */
+/* Listening: the microphone is genuinely open. Held deliberately calm —
+   the core is receiving, not working — with the real level doing the moving
+   rather than a faster canned loop. */
+.core-listening .ring-arc-bright,
+.core-listening .bracket,
+.core-listening .core-orb-ring { stroke: var(--ok); }
+.core-listening .orbiter { fill: var(--ok); filter: drop-shadow(0 0 5px var(--ok)); }
+.core-listening .core-orb { filter: drop-shadow(0 0 16px var(--ok)); }
+.core-listening .core-sweep { opacity: 0; }
+.core-listening .arc-spin-a { animation-duration: 30s; }
+.core-listening .arc-spin-b { animation-duration: 22s; }
+
+/* The metered pair: `--amp` is a real device reading — the microphone while
+   listening, the neural voice while speaking — and when present it replaces
+   the canned breathing outright rather than fighting it. */
+.core-metered.core-listening .core-orb {
+  animation: none;
+  transform: scale(calc(1 + var(--amp, 0) * 0.55));
+  filter: drop-shadow(0 0 calc(10px + var(--amp, 0) * 26px) var(--ok));
+  transition: transform 60ms linear, filter 60ms linear;
+}
+
+.core-metered.core-listening .core-bloom {
+  animation: none;
+  opacity: calc(0.3 + var(--amp, 0) * 0.7);
+  transition: opacity 60ms linear;
+}
+
 .core-metered.core-speaking .core-orb {
   animation: none;
   transform: scale(calc(1 + var(--amp, 0) * 0.5));
@@ -267,12 +292,16 @@
     animation: none;
   }
   .core-metered.core-speaking .core-orb,
-  .core-metered.core-speaking .core-bloom {
+  .core-metered.core-speaking .core-bloom,
+  .core-metered.core-listening .core-orb,
+  .core-metered.core-listening .core-bloom {
     transform: none;
     opacity: 0.8;
     filter: drop-shadow(0 0 14px var(--accent));
     transition: none;
   }
+  /* Listening still reads at a glance without the level moving. */
+  .core-metered.core-listening .core-orb { filter: drop-shadow(0 0 14px var(--ok)); }
   /* Success and error still read at a glance — colour alone, no motion. */
   .core-success .core-orb { filter: drop-shadow(0 0 14px var(--ok)); }
   .core-error .core-orb { filter: drop-shadow(0 0 14px var(--danger)); }

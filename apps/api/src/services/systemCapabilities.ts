@@ -1,4 +1,5 @@
-import { toolDefinitions } from "./agentTools.js";
+import { availableTools } from "./agentTools.js";
+import { commandsArmed } from "./commandRunner.js";
 import { permissionLabels, permissionLevelOf, requiresConfirmation, type PermissionLevel } from "./toolPermissions.js";
 
 // What this build can actually do, read from the registry rather than
@@ -31,12 +32,20 @@ export type SystemCapabilities = {
   applicationBuilding: boolean;
   /**
    * `web` is fetch_url: a page read, given its exact URL — not search, and
-   * there is no tool that finds a URL for you. `codeExecution` has no tool at
-   * all. Both are stated as real fields rather than left implicit, so a
-   * capability report can say "unavailable" outright instead of staying
-   * silent about something a user might otherwise assume it has.
+   * there is no tool that finds a URL for you. Stated as a real field rather
+   * than left implicit, so a capability report can say "unavailable" outright
+   * instead of staying silent about something a user might otherwise assume.
    */
   web: boolean;
+  /**
+   * Whether it can run commands on this machine *right now*.
+   *
+   * This used to be hard-false, because there was genuinely no tool for it.
+   * There is one now, and it is gated on machine control being switched on —
+   * so this answers "can it, at this moment", not "does this build have the
+   * feature". Reporting it any other way would put the capability report back
+   * in the business of describing something other than what is enforced.
+   */
   codeExecution: boolean;
   /**
    * Third-party services this build talks to. Always empty today — everything
@@ -59,9 +68,16 @@ function hasAll(names: string[], ...required: string[]): boolean {
  * has no event loop access of its own.
  */
 export function getSystemCapabilities(model: string | null): SystemCapabilities {
-  const names = toolDefinitions.map((definition) => definition.function.name);
+  // The tools actually on offer right now, not every tool that exists.
+  // run_command is withheld while machine control is switched off, and this
+  // report has to agree with that — the whole reason this function reads the
+  // registry instead of a hand-written list is so what is described and what
+  // is enforced can never diverge. Listing a tool here that the loop will not
+  // offer is that same divergence by another route.
+  const offered = availableTools(commandsArmed());
+  const names = offered.map((definition) => definition.function.name);
 
-  const tools: ToolCapability[] = toolDefinitions.map((definition) => {
+  const tools: ToolCapability[] = offered.map((definition) => {
     const level = permissionLevelOf(definition.function.name);
     return {
       name: definition.function.name,
@@ -79,12 +95,13 @@ export function getSystemCapabilities(model: string | null): SystemCapabilities 
     memory: hasAll(names, "search_memory", "remember"),
     documents: hasAll(names, "search_documents", "write_document"),
     applicationBuilding: hasAll(names, "build_app"),
-    // Reading a page given its URL, via fetch_url — not search. codeExecution
-    // stays hard-false: there is genuinely no tool for that in this build,
-    // and unlike fetch_url that is a much larger decision to make later,
-    // not one to fold in quietly alongside it.
+    // Reading a page given its URL, via fetch_url — not search.
     web: hasAll(names, "fetch_url"),
-    codeExecution: false,
+    // True only while machine control is on, since `offered` already excludes
+    // run_command otherwise. It was hard-false when no such tool existed;
+    // leaving it false now that one does would be the same misreport in the
+    // opposite direction.
+    codeExecution: hasAll(names, "run_command"),
     integrations: []
   };
 }

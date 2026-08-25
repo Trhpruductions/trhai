@@ -3,7 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useAssistant, type AssistantStatus, type ChatMessage } from "../../hooks/useAssistant";
 import { useSpeech } from "../../hooks/useSpeech";
+import { useMicrophone } from "../../hooks/useMicrophone";
 import { Core, type CoreState } from "../../components/Core";
+import { Markdown } from "../../components/Markdown";
+import { speakableText } from "@ascend/shared";
 import "./chat.css";
 
 // Chat: TRHAI's conversation surface, talking to the real local orchestrator.
@@ -20,12 +23,21 @@ function toolLabel(tool: { name: string; ok: boolean }): string {
 
 /**
  * What the core shows, and the words under it — one place mapping the real
- * request status (plus real speech state, layered on top since it is not
- * part of the same request) to what a person sees. Every branch here traces
- * to something that actually happened; there is no state on this list that
+ * request status (plus the real device states, layered on top since neither
+ * belongs to the request) to what a person sees. Every branch here traces to
+ * something that actually happened; there is no state on this list that
  * plays for its own sake.
+ *
+ * Listening outranks the request states for the same reason it does on the
+ * dashboard: it describes the microphone rather than the conversation, and
+ * an open microphone is the most important true thing on a screen.
  */
-function presence(status: AssistantStatus, speaking: boolean): { core: CoreState; label: string } {
+function presence(
+  status: AssistantStatus,
+  { listening, transcribing, speaking }: { listening: boolean; transcribing: boolean; speaking: boolean }
+): { core: CoreState; label: string } {
+  if (listening) return { core: "listening", label: "Listening…" };
+  if (transcribing) return { core: "thinking", label: "Transcribing on this machine…" };
   if (status.state === "executing") return { core: "executing", label: `Working: ${status.tool.replace(/_/g, " ")}…` };
   if (status.state === "thinking") return { core: "thinking", label: "Thinking…" };
   if (status.state === "success") return { core: "success", label: "Complete." };
@@ -46,7 +58,12 @@ function Turn({ message }: { message: ChatMessage }) {
           <span className="chip chip-danger">service error</span>
         ) : null}
       </header>
-      <p className="turn-text">{message.text}</p>
+      {/* Only replies are parsed as Markdown. What you typed is shown exactly
+          as you typed it — reinterpreting a user's own words as formatting
+          would mean asking about "**" and being shown something else. */}
+      {message.role === "assistant"
+        ? <Markdown text={message.text} className="turn-text" />
+        : <p className="turn-text">{message.text}</p>}
       {message.toolsUsed && message.toolsUsed.length > 0 ? (
         <div className="turn-tools">
           {message.toolsUsed.map((tool, index) => (
@@ -61,6 +78,7 @@ function Turn({ message }: { message: ChatMessage }) {
 export default function ChatPage() {
   const { messages, status, send, clear } = useAssistant();
   const speech = useSpeech();
+  const mic = useMicrophone();
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const lastSpokenId = useRef<string | null>(null);
@@ -88,13 +106,31 @@ export default function ChatPage() {
     const newest = messages[messages.length - 1];
     if (!newest || newest.role !== "assistant") return;
     if (newest.id.startsWith("restored-")) return;
+    // Never mid-stream. Speaking the first token would read one word aloud
+    // and stop, and marking it spoken would mean the finished reply is never
+    // read at all.
+    if (newest.streaming) return;
     if (lastSpokenId.current === newest.id) return;
+
+    // Marked spoken either way, deliberately. With the microphone open,
+    // reading the reply aloud would record it and transcribe TRHAI back to
+    // itself — and merely deferring would be worse, since the reply would
+    // then blurt out later, once the user had moved on.
     lastSpokenId.current = newest.id;
-    speech.speak(newest.text);
-  }, [messages, speech]);
+    if (mic.listening) return;
+
+    // Spoken as prose, not as markup: the reply renders as formatted text,
+    // so reading "asterisk asterisk" aloud would say something different
+    // from what is on screen.
+    speech.speak(speakableText(newest.text));
+  }, [messages, speech, mic.listening]);
 
   const busy = status.state === "thinking" || status.state === "executing";
-  const { core, label } = presence(status, speech.speaking);
+  const { core, label } = presence(status, {
+    listening: mic.listening,
+    transcribing: mic.transcribing,
+    speaking: speech.speaking
+  });
 
   function submit() {
     if (!draft.trim() || busy) return;
@@ -102,11 +138,42 @@ export default function ChatPage() {
     setDraft("");
   }
 
+  /**
+   * The microphone. Starting listens; stopping transcribes and appends what
+   * was said to the draft, for the user to read before sending.
+   *
+   * Deliberately not auto-sent, same as the dashboard: a transcript is a
+   * guess at speech, and sending on a guess the user has not seen is how a
+   * voice feature says something they did not.
+   */
+  async function handleMic() {
+    if (!mic.listening) {
+      // Stop any reply already being read aloud. Without this the microphone
+      // opens into TRHAI's own voice and transcribes it back as though the
+      // user had said it.
+      speech.stop();
+      await mic.start();
+      return;
+    }
+
+    const said = await mic.stop();
+    if (said) setDraft((existing) => (existing.trim() ? `${existing.trim()} ${said}` : said));
+  }
+
   return (
     <section className="chat" aria-label="Conversation">
       <header className="chat-head">
         <div className="row">
-          <Core state={core} size={30} />
+          {/* One amplitude input, two real sources: the microphone while
+              listening, the neural voice while speaking. Undefined in every
+              other state, and for the browser fallback voice, which exposes
+              no audio to read — Core treats that as "breathe on your own"
+              rather than as silence. */}
+          <Core
+            state={core}
+            size={30}
+            amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
+          />
           <div className="col">
             <h2 className="chat-title">Chat</h2>
             <span className="faint chat-presence">{label}</span>
@@ -153,6 +220,7 @@ export default function ChatPage() {
         ) : null}
 
         {speech.error ? <p className="faint chat-voice-note">{speech.error}</p> : null}
+        {mic.error ? <p className="faint chat-voice-note">{mic.error}</p> : null}
 
         <div ref={endRef} />
       </div>
@@ -162,12 +230,29 @@ export default function ChatPage() {
           className="field"
           rows={2}
           value={draft}
-          placeholder="Ask anything…"
+          placeholder={mic.listening ? "Listening — press the dot again to stop…" : "Ask anything…"}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); }
           }}
         />
+        {mic.supported ? (
+          <button
+            type="button"
+            className={`btn btn-ghost chat-mic${mic.listening ? " chat-mic-live" : ""}`}
+            aria-pressed={mic.listening}
+            disabled={mic.transcribing}
+            aria-label={mic.listening ? "Stop listening and transcribe" : "Speak your message"}
+            title={mic.listening
+              ? "Stop and transcribe"
+              : mic.transcriptionAvailable === false
+                ? `${mic.transcriptionReason} The microphone still works as a level meter.`
+                : "Speak your message. It is transcribed on this machine and never uploaded."}
+            onClick={() => void handleMic()}
+          >
+            {mic.transcribing ? "…" : "●"}
+          </button>
+        ) : null}
         <button type="button" className="btn btn-primary" disabled={!draft.trim() || busy} onClick={submit}>
           Send
         </button>

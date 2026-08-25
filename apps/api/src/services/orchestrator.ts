@@ -3,6 +3,7 @@ import { checkAvailability, generate, orderedCandidates, readLocalModelConfig } 
 import { buildCapabilityReply } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
 import { setActivity } from "./agentActivity.js";
+import { enterStage } from "./reasoningStage.js";
 import { isContinuationRequest } from "./requestAnalysis.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
@@ -44,6 +45,34 @@ export type OrchestratorInput = {
   deleteDocument?: (id: string) => boolean;
   /** Pins or unpins a memory, for the "pin_memory" tool. */
   pinMemory?: (id: string, pinned: boolean) => boolean;
+  /**
+   * Fired with each new piece of a generated reply, for callers that can show
+   * it arriving. Optional throughout: without it every request is made and
+   * answered exactly as before.
+   *
+   * Only ever fires on the branch that reaches a model. A reply quoted from
+   * saved memory or a stored document is not generated a token at a time and
+   * has nothing to stream — it is already whole when it is found.
+   */
+  onToken?: (text: string) => void;
+  /**
+   * True when nothing is watching this turn — a schedule firing on a timer
+   * rather than someone sitting at the machine.
+   *
+   * Command access is withheld whatever the arming window says. Switching
+   * machine control on is a grant for working at the machine; a scheduled run
+   * must not inherit it merely because the window happens to still be open
+   * when the timer fires.
+   */
+  unattended?: boolean;
+  /**
+   * Stops this turn: the user pressed Stop, or their browser went away.
+   *
+   * Real cancellation rather than a discarded result. A local model can hold
+   * the GPU for a minute, so throwing the reply away while it kept generating
+   * would leave the whole cost and remove only the benefit.
+   */
+  cancel?: AbortSignal;
 };
 
 export type OrchestratorResult = {
@@ -113,6 +142,10 @@ export async function runAssistantOrchestrator(
   if (resuming && input.sessionId) {
     updateTask(input.sessionId, { status: "executing" });
   }
+
+  // Working out what was asked. Set here because this is the line that does
+  // it, not a step announced before it starts.
+  enterStage(input.sessionId, "understanding");
 
   const modelReply = await modelRouter.generate({
     mode: input.mode,
@@ -405,10 +438,12 @@ async function answerWithLocalModel(
     deleteDocument: input.deleteDocument,
     pinMemory: input.pinMemory,
     confirmedActions,
+    unattended: input.unattended,
+    sessionId: input.sessionId,
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history
-  }, fetch, onToolStart);
+  }, fetch, onToolStart, input.onToken, input.unattended, input.cancel);
 
     if (result.ok) {
       return {
@@ -419,11 +454,20 @@ async function answerWithLocalModel(
       };
     }
 
-    // Only a model that could not be loaded is worth replacing. One that
-    // loaded and then failed to answer will fail the same way again, and
-    // trying every installed model against it just makes the user wait.
-    if (!result.modelUnusable) return null;
-    console.warn(`[assist] ${result.reason}`);
+    // Only a model that could not be loaded, or that produced nothing at all,
+    // is worth replacing. One that loaded and answered badly will answer
+    // badly again, and trying every installed model against it just makes the
+    // user wait.
+    //
+    // Logged either way. This used to return null in silence, which meant a
+    // model failing mid-conversation was invisible: the caller fell back to a
+    // deterministic reply that looks like a deliberate answer, and nothing
+    // anywhere said the model had been asked and had failed.
+    if (!result.modelUnusable) {
+      console.warn(`[assist] ${model} could not answer: ${result.reason}`);
+      return null;
+    }
+    console.warn(`[assist] ${model} unusable: ${result.reason}`);
   }
 
   if (attempted.length > 0) {

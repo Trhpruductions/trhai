@@ -72,9 +72,14 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   write_file: 2,
   build_app: 2,
 
-  // 3 — destroys the only copy of something the user chose to keep.
+  // 3 — destroys the only copy of something the user chose to keep, or
+  // reaches outside the workspace entirely.
   forget: 3,
-  delete_document: 3
+  delete_document: 3,
+  // The only tool here not bounded by the workspace: it runs as the user and
+  // can do anything they can. Gated twice over — this level, and an arming
+  // window without which it is never offered to the model at all.
+  run_command: 3
 };
 
 /** Unknown tools are treated as destructive, so forgetting to classify is safe. */

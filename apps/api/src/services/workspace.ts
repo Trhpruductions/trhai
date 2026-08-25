@@ -192,6 +192,35 @@ export function listWorkspace(subdirectory = "."): WorkspaceEntry[] | null {
   return found;
 }
 
+/**
+ * Whether decoded text is really binary that was read as UTF-8.
+ *
+ * Decided from the content rather than the file name. The first version of
+ * the Files page guessed from the extension and would have told you
+ * ".git/config", "HEAD" and "COMMIT_EDITMSG" were not text — they have no
+ * extension and are plainly readable. A name is a hint; the bytes are the
+ * fact.
+ *
+ * A NUL byte is the classic signal, since text essentially never contains
+ * one. Decoding binary as UTF-8 also produces replacement characters, so a
+ * high proportion of those means the same thing — but a low proportion is
+ * ordinary in text that has a couple of mangled characters in it, which is
+ * why this is a ratio and not a presence check.
+ */
+export function looksBinary(content: string): boolean {
+  if (content.length === 0) return false;
+  if (content.includes("\u0000")) return true;
+
+  // Sampled rather than counted in full: this runs on every read, and the
+  // first few KB decide the question for any real file.
+  const sample = content.slice(0, 4096);
+  let replacements = 0;
+  for (const character of sample) {
+    if (character === "\uFFFD") replacements += 1;
+  }
+  return replacements / sample.length > 0.1;
+}
+
 export type ReadResult =
   | { ok: true; content: string; truncated: boolean }
   | { ok: false; reason: string };

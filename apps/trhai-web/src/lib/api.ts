@@ -62,6 +62,23 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiResul
   }
 }
 
+export async function apiPut<T>(path: string, body: unknown): Promise<ApiResult<T>> {
+  try {
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      return { ok: false, reason: typeof payload?.message === "string" ? payload.message : `The service answered with ${response.status}.` };
+    }
+    return { ok: true, data: (payload?.data ?? payload) as T };
+  } catch {
+    return { ok: false, reason: "Could not reach the local service." };
+  }
+}
+
 export async function apiDelete(path: string): Promise<ApiResult<void>> {
   try {
     const response = await fetch(`${apiBaseUrl}${path}`, { method: "DELETE" });

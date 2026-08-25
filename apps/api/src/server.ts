@@ -57,6 +57,37 @@ import {
   getPendingConfirmation
 } from "./services/pendingConfirmation.js";
 import { maxSynthesisCharacters, piperStatus, synthesize, type Cadence } from "./services/piperSpeech.js";
+import { maxAudioBytes, requiredChannels, requiredSampleRate, transcribe, whisperStatus } from "./services/whisperTranscribe.js";
+import {
+  addSchedule,
+  describeAction,
+  describeCadence,
+  isCadence,
+  isScheduleAction,
+  listSchedules,
+  removeSchedule,
+  setScheduleEnabled
+} from "./services/scheduleStore.js";
+import { getFlow, saveFlow } from "./services/flowStore.js";
+import { readTelemetry } from "./services/systemTelemetry.js";
+import { getTask } from "./services/taskStore.js";
+import { clearEvents, listEvents } from "./services/executionLog.js";
+import { finishStages, getStage, stageLabels } from "./services/reasoningStage.js";
+import { increment, observe, snapshot, toPrometheus } from "./services/metrics.js";
+import {
+  armCommands,
+  armedUntil,
+  commandHistory,
+  commandsArmed,
+  disarmCommands
+} from "./services/commandRunner.js";
+import {
+  listWorkspace,
+  looksBinary,
+  maxListedFiles,
+  readWorkspaceFile,
+  workspaceRoot
+} from "./services/workspace.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -111,6 +142,132 @@ function normalizeAssistMode(mode: unknown): AssistRouteMode {
     return mode;
   }
   return "general";
+}
+
+/**
+ * Everything the orchestrator needs for one turn, wired to this session's
+ * real stores.
+ *
+ * Shared by /v1/assist and /v1/assist/stream. It was briefly duplicated into
+ * the streaming route, which is how two copies of a dozen closures start
+ * drifting apart — one gains a capability the other quietly lacks, and the
+ * difference only shows up as "it works in chat but not on the dashboard".
+ */
+function buildAssistInput(
+  req: express.Request,
+  options: {
+    mode: AssistRouteMode;
+    message: string;
+    sessionId: string | null;
+    savedMemories: Array<{ body: string }>;
+    memoryContext: Array<{ id: string; title: string; body: string; pinned: boolean; createdAt: string }>;
+    history: Array<{ role: "user" | "assistant"; content: string }>;
+    onToken?: (text: string) => void;
+    cancel?: AbortSignal;
+  }
+) {
+  const { mode, message, sessionId, savedMemories, memoryContext, history, onToken, cancel } = options;
+
+  return {
+    mode,
+    userMessage: message,
+    sessionId: sessionId ?? undefined,
+    history,
+    memoryContext: memoryContext.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      body: entry.body,
+      pinned: entry.pinned,
+      createdAt: entry.createdAt
+    })),
+    // Reported so the reply can only confirm a save that actually happened.
+    // Without a session there is nowhere to write, and the user must be told
+    // that rather than reassured.
+    memoryWrite: {
+      available: sessionId !== null,
+      saved: savedMemories.length,
+      savedBodies: savedMemories.map((memory) => memory.body)
+    },
+    knowledge: sessionId ? retrieveKnowledgePassages(sessionId) : [],
+    // The write path for the assistant's own "remember" tool. Omitted without
+    // a session, so the tool reports that nothing was saved rather than the
+    // assistant claiming a write that had nowhere to go.
+    saveMemory: sessionId
+      ? (fact: string) => recordSingleMemory(sessionId, fact).status
+      : undefined,
+    forgetMemory: sessionId ? (id: string) => forgetMemory(sessionId, id) : undefined,
+    documents: sessionId
+      ? listDocuments(sessionId).map((document) => ({
+        id: document.id,
+        title: document.title,
+        body: document.body
+      }))
+      : undefined,
+    saveDocument: sessionId
+      ? (title: string, body: string) => Boolean(addDocument(sessionId, {
+        id: globalThis.crypto.randomUUID(),
+        title,
+        body
+      }))
+      : undefined,
+    // An update is a delete and a re-add under the original title and id,
+    // because the store has no in-place edit. Done in this order so a failed
+    // write cannot leave the session with neither version.
+    updateDocument: sessionId
+      ? (id: string, body: string) => {
+        const existing = listDocuments(sessionId).find((document) => document.id === id);
+        if (!existing) return false;
+        const replaced = addDocument(sessionId, { id: `${id}-updated`, title: existing.title, body });
+        if (!replaced) return false;
+        removeDocument(sessionId, id);
+        return true;
+      }
+      : undefined,
+    deleteDocument: sessionId ? (id: string) => removeDocument(sessionId, id) : undefined,
+    pinMemory: sessionId
+      ? (id: string, pinned: boolean) => Boolean(setMemoryPinned(sessionId, id, pinned))
+      : undefined,
+    ...(onToken ? { onToken } : {}),
+    ...(cancel ? { cancel } : {})
+  };
+}
+
+/** The per-turn session state both assist routes derive the same way. */
+/**
+ * Close a turn's stages and record how long each actually took.
+ *
+ * The telemetry the spec asks for, in the only form worth having: measured
+ * durations for stages that genuinely ran, rather than a fixed sequence with
+ * timings hung off it. A turn that stopped early reports the stages it
+ * reached and no more.
+ */
+function reportStages(sessionId: string): void {
+  const sequence = finishStages(sessionId);
+  if (sequence.length === 0) return;
+  console.info(`[stages] ${sequence.map((entry) => `${entry.stage} ${entry.durationMs}ms`).join(" -> ")}`);
+}
+
+function readTurnContext(req: express.Request, message: string) {
+  const sessionId = resolveMemoryKey(req, normalizeSessionId(req.body?.sessionId));
+  // A new request starts a fresh trace. The panel is for watching the work
+  // happening now; keeping every step since the browser opened would bury the
+  // one that matters at the moment it matters most.
+  clearEvents(sessionId ?? undefined);
+  const savedMemories = sessionId ? recordMemoriesFromMessage(sessionId, message) : [];
+  // Widen the candidate set: the composer scores for relevance, so limiting
+  // to the 5 newest would hide the one memory that actually answers.
+  const memoryContext = sessionId ? retrieveSessionMemories(sessionId, memoryCandidateLimit) : [];
+
+  const clientHistory = normalizeAssistHistory(req.body?.history);
+  // Fall back to the stored transcript when the client sends none — that is
+  // what lets a fresh browser continue an existing conversation.
+  const history = clientHistory.length > 0 || !sessionId
+    ? clientHistory
+    : normalizeAssistHistory(
+      listTurns(sessionId).map((turn) => ({ role: turn.role, content: turn.content }))
+    );
+
+  return { sessionId, savedMemories, memoryContext, history };
 }
 
 export function createApp() {
@@ -241,7 +398,10 @@ export function createApp() {
       }).finally(() => {
         // Whatever a client polling /v1/assist/activity mid-turn was told is
         // stale the instant this turn ends, success or failure alike.
-        if (sessionId) clearActivity(sessionId);
+        if (sessionId) {
+          clearActivity(sessionId);
+          reportStages(sessionId);
+        }
       });
 
       // Recorded after a successful reply so a failed request leaves no orphan turn.
@@ -637,6 +797,412 @@ export function createApp() {
     res.send(result.audio);
   });
 
+  // Whether local speech-to-text is installed, so the interface can offer the
+  // microphone honestly instead of a button that would hear nothing. Absent is
+  // a normal state with a reason attached, exactly as for the neural voice.
+  app.get("/v1/transcribe", (_req, res) => {
+    const status = whisperStatus();
+
+    res.json({
+      data: status.available
+        ? {
+            available: true,
+            model: status.model.id,
+            models: status.models.map(({ id, size, englishOnly }) => ({ id, size, englishOnly })),
+            sampleRate: requiredSampleRate,
+            channels: requiredChannels,
+            maxBytes: maxAudioBytes
+          }
+        : { available: false, model: null, models: [], reason: status.reason },
+      traceId: "trace-local"
+    });
+  });
+
+  // Audio in, text out. The transcription runs on this machine — no account,
+  // no key, nothing uploaded — which is the entire reason for preferring
+  // whisper.cpp over the browser's own SpeechRecognition, which would have
+  // streamed the microphone to a third party to do the same job.
+  app.post("/v1/transcribe",
+    express.raw({ type: ["audio/wav", "audio/wave", "audio/x-wav", "application/octet-stream"], limit: maxAudioBytes }),
+    async (req, res) => {
+      const audio = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      if (audio.length === 0) {
+        res.status(400).json({
+          code: "INVALID_REQUEST",
+          message: "audio is required, as a 16 kHz mono WAV body",
+          traceId: "trace-local"
+        });
+        return;
+      }
+
+      const result = await transcribe(audio);
+
+      if (!result.ok) {
+        // 503 rather than 500: the usual cause is that whisper.cpp is not
+        // installed, which is a state of the machine, not a bug in the
+        // request. The one exception is audio this cannot read, which is.
+        const isRequestFault = /not a WAV|must be .* kHz/i.test(result.reason);
+        res.status(isRequestFault ? 400 : 503).json({
+          code: isRequestFault ? "INVALID_REQUEST" : "TRANSCRIPTION_UNAVAILABLE",
+          message: result.reason,
+          traceId: "trace-local"
+        });
+        return;
+      }
+
+      res.json({ data: { text: result.text, model: result.model }, traceId: "trace-local" });
+    });
+
+  // Scheduled work. These are machine-wide rather than per-session: the
+  // scheduler runs them from the API process whether or not anyone has a tab
+  // open, which is the only arrangement under which "every day at 9:00 AM"
+  // is a true statement rather than a picture of one.
+  app.get("/v1/schedules", (_req, res) => {
+    res.json({
+      data: {
+        schedules: listSchedules().map((schedule) => ({
+          ...schedule,
+          cadenceLabel: describeCadence(schedule.cadence),
+          actionLabel: describeAction(schedule.action)
+        }))
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  // The saved automation flow, kept server-side so the scheduler can reach
+  // it. It used to live only in a browser's localStorage, where nothing but
+  // that one tab could see it.
+  app.get("/v1/flow", (_req, res) => {
+    res.json({ data: { flow: getFlow() }, traceId: "trace-local" });
+  });
+
+  app.put("/v1/flow", (req, res) => {
+    const saved = saveFlow(req.body?.flow);
+    if (!saved) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "flow must have an id, a name and a list of known node types",
+        traceId: "trace-local"
+      });
+      return;
+    }
+    res.json({ data: { flow: saved }, traceId: "trace-local" });
+  });
+
+  // Live hardware readings for the dashboard rings. Measured per request
+  // rather than cached: a ring showing a number from thirty seconds ago is
+  // not showing what the machine is doing now, which is the only thing it
+  // claims to show.
+  app.get("/v1/system-telemetry", async (_req, res) => {
+    res.json({ data: await readTelemetry(), traceId: "trace-local" });
+  });
+
+  // The same turn as /v1/assist, streamed.
+  //
+  // A local model can take half a minute to answer, and watching nothing
+  // happen for that long is the worst part of using one. This sends the reply
+  // as it is generated.
+  //
+  // Deliberately a second route rather than a flag on the first. Everything
+  // that already calls /v1/assist keeps the exact request and the exact
+  // response it had, and the streaming path cannot change an answer for a
+  // caller that did not ask for it. The final "done" event carries the whole
+  // result, so a client can rely on that alone and treat the tokens as
+  // presentation — which is what makes it safe for the tokens to be withheld
+  // when the model turns out to have been writing a tool call.
+  app.post("/v1/assist/stream", async (req, res) => {
+    const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+    if (!message) {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "message is required", traceId: "trace-local" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    // Nginx and friends buffer event streams by default, which turns a live
+    // reply back into one long wait with extra steps.
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+
+    const send = (event: string, data: unknown) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    const mode = normalizeAssistMode(req.body?.mode);
+    const turn = readTurnContext(req, message);
+    const { sessionId } = turn;
+
+    try {
+      // The browser going away is the signal to stop working. Pressing Stop
+      // aborts the fetch, which closes this connection, which lands here — one
+      // path for both, and neither leaves the model generating a reply that
+      // nothing is waiting for.
+      // On the RESPONSE, not the request.
+      //
+      // req.on("close") fires when the request stream finishes being read,
+      // which for a POST whose body express.json() has already consumed is
+      // immediately — so every turn aborted itself the moment it started, the
+      // model call was cancelled before it produced anything, and the reply
+      // fell back to the deterministic plan. The symptom looked exactly like
+      // the model failing. The response closing is the thing that actually
+      // means the client has gone.
+      const stopping = new AbortController();
+      let finished = false;
+      res.on("close", () => {
+        // Not after we have already answered: the response closes on every
+        // successful turn too, and aborting there would cancel work that had
+        // just completed.
+        if (!finished) stopping.abort();
+      });
+
+      const result = await runAssistantOrchestrator(
+        buildAssistInput(req, {
+          mode, message, ...turn,
+          onToken: (text) => send("token", { text }),
+          cancel: stopping.signal
+        })
+      );
+
+      if (sessionId) {
+        appendTurn(sessionId, "user", message);
+        // Provenance goes on the assistant turn for the same reason it does
+        // on the unstreamed route: a reloaded transcript still has to show
+        // whether an answer was quoted or generated.
+        appendTurn(sessionId, "assistant", result.assistantMessage, {
+          strategy: result.strategy,
+          model: result.model
+        });
+        clearActivity(sessionId);
+        reportStages(sessionId);
+      }
+
+      // The whole result, so a client never has to reassemble the reply from
+      // the tokens it happened to receive.
+      finished = true;
+      send("done", result);
+    } catch (error) {
+      // An error mid-stream cannot be a status code — the headers are long
+      // gone — so it is an event the client can render as a failed turn.
+      send("failed", {
+        message: error instanceof Error ? error.message : "The assistant could not answer."
+      });
+    } finally {
+      res.end();
+    }
+  });
+
+  // Telemetry for this process, in the Prometheus text format.
+  //
+  // E10 asks for OpenTelemetry with Prometheus, Grafana and Loki. The
+  // instrumentation is worth having; three server processes beside an app
+  // whose premise is running on one machine with nothing else installed are
+  // not, and the two are separable. Point Prometheus at this and it scrapes;
+  // read it in a browser and it is legible without one.
+  app.get("/v1/metrics", (_req, res) => {
+    res.type("text/plain; version=0.0.4").send(toPrometheus());
+  });
+
+  // The same numbers as JSON, for anything that would rather not parse the
+  // text format — the System surface, mostly.
+  app.get("/v1/metrics.json", (_req, res) => {
+    res.json({ data: snapshot(), traceId: "trace-local" });
+  });
+
+  // What the assistant actually did, step by step, as it happens.
+  //
+  // Not the same as /v1/agent-tasks, which records one request and whether it
+  // succeeded. This is the individual steps inside it — the thing that makes
+  // a long build watchable rather than merely pending.
+  app.get("/v1/execution", (req, res) => {
+    const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : "";
+    res.json({ data: { events: listEvents(sessionId) }, traceId: "trace-local" });
+  });
+
+  // Command access: the switch, and what it has actually run.
+  //
+  // Deliberately a switch with a horizon rather than a permanent setting. A
+  // grant that never expires is one nobody remembers making, and this is the
+  // only capability in the app that is not bounded by the workspace.
+  app.get("/v1/commands", (_req, res) => {
+    res.json({
+      data: { armed: commandsArmed(), armedUntil: armedUntil(), history: commandHistory() },
+      traceId: "trace-local"
+    });
+  });
+
+  app.post("/v1/commands/arm", (_req, res) => {
+    const { armedUntil: until } = armCommands();
+    console.warn(`[command] access armed until ${until}`);
+    res.json({ data: { armed: true, armedUntil: until }, traceId: "trace-local" });
+  });
+
+  app.post("/v1/commands/disarm", (_req, res) => {
+    disarmCommands();
+    console.warn("[command] access switched off");
+    res.json({ data: { armed: false, armedUntil: null }, traceId: "trace-local" });
+  });
+
+  // What the assistant is actually working on.
+  //
+  // Not the to-do list at /v1/tasks — that is a list you write. These are
+  // recorded by the orchestrator when a request reaches the agent, so the
+  // panel shows real work with a real status rather than a progress bar
+  // ticking towards a number nobody measured. There is no percentage here on
+  // purpose: nothing in the loop knows how far through a request it is, and
+  // a bar filling to 72% would be an animation, not a measurement.
+  app.get("/v1/agent-tasks", (req, res) => {
+    const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : "";
+    if (!sessionId) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "sessionId is required",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    const task = getTask(sessionId);
+    res.json({ data: { tasks: task ? [task] : [] }, traceId: "trace-local" });
+  });
+
+  // The workspace, over HTTP.
+  //
+  // Until now the only way to see these files was to ask the model to list
+  // them, which is a strange way to look at your own disk. Both routes go
+  // through the same resolveInWorkspace the tools use rather than reading
+  // paths directly: a browser can send "../../.ssh/id_rsa" exactly as easily
+  // as a model can, and there is no reason for a second, weaker check to
+  // exist alongside the one that already refuses it.
+  app.get("/v1/files", (req, res) => {
+    const requested = typeof req.query.path === "string" && req.query.path.trim() ? req.query.path : ".";
+    const entries = listWorkspace(requested);
+    if (entries === null) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "That path is outside the workspace.",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    // The walk stops at maxListedFiles. Without saying so, a listing that hit
+    // the cap looks exactly like a complete one, and the page would imply
+    // "this is everything" about a directory it only partly read.
+    res.json({
+      data: {
+        root: workspaceRoot(),
+        path: requested,
+        entries,
+        truncated: entries.length >= maxListedFiles,
+        limit: maxListedFiles
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  app.get("/v1/files/content", (req, res) => {
+    const requested = typeof req.query.path === "string" ? req.query.path : "";
+    const result = readWorkspaceFile(requested);
+    if (!result.ok) {
+      // 404 only for a genuinely missing file; a refused path is a bad
+      // request, and conflating the two would tell a caller probing for
+      // paths outside the workspace which ones exist.
+      const missing = result.reason.startsWith("There is no file at");
+      res.status(missing ? 404 : 400).json({
+        code: missing ? "NOT_FOUND" : "INVALID_REQUEST",
+        message: result.reason,
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    // Whether it is really text is answered from the content, not the file
+    // name — ".git/config", "HEAD" and "COMMIT_EDITMSG" have no extension and
+    // are plainly readable, and a name-based guess calls all three binary.
+    // Binary content is not sent at all: it is megabytes of noise that would
+    // render as mojibake and make the file look corrupted.
+    const binary = looksBinary(result.content);
+    res.json({
+      data: {
+        path: requested,
+        content: binary ? "" : result.content,
+        truncated: result.truncated,
+        binary
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  app.post("/v1/schedules", (req, res) => {
+    const name = typeof req.body?.name === "string" ? req.body.name : "";
+    const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+    const action = req.body?.action;
+    const cadence = req.body?.cadence;
+
+    if (!isCadence(cadence)) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "cadence must be {kind:'daily',minuteOfDay} or {kind:'interval',minutes}",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    const schedule = addSchedule({
+      id: `sched-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      prompt,
+      // Either shape is accepted; addSchedule turns a bare prompt into an
+      // "ask" action so a caller never has to send both.
+      action: isScheduleAction(action) ? action : undefined,
+      cadence
+    });
+
+    if (!schedule) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "A schedule needs a name and a prompt, and there is a limit on how many can exist",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    res.status(201).json({
+      data: { schedule: { ...schedule, cadenceLabel: describeCadence(schedule.cadence),
+          actionLabel: describeAction(schedule.action) } },
+      traceId: "trace-local"
+    });
+  });
+
+  app.patch("/v1/schedules/:scheduleId", (req, res) => {
+    if (typeof req.body?.enabled !== "boolean") {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "enabled must be a boolean", traceId: "trace-local" });
+      return;
+    }
+
+    const schedule = setScheduleEnabled(req.params.scheduleId, req.body.enabled);
+    if (!schedule) {
+      res.status(404).json({ code: "NOT_FOUND", message: "Schedule not found", traceId: "trace-local" });
+      return;
+    }
+
+    res.json({
+      data: { schedule: { ...schedule, cadenceLabel: describeCadence(schedule.cadence),
+          actionLabel: describeAction(schedule.action) } },
+      traceId: "trace-local"
+    });
+  });
+
+  app.delete("/v1/schedules/:scheduleId", (req, res) => {
+    if (!removeSchedule(req.params.scheduleId)) {
+      res.status(404).json({ code: "NOT_FOUND", message: "Schedule not found", traceId: "trace-local" });
+      return;
+    }
+    res.status(204).end();
+  });
+
   // Which tool the agent is running right now, for a client to poll while a
   // reply is in flight. Absent is a real answer — the model is still thinking,
   // or between tool calls — not an error, so this never 404s on a live session.
@@ -645,7 +1211,22 @@ export function createApp() {
     if (!sessionId) return;
 
     const activity = getActivity(sessionId);
-    res.json({ data: { tool: activity?.tool ?? null }, traceId: "trace-local" });
+    // The stage rides along on the poll the client already makes. "Thinking"
+    // for thirty seconds is true and tells you almost nothing; which part of
+    // the pipeline it is in is the part worth knowing.
+    const stage = getStage(sessionId);
+    res.json({
+      data: {
+        tool: activity?.tool ?? null,
+        stage: stage?.stage ?? null,
+        stageLabel: stage ? stageLabels[stage.stage] : null,
+        // Real elapsed time in the current stage, and what each finished one
+        // actually took — measured, never estimated.
+        stageMs: stage ? Math.max(0, Date.now() - stage.startedAt) : null,
+        completedStages: stage?.completed ?? []
+      },
+      traceId: "trace-local"
+    });
   });
 
   // Machine-wide preferences, so the desktop window and a browser tab agree.

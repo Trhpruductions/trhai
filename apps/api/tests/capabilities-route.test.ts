@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
 import { createApp } from "../src/server.js";
-import { toolDefinitions } from "../src/services/agentTools.js";
+import { availableTools } from "../src/services/agentTools.js";
+import { commandsArmed } from "../src/services/commandRunner.js";
 
 // The route this file covers exists so a UI screen can render real tools and
 // real permission levels as structured data, instead of parsing them back out
@@ -24,7 +25,7 @@ async function startTestServer() {
   };
 }
 
-test("the capabilities route reports every registered tool, and nothing else", async () => {
+test("the capabilities route reports every tool on offer, and nothing else", async () => {
   const server = await startTestServer();
   try {
     const response = await fetch(`${server.baseUrl}/v1/capabilities`);
@@ -33,9 +34,11 @@ test("the capabilities route reports every registered tool, and nothing else", a
     };
 
     assert.equal(response.status, 200);
+    // What is offered, not everything that exists: run_command is withheld
+    // while machine control is off, and the route has to agree with that.
     const reported = (payload.data?.tools ?? []).map((tool) => tool.name).sort();
-    const registered = toolDefinitions.map((definition) => definition.function.name).sort();
-    assert.deepEqual(reported, registered);
+    const offered = availableTools(commandsArmed()).map((definition) => definition.function.name).sort();
+    assert.deepEqual(reported, offered);
   } finally {
     await server.close();
   }
@@ -51,9 +54,8 @@ test("the capabilities route reports honestly: filesystem and web are true, code
 
     assert.equal(payload.data?.filesystem, true);
     assert.equal(payload.data?.web, true);
-    // Not a placeholder value — there is genuinely no tool registered for
-    // this, the same fact system-capabilities.test.ts asserts on the
-    // function directly.
+    // False because machine control is off, not because no such tool exists —
+    // one does now. The answer is unchanged; the reason for it is not.
     assert.equal(payload.data?.codeExecution, false);
     assert.deepEqual(payload.data?.integrations, []);
   } finally {

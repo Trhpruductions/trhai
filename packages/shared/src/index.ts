@@ -7,6 +7,7 @@ export * from "./memoryView.js";
 export * from "./knowledgeImport.js";
 export * from "./localCalendar.js";
 export * from "./automation.js";
+export * from "./markdown.js";
 
 export type AssistantMode = "general" | "coding" | "business" | "creator";
 

@@ -1,5 +1,9 @@
 import type { LocalModelConfig } from "./localModel.js";
-import { runTool, toolDefinitions, type ToolContext, type ToolCall } from "./agentTools.js";
+import { availableTools, runTool, toolDefinitions, type ToolContext, type ToolCall } from "./agentTools.js";
+import { commandsArmed } from "./commandRunner.js";
+import { readStream, toLines } from "./streamReader.js";
+import { enterStage, stageForTool } from "./reasoningStage.js";
+import { increment, observe } from "./metrics.js";
 
 // The agent loop.
 //
@@ -63,6 +67,14 @@ export type AgentResult =
      * smaller one instead of giving up.
      */
     modelUnusable?: boolean;
+    /**
+     * True when the user stopped this turn, rather than it failing.
+     *
+     * Kept distinct because the difference matters to what is shown: a
+     * cancellation is a decision someone made, and reporting it as "the local
+     * model did not reply" would blame the machine for it.
+     */
+    stopped?: boolean;
   };
 
 /**
@@ -130,6 +142,11 @@ export const systemPrompt = [
   "- build_app when they want something built. It writes a working app to disk.",
   "  Do not describe what you would build and stop; build it, then say where it is.",
   "- list_files, read_file, write_file for the workspace where those apps live.",
+  "- run_command runs a real command on this machine and returns its real output. It only",
+  "  appears when the user has switched command access on. Use it for anything outside the",
+  "  workspace: installing, building, running tests, opening an app, inspecting the system.",
+  "  Say what you are about to run. A non-zero exit code means it FAILED - report that, do",
+  "  not describe a failed command as done.",
   "- A name with a file extension - test.txt, notes.md, server.js - is a workspace FILE: use",
   "  list_files, read_file, write_file. write_document, update_document, read_document and",
   "  delete_document are only for the knowledge base, titled in plain language with no extension.",
@@ -467,7 +484,7 @@ export function parseTextToolCalls(text: string, known = advertisedToolNames()):
 
 /** The tools this app offers, by name. */
 function advertisedToolNames(): string[] {
-  return toolDefinitions.map((definition) => definition.function.name);
+  return availableTools(commandsArmed()).map((definition) => definition.function.name);
 }
 
 function parseToolCalls(response: ChatResponse): ToolCall[] {
@@ -496,13 +513,32 @@ function parseToolCalls(response: ChatResponse): ToolCall[] {
   });
 }
 
-async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+async function withTimeout<T>(
+  ms: number,
+  run: (signal: AbortSignal) => Promise<T>,
+  /**
+   * A caller's own reason to stop — the user pressing Stop, or their browser
+   * going away mid-request.
+   *
+   * Combined with the timeout rather than replacing it: a request must still
+   * give up on its own if the model stalls, whether or not anyone is watching.
+   */
+  external?: AbortSignal
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
+
+  // Already gone before we started. Firing immediately beats opening a request
+  // that nothing is waiting for.
+  if (external?.aborted) controller.abort();
+  const relay = () => controller.abort();
+  external?.addEventListener("abort", relay);
+
   try {
     return await run(controller.signal);
   } finally {
     clearTimeout(timer);
+    external?.removeEventListener("abort", relay);
   }
 }
 
@@ -518,7 +554,31 @@ export async function runAgent(
   context: ToolContext,
   fetchImpl: typeof fetch = fetch,
   /** Fired right before each tool call, so a caller can report live progress. */
-  onToolStart?: (toolName: string) => void
+  onToolStart?: (toolName: string) => void,
+  /**
+   * Fired with each new piece of the reply as it is generated.
+   *
+   * Opt-in: without it the request is made exactly as before, unstreamed, so
+   * nothing that already works changes shape. A local model can take half a
+   * minute to answer, and watching nothing happen for that long is the worst
+   * part of using one — but it is not worth destabilising the loop for, so
+   * the streaming path is only taken when a caller actually wants it.
+   *
+   * Only prose arrives here. streamReader withholds anything that might be a
+   * text-encoded tool call, which this model does emit.
+   */
+  onToken?: (text: string) => void,
+  /**
+   * True when this turn runs with nobody watching — a schedule firing in the
+   * background rather than someone sitting at the machine.
+   *
+   * Command access is withheld whatever the arming window says. Switching
+   * machine control on is a grant for working at the machine; a scheduled run
+   * must not inherit it merely because the thirty-minute window happens to
+   * still be open when the timer fires.
+   */
+  unattended?: boolean,
+  cancel?: AbortSignal
 ): Promise<AgentResult> {
   // The date is stated outright rather than left to a tool call.
   //
@@ -597,11 +657,17 @@ export async function runAgent(
           body: JSON.stringify({
             model: config.model,
             messages,
-            stream: false,
-            ...(offerTools ? { tools: toolDefinitions } : {})
+            // Streamed only when someone is listening. Tokens are useless to
+            // a caller that cannot show them, and the unstreamed path is the
+            // one every existing test exercises.
+            stream: Boolean(onToken),
+            // Withheld while disarmed rather than offered and refused: a
+            // model that can see run_command will reason about it and try to
+            // talk its way into it; one that never sees it cannot.
+            ...(offerTools ? { tools: availableTools(commandsArmed() && !unattended) } : {})
           }),
           signal
-        }));
+        }), cancel);
 
       if (!raw.ok) {
         // The body carries why. "cudaMalloc failed: out of memory" and a
@@ -621,8 +687,38 @@ export async function runAgent(
         };
       }
 
-      response = await raw.json() as ChatResponse;
+      if (onToken && raw.body) {
+        // The same shape the unstreamed path produces, assembled from frames.
+        // Everything downstream — tool parsing, the text guard, the round
+        // bound — then works identically whether or not this was streamed.
+        const streamed = await readStream(
+          toLines(raw.body as unknown as AsyncIterable<Uint8Array>),
+          onToken,
+          // What counts as "do not show this": the same parser that decides
+          // whether the finished message was a call. Sharing it means the
+          // screen and the loop can never disagree about what the reply was.
+          (text) => parseTextToolCalls(text).length > 0
+        );
+        response = {
+          model: streamed.model ?? config.model,
+          message: {
+            role: "assistant",
+            content: streamed.content,
+            ...(streamed.toolCalls ? { tool_calls: streamed.toolCalls } : {})
+          }
+        } as ChatResponse;
+      } else {
+        response = await raw.json() as ChatResponse;
+      }
     } catch (error) {
+      // Stopped on purpose is not a fault. Both arrive here as an AbortError,
+      // and reporting a cancellation as "the model did not reply" would blame
+      // the machine for a decision the user made — so the caller's own signal
+      // is checked before the timeout is assumed.
+      if (cancel?.aborted) {
+        return { ok: false, reason: "Stopped.", toolsUsed, stopped: true };
+      }
+
       const detail = error instanceof Error && error.name === "AbortError"
         ? `it did not reply within ${Math.round(config.timeoutMs / 1000)}s`
         : "the request failed";
@@ -655,7 +751,17 @@ export async function runAgent(
         // reads this looking at the wrong thing.
         return requested.length > 0
           ? { ok: false, reason: "The assistant kept searching without reaching an answer.", toolsUsed }
-          : { ok: false, reason: "The local model returned an empty reply.", toolsUsed };
+          // Marked unusable so the caller moves on to the next installed
+          // model. An empty reply is not a considered refusal, it is the
+          // model producing nothing at all — and unlike a model that answered
+          // badly, a different one has every chance of answering fine. Found
+          // live: "Write a Python function that adds two numbers" got an
+          // empty reply from vexora:latest in a second, the caller gave up,
+          // and the user was shown a generic four-step planning template
+          // ("Clarify the end state ... Identify the highest-impact next
+          // move") as though it were the answer. qwen2.5-coder, already
+          // installed on the same machine, answered it correctly.
+          : { ok: false, reason: "The local model returned an empty reply.", toolsUsed, modelUnusable: true };
       }
       const builtAnApp = toolsUsed.some((used) => used.name === "build_app");
       const cleanedText = builtAnApp ? withoutFabricatedLiveClaims(text) : text;
@@ -699,6 +805,11 @@ export async function runAgent(
 
     for (const call of orderedCalls) {
       onToolStart?.(call.name);
+      // The stage follows the work: a search moves it to gathering, a build to
+      // building. Set here, as the call begins, rather than predicted from the
+      // request — which is what keeps a stalled turn showing the stage it
+      // actually stopped in instead of marching on through the rest.
+      enterStage(context.sessionId, stageForTool(call.name));
 
       // The same removal, not the same request for restraint, for the part a
       // round boundary cannot reach: once fetch_url has failed this turn,
@@ -734,7 +845,18 @@ export async function runAgent(
       // Awaited in sequence rather than run in parallel. Two calls in one
       // round are rare, and running them concurrently would let a build and a
       // write race for the same workspace file with no ordering guarantee.
+      // Timed around the real dispatch, so a slow tool shows up as a slow
+      // tool rather than as a slow request with no explanation.
+      const toolBegan = Date.now();
       const result = await runTool(call, context);
+      observe("trhai_tool_duration", Date.now() - toolBegan, { tool: call.name });
+      increment("trhai_tool_calls_total", {
+        tool: call.name,
+        // Three outcomes, because a refusal is neither a success nor a
+        // failure — nothing was attempted, and counting it as an error would
+        // make the permission ladder look like a fault.
+        outcome: result.needsConfirmation ? "refused" : result.ok ? "ok" : "failed"
+      });
 
       // Refused for permission, not failed. Recorded so the caller can hold
       // the offer open for a "yes"; the model still sees the refusal text and

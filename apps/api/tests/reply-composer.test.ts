@@ -334,11 +334,39 @@ test("history grounding still reports no-answer when nothing matches", () => {
   assert.equal(reply.groundedOnHistory, 0);
 });
 
-test("asks one question instead of building a vague request", () => {
+test("a vague build request is built anyway, with the assumption stated", () => {
+  // This used to stop and ask what each record should store. Being asked
+  // "what should each one store?" after saying "build a CRM" is the assistant
+  // handing the work back, and the answer is nearly always the obvious one —
+  // so the question bought a round trip and very little else.
   const reply = composeReply({ mode: "build", message: "Build a CRM", memories: [], history: [] });
 
-  assert.equal(reply.strategy, "clarify-build");
-  assert.match(reply.text, /what are the records/i);
+  assert.equal(reply.strategy, "plan", "it builds rather than interrogating");
+  assert.ok(reply.text.length > 0);
+});
+
+test("an assumed spec says what it assumed, rather than guessing quietly", () => {
+  // Not asking is only honest if the guess is visible. A wrong assumption
+  // should cost one sentence, not be discovered later inside the built app.
+  const reply = composeReply({ mode: "build", message: "Build a CRM", memories: [], history: [] });
+
+  assert.match(reply.text, /didn't say|I've built it around|Tell me the fields/i,
+    `expected the assumption to be stated, got: ${reply.text}`);
+});
+
+test("a request that names its fields is built with no assumption note", () => {
+  // Nothing was assumed, so there is nothing to disclose — a note here would
+  // be noise on a request that was already complete.
+  const reply = composeReply({
+    mode: "build",
+    message: "Build a customer tracker with email, phone and company",
+    memories: [],
+    history: []
+  });
+
+  assert.equal(reply.strategy, "plan");
+  assert.ok(!/didn't say|Tell me the fields/i.test(reply.text),
+    `expected no assumption note, got: ${reply.text}`);
 });
 
 test("builds straight away when the request is specific enough", () => {
@@ -373,9 +401,8 @@ test("the clarifying answer is merged with the original request", () => {
   assert.match(reply.buildRequest ?? "", /email, phone and company/);
 });
 
-test("never asks the same question twice in a row", () => {
-  // The answer may still be vague; asking again would trap the user in a loop.
-  const question = composeReply({ mode: "build", message: "Build a CRM", memories: [], history: [] });
+test("a vague follow-up still builds rather than stalling", () => {
+  const first = composeReply({ mode: "build", message: "Build a CRM", memories: [], history: [] });
 
   const reply = composeReply({
     mode: "build",
@@ -383,7 +410,7 @@ test("never asks the same question twice in a row", () => {
     memories: [],
     history: [
       { role: "user", content: "Build a CRM" },
-      { role: "assistant", content: question.text }
+      { role: "assistant", content: first.text }
     ]
   });
 

@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Orbitron } from "next/font/google";
-import Script from "next/script";
 import { AppShell } from "../components/AppShell";
 import { themeBootScript } from "../lib/theme";
 import "./globals.css";
@@ -19,23 +18,32 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${orbitron.variable} h-full`}
-      // The beforeInteractive script below sets data-accent from localStorage
+      // The theme-boot script in <head> sets data-accent from localStorage
       // before React hydrates, which the server has no way to know in
       // advance. That one attribute is expected to differ on first paint —
-      // this is the documented pattern for exactly that, not a blanket
-      // "ignore hydration issues here".
+      // this is the documented pattern for exactly that, and it is scoped to
+      // <html> rather than being a blanket "ignore hydration issues here".
+      // Nothing else in the tree relies on it: the clocks that used to
+      // mismatch now render nothing until mounted instead.
       suppressHydrationWarning
     >
-      <body className="h-full">
+      <head>
         {/* Applies a saved accent before first paint so switching it does not
-            flash cyan for a frame on every reload. beforeInteractive is the
-            framework's own mechanism for exactly this — a script that must run
-            ahead of hydration — rather than a raw <script> tag, which React 19
-            refuses to execute when it appears inside a rendered component.
-            Reads one known-shaped localStorage key and validates it against the
-            fixed accent list; see theme.ts for the only place its content is
+            flash cyan for a frame on every reload.
+
+            dangerouslySetInnerHTML rather than next/script: passing the code
+            as *children* is what React 19 objects to — "Encountered a script
+            tag while rendering React component" — and it did so through
+            next/script too, which was the previous attempt at avoiding it.
+            Set as inner HTML in <head> it is the ordinary App Router pattern
+            for this, runs before first paint, and warns about nothing.
+
+            Reads one known-shaped localStorage key and validates it against
+            the fixed accent list; see theme.ts, the only place its content is
             defined. */}
-        <Script id="theme-boot" strategy="beforeInteractive">{themeBootScript()}</Script>
+        <script id="theme-boot" dangerouslySetInnerHTML={{ __html: themeBootScript() }} />
+      </head>
+      <body className="h-full">
         <div id="trhai-root">
           <AppShell>{children}</AppShell>
         </div>

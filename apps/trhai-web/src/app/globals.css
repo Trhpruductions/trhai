@@ -15,13 +15,13 @@
   --bg-2: #101825;
   --bg-3: #16233a;
 
-  --line-subtle: rgba(120, 200, 255, 0.10);
-  --line: rgba(120, 200, 255, 0.20);
+  --line-subtle: rgba(120, 200, 255, 0.16);
+  --line: rgba(120, 200, 255, 0.28);
   --line-strong: rgba(90, 200, 255, 0.45);
 
   --text: #eaf6ff;
   --text-muted: #92aec2;
-  --text-faint: #5c7688;
+  --text-faint: #93b0c4;
 
   --accent: #35c7ff;
   --accent-strong: #7fe3ff;
@@ -209,7 +209,7 @@ button, input, select, textarea {
 
 .hud-label {
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: 12.5px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -226,7 +226,7 @@ button, input, select, textarea {
   padding: 2px 10px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--line);
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -246,7 +246,7 @@ button, input, select, textarea {
   border: 1px solid var(--line);
   background: var(--bg-2);
   color: var(--text);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
@@ -278,7 +278,7 @@ button, input, select, textarea {
   border: 1px solid var(--line);
   background: var(--bg-0);
   color: var(--text);
-  font-size: 14px;
+  font-size: 16px;
   transition: border-color var(--fast) var(--ease);
 }
 
@@ -288,4 +288,72 @@ button, input, select, textarea {
   outline: none;
   border-color: var(--line-strong);
   box-shadow: var(--glow-soft);
+}
+
+
+/* ---- HUD primitives ----
+   Shared by the dashboard, System, and anything else using SystemRings.
+   These lived in dash.css, which only loads on the dashboard - so the
+   System page rendered its readouts as an unstyled <dl>. A primitive used
+   by more than one page belongs here, not in one page's stylesheet. */
+
+.hud-panel {
+  position: relative;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(53, 199, 255, 0.05), transparent 42%),
+    rgba(10, 15, 22, 0.72);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Corner brackets: the detail that reads "instrument panel" rather than
+   "rounded card". Drawn with two gradients on a pseudo-element, so it costs
+   no extra DOM per panel. */
+.hud-panel::before,
+.hud-panel::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--line-strong);
+  border-style: solid;
+  pointer-events: none;
+}
+
+.hud-readouts { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+
+.hud-readouts > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.hud-readouts dt {
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 13px;
+}
+
+.hud-readouts dd { margin: 0; color: var(--text); font-family: var(--font-mono); font-size: 13.5px; }
+.hud-readouts dd.ok { color: var(--ok); }
+.hud-readouts dd.warn { color: var(--warn); }
+.hud-readouts dd.danger { color: var(--danger); }
+
+.hud-panel::before {
+  top: -1px; left: -1px;
+  border-width: 1px 0 0 1px;
+  border-top-left-radius: var(--radius-lg);
+}
+
+.hud-panel::after {
+  bottom: -1px; right: -1px;
+  border-width: 0 1px 1px 0;
+  border-bottom-right-radius: var(--radius-lg);
 }

@@ -242,6 +242,48 @@ test("an empty reply is a failure, not a blank answer", async () => {
   }
 });
 
+test("an empty reply marks the model unusable so another is tried", async () => {
+  // Found live. "Write a Python function that adds two numbers" got an empty
+  // reply from the default model in about a second; the caller treated that
+  // as a considered failure, stopped, and showed a generic four-step
+  // planning template as though it were the answer. A coder model already
+  // installed on the same machine answered it correctly. An empty reply is
+  // the model producing nothing at all, not a judgement about the question,
+  // so the next candidate deserves a turn.
+  const { server, baseUrl } = await fakeModel([answer("")]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "anything", context);
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.modelUnusable, true);
+  } finally {
+    server.close();
+  }
+});
+
+test("a model that keeps calling tools is not marked unusable", async () => {
+  // The opposite case, and the reason this is not just "any failure retries".
+  // A model that loaded and worked but never concluded will do the same on
+  // the next question; cycling every installed model against it only makes
+  // the user wait longer for the same outcome.
+  const { server, baseUrl } = await fakeModel([
+    { message: { role: "assistant", content: "", tool_calls: [{ function: { name: "current_datetime", arguments: {} } }] } },
+    { message: { role: "assistant", content: "", tool_calls: [{ function: { name: "current_datetime", arguments: {} } }] } },
+    { message: { role: "assistant", content: "", tool_calls: [{ function: { name: "current_datetime", arguments: {} } }] } },
+    { message: { role: "assistant", content: "", tool_calls: [{ function: { name: "current_datetime", arguments: {} } }] } },
+    { message: { role: "assistant", content: "", tool_calls: [{ function: { name: "current_datetime", arguments: {} } }] } },
+    { message: { role: "assistant", content: "", tool_calls: [{ function: { name: "current_datetime", arguments: {} } }] } }
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what time is it", context);
+    assert.equal(result.ok, false);
+    assert.ok(!(result.ok === false && result.modelUnusable), "swapping models will not help here");
+  } finally {
+    server.close();
+  }
+});
+
 test("the system prompt forbids inventing a result", () => {
   // The tools are only safe because of this instruction; it is worth a test.
   assert.match(systemPrompt, /An empty tool result means the USER has not recorded that/);

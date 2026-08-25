@@ -18,18 +18,30 @@ export type ChatMessage = {
   strategy?: string;
   model?: string;
   toolsUsed?: Array<{ name: string; ok: boolean }>;
+  /**
+   * True while this reply is still being written.
+   *
+   * The text is real — it is what the model has produced so far — but it is
+   * not finished, and some things have to wait for that. The voice above all:
+   * reading a sentence aloud while it is still being written would speak a
+   * fragment and then have nothing to follow it.
+   */
+  streaming?: boolean;
 };
 
 export type AssistantStatus =
   | { state: "idle" }
-  | { state: "thinking" }
-  | { state: "executing"; tool: string }
+  | { state: "thinking"; stage?: string }
+  | { state: "executing"; tool: string; stage?: string }
   | { state: "success" }
   | { state: "error"; detail: string };
 
 const historyTurns = 8;
 /** How often to check which tool is running — see /v1/assist/activity. */
 const activityPollMs = 500;
+/** How often a streaming reply repaints. Fast enough to read as live, slow
+ * enough that a long answer costs tens of renders rather than hundreds. */
+const streamPaintMs = 60;
 /** How long the core shows a finished reply as "success" before settling to idle. */
 const successHoldMs = 1200;
 
@@ -44,6 +56,14 @@ export function useAssistant() {
   // stops a stale callback from a superseded call clobbering the status a
   // newer call is actively setting.
   const generation = useRef(0);
+  /**
+   * The request in flight, so it can genuinely be stopped.
+   *
+   * Aborting the fetch closes the connection, which the API notices and uses
+   * to stop the model. Without that the reply would only be hidden while the
+   * machine carried on producing it.
+   */
+  const inFlight = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,38 +111,133 @@ export function useAssistant() {
         .then((payload) => {
           if (!stillCurrent()) return;
           const tool = payload?.data?.tool;
+          // Which part of the pipeline this actually is. Reported by the API
+          // from real checkpoints, not guessed from elapsed time here.
+          const stage = typeof payload?.data?.stageLabel === "string"
+            ? payload.data.stageLabel
+            : undefined;
           setStatus((existing) => {
             // Only ever steers a turn already in progress — a poll response
             // that lands after the request itself resolved must not drag a
             // finished turn's status back toward "thinking".
             if (existing.state !== "thinking" && existing.state !== "executing") return existing;
-            return typeof tool === "string" ? { state: "executing", tool } : { state: "thinking" };
+            return typeof tool === "string"
+              ? { state: "executing", tool, stage }
+              : { state: "thinking", stage };
           });
         })
         .catch(() => { /* a missed poll just leaves the last known status showing */ });
     }, activityPollMs);
 
+    // Made before the request so streamed text has a message to land in, and
+    // the finished reply replaces that same message rather than appending a
+    // second copy of itself.
+    const replyId = crypto.randomUUID();
+    let streamed = "";
+
+    const controller = new AbortController();
+    inFlight.current = controller;
+
+    // Declared out here so `finally` can always clear it. Created inside the
+    // try, it was only cleared on the path where the stream finished normally
+    // — a stopped or failed request left it repainting forever.
+    let flush = 0;
+
     try {
-      const response = await fetch(`${apiBaseUrl}/v1/assist`, {
+      const response = await fetch(`${apiBaseUrl}/v1/assist/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, sessionId: session.current, history, mode: "general" })
+        body: JSON.stringify({ message: text, sessionId: session.current, history, mode: "general" }),
+        // Aborting closes the connection, which the API notices and uses to
+        // stop the model. Without it, stopping would only hide the reply while
+        // the machine carried on producing it.
+        signal: controller.signal
       });
 
       if (!response.ok) throw new Error(`The assistant service answered ${response.status}.`);
+      if (!response.body) throw new Error("The assistant service sent no reply.");
 
-      const payload = await response.json();
-      const data = payload?.data ?? {};
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let data: Record<string, unknown> | null = null;
+      let failure: string | null = null;
 
-      setMessages((prior) => [...prior, {
-        id: crypto.randomUUID(),
+      // Paints whatever has arrived, on a timer. An interval callback is a
+      // macrotask, so each flush is its own render — which is the whole point.
+      // It also means a fast reply costs ~20 renders instead of ~550.
+      let painted = "";
+      flush = window.setInterval(() => {
+        if (streamed === painted) return;
+        painted = streamed;
+        setMessages((prior) => (prior.some((message) => message.id === replyId)
+          ? prior.map((message) =>
+            (message.id === replyId ? { ...message, text: painted } : message))
+          : [...prior, {
+            id: replyId, role: "assistant" as const, text: painted,
+            at: Date.now(), streaming: true
+          }]));
+      }, streamPaintMs);
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        // Events are separated by a blank line; a partial one waits in the
+        // buffer for the rest of it.
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+
+        for (const frame of frames) {
+          const event = /^event: (.+)$/m.exec(frame)?.[1];
+          const body = /^data: (.+)$/m.exec(frame)?.[1];
+          if (!event || !body) continue;
+
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(body) as Record<string, unknown>;
+          } catch {
+            continue;
+          }
+
+          // Accumulated here and painted by the flush timer below, never
+          // straight from this loop.
+          //
+          // reader.read() resolves in a microtask whenever the next chunk is
+          // already buffered, so a fast reply runs hundreds of updates with no
+          // macrotask boundary between them — and React batches the lot into a
+          // single render at the end. The first token lands in a real network
+          // task and paints; every one after it was being coalesced away, so
+          // the reply appeared to arrive whole despite arriving in pieces.
+          if (event === "token" && typeof parsed.text === "string") streamed += parsed.text;
+          if (event === "done") data = parsed;
+          if (event === "failed") failure = String(parsed.message ?? "The assistant could not answer.");
+        }
+      }
+
+      window.clearInterval(flush);
+
+      if (failure) throw new Error(failure);
+      if (!data) throw new Error("The assistant stopped before finishing its reply.");
+
+      // The finished result replaces whatever was streamed. That is what makes
+      // it safe for tokens to be withheld mid-stream when the model turns out
+      // to have been writing a tool call: what is on screen is provisional
+      // until this lands.
+      const finished: ChatMessage = {
+        id: replyId,
         role: "assistant",
-        text: data.assistantMessage ?? "",
+        text: typeof data.assistantMessage === "string" ? data.assistantMessage : streamed,
         at: Date.now(),
-        strategy: data.strategy,
-        model: data.model,
-        toolsUsed: data.toolsUsed
-      }]);
+        strategy: data.strategy as string | undefined,
+        model: data.model as string | undefined,
+        toolsUsed: data.toolsUsed as ChatMessage["toolsUsed"]
+      };
+
+      setMessages((prior) => (prior.some((message) => message.id === replyId)
+        ? prior.map((message) => (message.id === replyId ? finished : message))
+        : [...prior, finished]));
       if (stillCurrent()) {
         setStatus({ state: "success" });
         // A brief confirmation, not a resting state — see core.css's
@@ -132,6 +247,29 @@ export function useAssistant() {
         window.setTimeout(() => { if (stillCurrent()) setStatus({ state: "idle" }); }, successHoldMs);
       }
     } catch (error) {
+      // Stopping is not an error, and must not be reported as one. Whatever
+      // had already arrived is kept and marked as stopped: those words were
+      // genuinely produced, and throwing them away would lose real work to
+      // make the failure tidier.
+      if (controller.signal.aborted) {
+        if (stillCurrent()) setStatus({ state: "idle" });
+        setMessages((prior) => {
+          const partial = streamed.trim();
+          const existing = prior.some((message) => message.id === replyId);
+          const stoppedMessage: ChatMessage = {
+            id: replyId,
+            role: "assistant",
+            text: partial ? `${partial}\n\n_Stopped._` : "_Stopped before anything was written._",
+            at: Date.now(),
+            strategy: "stopped"
+          };
+          return existing
+            ? prior.map((message) => (message.id === replyId ? stoppedMessage : message))
+            : [...prior, stoppedMessage];
+        });
+        return;
+      }
+
       const detail = error instanceof Error ? error.message : "The assistant could not be reached.";
       if (stillCurrent()) setStatus({ state: "error", detail });
       setMessages((prior) => [...prior, {
@@ -146,9 +284,22 @@ export function useAssistant() {
       // does not touch `generation`, which stays valid through the success
       // hold above until a genuinely newer call moves it forward.
       window.clearInterval(activityPoll);
+      window.clearInterval(flush);
+      inFlight.current = null;
       busy.current = false;
     }
   }, [messages]);
+
+  /**
+   * Stop the request in flight.
+   *
+   * Aborts the fetch, which closes the connection, which the API turns into a
+   * real cancellation of the model — so the machine stops working, not just
+   * the screen. Safe to call when nothing is running.
+   */
+  const stop = useCallback(() => {
+    inFlight.current?.abort();
+  }, []);
 
   const clear = useCallback(async () => {
     setMessages([]);
@@ -165,5 +316,5 @@ export function useAssistant() {
     }
   }, []);
 
-  return { messages, status, restored, sessionId: session.current, send, clear };
+  return { messages, status, restored, sessionId: session.current, send, stop, clear };
 }

@@ -26,11 +26,14 @@ import "./shell.css";
 // already reports itself honestly as skipped with no runner configured,
 // rather than needing this screen to hide or fake that gap.
 //
-// System and Files stay planned for a different reason than the above seven
-// did before this: both depend entirely on window.ascendDesktop, the
-// Electron-only bridge apps/desktop provides and this Next.js app does not
-// — porting either means standing up that bridge first, not writing this
-// screen.
+// System and Files were listed here as needing window.ascendDesktop, the
+// Electron-only bridge this Next.js app does not have. That was true of the
+// browser and false of the app: the local API is a Node process on this
+// machine, so it can read os.cpus() and the workspace directly, and both
+// screens are built against it rather than against a bridge. Nothing is
+// waiting on Electron — the desktop app remains the only way to reach
+// anything outside the workspace, which is a deliberate boundary rather than
+// a missing feature.
 
 type Destination = { href: string; label: string; glyph: string; hint: string };
 
@@ -44,19 +47,25 @@ const live: Destination[] = [
   { href: "/automation", label: "Automation", glyph: "◇", hint: "Flows you can actually run" },
   { href: "/agents", label: "Agents", glyph: "◆", hint: "Installable lenses on the same assistant" },
   { href: "/security", label: "Security", glyph: "◐", hint: "Every tool and the permission that gates it" },
+  { href: "/system", label: "System", glyph: "▦", hint: "What is running, and which build this is" },
+  { href: "/files", label: "Files", glyph: "▣", hint: "The workspace, read straight from disk" },
   { href: "/settings", label: "Settings", glyph: "⚙", hint: "Voice, theme and defaults" }
 ];
 
-const planned: Destination[] = [
-  { href: "#", label: "System", glyph: "▦", hint: "Needs the desktop bridge — not built yet" },
-  { href: "#", label: "Files", glyph: "▣", hint: "Needs the desktop bridge — not built yet" }
-];
+// There is no `planned` list any more. It held System and Files, and an
+// empty one left a rail divider with nothing under it — three lines to bring
+// back if something is genuinely pending again.
 
 function StatusFooter() {
   const [online, setOnline] = useState<boolean | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const [apiMs, setApiMs] = useState<number | null>(null);
-  const [clock, setClock] = useState(() => new Date());
+  // Null until mounted, deliberately. Reading the clock during render makes
+  // the server and the browser disagree by whatever fraction of a second sat
+  // between them, which React reports as a hydration mismatch on every single
+  // load — the time is genuinely unknowable server-side, so it is not
+  // rendered there at all.
+  const [clock, setClock] = useState<Date | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +90,7 @@ function StatusFooter() {
     }
 
     void sample();
+    setClock(new Date());
     const poller = window.setInterval(sample, 4000);
     const ticker = window.setInterval(() => setClock(new Date()), 1000);
     return () => { cancelled = true; window.clearInterval(poller); window.clearInterval(ticker); };
@@ -100,7 +110,12 @@ function StatusFooter() {
       </span>
       <span className="grow" />
       <span className="mono sb-item sb-clock">
-        {clock.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+        {/* Em dashes rather than a blank until the first tick: the strip has a
+            fixed layout, and an empty slot that suddenly fills reads as a
+            glitch where a placeholder reads as a reading not yet taken. */}
+        {clock
+          ? clock.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+          : "--:--:--"}
       </span>
     </footer>
   );
@@ -138,14 +153,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             <span aria-hidden="true">{entry.glyph}</span>
           </Link>
-        ))}
-
-        <div className="rail-divider" aria-hidden="true" />
-
-        {planned.map((entry) => (
-          <span key={entry.label} className="rail-btn rail-btn-planned" title={`${entry.label} — ${entry.hint}`}>
-            <span aria-hidden="true">{entry.glyph}</span>
-          </span>
         ))}
       </nav>
 

@@ -1,511 +1,778 @@
-/* The command centre. One screen: rail, stage, side panels, status strip. */
+/* The command centre.
+   Layout follows the reference design; see page.tsx for which numbers in that
+   reference are real here and which were replaced with measurements. */
 
-.hud {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  height: 100%;
-  min-height: 0;
+.cc {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100vh;
   overflow: hidden;
-  position: relative;
-}
-
-/* A faint grid and starfield behind everything, so the black is not flat.
-   Pure CSS on one painted layer — no per-particle DOM, and the drift is a
-   single background-position animation the compositor handles. */
-.hud::before {
-  content: "";
-  position: absolute;
-  inset: -40px;
-  pointer-events: none;
-  background:
-    radial-gradient(1px 1px at 12% 22%, rgba(120, 200, 255, 0.40), transparent 60%),
-    radial-gradient(1px 1px at 78% 14%, rgba(120, 200, 255, 0.28), transparent 60%),
-    radial-gradient(1px 1px at 34% 76%, rgba(120, 200, 255, 0.34), transparent 60%),
-    radial-gradient(1px 1px at 88% 62%, rgba(120, 200, 255, 0.24), transparent 60%),
-    radial-gradient(1px 1px at 56% 42%, rgba(120, 200, 255, 0.20), transparent 60%),
-    radial-gradient(1px 1px at 22% 54%, rgba(120, 200, 255, 0.22), transparent 60%),
-    radial-gradient(1px 1px at 66% 84%, rgba(120, 200, 255, 0.26), transparent 60%),
-    linear-gradient(rgba(53, 199, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(53, 199, 255, 0.045) 1px, transparent 1px),
-    radial-gradient(900px 520px at 50% 46%, rgba(53, 199, 255, 0.07), transparent 70%);
-  background-size:
-    auto, auto, auto, auto, auto, auto, auto,
-    46px 46px, 46px 46px, auto;
-  animation: hud-drift 34s linear infinite;
-}
-
-@keyframes hud-drift {
-  from { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
-  to   { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 46px, 46px 0, 0 0; }
-}
-
-/* A slow scan passing down the screen — one translated element, the classic
-   HUD tell, and cheap because it never triggers layout. */
-.hud::after {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  height: 180px;
-  pointer-events: none;
-  background: linear-gradient(180deg, transparent, rgba(53, 199, 255, 0.055), transparent);
-  animation: hud-scan 9s linear infinite;
-}
-
-@keyframes hud-scan {
-  from { transform: translateY(-180px); }
-  to   { transform: translateY(100vh); }
 }
 
 /* ---- top bar ---- */
 
-.hud-top {
+.cc-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--line-subtle);
-  position: relative;
+  padding: 8px 14px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(10, 15, 22, 0.78);
 }
 
-.hud-top-left { display: flex; align-items: center; gap: 8px; }
+.cc-brand { display: flex; align-items: center; gap: 9px; flex: none; }
 
-.hud-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-faint);
+.cc-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  color: var(--accent-strong);
+  font-size: 16px;
+  box-shadow: 0 0 12px rgba(53, 199, 255, 0.28) inset;
 }
 
-.hud-dot.live {
-  background: var(--ok);
-  box-shadow: 0 0 10px var(--ok);
-  animation: hud-pulse 2.6s var(--ease) infinite;
+.cc-brand-text { display: flex; flex-direction: column; line-height: 1.05; }
+
+.cc-wordmark { font-family: var(--font-display); font-size: 17px; letter-spacing: 0.14em; color: var(--text); }
+
+.cc-sub { font-size: 12px; letter-spacing: 0.14em; color: var(--text-faint); }
+
+.cc-top-status { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+.cc-status-word { font-size: 12.5px; letter-spacing: 0.14em; color: var(--text-faint); }
+.cc-status-word.ok { color: var(--ok); }
+.cc-status-word.danger { color: var(--danger, #ff5c5c); }
+
+.cc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
+.cc-dot.live { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+
+.cc-status-note {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-@keyframes hud-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
+.cc-metrics { display: flex; gap: 6px; margin-left: auto; flex: none; }
+
+.metric {
+  min-width: 62px;
+  padding: 4px 9px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 6px;
+  background: rgba(53, 199, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
 }
 
-.hud-top-mark { display: flex; align-items: baseline; gap: 8px; }
+.metric-label { font-size: 12px; letter-spacing: 0.14em; color: var(--text-faint); }
 
-.hud-wordmark {
-  font-family: var(--font-display);
-  font-size: 19px;
-  letter-spacing: 0.22em;
-  color: var(--text);
-  text-shadow: var(--glow-soft);
-}
+.metric-value { font-family: var(--font-display); font-size: 16px; color: var(--accent-strong); line-height: 1.1; }
+.metric-value.warn { color: var(--warn, #f5a524); }
+.metric-value.danger { color: var(--danger, #ff5c5c); }
 
-.hud-version { font-size: 11px; color: var(--text-faint); }
-
-.hud-top-right { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; }
-.hud-clock { font-size: 15px; letter-spacing: 0.12em; color: var(--text); }
-.hud-date { font-size: 10px; letter-spacing: 0.1em; color: var(--text-faint); text-transform: uppercase; }
+.cc-clock { display: flex; flex-direction: column; align-items: flex-end; flex: none; line-height: 1.15; }
+.cc-time { font-size: 19px; color: var(--accent-strong); }
+.cc-date { font-size: 12px; letter-spacing: 0.14em; color: var(--text-faint); }
 
 /* ---- body ---- */
 
-.hud-body {
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 300px;
-  gap: 16px;
-  padding: 16px 20px;
+.cc-body {
+  flex: 1;
   min-height: 0;
-  position: relative;
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(260px, 330px);
+  gap: 12px;
+  /* Stretch, not start. Columns used to sit at their natural height inside a
+     taller row, which left the left column ending 230px above the right one
+     and a band of dead space under both. */
+  align-items: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
 }
 
-/* ---- left rail ---- */
-
-.hud-rail-col {
+.cc-left, .cc-right {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
   min-height: 0;
-}
-
-.hud-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  /* The columns scroll inside themselves so the stage stays put — the core
+     should not slide away while reading a panel. Height comes from the grid
+     row now rather than a viewport sum that had to be kept in step with the
+     header every time it changed. */
+  height: 100%;
   overflow-y: auto;
-  min-height: 0;
+  padding-right: 2px;
 }
 
-.hud-quick { flex: none; gap: 4px; padding: 12px 14px; }
+/* ---- console ---- */
 
-.hud-quick-item {
-  text-align: left;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 5px 6px;
-  font: inherit;
-  font-size: 11.5px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
-}
+.cc-console { min-height: 0; }
 
-.hud-quick-item:hover { color: var(--accent-strong); background: var(--accent-quiet); }
-
-.rail-item {
+.console-feed {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  text-decoration: none;
-  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
+  gap: 9px;
+  max-height: 280px;
+  overflow-y: auto;
+  min-width: 0;
 }
 
-.rail-item:hover { background: var(--bg-1); border-color: var(--line-subtle); }
+.console-turn { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 
-.rail-item.active {
-  background: var(--accent-quiet);
-  border-color: var(--line-strong);
-}
+.console-turn + .console-turn { padding-top: 8px; border-top: 1px solid var(--line); }
 
-.rail-label {
-  font-family: var(--font-display);
+.console-who {
   font-size: 12px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text);
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
 }
 
-.rail-hint { font-size: 10.5px; color: var(--text-faint); }
+.console-assistant .console-who { color: var(--accent); }
 
-/* ---- centre stage ---- */
+.console-text { margin: 0; font-size: 13.5px; line-height: 1.5; word-break: break-word; }
 
-.hud-stage {
+.console-wave {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px 0 8px;
-}
-
-.trace {
-  width: 100%;
-  max-width: 560px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.trace-bars {
-  width: 100%;
-  height: 40px;
-  display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
   gap: 2px;
-  padding: 0 16px;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-pill);
-  background: rgba(10, 15, 22, 0.6);
+  height: 28px;
+  padding: 0 2px;
 }
 
-.trace-bar {
+.console-wave span {
   flex: 1;
   min-width: 1px;
-  max-width: 3px;
   background: var(--accent);
   border-radius: 1px;
-  opacity: 0.75;
+  opacity: 0.85;
   transition: height 90ms linear;
 }
 
-.trace-label {
-  font-family: var(--font-display);
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  color: var(--text-faint);
-}
-
-.trace-label-live { color: var(--accent-strong); text-shadow: var(--glow-soft); }
-
-.hud-core-wrap {
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex: none;
-}
-
-.hud-core-text {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  pointer-events: none;
-}
-
-.hud-core-name {
-  font-family: var(--font-display);
-  font-size: 42px;
-  letter-spacing: 0.16em;
-  color: var(--text);
-  /* Sits directly over the lit orb, so it carries its own dark backing —
-     without this the glow behind it wins and the wordmark greys out. */
-  text-shadow:
-    0 0 18px rgba(5, 7, 10, 0.95),
-    0 0 34px rgba(5, 7, 10, 0.8),
-    0 0 26px rgba(53, 199, 255, 0.5);
-}
-
-/* Below the rings rather than across them: over the core's lit centre this
-   was unreadable at any weight, and a caption you have to squint through is
-   worse than one placed somewhere calmer. */
-.hud-core-tag {
-  font-size: 9.5px;
-  letter-spacing: 0.2em;
-  color: var(--text-faint);
-  text-align: center;
-}
-
-.hud-agent { font-size: 12px; color: var(--text-muted); }
-
-.hud-ask {
-  width: 100%;
-  max-width: 620px;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 8px 8px 8px 18px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: rgba(10, 15, 22, 0.75);
-  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
-}
-
-.hud-ask:focus-within {
-  border-color: var(--line-strong);
-  box-shadow: var(--glow-soft);
-}
-
-.hud-ask-field {
-  flex: 1;
-  background: none;
-  border: none;
-  outline: none;
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
-}
-
-.hud-ask-field::placeholder { color: var(--text-faint); }
-
-.hud-ask-go {
-  border: 1px solid var(--line-strong);
-  background: var(--accent-quiet);
-  color: var(--accent-strong);
-  border-radius: var(--radius-pill);
-  padding: 7px 18px;
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  cursor: pointer;
-  transition: background var(--fast) var(--ease);
-}
-
-.hud-ask-go:hover:not(:disabled) { background: rgba(53, 199, 255, 0.24); }
-.hud-ask-go:disabled { opacity: 0.4; cursor: default; }
-
-.hud-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  max-width: 620px;
-}
-
-.hud-chip {
-  border: 1px solid var(--line-subtle);
-  background: var(--bg-1);
-  color: var(--text-muted);
-  border-radius: var(--radius-pill);
-  padding: 6px 14px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease);
-}
-
-.hud-chip:hover { border-color: var(--line-strong); color: var(--text); }
-
-/* ---- right panels ---- */
-
-.hud-side {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.hud-panel {
-  position: relative;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-lg);
-  background:
-    linear-gradient(180deg, rgba(53, 199, 255, 0.05), transparent 42%),
-    rgba(10, 15, 22, 0.72);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* Corner brackets: the detail that reads "instrument panel" rather than
-   "rounded card". Drawn with two gradients on a pseudo-element, so it costs
-   no extra DOM per panel. */
-.hud-panel::before,
-.hud-panel::after {
-  content: "";
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  border-color: var(--line-strong);
-  border-style: solid;
-  pointer-events: none;
-}
-
-.hud-panel::before {
-  top: -1px; left: -1px;
-  border-width: 1px 0 0 1px;
-  border-top-left-radius: var(--radius-lg);
-}
-
-.hud-panel::after {
-  bottom: -1px; right: -1px;
-  border-width: 0 1px 1px 0;
-  border-bottom-right-radius: var(--radius-lg);
-}
-
-.hud-gauges { display: flex; gap: 10px; }
-
-.gauge { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; }
-
-.gauge-ring {
-  width: 58px;
-  height: 58px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  border: 2px solid var(--line);
-  background: radial-gradient(circle at 50% 50%, rgba(53, 199, 255, 0.10), transparent 70%);
-}
-
-.gauge-value {
-  font-family: var(--font-display);
-  font-size: 15px;
-  color: var(--accent-strong);
-}
-
-.gauge-label {
-  font-size: 9.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.hud-readouts { display: flex; flex-direction: column; gap: 6px; margin: 0; }
-
-.hud-readouts > div {
+.console-voice {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-}
-
-.hud-readouts dt {
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 10px;
-}
-
-.hud-readouts dd { margin: 0; color: var(--text); font-family: var(--font-mono); font-size: 11.5px; }
-.hud-readouts dd.ok { color: var(--ok); }
-.hud-readouts dd.warn { color: var(--warn); }
-.hud-readouts dd.danger { color: var(--danger); }
-
-.hud-say-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.hud-say-model { font-size: 10px; color: var(--accent); }
-
-.hud-say-text {
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--text-muted);
-  white-space: pre-wrap;
-  /* A long reply must not push the panels below it off-screen — the command
-     centre stays one screen, and the full text is one click away on /chat. */
-  max-height: 168px;
-  overflow-y: auto;
-}
-
-.hud-say-tools { display: flex; flex-wrap: wrap; gap: 5px; }
-
-.hud-tool-chip {
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  padding: 3px 8px;
-  border-radius: var(--radius-pill);
+  gap: 8px;
+  padding: 6px 8px;
   border: 1px solid var(--line-subtle);
-  color: var(--text-faint);
+  border-radius: 6px;
 }
 
-.hud-flow { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.console-voice-state { font-size: 12px; color: var(--text-faint); }
+.console-voice-state.live { color: var(--ok); }
 
-.hud-more {
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--accent);
-  text-decoration: none;
-}
+.quick { display: flex; flex-direction: column; gap: 2px; }
 
-.hud-more:hover { text-decoration: underline; }
-
-/* ---- bottom strip ---- */
-
-.hud-bottom {
+.quick-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 20px;
-  border-top: 1px solid var(--line-subtle);
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: 6px;
   color: var(--text-faint);
-  text-transform: uppercase;
-  position: relative;
+  text-decoration: none;
+  font-size: 14px;
 }
 
-.hud-sep { opacity: 0.5; }
+.quick-item:hover { background: var(--accent-quiet); color: var(--accent-strong); }
 
-/* The whole HUD leans into the state the core is in — one signal, felt
-   everywhere, rather than each panel animating on its own schedule. */
-.hud-thinking .trace-bar { opacity: 0.9; }
-.hud-executing .trace-bar { opacity: 1; }
-.hud-error .trace-bar { background: var(--danger); }
-.hud-success .trace-bar { background: var(--ok); }
+.quick-glyph { color: var(--accent); font-size: 15px; }
 
-@media (max-width: 1100px) {
-  .hud-body { grid-template-columns: 180px minmax(0, 1fr); }
-  .hud-side { display: none; }
+/* ---- stage ---- */
+
+.cc-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Centred in the full column height. Top-aligned, the core sat high with a
+     large empty band beneath it. */
+  justify-content: center;
+  gap: 14px;
+  padding: 8px 0;
+}
+
+.cc-particles { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+
+.cc-core-title { position: relative; z-index: 1; text-align: center; }
+
+.cc-core-title h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 26px;
+  letter-spacing: 0.14em;
+  color: var(--accent-strong);
+  text-shadow: var(--glow-soft);
+}
+
+.cc-core-state {
+  font-size: 12.5px;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+}
+
+.cc-core-row {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 340px;
+}
+
+.cc-core-wrap { position: relative; display: grid; place-items: center; }
+
+.cc-actions { position: relative; z-index: 1; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+.cc-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 76px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 8px;
+  background: rgba(10, 15, 22, 0.72);
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 12.5px;
+  letter-spacing: 0.14em;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.cc-action:hover:not(:disabled) { border-color: var(--line-strong); color: var(--accent-strong); }
+
+.cc-action:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.cc-action-glyph { font-size: 18px; color: var(--accent); line-height: 1; }
+
+.cc-action-main { border-color: var(--accent); color: var(--accent-strong); }
+
+.cc-action.live { border-color: var(--ok); color: var(--ok); }
+.cc-action.live .cc-action-glyph { color: var(--ok); }
+
+.cc-ask {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 620px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 5px 5px 14px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  background: rgba(10, 15, 22, 0.82);
+}
+
+.cc-ask-field {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+}
+
+.cc-ask-field::placeholder { color: var(--text-faint); }
+
+.cc-ask-go {
+  flex: none;
+  padding: 7px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 12.5px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.cc-ask-go:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.cc-note {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: center;
+  max-width: 560px;
+  line-height: 1.45;
+}
+
+.cc-suggestions { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+
+/* ---- state rail ---- */
+
+.cc-states {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 7px 14px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(10, 15, 22, 0.78);
+  flex-wrap: wrap;
+}
+
+.cc-stage-word {
+  font-size: 12.5px;
+  letter-spacing: 0.2em;
+  color: var(--text-faint);
+  opacity: 0.5;
+}
+
+/* Lit only by real state, which is why this is a class and not an
+   animation cycling through the five words. */
+.cc-stage-word.on {
+  opacity: 1;
+  color: var(--accent-strong);
+  text-shadow: var(--glow-soft);
+}
+
+.cc-states-note { margin-left: auto; font-size: 13px; }
+
+/* ---- narrower screens ---- */
+
+@media (max-width: 1500px) {
+  .cc-body { grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(230px, 280px); }
+  .cc-core-row { min-height: 300px; }
+}
+
+@media (max-width: 1200px) {
+  .cc-body { grid-template-columns: 1fr; }
+  .cc-left, .cc-right { max-height: none; overflow: visible; }
+  /* Stage first on a narrow screen: the core is the point of this screen,
+     and burying it under the console would be the wrong order. */
+  .cc-stage { order: -1; }
+  .cc-metrics { margin-left: 0; }
+  .cc-top { flex-wrap: wrap; }
+}
+
+@media (max-width: 700px) {
+  .cc-clock { align-items: flex-start; }
+  .cc-states { gap: 12px; }
+  .cc-states-note { margin-left: 0; width: 100%; text-align: center; }
+}
+
+/* ---- surfaces ----
+   A surface opens over the stage instead of on its own page, so the core, the
+   metrics, the console and the state rail stay visible and stay live while
+   you use it. See page.tsx for why the app is one screen. */
+
+.cc-surface {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(10, 15, 22, 0.94);
+  overflow: hidden;
+}
+
+.cc-surface-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--accent-quiet);
+}
+
+.cc-surface-close {
+  padding: 3px 12px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 999px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.cc-surface-close:hover { color: var(--accent-strong); border-color: var(--accent); }
+
+.cc-surface-body {
+  padding: 14px;
+  /* Scrolls inside itself so the screen never grows a second scrollbar and
+     the surrounding instruments never move. */
+  overflow-y: auto;
+  max-height: calc(100vh - 260px);
+  min-height: 0;
+}
+
+/* A surface takes the stage, so the core and its controls stand down while
+   one is open — they are still mounted, still live, just not competing for
+   the same space. */
+.cc-stage:has(.cc-surface) .cc-core-row,
+.cc-stage:has(.cc-surface) .cc-actions,
+.cc-stage:has(.cc-surface) .cc-suggestions,
+.cc-stage:has(.cc-surface) .cc-core-title { display: none; }
+
+/* The core stays with you into a surface. Same component, same live state —
+   it listens, thinks and speaks here exactly as it does at full size. */
+.cc-surface-core { flex: none; display: grid; place-items: center; }
+
+.cc-surface-state {
+  margin-left: auto;
+  font-size: 12.5px;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+
+/* The core and its controls stand down while the work view has the stage,
+   the same as for a surface. Still mounted and still live; just not
+   competing for the same space. */
+.cc-stage:has(.work) .cc-core-row,
+.cc-stage:has(.work) .cc-actions,
+.cc-stage:has(.work) .cc-suggestions,
+.cc-stage:has(.work) .cc-core-title { display: none; }
+
+/* ---- depth ----
+   The screen was flat panels on flat black. These are the layers that make it
+   read as an instrument rather than a form: a faint grid behind everything, a
+   glow under the core, and edges that catch light. All of it is decoration and
+   none of it carries information — the rule is that nothing here may look like
+   a reading, so there are no moving parts and no numbers. */
+
+.cc {
+  position: relative;
+  isolation: isolate;
+}
+
+/* A surveyor's grid, well under the content. Fixed rather than scrolling, so
+   it reads as the surface the panels sit on. */
+.cc::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background-image:
+    linear-gradient(rgba(53, 199, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(53, 199, 255, 0.045) 1px, transparent 1px);
+  background-size: 46px 46px;
+  pointer-events: none;
+}
+
+/* Vignette: pulls the eye to the middle and keeps the corners from competing
+   with the panels. */
+.cc::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(3, 6, 10, 0.75) 100%);
+  pointer-events: none;
+}
+
+/* The core throws light onto the stage behind it. Sized to the core and
+   coloured by state, so a thinking core lights the space differently from an
+   idle one — the state is already real, this only makes it visible further
+   out. */
+.cc-stage::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 560px;
+  height: 560px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(53, 199, 255, 0.10), transparent 62%);
+  z-index: 0;
+  pointer-events: none;
+  transition: background 500ms ease;
+}
+
+.cc-executing .cc-stage::before { background: radial-gradient(circle, rgba(53, 199, 255, 0.18), transparent 62%); }
+.cc-listening .cc-stage::before { background: radial-gradient(circle, rgba(70, 227, 160, 0.14), transparent 62%); }
+.cc-error .cc-stage::before { background: radial-gradient(circle, rgba(255, 92, 92, 0.14), transparent 62%); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-stage::before { transition: none; }
+}
+
+/* Panels catch light along their top edge and sit on a soft shadow, which is
+   what separates them from the background instead of a bare 1px line. */
+.hud-panel {
+  box-shadow:
+    0 1px 0 rgba(53, 199, 255, 0.10) inset,
+    0 10px 26px rgba(0, 0, 0, 0.36);
+}
+
+/* A short accent rule beside every panel heading. Cheap, and it does more for
+   legibility than another border would. */
+.hud-panel > .hud-label:first-child,
+.rings-head .hud-label,
+.cmd-head .hud-label,
+.trace-head .hud-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.hud-panel > .hud-label:first-child::before,
+.rings-head .hud-label::before,
+.cmd-head .hud-label::before,
+.trace-head .hud-label::before {
+  content: "";
+  width: 2px;
+  height: 11px;
+  flex: none;
+  border-radius: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+/* The top bar and the state rail are the frame; they get a stronger seat than
+   the panels between them. */
+.cc-top, .cc-states {
+  box-shadow:
+    0 1px 0 rgba(53, 199, 255, 0.12) inset,
+    0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.cc-core-title h1 { letter-spacing: 0.3em; }
+
+/* The ask field is the one control people reach for, so it reads as raised
+   rather than as another outline. */
+.cc-ask {
+  box-shadow:
+    0 1px 0 rgba(53, 199, 255, 0.10) inset,
+    0 8px 22px rgba(0, 0, 0, 0.45);
+}
+
+.cc-ask:focus-within {
+  border-color: var(--accent);
+  box-shadow:
+    0 1px 0 rgba(53, 199, 255, 0.16) inset,
+    0 0 0 1px rgba(53, 199, 255, 0.25),
+    0 8px 26px rgba(0, 0, 0, 0.5);
+}
+
+.cc-action { box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3); }
+
+/* ---- the projector base ----
+   The reference sits its core on a lit platform with light rising from it, and
+   that silhouette is most of why the design reads as a projection rather than
+   a circle on a page. Purely decorative: no part of it encodes a value, and it
+   carries no numbers, so it cannot be mistaken for an instrument. */
+
+.cc-core-wrap { position: relative; }
+
+/* The platform: an ellipse in perspective, brightest at its near edge. */
+.cc-core-wrap::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -34px;
+  width: 300px;
+  height: 66px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(53, 199, 255, 0.22), transparent 68%),
+    radial-gradient(ellipse at 50% 42%, rgba(120, 225, 255, 0.16), transparent 52%);
+  border-top: 1px solid rgba(53, 199, 255, 0.30);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* The beam: a soft cone between the platform and the core. Kept faint so the
+   core stays the brightest thing on the screen. */
+.cc-core-wrap::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -12px;
+  width: 210px;
+  height: 150px;
+  transform: translateX(-50%);
+  background: linear-gradient(to top, rgba(53, 199, 255, 0.16), transparent 76%);
+  clip-path: polygon(28% 100%, 72% 100%, 60% 0%, 40% 0%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* The state colours the base too, so the platform belongs to the core rather
+   than sitting under it as unrelated scenery. */
+.cc-listening .cc-core-wrap::after { border-top-color: rgba(70, 227, 160, 0.34); }
+.cc-error .cc-core-wrap::after { border-top-color: rgba(255, 92, 92, 0.34); }
+
+/* Corner ticks on the stage: the framing marks the reference uses to make the
+   middle read as a viewport rather than as empty space. */
+.cc-core-row::before,
+.cc-core-row::after {
+  content: "";
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-strong);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.cc-core-row::before { top: 4px; left: 4px; border-width: 1px 0 0 1px; }
+.cc-core-row::after { bottom: 4px; right: 4px; border-width: 0 1px 1px 0; }
+
+/* Stop reads as an interruption rather than another action, so it takes the
+   warning colour instead of the accent. */
+.cc-ask-stop {
+  border-color: var(--warn, #f5a524);
+  color: var(--warn, #f5a524);
+  background: rgba(245, 165, 36, 0.10);
+}
+
+.cc-ask-stop:hover { border-color: var(--warn, #f5a524); filter: brightness(1.15); }
+
+/* ---- the nav rail ----
+   The reference puts a labelled rail down the left: icon, word, and a clear
+   selected state. The old screen had quick-access links buried under the
+   console, which is why nothing on the left read as navigation. */
+
+.cc-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(10, 15, 22, 0.72);
+  box-shadow: 0 1px 0 rgba(53, 199, 255, 0.10) inset, 0 10px 26px rgba(0, 0, 0, 0.36);
+}
+
+.cc-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 13.5px;
+  letter-spacing: 0.06em;
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+.cc-nav-item:hover { color: var(--text); background: var(--accent-quiet); }
+
+/* The selected item is unmistakable — a filled seat with a lit edge, not a
+   slightly brighter word. */
+.cc-nav-item.active {
+  color: var(--accent-strong);
+  background: var(--accent-quiet);
+  border-color: var(--line-strong);
+  box-shadow: 0 0 14px rgba(53, 199, 255, 0.14) inset;
+}
+
+.cc-nav-glyph {
+  flex: none;
+  width: 22px;
+  text-align: center;
+  font-size: 16px;
+  color: var(--accent);
+}
+
+.cc-nav-item.active .cc-nav-glyph { color: var(--accent-strong); }
+
+/* ---- the ask row ----
+   The reference gives the command line a big round microphone beside it. Both
+   are the controls you reach for, so they get the most weight on the screen. */
+
+.cc-ask { padding: 7px 7px 7px 20px; }
+.cc-ask-field { font-size: 15px; }
+.cc-ask-go { padding: 10px 22px; font-size: 13px; letter-spacing: 0.12em; }
+
+.cc-mic {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+  font-size: 17px;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
+}
+
+.cc-mic:hover:not(:disabled) { border-color: var(--accent); }
+.cc-mic:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Listening is a real state and gets a real signal: the ring lights and
+   breathes. It is driven by mic.listening, not by a timer. */
+.cc-mic.live {
+  border-color: var(--ok);
+  color: var(--ok);
+  box-shadow: 0 0 0 3px rgba(75, 227, 168, 0.16), 0 0 22px rgba(75, 227, 168, 0.30);
+  animation: mic-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes mic-breathe {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(75, 227, 168, 0.14), 0 0 18px rgba(75, 227, 168, 0.24); }
+  50% { box-shadow: 0 0 0 5px rgba(75, 227, 168, 0.20), 0 0 30px rgba(75, 227, 168, 0.40); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hud-dot.live { animation: none; }
-  .trace-bar { transition: none; }
-  .hud::before { animation: none; }
-  .hud::after { display: none; }
+  /* Still obviously live, just not moving. */
+  .cc-mic.live { animation: none; }
 }
+
+/* ---- room ----
+   Panels were packed to their edges, which reads as cramped however good the
+   type is. These are the last of the "basic" problem: space, not decoration. */
+
+.hud-panel { padding: 16px 18px; gap: 12px; }
+
+.cc-top { padding: 12px 18px; gap: 20px; }
+
+.metric { min-width: 74px; padding: 7px 12px; }
+.metric-value { font-size: 19px; }
+.cc-time { font-size: 21px; }
+
+.cc-states { padding: 10px 18px; gap: 28px; }
+.cc-stage-word { letter-spacing: 0.22em; }
+
+.cc-core-title h1 { font-size: 30px; }
+
+/* The tiles were four to a row and unreadable at that width. Three gives each
+   one enough space for its label to be a word rather than an ellipsis. */
+.tiles { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.tile { padding: 12px 6px; gap: 6px; }
+.tile-glyph { font-size: 19px; }

@@ -10,6 +10,10 @@ import {
   writeWorkspaceFile
 } from "./workspace.js";
 import { fetchWebPage } from "./webFetch.js";
+import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
+import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
+import { enterStage } from "./reasoningStage.js";
+import { increment, observe } from "./metrics.js";
 
 // What the assistant can actually do.
 //
@@ -112,6 +116,27 @@ export type ToolContext = {
    * given in would mean "yes" to one deletion quietly permitting the next.
    */
   confirmedActions?: ReadonlySet<string>;
+  /**
+   * True when this turn runs with nobody watching — a schedule firing in the
+   * background rather than someone at the machine.
+   *
+   * Command access is withheld whatever the arming window says. Switching
+   * machine control on is a grant for working at the machine, and a scheduled
+   * run must not inherit it because the window happens to still be open when
+   * the timer fires. Checked here as well as at the tool list, so a call the
+   * model writes as text rather than through the interface is caught too.
+   */
+  unattended?: boolean;
+  /**
+   * The session this turn belongs to, so each step can be recorded against it
+   * as it happens.
+   *
+   * Optional throughout: without it the tools work exactly as before and
+   * simply record nothing. A trace is for watching the work, not for the work
+   * being correct, and a test exercising a tool should not need a session to
+   * do it.
+   */
+  sessionId?: string;
   /** Overridable so a test can assert on a fixed clock. */
   now?: () => Date;
   /**
@@ -477,8 +502,48 @@ export const toolDefinitions: ToolDefinition[] = [
         required: ["url"]
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "run_command",
+      description:
+        "Run a command on the user's machine and get back its real output and exit code. Use this "
+        + "for anything outside the workspace: installing packages, running builds and tests, "
+        + "opening applications, inspecting the system. The command runs as the user, so it can do "
+        + "anything they can do — say what you are about to run and why. Report failures as "
+        + "failures: a non-zero exit code means it did not work, whatever the output says.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: {
+            type: "string",
+            description: "The exact command line to run, as the user would type it in a terminal."
+          },
+          reason: {
+            type: "string",
+            description: "One short line on what this is for, shown to the user in the run log."
+          }
+        },
+        required: ["command"]
+      }
+    }
   }
 ];
+
+/**
+ * The tools actually offered on a given turn.
+ *
+ * run_command is withheld entirely while disarmed rather than being offered
+ * and then refused. A model that can see a tool will reason about it, mention
+ * it, and try to talk its way into it; one that never sees it cannot. This is
+ * the same reason the capability report reads from the registry — what is
+ * described and what is enforced have to be the same thing.
+ */
+export function availableTools(armed: boolean): ToolDefinition[] {
+  if (armed) return toolDefinitions;
+  return toolDefinitions.filter((definition) => definition.function.name !== "run_command");
+}
 
 /** How many results a search hands back before it stops being useful context. */
 const searchLimit = 3;
@@ -556,7 +621,36 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
   // confirm a tool that does not exist.
   const isRegistered = toolDefinitions.some((definition) => definition.function.name === call.name);
 
-  if (isRegistered && requiresConfirmation(call.name) && !context.confirmedActions?.has(call.name)) {
+  // Switching machine control on IS the authorisation for run_command.
+  //
+  // Asking again per command would make the switch pointless: the user has
+  // just made an explicit, scoped, expiring grant, and answering "are you
+  // sure" to every line afterwards is the same question twice. It is also how
+  // a confirmation prompt stops being read — a dialog that appears on every
+  // command is one people click through without looking, which is worse than
+  // one clear decision up front.
+  //
+  // The grant stays bounded by everything around it: it lapses on its own, it
+  // is visible on the front screen while it is on, and every command that
+  // runs is recorded with its output. Other level-3 tools are unaffected —
+  // forget and delete_document still ask.
+  // Refused before the confirmation gate, and for a different reason. Falling
+  // through to "ask the user to confirm" would be nonsense on a scheduled run
+  // — there is nobody there to ask — and worse, it implies a confirmation
+  // would let it through, which nothing can.
+  if (call.name === "run_command" && context.unattended) {
+    return {
+      ok: false,
+      content: "Nothing was run. This is a scheduled run with nobody watching, and command access "
+        + "is only ever granted for working at the machine — it cannot be confirmed into being "
+        + "here. Say what you would have run and why."
+    };
+  }
+
+  const preAuthorised = call.name === "run_command" && commandsArmed();
+
+  if (isRegistered && requiresConfirmation(call.name)
+    && !preAuthorised && !context.confirmedActions?.has(call.name)) {
     return { ok: false, content: describeConfirmationNeeded(call.name), needsConfirmation: true };
   }
 
@@ -892,13 +986,25 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       const folder = slugify(spec.title, "app", 60);
       const files = generateProject(spec);
 
+      // Recorded as it happens, not described in advance. Each event is
+      // written by the code that does the thing, at the moment it does it, so
+      // the trace cannot claim a step that did not run.
+      const { sessionId } = context;
+      recordEvent(sessionId, "plan", `Planned "${spec.title}"`, "ok",
+        `${files.length} files, ${spec.entities.length} record type${spec.entities.length === 1 ? "" : "s"}`);
+
       // Every file is written before anything is reported. A partial write that
       // announced success would leave the user with an app that does not run
       // and a message saying it does.
+      const writing = beginEvent(sessionId, "write", `Writing ${files.length} files`);
       const written: string[] = [];
       for (const file of files) {
         const result = writeWorkspaceFile(`${folder}/${file.path}`, file.content);
         if (!result.ok) {
+          // The count is what actually landed before it stopped, not the total
+          // it set out to write.
+          endEvent(sessionId, writing, "failed",
+            `${result.reason} ${written.length} of ${files.length} files were written.`);
           return {
             ok: false,
             content: `Could not finish building: ${result.reason} Nothing was reported as built.`
@@ -906,14 +1012,29 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         }
         written.push(result.path);
       }
+      endEvent(sessionId, writing, "ok", `${written.length} files`, `${folder}/`);
 
       // Written is not the same as working. Every generated project ships its
       // own smoke test with zero dependencies, so it can be run immediately
       // rather than trusted, rather than merely reported as built. Reporting
       // outcomes rather than intentions is the rule everywhere else in this
       // file; a build is the one action where skipping it is easiest to miss.
+      // Verifying is a stage of its own, entered where verification really
+      // begins — not announced when the build was requested.
+      enterStage(sessionId, "verifying");
+      const verifying = beginEvent(sessionId, "verify", "Running its own checks");
       const verification = await verifyBuiltProject(folder);
       const runLine = "Run it with: cd " + folder + " && npm install && npm start";
+
+      // Three outcomes, kept distinct. "Could not check" is not "passed", and
+      // reporting it as either would be the kind of quiet rounding-up this
+      // whole trace exists to make impossible.
+      endEvent(
+        sessionId,
+        verifying,
+        !verification.ran ? "skipped" : verification.passed ? "ok" : "failed",
+        verification.ran ? verification.output : verification.reason
+      );
 
       if (!verification.ran) {
         return {
@@ -1014,6 +1135,55 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
 
       const notice = result.truncated ? " [showing the first part of this page]" : "";
       return { ok: true, content: `From "${result.title}" (${result.url})${notice}:\n${result.text}` };
+    }
+
+    case "run_command": {
+      const command = requireString(call.arguments.command);
+      if (!command) return { ok: false, content: "run_command needs a command." };
+
+      // Re-checked here, not only where the tool list is built. The arming
+      // window can lapse between the model being offered the tool and the
+      // call arriving, and the check that matters is the one at the moment
+      // something actually runs.
+      if (context.unattended) {
+        return {
+          ok: false,
+          content: "Nothing was run: this is a scheduled run with nobody watching, and command "
+            + "access is only ever granted for working at the machine. Say what you would have run."
+        };
+      }
+
+      if (!commandsArmed()) {
+        return {
+          ok: false,
+          content: "Command access is not switched on, so nothing was run. Tell the user they can "
+            + "turn it on from the dashboard, and what you would have run."
+        };
+      }
+
+      // The stage a command belongs to, read from the command itself — an
+      // install looks like an install in the trace rather than a generic
+      // "command", which is what makes the sequence legible.
+      const lower = command.toLowerCase();
+      const kind = /(install|add|npm i|pip install)/.test(lower) ? "install"
+        : /(test|jest|vitest|pytest)/.test(lower) ? "test"
+        : /(start|serve|run dev|launch)/.test(lower) ? "launch"
+        : "command";
+
+      const step = beginEvent(context.sessionId, kind, command);
+      const run = await runCommand(command);
+      endEvent(
+        context.sessionId,
+        step,
+        run.timedOut ? "failed" : run.exitCode === 0 ? "ok" : "failed",
+        run.timedOut
+          ? "Still running after the time limit, and was stopped."
+          : (run.stdout.trim() || run.stderr.trim() || "printed nothing").slice(0, 400)
+      );
+      // ok tracks whether the command succeeded, not whether the tool worked.
+      // A failed command that was reported accurately is still a failure, and
+      // labelling it ok would let the reply describe it as done.
+      return { ok: run.exitCode === 0 && !run.timedOut, content: describeRun(run) };
     }
 
     default:
