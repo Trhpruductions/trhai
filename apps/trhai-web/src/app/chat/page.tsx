@@ -106,6 +106,10 @@ export default function ChatPage() {
     const newest = messages[messages.length - 1];
     if (!newest || newest.role !== "assistant") return;
     if (newest.id.startsWith("restored-")) return;
+    // Never mid-stream. Speaking the first token would read one word aloud
+    // and stop, and marking it spoken would mean the finished reply is never
+    // read at all.
+    if (newest.streaming) return;
     if (lastSpokenId.current === newest.id) return;
 
     // Marked spoken either way, deliberately. With the microphone open,

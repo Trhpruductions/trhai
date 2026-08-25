@@ -246,6 +246,10 @@ export default function DashboardPage() {
     const newest = messages[messages.length - 1];
     if (!newest || newest.role !== "assistant") return;
     if (newest.id.startsWith("restored-")) return;
+    // Never mid-stream. Speaking the first token would read one word aloud
+    // and stop, and marking it spoken would mean the finished reply is never
+    // read at all.
+    if (newest.streaming) return;
     if (lastSpokenId.current === newest.id) return;
 
     lastSpokenId.current = newest.id;
