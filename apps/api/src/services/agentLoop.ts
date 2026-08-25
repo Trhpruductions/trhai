@@ -2,6 +2,7 @@ import type { LocalModelConfig } from "./localModel.js";
 import { availableTools, runTool, toolDefinitions, type ToolContext, type ToolCall } from "./agentTools.js";
 import { commandsArmed } from "./commandRunner.js";
 import { readStream, toLines } from "./streamReader.js";
+import { enterStage, stageForTool } from "./reasoningStage.js";
 
 // The agent loop.
 //
@@ -767,6 +768,11 @@ export async function runAgent(
 
     for (const call of orderedCalls) {
       onToolStart?.(call.name);
+      // The stage follows the work: a search moves it to gathering, a build to
+      // building. Set here, as the call begins, rather than predicted from the
+      // request — which is what keeps a stalled turn showing the stage it
+      // actually stopped in instead of marching on through the rest.
+      enterStage(context.sessionId, stageForTool(call.name));
 
       // The same removal, not the same request for restraint, for the part a
       // round boundary cannot reach: once fetch_url has failed this turn,

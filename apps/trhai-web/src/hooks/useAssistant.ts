@@ -31,8 +31,8 @@ export type ChatMessage = {
 
 export type AssistantStatus =
   | { state: "idle" }
-  | { state: "thinking" }
-  | { state: "executing"; tool: string }
+  | { state: "thinking"; stage?: string }
+  | { state: "executing"; tool: string; stage?: string }
   | { state: "success" }
   | { state: "error"; detail: string };
 
@@ -103,12 +103,19 @@ export function useAssistant() {
         .then((payload) => {
           if (!stillCurrent()) return;
           const tool = payload?.data?.tool;
+          // Which part of the pipeline this actually is. Reported by the API
+          // from real checkpoints, not guessed from elapsed time here.
+          const stage = typeof payload?.data?.stageLabel === "string"
+            ? payload.data.stageLabel
+            : undefined;
           setStatus((existing) => {
             // Only ever steers a turn already in progress — a poll response
             // that lands after the request itself resolved must not drag a
             // finished turn's status back toward "thinking".
             if (existing.state !== "thinking" && existing.state !== "executing") return existing;
-            return typeof tool === "string" ? { state: "executing", tool } : { state: "thinking" };
+            return typeof tool === "string"
+              ? { state: "executing", tool, stage }
+              : { state: "thinking", stage };
           });
         })
         .catch(() => { /* a missed poll just leaves the last known status showing */ });

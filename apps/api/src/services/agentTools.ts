@@ -12,6 +12,7 @@ import {
 import { fetchWebPage } from "./webFetch.js";
 import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
 import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
+import { enterStage } from "./reasoningStage.js";
 
 // What the assistant can actually do.
 //
@@ -1017,6 +1018,9 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // rather than trusted, rather than merely reported as built. Reporting
       // outcomes rather than intentions is the rule everywhere else in this
       // file; a build is the one action where skipping it is easiest to miss.
+      // Verifying is a stage of its own, entered where verification really
+      // begins — not announced when the build was requested.
+      enterStage(sessionId, "verifying");
       const verifying = beginEvent(sessionId, "verify", "Running its own checks");
       const verification = await verifyBuiltProject(folder);
       const runLine = "Run it with: cd " + folder + " && npm install && npm start";

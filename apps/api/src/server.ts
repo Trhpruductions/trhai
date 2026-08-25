@@ -72,6 +72,7 @@ import { getFlow, saveFlow } from "./services/flowStore.js";
 import { readTelemetry } from "./services/systemTelemetry.js";
 import { getTask } from "./services/taskStore.js";
 import { clearEvents, listEvents } from "./services/executionLog.js";
+import { finishStages, getStage, stageLabels } from "./services/reasoningStage.js";
 import {
   armCommands,
   armedUntil,
@@ -229,6 +230,20 @@ function buildAssistInput(
 }
 
 /** The per-turn session state both assist routes derive the same way. */
+/**
+ * Close a turn's stages and record how long each actually took.
+ *
+ * The telemetry the spec asks for, in the only form worth having: measured
+ * durations for stages that genuinely ran, rather than a fixed sequence with
+ * timings hung off it. A turn that stopped early reports the stages it
+ * reached and no more.
+ */
+function reportStages(sessionId: string): void {
+  const sequence = finishStages(sessionId);
+  if (sequence.length === 0) return;
+  console.info(`[stages] ${sequence.map((entry) => `${entry.stage} ${entry.durationMs}ms`).join(" -> ")}`);
+}
+
 function readTurnContext(req: express.Request, message: string) {
   const sessionId = resolveMemoryKey(req, normalizeSessionId(req.body?.sessionId));
   // A new request starts a fresh trace. The panel is for watching the work
@@ -380,7 +395,10 @@ export function createApp() {
       }).finally(() => {
         // Whatever a client polling /v1/assist/activity mid-turn was told is
         // stale the instant this turn ends, success or failure alike.
-        if (sessionId) clearActivity(sessionId);
+        if (sessionId) {
+          clearActivity(sessionId);
+          reportStages(sessionId);
+        }
       });
 
       // Recorded after a successful reply so a failed request leaves no orphan turn.
@@ -928,6 +946,7 @@ export function createApp() {
           model: result.model
         });
         clearActivity(sessionId);
+        reportStages(sessionId);
       }
 
       // The whole result, so a client never has to reassemble the reply from
@@ -1145,7 +1164,22 @@ export function createApp() {
     if (!sessionId) return;
 
     const activity = getActivity(sessionId);
-    res.json({ data: { tool: activity?.tool ?? null }, traceId: "trace-local" });
+    // The stage rides along on the poll the client already makes. "Thinking"
+    // for thirty seconds is true and tells you almost nothing; which part of
+    // the pipeline it is in is the part worth knowing.
+    const stage = getStage(sessionId);
+    res.json({
+      data: {
+        tool: activity?.tool ?? null,
+        stage: stage?.stage ?? null,
+        stageLabel: stage ? stageLabels[stage.stage] : null,
+        // Real elapsed time in the current stage, and what each finished one
+        // actually took — measured, never estimated.
+        stageMs: stage ? Math.max(0, Date.now() - stage.startedAt) : null,
+        completedStages: stage?.completed ?? []
+      },
+      traceId: "trace-local"
+    });
   });
 
   // Machine-wide preferences, so the desktop window and a browser tab agree.

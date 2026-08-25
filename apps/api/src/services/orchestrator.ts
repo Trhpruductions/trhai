@@ -3,6 +3,7 @@ import { checkAvailability, generate, orderedCandidates, readLocalModelConfig } 
 import { buildCapabilityReply } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
 import { setActivity } from "./agentActivity.js";
+import { enterStage } from "./reasoningStage.js";
 import { isContinuationRequest } from "./requestAnalysis.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
@@ -133,6 +134,10 @@ export async function runAssistantOrchestrator(
   if (resuming && input.sessionId) {
     updateTask(input.sessionId, { status: "executing" });
   }
+
+  // Working out what was asked. Set here because this is the line that does
+  // it, not a step announced before it starts.
+  enterStage(input.sessionId, "understanding");
 
   const modelReply = await modelRouter.generate({
     mode: input.mode,

@@ -80,9 +80,15 @@ type Presence = {
 function presence(status: AssistantStatus, listening: boolean, speaking: boolean): Presence {
   if (listening) return { core: "listening", label: "LISTENING" };
   if (status.state === "executing") {
-    return { core: "executing", label: `EXECUTING · ${status.tool.replace(/_/g, " ").toUpperCase()}` };
+    // The stage says which part of the pipeline this is; the tool says what is
+    // doing it. Both are real readings, and neither stands in for the other.
+    const stage = status.stage ? `${status.stage.toUpperCase()} · ` : "";
+    return { core: "executing", label: `${stage}${status.tool.replace(/_/g, " ").toUpperCase()}` };
   }
-  if (status.state === "thinking") return { core: "thinking", label: "THINKING" };
+  if (status.state === "thinking") {
+    // "THINKING" for thirty seconds is true and says almost nothing.
+    return { core: "thinking", label: (status.stage ?? "Thinking").toUpperCase() };
+  }
   if (status.state === "success") return { core: "success", label: "COMPLETE" };
   if (status.state === "error") return { core: "error", label: "ERROR" };
   if (speaking) return { core: "speaking", label: "SPEAKING" };
