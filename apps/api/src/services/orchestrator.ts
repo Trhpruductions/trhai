@@ -426,6 +426,7 @@ async function answerWithLocalModel(
     pinMemory: input.pinMemory,
     confirmedActions,
     unattended: input.unattended,
+    sessionId: input.sessionId,
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history

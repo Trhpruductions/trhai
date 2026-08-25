@@ -71,6 +71,7 @@ import {
 import { getFlow, saveFlow } from "./services/flowStore.js";
 import { readTelemetry } from "./services/systemTelemetry.js";
 import { getTask } from "./services/taskStore.js";
+import { clearEvents, listEvents } from "./services/executionLog.js";
 import {
   armCommands,
   armedUntil,
@@ -230,6 +231,10 @@ function buildAssistInput(
 /** The per-turn session state both assist routes derive the same way. */
 function readTurnContext(req: express.Request, message: string) {
   const sessionId = resolveMemoryKey(req, normalizeSessionId(req.body?.sessionId));
+  // A new request starts a fresh trace. The panel is for watching the work
+  // happening now; keeping every step since the browser opened would bury the
+  // one that matters at the moment it matters most.
+  clearEvents(sessionId ?? undefined);
   const savedMemories = sessionId ? recordMemoriesFromMessage(sessionId, message) : [];
   // Widen the candidate set: the composer scores for relevance, so limiting
   // to the 5 newest would hide the one memory that actually answers.
@@ -937,6 +942,16 @@ export function createApp() {
     } finally {
       res.end();
     }
+  });
+
+  // What the assistant actually did, step by step, as it happens.
+  //
+  // Not the same as /v1/agent-tasks, which records one request and whether it
+  // succeeded. This is the individual steps inside it — the thing that makes
+  // a long build watchable rather than merely pending.
+  app.get("/v1/execution", (req, res) => {
+    const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : "";
+    res.json({ data: { events: listEvents(sessionId) }, traceId: "trace-local" });
   });
 
   // Command access: the switch, and what it has actually run.

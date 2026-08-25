@@ -11,6 +11,7 @@ import {
 } from "./workspace.js";
 import { fetchWebPage } from "./webFetch.js";
 import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
+import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
 
 // What the assistant can actually do.
 //
@@ -124,6 +125,16 @@ export type ToolContext = {
    * model writes as text rather than through the interface is caught too.
    */
   unattended?: boolean;
+  /**
+   * The session this turn belongs to, so each step can be recorded against it
+   * as it happens.
+   *
+   * Optional throughout: without it the tools work exactly as before and
+   * simply record nothing. A trace is for watching the work, not for the work
+   * being correct, and a test exercising a tool should not need a session to
+   * do it.
+   */
+  sessionId?: string;
   /** Overridable so a test can assert on a fixed clock. */
   now?: () => Date;
   /**
@@ -973,13 +984,25 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       const folder = slugify(spec.title, "app", 60);
       const files = generateProject(spec);
 
+      // Recorded as it happens, not described in advance. Each event is
+      // written by the code that does the thing, at the moment it does it, so
+      // the trace cannot claim a step that did not run.
+      const { sessionId } = context;
+      recordEvent(sessionId, "plan", `Planned "${spec.title}"`, "ok",
+        `${files.length} files, ${spec.entities.length} record type${spec.entities.length === 1 ? "" : "s"}`);
+
       // Every file is written before anything is reported. A partial write that
       // announced success would leave the user with an app that does not run
       // and a message saying it does.
+      const writing = beginEvent(sessionId, "write", `Writing ${files.length} files`);
       const written: string[] = [];
       for (const file of files) {
         const result = writeWorkspaceFile(`${folder}/${file.path}`, file.content);
         if (!result.ok) {
+          // The count is what actually landed before it stopped, not the total
+          // it set out to write.
+          endEvent(sessionId, writing, "failed",
+            `${result.reason} ${written.length} of ${files.length} files were written.`);
           return {
             ok: false,
             content: `Could not finish building: ${result.reason} Nothing was reported as built.`
@@ -987,14 +1010,26 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         }
         written.push(result.path);
       }
+      endEvent(sessionId, writing, "ok", `${written.length} files`, `${folder}/`);
 
       // Written is not the same as working. Every generated project ships its
       // own smoke test with zero dependencies, so it can be run immediately
       // rather than trusted, rather than merely reported as built. Reporting
       // outcomes rather than intentions is the rule everywhere else in this
       // file; a build is the one action where skipping it is easiest to miss.
+      const verifying = beginEvent(sessionId, "verify", "Running its own checks");
       const verification = await verifyBuiltProject(folder);
       const runLine = "Run it with: cd " + folder + " && npm install && npm start";
+
+      // Three outcomes, kept distinct. "Could not check" is not "passed", and
+      // reporting it as either would be the kind of quiet rounding-up this
+      // whole trace exists to make impossible.
+      endEvent(
+        sessionId,
+        verifying,
+        !verification.ran ? "skipped" : verification.passed ? "ok" : "failed",
+        verification.ran ? verification.output : verification.reason
+      );
 
       if (!verification.ran) {
         return {
@@ -1121,7 +1156,25 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         };
       }
 
+      // The stage a command belongs to, read from the command itself — an
+      // install looks like an install in the trace rather than a generic
+      // "command", which is what makes the sequence legible.
+      const lower = command.toLowerCase();
+      const kind = /(install|add|npm i|pip install)/.test(lower) ? "install"
+        : /(test|jest|vitest|pytest)/.test(lower) ? "test"
+        : /(start|serve|run dev|launch)/.test(lower) ? "launch"
+        : "command";
+
+      const step = beginEvent(context.sessionId, kind, command);
       const run = await runCommand(command);
+      endEvent(
+        context.sessionId,
+        step,
+        run.timedOut ? "failed" : run.exitCode === 0 ? "ok" : "failed",
+        run.timedOut
+          ? "Still running after the time limit, and was stopped."
+          : (run.stdout.trim() || run.stderr.trim() || "printed nothing").slice(0, 400)
+      );
       // ok tracks whether the command succeeded, not whether the tool worked.
       // A failed command that was reported accurately is still a failure, and
       // labelling it ok would let the reply describe it as done.

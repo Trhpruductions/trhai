@@ -10,6 +10,7 @@ import { useMicrophone } from "../hooks/useMicrophone";
 import { Markdown } from "../components/Markdown";
 import { Subsystems, type Subsystem } from "../components/Subsystems";
 import { CommandAccess } from "../components/CommandAccess";
+import { ExecutionTrace } from "../components/ExecutionTrace";
 import {
   ActiveTasks, ConnectedServices, MemoryStatus, PersonalityCard, SystemOverview, ToolsGrid,
   type AgentTask, type HealthRow, type Tile
@@ -677,6 +678,7 @@ export default function DashboardPage() {
           <CommandAccess />
           <SystemOverview rows={healthRows} />
           <ActiveTasks tasks={agentTasks} />
+          <ExecutionTrace busy={busy} />
           <ToolsGrid tiles={tiles} onOpen={(href) => setSurface(surfaceFor(href))} />
           <ConnectedServices services={telemetry?.cloud.services ?? []} />
           <MemoryStatus
