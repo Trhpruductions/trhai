@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import {
+  binaryPath,
   cleanTranscript,
   describeModelFile,
   installedModels,
@@ -144,6 +147,48 @@ test("the required audio format is stated, so a client can meet it", () => {
   // rather than written twice.
   assert.equal(requiredSampleRate, 16_000);
   assert.equal(requiredChannels, 1);
+});
+
+test("the binary is found in the layout the official Windows zip actually uses", () => {
+  // Caught by installing it rather than by reading the docs, which do not
+  // mention this: whisper-bin-x64.zip extracts to a Release/ subdirectory,
+  // so a search that only looked in the root and build/bin found nothing on
+  // a perfectly good install. Pinned here because it would silently return.
+  const original = process.env.VEXORA_WHISPER_DIR;
+  const root = mkdtempSync(path.join(tmpdir(), "whisper-layout-"));
+  const executable = process.platform === "win32" ? "whisper-cli.exe" : "whisper-cli";
+
+  try {
+    process.env.VEXORA_WHISPER_DIR = root;
+    assert.equal(binaryPath(), null, "nothing installed yet");
+
+    mkdirSync(path.join(root, "Release"), { recursive: true });
+    writeFileSync(path.join(root, "Release", executable), "");
+
+    assert.equal(binaryPath(), path.join(root, "Release", executable));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    if (original === undefined) delete process.env.VEXORA_WHISPER_DIR;
+    else process.env.VEXORA_WHISPER_DIR = original;
+  }
+});
+
+test("the older `main` executable name is still recognised", () => {
+  // whisper.cpp renamed its CLI in 2024; an install from either era must work
+  // without the user knowing which one they have.
+  const original = process.env.VEXORA_WHISPER_DIR;
+  const root = mkdtempSync(path.join(tmpdir(), "whisper-legacy-"));
+  const legacy = process.platform === "win32" ? "main.exe" : "main";
+
+  try {
+    process.env.VEXORA_WHISPER_DIR = root;
+    writeFileSync(path.join(root, legacy), "");
+    assert.equal(binaryPath(), path.join(root, legacy));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    if (original === undefined) delete process.env.VEXORA_WHISPER_DIR;
+    else process.env.VEXORA_WHISPER_DIR = original;
+  }
 });
 
 test("the install root is overridable, so a different layout still works", () => {

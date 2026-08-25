@@ -31,16 +31,26 @@ is — the models are large and the app does not download things on your behalf.
 Neither the binary nor the models are in this repository, and nothing in the
 app fetches them for you.
 
-1. Get a `whisper.cpp` build. Either download a prebuilt release from the
-   [releases page](https://github.com/ggml-org/whisper.cpp/releases), or build
-   from source. Put it so the executable ends up at either:
-   - `%USERPROFILE%\Vexora\whisper\whisper-cli.exe`, or
-   - `%USERPROFILE%\Vexora\whisper\build\bin\whisper-cli.exe` (an unmodified
-     build tree works as-is)
+1. Get a `whisper.cpp` build. On Windows, download **`whisper-bin-x64.zip`**
+   (~8 MB) from the
+   [releases page](https://github.com/ggml-org/whisper.cpp/releases) and
+   extract it into `%USERPROFILE%\Vexora\whisper\`. That is the plain CPU
+   build — the `cublas` and `blas` variants need extra runtimes.
+
+   Any of these layouts is found automatically:
+   - `%USERPROFILE%\Vexora\whisper\whisper-cli.exe`
+   - `%USERPROFILE%\Vexora\whisper\Release\whisper-cli.exe` ← **what the
+     official zip actually extracts to**
+   - `%USERPROFILE%\Vexora\whisper\build\bin\whisper-cli.exe` (compiled from
+     source)
 
    Older builds name the executable `main` instead of `whisper-cli`; both names
    are recognised, so an install from either era works without you having to
    know which one you have.
+
+   The process runs from the binary's own directory rather than the install
+   root, because the Windows build ships its DLLs beside the executable and
+   would otherwise fail to load `ggml.dll`.
 
 2. Download at least one model from
    [ggerganov/whisper.cpp on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp)
@@ -50,6 +60,13 @@ app fetches them for you.
    **`ggml-base.en.bin` (~150 MB) is the recommended starting point.**
 
 Restart the API after installing. `GET /v1/transcribe` reports what it found.
+
+### Verified on this machine
+
+`whisper-bin-x64.zip` (b4938) plus `ggml-base.en.bin`, transcribing the
+project's own `samples/jfk.wav` — 11 seconds of speech — in **1.4 seconds**,
+verbatim correct. That is comfortably fast enough for spoken commands on CPU
+alone, which is why `base` and `small` are preferred over the larger models.
 
 ## Which model gets picked
 

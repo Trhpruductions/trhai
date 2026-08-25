@@ -57,10 +57,15 @@ export function binaryPath(): string | null {
     ? ["whisper-cli.exe", "main.exe"]
     : ["whisper-cli", "main"];
 
+  // Three layouts, all real. The root is the tidy hand-placed case; build/bin
+  // is what compiling from source produces; Release is what the official
+  // Windows zip actually extracts to — found by installing it, not by
+  // reading the docs, which do not mention it.
+  const directories = [root, path.join(root, "Release"), path.join(root, "build", "bin")];
+
   for (const name of executables) {
-    // Some builds put the binary in a build/bin subdirectory rather than the
-    // root; both are checked so an unmodified upstream build tree works.
-    for (const candidate of [path.join(root, name), path.join(root, "build", "bin", name)]) {
+    for (const directory of directories) {
+      const candidate = path.join(directory, name);
       if (existsSync(candidate)) return candidate;
     }
   }
@@ -288,7 +293,10 @@ export async function transcribe(audio: Buffer): Promise<TranscriptionResult> {
           // this module built itself.
           shell: false,
           windowsHide: true,
-          cwd: whisperRoot()
+          // The binary's own directory, not the install root: the Windows
+          // build ships its DLLs beside the executable in Release/, and
+          // running from a directory above them fails to load ggml.dll.
+          cwd: path.dirname(status.binaryPath)
         }
       );
 
