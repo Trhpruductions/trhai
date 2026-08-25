@@ -344,6 +344,27 @@
   animation: hud-pulse 1.6s var(--ease) infinite;
 }
 
+.hud-voice {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-faint);
+  font-family: var(--font-orbitron), var(--font-geist-sans), sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+
+.hud-voice:hover { color: var(--accent-strong); border-color: var(--line-strong); }
+
+.hud-voice-on {
+  color: var(--accent-strong);
+  border-color: var(--line-strong);
+  background: var(--accent-quiet);
+}
+
 .hud-mic-note {
   font-size: 11px;
   line-height: 1.5;

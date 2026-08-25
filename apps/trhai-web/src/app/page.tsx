@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Core } from "../components/Core";
 import { useAssistant, type AssistantStatus } from "../hooks/useAssistant";
+import { useSpeech } from "../hooks/useSpeech";
 import { useMicrophone } from "../hooks/useMicrophone";
 import { apiBaseUrl, apiGet, sessionId } from "../lib/api";
 import { readStoredPersonality } from "../lib/personality";
@@ -23,7 +24,10 @@ import "./dash.css";
 
 type ModelInfo = { available: true; model: string } | { available: false; reason: string };
 
-type Presence = { core: "idle" | "listening" | "thinking" | "executing" | "success" | "error"; label: string };
+type Presence = {
+  core: "idle" | "listening" | "thinking" | "executing" | "speaking" | "success" | "error";
+  label: string;
+};
 
 /**
  * What the core does and what the status line says, from real state alone.
@@ -32,12 +36,15 @@ type Presence = { core: "idle" | "listening" | "thinking" | "executing" | "succe
  * rather than the request: if the microphone is genuinely open, that is the
  * most important true thing on the screen.
  */
-function presence(status: AssistantStatus, listening: boolean): Presence {
+function presence(status: AssistantStatus, listening: boolean, speaking: boolean): Presence {
   if (listening) return { core: "listening", label: "LISTENING" };
   if (status.state === "executing") return { core: "executing", label: `WORKING · ${status.tool.replace(/_/g, " ").toUpperCase()}` };
   if (status.state === "thinking") return { core: "thinking", label: "THINKING" };
   if (status.state === "success") return { core: "success", label: "COMPLETE" };
   if (status.state === "error") return { core: "error", label: "ERROR" };
+  // Below the request states: speaking happens after a reply has landed, so
+  // it never competes with them for the same moment.
+  if (speaking) return { core: "speaking", label: "SPEAKING" };
   return { core: "idle", label: "STANDING BY" };
 }
 
@@ -135,9 +142,12 @@ export default function DashboardPage() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [flowName, setFlowName] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** The reply already read aloud, so a re-render never repeats one. */
+  const lastSpokenId = useRef<string | null>(null);
 
   const mic = useMicrophone();
-  const { core, label } = presence(status, mic.listening);
+  const speech = useSpeech();
+  const { core, label } = presence(status, mic.listening, speech.speaking);
 
   /**
    * The microphone button. Starting listens; stopping transcribes and puts
@@ -149,6 +159,10 @@ export default function DashboardPage() {
    */
   async function handleMic() {
     if (!mic.listening) {
+      // Stop any reply already being read. Without this the microphone opens
+      // into TRHAI's own voice and transcribes it back as though the user
+      // had said it.
+      speech.stop();
       await mic.start();
       return;
     }
@@ -161,9 +175,32 @@ export default function DashboardPage() {
   // and neither is a stand-in for the other.
   const level = mic.listening
     ? mic.amplitude
-    : status.state === "executing" ? 1 : status.state === "thinking" ? 0.6 : 0;
+    : speech.speaking && speech.amplitude !== undefined
+      ? speech.amplitude
+      : status.state === "executing" ? 1 : status.state === "thinking" ? 0.6 : 0;
   const busy = status.state === "thinking" || status.state === "executing";
   const lastReply = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
+
+  // Read the newest reply aloud when voice is on. Same rules as the chat
+  // surface, which this deliberately mirrors rather than reinvents: restored
+  // history is never spoken (a reload would recite the last answer at you),
+  // and each reply is spoken at most once.
+  useEffect(() => {
+    if (!speech.enabled) return;
+    const newest = messages[messages.length - 1];
+    if (!newest || newest.role !== "assistant") return;
+    if (newest.id.startsWith("restored-")) return;
+    if (lastSpokenId.current === newest.id) return;
+
+    // Marked spoken either way. With the microphone open, speaking would be
+    // recorded and transcribed back as though the user had said it — and
+    // deferring instead of skipping would be worse, since the reply would
+    // then blurt out later once they had moved on.
+    lastSpokenId.current = newest.id;
+    if (mic.listening) return;
+
+    speech.speak(newest.text);
+  }, [messages, speech, mic.listening]);
 
   // Clock starts null and fills in on the client: rendering a time on the
   // server guarantees it disagrees with the client a second later, which is
@@ -287,7 +324,16 @@ export default function DashboardPage() {
           <ActivityTrace level={level} label={label} />
 
           <div className="hud-core-wrap">
-            <Core state={core} size={380} amplitude={mic.listening ? mic.amplitude : undefined} />
+            {/* One amplitude input, two real sources: the microphone while
+                listening, the neural voice while speaking. Undefined in any
+                other state, and for the browser fallback voice, which exposes
+                no audio to read — Core treats undefined as "breathe on your
+                own" rather than as silence. */}
+            <Core
+              state={core}
+              size={380}
+              amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
+            />
             <div className="hud-core-text">
               <span className="hud-core-name">TRHAI</span>
             </div>
@@ -373,6 +419,29 @@ export default function DashboardPage() {
           <section className="hud-panel hud-say">
             <div className="hud-say-head">
               <span className="hud-label">TRHAI</span>
+              {/* Voice is off by default and the control sits next to what it
+                  reads. A screen that started talking with no visible way to
+                  stop it would be the worst version of this feature. */}
+              {speech.engine !== "none" ? (
+                <button
+                  type="button"
+                  className={`hud-voice${speech.enabled ? " hud-voice-on" : ""}`}
+                  aria-pressed={speech.enabled}
+                  onClick={() => speech.setEnabled(!speech.enabled)}
+                  title={speech.enabled
+                    ? "Stop reading replies aloud"
+                    : speech.engine === "neural"
+                      ? "Read replies aloud using the local neural voice"
+                      : "Read replies aloud using this browser's voices"}
+                >
+                  {speech.enabled ? "VOICE ON" : "VOICE OFF"}
+                </button>
+              ) : null}
+              {speech.speaking || speech.preparing ? (
+                <button type="button" className="hud-voice" onClick={speech.stop}>
+                  {speech.preparing ? "CANCEL" : "STOP"}
+                </button>
+              ) : null}
               {lastReply?.model ? (
                 <span className="hud-say-model mono">{lastReply.model.replace(/^ollama\//, "").replace(/:latest$/, "")}</span>
               ) : null}
