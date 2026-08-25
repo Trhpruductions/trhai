@@ -14,12 +14,16 @@ import "./core.css";
 //
 // "executing" specifically means a tool is actually running right now — see
 // useAssistant.ts, which polls the real /v1/assist/activity endpoint for
-// this rather than guessing from a timer. There is no "listening" state:
-// that would mean a live microphone reading, and this build has no audio
-// capture at all yet. Adding the state without the capability behind it
-// would be exactly the decoration this component exists to refuse.
+// this rather than guessing from a timer.
+//
+// "listening" means a real microphone is genuinely open — see
+// useMicrophone.ts — and the `amplitude` prop below carries that device's
+// actual loudness, so the core moves with the room rather than to a canned
+// rhythm. This state was deliberately absent until the capture existed:
+// a core captioned "listening" with nothing behind it is the decoration
+// this component was written to refuse.
 
-export type CoreState = "idle" | "thinking" | "executing" | "speaking" | "success" | "error" | "offline";
+export type CoreState = "idle" | "listening" | "thinking" | "executing" | "speaking" | "success" | "error" | "offline";
 
 /**
  * Rounded to 3 decimals — plenty of precision for a 240-unit viewBox, and
@@ -92,7 +96,12 @@ const brackets = Array.from({ length: 6 }, (_, index) => {
 export function Core({ state = "idle", size = 300, amplitude }: {
   state?: CoreState;
   size?: number;
-  /** Real loudness of the neural voice while state is "speaking". Undefined when no reading exists. */
+  /**
+   * A real loudness reading, 0..1 — the microphone's own level while
+   * listening (useMicrophone.ts), or the neural voice's while speaking.
+   * Undefined when no reading exists, which is what makes the canned
+   * breathing the fallback rather than the default.
+   */
   amplitude?: number;
 }) {
   const instance = useId().replace(/:/g, "");

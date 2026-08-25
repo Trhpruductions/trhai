@@ -318,6 +318,40 @@
 .hud-ask-go:hover:not(:disabled) { background: rgba(53, 199, 255, 0.24); }
 .hud-ask-go:disabled { opacity: 0.4; cursor: default; }
 
+.hud-mic {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+
+.hud-mic:hover { color: var(--accent-strong); border-color: var(--line-strong); }
+
+/* Live is deliberately loud: an open microphone is the one state a person
+   must never be unsure about. */
+.hud-mic-live {
+  color: var(--ok);
+  border-color: var(--ok);
+  box-shadow: 0 0 12px rgba(75, 227, 168, 0.5);
+  animation: hud-pulse 1.6s var(--ease) infinite;
+}
+
+.hud-mic-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  max-width: 560px;
+  text-align: center;
+}
+
 .hud-suggestions {
   display: flex;
   flex-wrap: wrap;
@@ -497,6 +531,8 @@
 .hud-executing .trace-bar { opacity: 1; }
 .hud-error .trace-bar { background: var(--danger); }
 .hud-success .trace-bar { background: var(--ok); }
+.hud-listening .trace-bar { background: var(--ok); opacity: 1; }
+.hud-listening .trace-label-live { color: var(--ok); }
 
 @media (max-width: 1100px) {
   .hud-body { grid-template-columns: 180px minmax(0, 1fr); }

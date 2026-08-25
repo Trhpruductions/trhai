@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Core } from "../components/Core";
 import { useAssistant, type AssistantStatus } from "../hooks/useAssistant";
+import { useMicrophone } from "../hooks/useMicrophone";
 import { apiBaseUrl, apiGet, sessionId } from "../lib/api";
 import { readStoredPersonality } from "../lib/personality";
 import { activeAgent, personalityById, readMarketplaceState, readFlow, type Agent } from "@ascend/shared";
@@ -22,8 +23,17 @@ import "./dash.css";
 
 type ModelInfo = { available: true; model: string } | { available: false; reason: string };
 
-/** What the core does and what the status line says, from real state alone. */
-function presence(status: AssistantStatus): { core: "idle" | "thinking" | "executing" | "success" | "error"; label: string } {
+type Presence = { core: "idle" | "listening" | "thinking" | "executing" | "success" | "error"; label: string };
+
+/**
+ * What the core does and what the status line says, from real state alone.
+ *
+ * Listening outranks the request states because it describes the device
+ * rather than the request: if the microphone is genuinely open, that is the
+ * most important true thing on the screen.
+ */
+function presence(status: AssistantStatus, listening: boolean): Presence {
+  if (listening) return { core: "listening", label: "LISTENING" };
   if (status.state === "executing") return { core: "executing", label: `WORKING · ${status.tool.replace(/_/g, " ").toUpperCase()}` };
   if (status.state === "thinking") return { core: "thinking", label: "THINKING" };
   if (status.state === "success") return { core: "success", label: "COMPLETE" };
@@ -55,11 +65,17 @@ function ActivityTrace({ level, label }: { level: number; label: string }) {
   // shows a live baseline, not a flat line, and a flat line here reads as
   // "disconnected" rather than "ready". The amplitude below is what carries
   // the real distinction between resting and working.
+  //
+  // Deliberately keyed on *whether* there is activity, not on the level
+  // itself: while the microphone is open the level changes every animation
+  // frame, and depending on it here would tear down and rebuild this
+  // interval dozens of times a second.
+  const active = level > 0;
   useEffect(() => {
-    const period = level === 0 ? 420 : 90;
+    const period = active ? 90 : 420;
     const timer = window.setInterval(() => setSeed((value) => value + 1), period);
     return () => window.clearInterval(timer);
-  }, [level]);
+  }, [active]);
 
   return (
     <div className="trace" aria-hidden="true">
@@ -68,9 +84,9 @@ function ActivityTrace({ level, label }: { level: number; label: string }) {
           // Deterministic per (index, seed): a stable shape that advances,
           // rather than a fresh random field every frame.
           const wave = Math.sin((index + seed) * 0.55) * Math.sin((index + seed) * 0.17);
-          const raw = level === 0
-            ? 2 + Math.abs(wave) * 4
-            : 3 + Math.abs(wave) * level * 26;
+          const raw = active
+            ? 3 + Math.abs(wave) * level * 26
+            : 2 + Math.abs(wave) * 4;
           // Rounded for the same reason Core.tsx rounds its tick geometry:
           // Math.sin is only required to be implementation-approximated, so
           // Node's V8 and the browser's V8 can legitimately differ in the
@@ -120,8 +136,14 @@ export default function DashboardPage() {
   const [flowName, setFlowName] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { core, label } = presence(status);
-  const level = status.state === "executing" ? 1 : status.state === "thinking" ? 0.6 : 0;
+  const mic = useMicrophone();
+  const { core, label } = presence(status, mic.listening);
+  // While the microphone is open the trace shows the room's actual loudness;
+  // otherwise it shows how hard the core is working. Both are real readings,
+  // and neither is a stand-in for the other.
+  const level = mic.listening
+    ? mic.amplitude
+    : status.state === "executing" ? 1 : status.state === "thinking" ? 0.6 : 0;
   const busy = status.state === "thinking" || status.state === "executing";
   const lastReply = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
 
@@ -247,7 +269,7 @@ export default function DashboardPage() {
           <ActivityTrace level={level} label={label} />
 
           <div className="hud-core-wrap">
-            <Core state={core} size={380} />
+            <Core state={core} size={380} amplitude={mic.listening ? mic.amplitude : undefined} />
             <div className="hud-core-text">
               <span className="hud-core-name">TRHAI</span>
             </div>
@@ -271,10 +293,32 @@ export default function DashboardPage() {
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => { if (event.key === "Enter") ask(draft); }}
             />
+            {mic.supported ? (
+              <button
+                type="button"
+                className={`hud-mic${mic.listening ? " hud-mic-live" : ""}`}
+                aria-pressed={mic.listening}
+                aria-label={mic.listening ? "Stop listening" : "Start listening"}
+                title={mic.listening
+                  ? "Stop the microphone"
+                  : "Open the microphone. Audio is read on this machine only and never uploaded."}
+                onClick={() => (mic.listening ? mic.stop() : void mic.start())}
+              >
+                ●
+              </button>
+            ) : null}
             <button type="button" className="hud-ask-go" onClick={() => ask(draft)} disabled={!draft.trim() || busy}>
               {busy ? "…" : "Send"}
             </button>
           </div>
+
+          {mic.error ? <p className="hud-mic-note">{mic.error}</p> : null}
+          {mic.listening ? (
+            <p className="hud-mic-note">
+              Microphone open — the level above is this machine&rsquo;s own audio, read locally and never
+              uploaded. Speech-to-text is not installed yet, so type your request while it listens.
+            </p>
+          ) : null}
 
           <div className="hud-suggestions">
             {(suggestions.length > 0 ? suggestions : quickCommands).slice(0, 4).map((suggestion) => (
