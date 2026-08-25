@@ -189,6 +189,27 @@
   min-height: 0;
   overflow-y: auto;
   padding: 4px 0 8px;
+  /* Containing block for the particle canvas below, which is absolutely
+     positioned so it fills the stage without taking part in the column
+     layout — as a flex child it would push the core off centre. */
+  position: relative;
+}
+
+.hud-particles {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* Behind every real element, and never intercepting a click: it is
+     ambience, not a control. */
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Everything the user actually reads or presses sits above the field. */
+.hud-stage > *:not(.hud-particles) {
+  position: relative;
+  z-index: 1;
 }
 
 .trace {

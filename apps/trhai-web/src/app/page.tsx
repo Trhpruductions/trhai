@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Core } from "../components/Core";
 import { useAssistant, type AssistantStatus } from "../hooks/useAssistant";
 import { useSpeech } from "../hooks/useSpeech";
+import { ParticleField } from "../components/ParticleField";
 import { useMicrophone } from "../hooks/useMicrophone";
 import { apiBaseUrl, apiGet, sessionId } from "../lib/api";
 import { readStoredPersonality } from "../lib/personality";
@@ -321,6 +322,11 @@ export default function DashboardPage() {
         </div>
 
         <main className="hud-stage">
+          {/* Behind everything, reading the same state the core does — the
+              field quickens while the model works and pulls inward while a
+              tool actually runs, rather than drifting for its own sake. */}
+          <ParticleField state={core} className="hud-particles" />
+
           <ActivityTrace level={level} label={label} />
 
           <div className="hud-core-wrap">
