@@ -65,6 +65,14 @@ export type OrchestratorInput = {
    * when the timer fires.
    */
   unattended?: boolean;
+  /**
+   * Stops this turn: the user pressed Stop, or their browser went away.
+   *
+   * Real cancellation rather than a discarded result. A local model can hold
+   * the GPU for a minute, so throwing the reply away while it kept generating
+   * would leave the whole cost and remove only the benefit.
+   */
+  cancel?: AbortSignal;
 };
 
 export type OrchestratorResult = {
@@ -435,7 +443,7 @@ async function answerWithLocalModel(
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history
-  }, fetch, onToolStart, input.onToken, input.unattended);
+  }, fetch, onToolStart, input.onToken, input.unattended, input.cancel);
 
     if (result.ok) {
       return {

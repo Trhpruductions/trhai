@@ -56,6 +56,14 @@ export function useAssistant() {
   // stops a stale callback from a superseded call clobbering the status a
   // newer call is actively setting.
   const generation = useRef(0);
+  /**
+   * The request in flight, so it can genuinely be stopped.
+   *
+   * Aborting the fetch closes the connection, which the API notices and uses
+   * to stop the model. Without that the reply would only be hidden while the
+   * machine carried on producing it.
+   */
+  const inFlight = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,11 +135,23 @@ export function useAssistant() {
     const replyId = crypto.randomUUID();
     let streamed = "";
 
+    const controller = new AbortController();
+    inFlight.current = controller;
+
+    // Declared out here so `finally` can always clear it. Created inside the
+    // try, it was only cleared on the path where the stream finished normally
+    // — a stopped or failed request left it repainting forever.
+    let flush = 0;
+
     try {
       const response = await fetch(`${apiBaseUrl}/v1/assist/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, sessionId: session.current, history, mode: "general" })
+        body: JSON.stringify({ message: text, sessionId: session.current, history, mode: "general" }),
+        // Aborting closes the connection, which the API notices and uses to
+        // stop the model. Without it, stopping would only hide the reply while
+        // the machine carried on producing it.
+        signal: controller.signal
       });
 
       if (!response.ok) throw new Error(`The assistant service answered ${response.status}.`);
@@ -147,7 +167,7 @@ export function useAssistant() {
       // macrotask, so each flush is its own render — which is the whole point.
       // It also means a fast reply costs ~20 renders instead of ~550.
       let painted = "";
-      const flush = window.setInterval(() => {
+      flush = window.setInterval(() => {
         if (streamed === painted) return;
         painted = streamed;
         setMessages((prior) => (prior.some((message) => message.id === replyId)
@@ -227,6 +247,29 @@ export function useAssistant() {
         window.setTimeout(() => { if (stillCurrent()) setStatus({ state: "idle" }); }, successHoldMs);
       }
     } catch (error) {
+      // Stopping is not an error, and must not be reported as one. Whatever
+      // had already arrived is kept and marked as stopped: those words were
+      // genuinely produced, and throwing them away would lose real work to
+      // make the failure tidier.
+      if (controller.signal.aborted) {
+        if (stillCurrent()) setStatus({ state: "idle" });
+        setMessages((prior) => {
+          const partial = streamed.trim();
+          const existing = prior.some((message) => message.id === replyId);
+          const stoppedMessage: ChatMessage = {
+            id: replyId,
+            role: "assistant",
+            text: partial ? `${partial}\n\n_Stopped._` : "_Stopped before anything was written._",
+            at: Date.now(),
+            strategy: "stopped"
+          };
+          return existing
+            ? prior.map((message) => (message.id === replyId ? stoppedMessage : message))
+            : [...prior, stoppedMessage];
+        });
+        return;
+      }
+
       const detail = error instanceof Error ? error.message : "The assistant could not be reached.";
       if (stillCurrent()) setStatus({ state: "error", detail });
       setMessages((prior) => [...prior, {
@@ -241,9 +284,22 @@ export function useAssistant() {
       // does not touch `generation`, which stays valid through the success
       // hold above until a genuinely newer call moves it forward.
       window.clearInterval(activityPoll);
+      window.clearInterval(flush);
+      inFlight.current = null;
       busy.current = false;
     }
   }, [messages]);
+
+  /**
+   * Stop the request in flight.
+   *
+   * Aborts the fetch, which closes the connection, which the API turns into a
+   * real cancellation of the model — so the machine stops working, not just
+   * the screen. Safe to call when nothing is running.
+   */
+  const stop = useCallback(() => {
+    inFlight.current?.abort();
+  }, []);
 
   const clear = useCallback(async () => {
     setMessages([]);
@@ -260,5 +316,5 @@ export function useAssistant() {
     }
   }, []);
 
-  return { messages, status, restored, sessionId: session.current, send, clear };
+  return { messages, status, restored, sessionId: session.current, send, stop, clear };
 }

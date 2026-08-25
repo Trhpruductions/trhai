@@ -163,9 +163,10 @@ function buildAssistInput(
     memoryContext: Array<{ id: string; title: string; body: string; pinned: boolean; createdAt: string }>;
     history: Array<{ role: "user" | "assistant"; content: string }>;
     onToken?: (text: string) => void;
+    cancel?: AbortSignal;
   }
 ) {
-  const { mode, message, sessionId, savedMemories, memoryContext, history, onToken } = options;
+  const { mode, message, sessionId, savedMemories, memoryContext, history, onToken, cancel } = options;
 
   return {
     mode,
@@ -226,7 +227,8 @@ function buildAssistInput(
     pinMemory: sessionId
       ? (id: string, pinned: boolean) => Boolean(setMemoryPinned(sessionId, id, pinned))
       : undefined,
-    ...(onToken ? { onToken } : {})
+    ...(onToken ? { onToken } : {}),
+    ...(cancel ? { cancel } : {})
   };
 }
 
@@ -933,8 +935,34 @@ export function createApp() {
     const { sessionId } = turn;
 
     try {
+      // The browser going away is the signal to stop working. Pressing Stop
+      // aborts the fetch, which closes this connection, which lands here — one
+      // path for both, and neither leaves the model generating a reply that
+      // nothing is waiting for.
+      // On the RESPONSE, not the request.
+      //
+      // req.on("close") fires when the request stream finishes being read,
+      // which for a POST whose body express.json() has already consumed is
+      // immediately — so every turn aborted itself the moment it started, the
+      // model call was cancelled before it produced anything, and the reply
+      // fell back to the deterministic plan. The symptom looked exactly like
+      // the model failing. The response closing is the thing that actually
+      // means the client has gone.
+      const stopping = new AbortController();
+      let finished = false;
+      res.on("close", () => {
+        // Not after we have already answered: the response closes on every
+        // successful turn too, and aborting there would cancel work that had
+        // just completed.
+        if (!finished) stopping.abort();
+      });
+
       const result = await runAssistantOrchestrator(
-        buildAssistInput(req, { mode, message, ...turn, onToken: (text) => send("token", { text }) })
+        buildAssistInput(req, {
+          mode, message, ...turn,
+          onToken: (text) => send("token", { text }),
+          cancel: stopping.signal
+        })
       );
 
       if (sessionId) {
@@ -952,6 +980,7 @@ export function createApp() {
 
       // The whole result, so a client never has to reassemble the reply from
       // the tokens it happened to receive.
+      finished = true;
       send("done", result);
     } catch (error) {
       // An error mid-stream cannot be a status code — the headers are long

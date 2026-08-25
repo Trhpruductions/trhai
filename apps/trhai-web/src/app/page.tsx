@@ -214,7 +214,7 @@ export default function DashboardPage() {
   // file to actually land costs a fraction of a second and is never wrong.
   const [working, setWorking] = useState(false);
   const [dismissedWork, setDismissedWork] = useState(false);
-  const { messages, status, send } = useAssistant();
+  const { messages, status, send, stop } = useAssistant();
   const mic = useMicrophone();
   const speech = useSpeech();
 
@@ -690,9 +690,19 @@ export default function DashboardPage() {
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => { if (event.key === "Enter") ask(draft); }}
             />
-            <button type="button" className="cc-ask-go" onClick={() => ask(draft)} disabled={!draft.trim() || busy}>
-              {busy ? "…" : "Send"}
-            </button>
+            {/* Send becomes Stop while a request is in flight. One control in
+                one place beats a second button that is dead most of the time,
+                and Stop is only offered when there is genuinely something to
+                stop. */}
+            {busy ? (
+              <button type="button" className="cc-ask-go cc-ask-stop" onClick={stop}>
+                Stop
+              </button>
+            ) : (
+              <button type="button" className="cc-ask-go" onClick={() => ask(draft)} disabled={!draft.trim()}>
+                Send
+              </button>
+            )}
           </div>
 
           {mic.listening ? (

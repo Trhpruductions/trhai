@@ -67,6 +67,14 @@ export type AgentResult =
      * smaller one instead of giving up.
      */
     modelUnusable?: boolean;
+    /**
+     * True when the user stopped this turn, rather than it failing.
+     *
+     * Kept distinct because the difference matters to what is shown: a
+     * cancellation is a decision someone made, and reporting it as "the local
+     * model did not reply" would blame the machine for it.
+     */
+    stopped?: boolean;
   };
 
 /**
@@ -505,13 +513,32 @@ function parseToolCalls(response: ChatResponse): ToolCall[] {
   });
 }
 
-async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+async function withTimeout<T>(
+  ms: number,
+  run: (signal: AbortSignal) => Promise<T>,
+  /**
+   * A caller's own reason to stop — the user pressing Stop, or their browser
+   * going away mid-request.
+   *
+   * Combined with the timeout rather than replacing it: a request must still
+   * give up on its own if the model stalls, whether or not anyone is watching.
+   */
+  external?: AbortSignal
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
+
+  // Already gone before we started. Firing immediately beats opening a request
+  // that nothing is waiting for.
+  if (external?.aborted) controller.abort();
+  const relay = () => controller.abort();
+  external?.addEventListener("abort", relay);
+
   try {
     return await run(controller.signal);
   } finally {
     clearTimeout(timer);
+    external?.removeEventListener("abort", relay);
   }
 }
 
@@ -550,7 +577,8 @@ export async function runAgent(
    * must not inherit it merely because the thirty-minute window happens to
    * still be open when the timer fires.
    */
-  unattended?: boolean
+  unattended?: boolean,
+  cancel?: AbortSignal
 ): Promise<AgentResult> {
   // The date is stated outright rather than left to a tool call.
   //
@@ -639,7 +667,7 @@ export async function runAgent(
             ...(offerTools ? { tools: availableTools(commandsArmed() && !unattended) } : {})
           }),
           signal
-        }));
+        }), cancel);
 
       if (!raw.ok) {
         // The body carries why. "cudaMalloc failed: out of memory" and a
@@ -683,6 +711,14 @@ export async function runAgent(
         response = await raw.json() as ChatResponse;
       }
     } catch (error) {
+      // Stopped on purpose is not a fault. Both arrive here as an AbortError,
+      // and reporting a cancellation as "the model did not reply" would blame
+      // the machine for a decision the user made — so the caller's own signal
+      // is checked before the timeout is assumed.
+      if (cancel?.aborted) {
+        return { ok: false, reason: "Stopped.", toolsUsed, stopped: true };
+      }
+
       const detail = error instanceof Error && error.name === "AbortError"
         ? `it did not reply within ${Math.round(config.timeoutMs / 1000)}s`
         : "the request failed";
