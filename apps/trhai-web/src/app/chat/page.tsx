@@ -150,7 +150,16 @@ export default function ChatPage() {
     <section className="chat" aria-label="Conversation">
       <header className="chat-head">
         <div className="row">
-          <Core state={core} size={30} amplitude={mic.listening ? mic.amplitude : undefined} />
+          {/* One amplitude input, two real sources: the microphone while
+              listening, the neural voice while speaking. Undefined in every
+              other state, and for the browser fallback voice, which exposes
+              no audio to read — Core treats that as "breathe on your own"
+              rather than as silence. */}
+          <Core
+            state={core}
+            size={30}
+            amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
+          />
           <div className="col">
             <h2 className="chat-title">Chat</h2>
             <span className="faint chat-presence">{label}</span>
