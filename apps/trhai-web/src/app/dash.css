@@ -359,3 +359,63 @@
   .cc-states { gap: 12px; }
   .cc-states-note { margin-left: 0; width: 100%; text-align: center; }
 }
+
+/* ---- surfaces ----
+   A surface opens over the stage instead of on its own page, so the core, the
+   metrics, the console and the state rail stay visible and stay live while
+   you use it. See page.tsx for why the app is one screen. */
+
+.cc-surface {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(10, 15, 22, 0.94);
+  overflow: hidden;
+}
+
+.cc-surface-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--accent-quiet);
+}
+
+.cc-surface-close {
+  padding: 3px 12px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 999px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.cc-surface-close:hover { color: var(--accent-strong); border-color: var(--accent); }
+
+.cc-surface-body {
+  padding: 14px;
+  /* Scrolls inside itself so the screen never grows a second scrollbar and
+     the surrounding instruments never move. */
+  overflow-y: auto;
+  max-height: calc(100vh - 260px);
+  min-height: 0;
+}
+
+/* A surface takes the stage, so the core and its controls stand down while
+   one is open — they are still mounted, still live, just not competing for
+   the same space. */
+.cc-stage:has(.cc-surface) .cc-core-row,
+.cc-stage:has(.cc-surface) .cc-actions,
+.cc-stage:has(.cc-surface) .cc-suggestions,
+.cc-stage:has(.cc-surface) .cc-core-title { display: none; }

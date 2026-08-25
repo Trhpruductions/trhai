@@ -20,6 +20,17 @@ import {
   activeAgent, personalityById, readMarketplaceState, readFlow, speakableText, type Agent
 } from "@ascend/shared";
 import { marketplaceStorageKey } from "../lib/agents";
+import ChatSurface from "./chat/page";
+import TasksSurface from "./tasks/page";
+import CalendarSurface from "./calendar/page";
+import MemorySurface from "./memory/page";
+import KnowledgeSurface from "./knowledge/page";
+import AutomationSurface from "./automation/page";
+import AgentsSurface from "./agents/page";
+import SecuritySurface from "./security/page";
+import SystemSurface from "./system/page";
+import FilesSurface from "./files/page";
+import SettingsSurface from "./settings/page";
 import "./dash.css";
 
 // The command centre.
@@ -135,7 +146,57 @@ const tiles: Tile[] = [
   { href: "/settings", label: "Settings", glyph: "⚙", hint: "Voice, theme, personality" }
 ];
 
+/** Every surface of the app, reachable without leaving this screen. */
+type SurfaceId =
+  | "home" | "chat" | "tasks" | "calendar" | "memory" | "knowledge"
+  | "automation" | "agents" | "security" | "system" | "files" | "settings";
+
+const surfaceTitles: Record<SurfaceId, string> = {
+  home: "Command centre",
+  chat: "Chat",
+  tasks: "Tasks",
+  calendar: "Calendar",
+  memory: "Memory",
+  knowledge: "Knowledge",
+  automation: "Automation",
+  agents: "Agents",
+  security: "Security",
+  system: "System",
+  files: "Files",
+  settings: "Settings"
+};
+
+/**
+ * The panel for a surface.
+ *
+ * These are the same components the old routes render, used directly rather
+ * than copied — so a surface cannot drift between the two ways of reaching
+ * it, and /files still works as a bookmark.
+ */
+function renderSurface(id: SurfaceId) {
+  switch (id) {
+    case "chat": return <ChatSurface />;
+    case "tasks": return <TasksSurface />;
+    case "calendar": return <CalendarSurface />;
+    case "memory": return <MemorySurface />;
+    case "knowledge": return <KnowledgeSurface />;
+    case "automation": return <AutomationSurface />;
+    case "agents": return <AgentsSurface />;
+    case "security": return <SecuritySurface />;
+    case "system": return <SystemSurface />;
+    case "files": return <FilesSurface />;
+    case "settings": return <SettingsSurface />;
+    default: return null;
+  }
+}
+
+/** "/files" -> "files". The tiles and quick links already carry hrefs. */
+function surfaceFor(href: string): SurfaceId {
+  return (href === "/" ? "home" : href.slice(1)) as SurfaceId;
+}
+
 export default function DashboardPage() {
+  const [surface, setSurface] = useState<SurfaceId>("home");
   const { messages, status, send } = useAssistant();
   const mic = useMicrophone();
   const speech = useSpeech();
@@ -475,10 +536,11 @@ export default function DashboardPage() {
             <span className="hud-label">Quick access</span>
             <div className="quick">
               {quickAccess.map((item) => (
-                <Link key={item.href} href={item.href} className="quick-item">
+                <button key={item.href} type="button" className="quick-item"
+                  onClick={() => setSurface(surfaceFor(item.href))}>
                   <span className="quick-glyph" aria-hidden="true">{item.glyph}</span>
                   <span>{item.label}</span>
-                </Link>
+                </button>
               ))}
             </div>
           </section>
@@ -486,6 +548,22 @@ export default function DashboardPage() {
 
         <main className="cc-stage">
           <ParticleField state={core} className="cc-particles" />
+
+          {/* One screen: a surface opens here rather than on its own page, so
+              the core, the machine readings, the console and the state rail
+              all stay where they are while you use it. Nothing unmounts, so a
+              reply still arriving keeps arriving. */}
+          {surface !== "home" ? (
+            <section className="cc-surface" aria-label={surfaceTitles[surface]}>
+              <header className="cc-surface-head">
+                <span className="hud-label">{surfaceTitles[surface]}</span>
+                <button type="button" className="cc-surface-close" onClick={() => setSurface("home")}>
+                  Close
+                </button>
+              </header>
+              <div className="cc-surface-body">{renderSurface(surface)}</div>
+            </section>
+          ) : null}
 
           <div className="cc-core-title">
             <h1>TRH AI CORE</h1>
@@ -522,10 +600,11 @@ export default function DashboardPage() {
             {/* The reference has a VISION button. There is no vision system in
                 this build, and a button that opens nothing is worse than one
                 fewer button — so this is FILES, which does something. */}
-            <Link className="cc-action" href="/files" title="The workspace, read straight from disk">
+            <button type="button" className="cc-action" title="The workspace, read straight from disk"
+              onClick={() => setSurface(surfaceFor("/files"))}>
               <span className="cc-action-glyph" aria-hidden="true">▣</span>
               <span>FILES</span>
-            </Link>
+            </button>
             <button
               type="button"
               className={`cc-action cc-action-main${busy ? " live" : ""}`}
@@ -535,14 +614,16 @@ export default function DashboardPage() {
               <span className="cc-action-glyph" aria-hidden="true">▽</span>
               <span>THINK</span>
             </button>
-            <Link className="cc-action" href="/knowledge" title="Documents TRHAI can quote">
+            <button type="button" className="cc-action" title="Documents TRHAI can quote"
+              onClick={() => setSurface(surfaceFor("/knowledge"))}>
               <span className="cc-action-glyph" aria-hidden="true">◎</span>
               <span>SEARCH</span>
-            </Link>
-            <Link className="cc-action" href="/automation" title="Flows and schedules that run on their own">
+            </button>
+            <button type="button" className="cc-action" title="Flows and schedules that run on their own"
+              onClick={() => setSurface(surfaceFor("/automation"))}>
               <span className="cc-action-glyph" aria-hidden="true">◇</span>
               <span>AUTONOMY</span>
-            </Link>
+            </button>
           </div>
 
           <div className="cc-ask">
@@ -582,7 +663,7 @@ export default function DashboardPage() {
           <CommandAccess />
           <SystemOverview rows={healthRows} />
           <ActiveTasks tasks={agentTasks} />
-          <ToolsGrid tiles={tiles} />
+          <ToolsGrid tiles={tiles} onOpen={(href) => setSurface(surfaceFor(href))} />
           <ConnectedServices services={telemetry?.cloud.services ?? []} />
           <MemoryStatus
             entries={memories?.total ?? null}

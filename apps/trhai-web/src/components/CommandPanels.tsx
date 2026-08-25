@@ -129,17 +129,33 @@ export function ActiveTasks({ tasks }: { tasks: AgentTask[] | null }) {
 
 export type Tile = { href: string; label: string; glyph: string; hint: string };
 
-export function ToolsGrid({ tiles }: { tiles: Tile[] }) {
+/**
+ * The app's surfaces, as tiles.
+ *
+ * `onOpen` switches the panel on this screen instead of routing away. Every
+ * part of TRHAI used to be its own page, which meant using it took you away
+ * from the core, the machine readings and any reply still arriving — the
+ * wrong shape for an interface whose whole point is being a live view of one
+ * machine. Without the callback these fall back to real links, which is what
+ * keeps the old routes usable as bookmarks.
+ */
+export function ToolsGrid({ tiles, onOpen }: { tiles: Tile[]; onOpen?: (href: string) => void }) {
   return (
     <section className="hud-panel">
       <span className="hud-label">Tools &amp; apps</span>
       <div className="tiles">
-        {tiles.map((tile) => (
+        {tiles.map((tile) => (onOpen ? (
+          <button key={tile.href} type="button" className="tile" title={tile.hint}
+            onClick={() => onOpen(tile.href)}>
+            <span className="tile-glyph" aria-hidden="true">{tile.glyph}</span>
+            <span className="tile-label">{tile.label}</span>
+          </button>
+        ) : (
           <Link key={tile.href} href={tile.href} className="tile" title={tile.hint}>
             <span className="tile-glyph" aria-hidden="true">{tile.glyph}</span>
             <span className="tile-label">{tile.label}</span>
           </Link>
-        ))}
+        )))}
       </div>
     </section>
   );
