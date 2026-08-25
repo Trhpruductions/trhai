@@ -629,7 +629,7 @@ export default function DashboardPage() {
             <div className="cc-core-wrap">
               <Core
                 state={core}
-                size={330}
+                size={380}
                 amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
               />
             </div>

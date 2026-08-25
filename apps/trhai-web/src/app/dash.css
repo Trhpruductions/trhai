@@ -6,7 +6,8 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: 100%;
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* ---- top bar ---- */
@@ -87,20 +88,29 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr) minmax(250px, 310px);
-  gap: 10px;
-  align-items: start;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(260px, 330px);
+  gap: 12px;
+  /* Stretch, not start. Columns used to sit at their natural height inside a
+     taller row, which left the left column ending 230px above the right one
+     and a band of dead space under both. */
+  align-items: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
 }
 
 .cc-left, .cc-right {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
-  /* The columns scroll on their own so the stage in the middle stays put —
-     the core should not slide away while reading a panel. */
-  max-height: calc(100vh - 150px);
+  min-height: 0;
+  /* The columns scroll inside themselves so the stage stays put — the core
+     should not slide away while reading a panel. Height comes from the grid
+     row now rather than a viewport sum that had to be kept in step with the
+     header every time it changed. */
+  height: 100%;
   overflow-y: auto;
+  padding-right: 2px;
 }
 
 /* ---- console ---- */
@@ -183,11 +193,16 @@
 .cc-stage {
   position: relative;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 6px 0 10px;
+  /* Centred in the full column height. Top-aligned, the core sat high with a
+     large empty band beneath it. */
+  justify-content: center;
+  gap: 14px;
+  padding: 8px 0;
 }
 
 .cc-particles { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
@@ -442,3 +457,190 @@
 .cc-stage:has(.work) .cc-actions,
 .cc-stage:has(.work) .cc-suggestions,
 .cc-stage:has(.work) .cc-core-title { display: none; }
+
+/* ---- depth ----
+   The screen was flat panels on flat black. These are the layers that make it
+   read as an instrument rather than a form: a faint grid behind everything, a
+   glow under the core, and edges that catch light. All of it is decoration and
+   none of it carries information — the rule is that nothing here may look like
+   a reading, so there are no moving parts and no numbers. */
+
+.cc {
+  position: relative;
+  isolation: isolate;
+}
+
+/* A surveyor's grid, well under the content. Fixed rather than scrolling, so
+   it reads as the surface the panels sit on. */
+.cc::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background-image:
+    linear-gradient(rgba(53, 199, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(53, 199, 255, 0.045) 1px, transparent 1px);
+  background-size: 46px 46px;
+  pointer-events: none;
+}
+
+/* Vignette: pulls the eye to the middle and keeps the corners from competing
+   with the panels. */
+.cc::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(3, 6, 10, 0.75) 100%);
+  pointer-events: none;
+}
+
+/* The core throws light onto the stage behind it. Sized to the core and
+   coloured by state, so a thinking core lights the space differently from an
+   idle one — the state is already real, this only makes it visible further
+   out. */
+.cc-stage::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 560px;
+  height: 560px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(53, 199, 255, 0.10), transparent 62%);
+  z-index: 0;
+  pointer-events: none;
+  transition: background 500ms ease;
+}
+
+.cc-executing .cc-stage::before { background: radial-gradient(circle, rgba(53, 199, 255, 0.18), transparent 62%); }
+.cc-listening .cc-stage::before { background: radial-gradient(circle, rgba(70, 227, 160, 0.14), transparent 62%); }
+.cc-error .cc-stage::before { background: radial-gradient(circle, rgba(255, 92, 92, 0.14), transparent 62%); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-stage::before { transition: none; }
+}
+
+/* Panels catch light along their top edge and sit on a soft shadow, which is
+   what separates them from the background instead of a bare 1px line. */
+.hud-panel {
+  box-shadow:
+    0 1px 0 rgba(53, 199, 255, 0.10) inset,
+    0 10px 26px rgba(0, 0, 0, 0.36);
+}
+
+/* A short accent rule beside every panel heading. Cheap, and it does more for
+   legibility than another border would. */
+.hud-panel > .hud-label:first-child,
+.rings-head .hud-label,
+.cmd-head .hud-label,
+.trace-head .hud-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.hud-panel > .hud-label:first-child::before,
+.rings-head .hud-label::before,
+.cmd-head .hud-label::before,
+.trace-head .hud-label::before {
+  content: "";
+  width: 2px;
+  height: 11px;
+  flex: none;
+  border-radius: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+/* The top bar and the state rail are the frame; they get a stronger seat than
+   the panels between them. */
+.cc-top, .cc-states {
+  box-shadow:
+    0 1px 0 rgba(53, 199, 255, 0.12) inset,
+    0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.cc-core-title h1 { letter-spacing: 0.3em; }
+
+/* The ask field is the one control people reach for, so it reads as raised
+   rather than as another outline. */
+.cc-ask {
+  box-shadow:
+    0 1px 0 rgba(53, 199, 255, 0.10) inset,
+    0 8px 22px rgba(0, 0, 0, 0.45);
+}
+
+.cc-ask:focus-within {
+  border-color: var(--accent);
+  box-shadow:
+    0 1px 0 rgba(53, 199, 255, 0.16) inset,
+    0 0 0 1px rgba(53, 199, 255, 0.25),
+    0 8px 26px rgba(0, 0, 0, 0.5);
+}
+
+.cc-action { box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3); }
+
+/* ---- the projector base ----
+   The reference sits its core on a lit platform with light rising from it, and
+   that silhouette is most of why the design reads as a projection rather than
+   a circle on a page. Purely decorative: no part of it encodes a value, and it
+   carries no numbers, so it cannot be mistaken for an instrument. */
+
+.cc-core-wrap { position: relative; }
+
+/* The platform: an ellipse in perspective, brightest at its near edge. */
+.cc-core-wrap::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -34px;
+  width: 300px;
+  height: 66px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(53, 199, 255, 0.22), transparent 68%),
+    radial-gradient(ellipse at 50% 42%, rgba(120, 225, 255, 0.16), transparent 52%);
+  border-top: 1px solid rgba(53, 199, 255, 0.30);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* The beam: a soft cone between the platform and the core. Kept faint so the
+   core stays the brightest thing on the screen. */
+.cc-core-wrap::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -12px;
+  width: 210px;
+  height: 150px;
+  transform: translateX(-50%);
+  background: linear-gradient(to top, rgba(53, 199, 255, 0.16), transparent 76%);
+  clip-path: polygon(28% 100%, 72% 100%, 60% 0%, 40% 0%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* The state colours the base too, so the platform belongs to the core rather
+   than sitting under it as unrelated scenery. */
+.cc-listening .cc-core-wrap::after { border-top-color: rgba(70, 227, 160, 0.34); }
+.cc-error .cc-core-wrap::after { border-top-color: rgba(255, 92, 92, 0.34); }
+
+/* Corner ticks on the stage: the framing marks the reference uses to make the
+   middle read as a viewport rather than as empty space. */
+.cc-core-row::before,
+.cc-core-row::after {
+  content: "";
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-strong);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.cc-core-row::before { top: 4px; left: 4px; border-width: 1px 0 0 1px; }
+.cc-core-row::after { bottom: 4px; right: 4px; border-width: 0 1px 1px 0; }
