@@ -184,6 +184,27 @@ function firstWord(message: string): string {
 const maxQualifierWords = 5;
 
 /**
+ * Subjects that turn a leading wh-word into narration rather than a question.
+ *
+ * "When I was setting up the server" and "What we decided" are the user
+ * telling the assistant something. "When did the server" and "What is
+ * TypeScript" invert to an auxiliary instead, which is what makes them
+ * questions.
+ */
+const narrativeSubjects = new Set(["i", "we", "you", "he", "she", "they", "it", "my", "our"]);
+
+/** True when a leading question word is followed by its subject, not an auxiliary. */
+export function narrativeAfterQuestionWord(message: string): boolean {
+  const words = message.trim().toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+  if (words.length < 3) return false;
+
+  const questionWords = new Set(["when", "what", "where", "why", "how", "who", "which"]);
+  if (!questionWords.has(words[0])) return false;
+
+  return narrativeSubjects.has(words[1]);
+}
+
+/**
  * The first word after a short leading clause, or null when there isn't one.
  *
  * "In two sentences, explain X" and "Briefly, summarise Y" put the qualifier
@@ -247,6 +268,19 @@ export function analyzeRequest(message: unknown): RequestAnalysis {
     // An auxiliary lead is ambiguous: "Do it" is an order, "Do we ship?" is a
     // question. Only a question mark settles it. Wh-words need no such proof.
     if (candidate.type === "confirm" && !endsWithQuestionMark) {
+      break;
+    }
+    // A wh-word can open a statement as easily as a question. "When I was
+    // setting up the server, I made a note about it" is something the user is
+    // telling the assistant, and it was being read as a question — so a fact
+    // worth keeping got answered instead of remembered. Same for "What I need
+    // is help" and "Why I did it is complicated".
+    //
+    // What separates them is what follows the wh-word. A question inverts to
+    // an auxiliary or verb — "When did the server", "What is TypeScript",
+    // "Where are my notes". A narrative continues with its subject — "When I
+    // was", "What I need". A question mark still settles it either way.
+    if (!endsWithQuestionMark && narrativeAfterQuestionWord(text)) {
       break;
     }
     questionType = candidate.type;
