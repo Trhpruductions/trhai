@@ -655,7 +655,17 @@ export async function runAgent(
         // reads this looking at the wrong thing.
         return requested.length > 0
           ? { ok: false, reason: "The assistant kept searching without reaching an answer.", toolsUsed }
-          : { ok: false, reason: "The local model returned an empty reply.", toolsUsed };
+          // Marked unusable so the caller moves on to the next installed
+          // model. An empty reply is not a considered refusal, it is the
+          // model producing nothing at all — and unlike a model that answered
+          // badly, a different one has every chance of answering fine. Found
+          // live: "Write a Python function that adds two numbers" got an
+          // empty reply from vexora:latest in a second, the caller gave up,
+          // and the user was shown a generic four-step planning template
+          // ("Clarify the end state ... Identify the highest-impact next
+          // move") as though it were the answer. qwen2.5-coder, already
+          // installed on the same machine, answered it correctly.
+          : { ok: false, reason: "The local model returned an empty reply.", toolsUsed, modelUnusable: true };
       }
       const builtAnApp = toolsUsed.some((used) => used.name === "build_app");
       const cleanedText = builtAnApp ? withoutFabricatedLiveClaims(text) : text;

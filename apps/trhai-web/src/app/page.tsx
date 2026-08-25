@@ -8,9 +8,10 @@ import { useSpeech } from "../hooks/useSpeech";
 import { ParticleField } from "../components/ParticleField";
 import { useMicrophone } from "../hooks/useMicrophone";
 import { SystemRings } from "../components/SystemRings";
+import { Markdown } from "../components/Markdown";
 import { apiBaseUrl, apiGet, apiPatch, sessionId } from "../lib/api";
 import { readStoredPersonality } from "../lib/personality";
-import { activeAgent, personalityById, readMarketplaceState, readFlow, type Agent } from "@ascend/shared";
+import { activeAgent, personalityById, readMarketplaceState, readFlow, speakableText, type Agent } from "@ascend/shared";
 import { marketplaceStorageKey } from "../lib/agents";
 import "./dash.css";
 
@@ -235,7 +236,10 @@ export default function DashboardPage() {
     lastSpokenId.current = newest.id;
     if (mic.listening) return;
 
-    speech.speak(newest.text);
+    // Spoken as prose, not as markup: the reply renders as formatted text,
+    // so reading "asterisk asterisk" aloud would say something different
+    // from what is on screen.
+    speech.speak(speakableText(newest.text));
   }, [messages, speech, mic.listening]);
 
   // Clock starts null and fills in on the client: rendering a time on the
@@ -496,19 +500,23 @@ export default function DashboardPage() {
                 <span className="hud-say-model mono">{lastReply.model.replace(/^ollama\//, "").replace(/:latest$/, "")}</span>
               ) : null}
             </div>
-            <p className="hud-say-text">
-              {status.state === "error"
-                ? status.detail
-                : busy
-                  ? label === "THINKING" ? "Thinking…" : "Working on it…"
-                  : online === false
-                    ? "The local API is not responding. Start it and this updates on its own."
-                    : lastReply
-                      ? lastReply.text
+            {/* A reply gets its formatting; every other case here is a plain
+                status sentence this screen wrote itself, not model output. */}
+            {!busy && status.state !== "error" && online !== false && lastReply ? (
+              <Markdown text={lastReply.text} className="hud-say-text" />
+            ) : (
+              <p className="hud-say-text">
+                {status.state === "error"
+                  ? status.detail
+                  : busy
+                    ? label === "THINKING" ? "Thinking…" : "Working on it…"
+                    : online === false
+                      ? "The local API is not responding. Start it and this updates on its own."
                       : modelName
                         ? `${greetingFor(clock ?? new Date())}, Hank. Answering with ${modelName}. How can I help?`
                         : "Reachable, but no local model is loaded — I can't generate a reply yet."}
-            </p>
+              </p>
+            )}
             {lastReply?.toolsUsed && lastReply.toolsUsed.length > 0 && !busy ? (
               <div className="hud-say-tools">
                 {lastReply.toolsUsed.map((tool, index) => (

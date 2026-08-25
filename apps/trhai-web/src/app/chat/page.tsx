@@ -5,6 +5,8 @@ import { useAssistant, type AssistantStatus, type ChatMessage } from "../../hook
 import { useSpeech } from "../../hooks/useSpeech";
 import { useMicrophone } from "../../hooks/useMicrophone";
 import { Core, type CoreState } from "../../components/Core";
+import { Markdown } from "../../components/Markdown";
+import { speakableText } from "@ascend/shared";
 import "./chat.css";
 
 // Chat: TRHAI's conversation surface, talking to the real local orchestrator.
@@ -56,7 +58,12 @@ function Turn({ message }: { message: ChatMessage }) {
           <span className="chip chip-danger">service error</span>
         ) : null}
       </header>
-      <p className="turn-text">{message.text}</p>
+      {/* Only replies are parsed as Markdown. What you typed is shown exactly
+          as you typed it — reinterpreting a user's own words as formatting
+          would mean asking about "**" and being shown something else. */}
+      {message.role === "assistant"
+        ? <Markdown text={message.text} className="turn-text" />
+        : <p className="turn-text">{message.text}</p>}
       {message.toolsUsed && message.toolsUsed.length > 0 ? (
         <div className="turn-tools">
           {message.toolsUsed.map((tool, index) => (
@@ -108,7 +115,10 @@ export default function ChatPage() {
     lastSpokenId.current = newest.id;
     if (mic.listening) return;
 
-    speech.speak(newest.text);
+    // Spoken as prose, not as markup: the reply renders as formatted text,
+    // so reading "asterisk asterisk" aloud would say something different
+    // from what is on screen.
+    speech.speak(speakableText(newest.text));
   }, [messages, speech, mic.listening]);
 
   const busy = status.state === "thinking" || status.state === "executing";

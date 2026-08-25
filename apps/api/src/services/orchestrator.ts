@@ -419,11 +419,20 @@ async function answerWithLocalModel(
       };
     }
 
-    // Only a model that could not be loaded is worth replacing. One that
-    // loaded and then failed to answer will fail the same way again, and
-    // trying every installed model against it just makes the user wait.
-    if (!result.modelUnusable) return null;
-    console.warn(`[assist] ${result.reason}`);
+    // Only a model that could not be loaded, or that produced nothing at all,
+    // is worth replacing. One that loaded and answered badly will answer
+    // badly again, and trying every installed model against it just makes the
+    // user wait.
+    //
+    // Logged either way. This used to return null in silence, which meant a
+    // model failing mid-conversation was invisible: the caller fell back to a
+    // deterministic reply that looks like a deliberate answer, and nothing
+    // anywhere said the model had been asked and had failed.
+    if (!result.modelUnusable) {
+      console.warn(`[assist] ${model} could not answer: ${result.reason}`);
+      return null;
+    }
+    console.warn(`[assist] ${model} unusable: ${result.reason}`);
   }
 
   if (attempted.length > 0) {
