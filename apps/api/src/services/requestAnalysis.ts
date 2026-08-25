@@ -59,6 +59,11 @@ const commandVerbs = new Set([
   "build", "create", "make", "generate", "add", "write", "implement", "fix", "debug", "refactor",
   "design", "plan", "draft", "review", "test", "deploy", "set", "setup", "configure", "update",
   "remove", "delete", "explain", "summarize", "analyze", "compare", "list", "show", "find",
+  // British spellings of verbs already on this list. The same request typed
+  // by someone who writes "summarise" fell through to "statement" and was
+  // filed away rather than answered — a spelling should not decide whether
+  // the assistant does the work.
+  "summarise", "analyse", "optimise", "organise", "customise",
   "optimize", "migrate", "install", "run", "scaffold",
   // Caught live: "Look inside the calculator project, list its files, then
   // read server.js and tell me whether the arithmetic looks correct" led
@@ -175,6 +180,33 @@ function firstWord(message: string): string {
   return message.trim().split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, "") ?? "";
 }
 
+/** Longest leading clause still treated as a qualifier rather than a sentence. */
+const maxQualifierWords = 5;
+
+/**
+ * The first word after a short leading clause, or null when there isn't one.
+ *
+ * "In two sentences, explain X" and "Briefly, summarise Y" put the qualifier
+ * first and the verb second. Read from the first word alone both look like
+ * statements, and a statement is something the user is telling the assistant
+ * — so "In two sentences, explain what a semaphore is." was answered with
+ * "Got it, I'll keep that in mind."
+ *
+ * Bounded at a few words on purpose. A long clause before a comma is a
+ * sentence in its own right, and reading its second half as the real request
+ * would turn an ordinary statement containing a comma into an order.
+ */
+export function leadAfterQualifier(message: string): string | null {
+  const comma = message.indexOf(",");
+  if (comma <= 0) return null;
+
+  const qualifier = message.slice(0, comma).trim();
+  if (!qualifier || qualifier.split(/\s+/).length > maxQualifierWords) return null;
+
+  const rest = message.slice(comma + 1).trim();
+  return rest ? firstWord(rest) : null;
+}
+
 export function analyzeRequest(message: unknown): RequestAnalysis {
   const text = typeof message === "string" ? message.trim() : "";
   const topics = extractTopics(text);
@@ -191,6 +223,19 @@ export function analyzeRequest(message: unknown): RequestAnalysis {
   }
 
   const lead = firstWord(text);
+  // The verb after a leading qualifier, when there is one.
+  //
+  // "Explain what a semaphore is in two sentences" is a command. "In two
+  // sentences, explain what a semaphore is" is the same request with the
+  // qualifier moved to the front — and it was read as a statement, because
+  // the first word is "In". A statement is something the user is telling the
+  // assistant, so the reply was "Got it, I'll keep that in mind" to a
+  // question that wanted an answer.
+  //
+  // Only a short leading clause counts. Anything longer is a sentence in its
+  // own right, and treating its second half as the real request would let a
+  // genuine statement that happens to contain a comma be read as an order.
+  const qualified = leadAfterQualifier(text);
   const endsWithQuestionMark = text.endsWith("?");
   const isRecall = recallPatterns.some((pattern) => pattern.test(text));
 
@@ -211,7 +256,7 @@ export function analyzeRequest(message: unknown): RequestAnalysis {
   // A leading command verb wins over a question word only when there is no "?".
   // "List the options" is a command; "What should I list?" is a question.
 const looksImperative =
-  (commandVerbs.has(lead) || isContinuationRequest(text))
+  (commandVerbs.has(lead) || (qualified !== null && commandVerbs.has(qualified)) || isContinuationRequest(text))
   && !endsWithQuestionMark
   && questionType === "none";
 

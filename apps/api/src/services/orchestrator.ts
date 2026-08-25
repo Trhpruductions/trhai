@@ -44,6 +44,16 @@ export type OrchestratorInput = {
   deleteDocument?: (id: string) => boolean;
   /** Pins or unpins a memory, for the "pin_memory" tool. */
   pinMemory?: (id: string, pinned: boolean) => boolean;
+  /**
+   * Fired with each new piece of a generated reply, for callers that can show
+   * it arriving. Optional throughout: without it every request is made and
+   * answered exactly as before.
+   *
+   * Only ever fires on the branch that reaches a model. A reply quoted from
+   * saved memory or a stored document is not generated a token at a time and
+   * has nothing to stream — it is already whole when it is found.
+   */
+  onToken?: (text: string) => void;
 };
 
 export type OrchestratorResult = {
@@ -408,7 +418,7 @@ async function answerWithLocalModel(
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history
-  }, fetch, onToolStart);
+  }, fetch, onToolStart, input.onToken);
 
     if (result.ok) {
       return {

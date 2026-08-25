@@ -1,6 +1,7 @@
 import type { LocalModelConfig } from "./localModel.js";
 import { availableTools, runTool, toolDefinitions, type ToolContext, type ToolCall } from "./agentTools.js";
 import { commandsArmed } from "./commandRunner.js";
+import { readStream, toLines } from "./streamReader.js";
 
 // The agent loop.
 //
@@ -524,7 +525,20 @@ export async function runAgent(
   context: ToolContext,
   fetchImpl: typeof fetch = fetch,
   /** Fired right before each tool call, so a caller can report live progress. */
-  onToolStart?: (toolName: string) => void
+  onToolStart?: (toolName: string) => void,
+  /**
+   * Fired with each new piece of the reply as it is generated.
+   *
+   * Opt-in: without it the request is made exactly as before, unstreamed, so
+   * nothing that already works changes shape. A local model can take half a
+   * minute to answer, and watching nothing happen for that long is the worst
+   * part of using one — but it is not worth destabilising the loop for, so
+   * the streaming path is only taken when a caller actually wants it.
+   *
+   * Only prose arrives here. streamReader withholds anything that might be a
+   * text-encoded tool call, which this model does emit.
+   */
+  onToken?: (text: string) => void
 ): Promise<AgentResult> {
   // The date is stated outright rather than left to a tool call.
   //
@@ -603,7 +617,10 @@ export async function runAgent(
           body: JSON.stringify({
             model: config.model,
             messages,
-            stream: false,
+            // Streamed only when someone is listening. Tokens are useless to
+            // a caller that cannot show them, and the unstreamed path is the
+            // one every existing test exercises.
+            stream: Boolean(onToken),
             // Withheld while disarmed rather than offered and refused: a
             // model that can see run_command will reason about it and try to
             // talk its way into it; one that never sees it cannot.
@@ -630,7 +647,29 @@ export async function runAgent(
         };
       }
 
-      response = await raw.json() as ChatResponse;
+      if (onToken && raw.body) {
+        // The same shape the unstreamed path produces, assembled from frames.
+        // Everything downstream — tool parsing, the text guard, the round
+        // bound — then works identically whether or not this was streamed.
+        const streamed = await readStream(
+          toLines(raw.body as unknown as AsyncIterable<Uint8Array>),
+          onToken,
+          // What counts as "do not show this": the same parser that decides
+          // whether the finished message was a call. Sharing it means the
+          // screen and the loop can never disagree about what the reply was.
+          (text) => parseTextToolCalls(text).length > 0
+        );
+        response = {
+          model: streamed.model ?? config.model,
+          message: {
+            role: "assistant",
+            content: streamed.content,
+            ...(streamed.toolCalls ? { tool_calls: streamed.toolCalls } : {})
+          }
+        } as ChatResponse;
+      } else {
+        response = await raw.json() as ChatResponse;
+      }
     } catch (error) {
       const detail = error instanceof Error && error.name === "AbortError"
         ? `it did not reply within ${Math.round(config.timeoutMs / 1000)}s`

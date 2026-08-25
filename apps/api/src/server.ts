@@ -141,6 +141,112 @@ function normalizeAssistMode(mode: unknown): AssistRouteMode {
   return "general";
 }
 
+/**
+ * Everything the orchestrator needs for one turn, wired to this session's
+ * real stores.
+ *
+ * Shared by /v1/assist and /v1/assist/stream. It was briefly duplicated into
+ * the streaming route, which is how two copies of a dozen closures start
+ * drifting apart — one gains a capability the other quietly lacks, and the
+ * difference only shows up as "it works in chat but not on the dashboard".
+ */
+function buildAssistInput(
+  req: express.Request,
+  options: {
+    mode: AssistRouteMode;
+    message: string;
+    sessionId: string | null;
+    savedMemories: Array<{ body: string }>;
+    memoryContext: Array<{ id: string; title: string; body: string; pinned: boolean; createdAt: string }>;
+    history: Array<{ role: "user" | "assistant"; content: string }>;
+    onToken?: (text: string) => void;
+  }
+) {
+  const { mode, message, sessionId, savedMemories, memoryContext, history, onToken } = options;
+
+  return {
+    mode,
+    userMessage: message,
+    sessionId: sessionId ?? undefined,
+    history,
+    memoryContext: memoryContext.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      body: entry.body,
+      pinned: entry.pinned,
+      createdAt: entry.createdAt
+    })),
+    // Reported so the reply can only confirm a save that actually happened.
+    // Without a session there is nowhere to write, and the user must be told
+    // that rather than reassured.
+    memoryWrite: {
+      available: sessionId !== null,
+      saved: savedMemories.length,
+      savedBodies: savedMemories.map((memory) => memory.body)
+    },
+    knowledge: sessionId ? retrieveKnowledgePassages(sessionId) : [],
+    // The write path for the assistant's own "remember" tool. Omitted without
+    // a session, so the tool reports that nothing was saved rather than the
+    // assistant claiming a write that had nowhere to go.
+    saveMemory: sessionId
+      ? (fact: string) => recordSingleMemory(sessionId, fact).status
+      : undefined,
+    forgetMemory: sessionId ? (id: string) => forgetMemory(sessionId, id) : undefined,
+    documents: sessionId
+      ? listDocuments(sessionId).map((document) => ({
+        id: document.id,
+        title: document.title,
+        body: document.body
+      }))
+      : undefined,
+    saveDocument: sessionId
+      ? (title: string, body: string) => Boolean(addDocument(sessionId, {
+        id: globalThis.crypto.randomUUID(),
+        title,
+        body
+      }))
+      : undefined,
+    // An update is a delete and a re-add under the original title and id,
+    // because the store has no in-place edit. Done in this order so a failed
+    // write cannot leave the session with neither version.
+    updateDocument: sessionId
+      ? (id: string, body: string) => {
+        const existing = listDocuments(sessionId).find((document) => document.id === id);
+        if (!existing) return false;
+        const replaced = addDocument(sessionId, { id: `${id}-updated`, title: existing.title, body });
+        if (!replaced) return false;
+        removeDocument(sessionId, id);
+        return true;
+      }
+      : undefined,
+    deleteDocument: sessionId ? (id: string) => removeDocument(sessionId, id) : undefined,
+    pinMemory: sessionId
+      ? (id: string, pinned: boolean) => Boolean(setMemoryPinned(sessionId, id, pinned))
+      : undefined,
+    ...(onToken ? { onToken } : {})
+  };
+}
+
+/** The per-turn session state both assist routes derive the same way. */
+function readTurnContext(req: express.Request, message: string) {
+  const sessionId = resolveMemoryKey(req, normalizeSessionId(req.body?.sessionId));
+  const savedMemories = sessionId ? recordMemoriesFromMessage(sessionId, message) : [];
+  // Widen the candidate set: the composer scores for relevance, so limiting
+  // to the 5 newest would hide the one memory that actually answers.
+  const memoryContext = sessionId ? retrieveSessionMemories(sessionId, memoryCandidateLimit) : [];
+
+  const clientHistory = normalizeAssistHistory(req.body?.history);
+  // Fall back to the stored transcript when the client sends none — that is
+  // what lets a fresh browser continue an existing conversation.
+  const history = clientHistory.length > 0 || !sessionId
+    ? clientHistory
+    : normalizeAssistHistory(
+      listTurns(sessionId).map((turn) => ({ role: turn.role, content: turn.content }))
+    );
+
+  return { sessionId, savedMemories, memoryContext, history };
+}
+
 export function createApp() {
   const app = express();
 
@@ -764,6 +870,73 @@ export function createApp() {
   // claims to show.
   app.get("/v1/system-telemetry", async (_req, res) => {
     res.json({ data: await readTelemetry(), traceId: "trace-local" });
+  });
+
+  // The same turn as /v1/assist, streamed.
+  //
+  // A local model can take half a minute to answer, and watching nothing
+  // happen for that long is the worst part of using one. This sends the reply
+  // as it is generated.
+  //
+  // Deliberately a second route rather than a flag on the first. Everything
+  // that already calls /v1/assist keeps the exact request and the exact
+  // response it had, and the streaming path cannot change an answer for a
+  // caller that did not ask for it. The final "done" event carries the whole
+  // result, so a client can rely on that alone and treat the tokens as
+  // presentation — which is what makes it safe for the tokens to be withheld
+  // when the model turns out to have been writing a tool call.
+  app.post("/v1/assist/stream", async (req, res) => {
+    const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+    if (!message) {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "message is required", traceId: "trace-local" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    // Nginx and friends buffer event streams by default, which turns a live
+    // reply back into one long wait with extra steps.
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+
+    const send = (event: string, data: unknown) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    const mode = normalizeAssistMode(req.body?.mode);
+    const turn = readTurnContext(req, message);
+    const { sessionId } = turn;
+
+    try {
+      const result = await runAssistantOrchestrator(
+        buildAssistInput(req, { mode, message, ...turn, onToken: (text) => send("token", { text }) })
+      );
+
+      if (sessionId) {
+        appendTurn(sessionId, "user", message);
+        // Provenance goes on the assistant turn for the same reason it does
+        // on the unstreamed route: a reloaded transcript still has to show
+        // whether an answer was quoted or generated.
+        appendTurn(sessionId, "assistant", result.assistantMessage, {
+          strategy: result.strategy,
+          model: result.model
+        });
+        clearActivity(sessionId);
+      }
+
+      // The whole result, so a client never has to reassemble the reply from
+      // the tokens it happened to receive.
+      send("done", result);
+    } catch (error) {
+      // An error mid-stream cannot be a status code — the headers are long
+      // gone — so it is an event the client can render as a failed turn.
+      send("failed", {
+        message: error instanceof Error ? error.message : "The assistant could not answer."
+      });
+    } finally {
+      res.end();
+    }
   });
 
   // Command access: the switch, and what it has actually run.
