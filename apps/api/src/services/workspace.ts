@@ -54,6 +54,16 @@ export const maxWriteBytes = 500_000;
 export const maxListedFiles = 200;
 
 /**
+ * How much of the tree is examined before the newest are chosen from it.
+ *
+ * Larger than what is returned, because the walk has to see a file before it
+ * can know how recent it is. Still bounded: this is a workspace of generated
+ * projects, not a filesystem crawl, and an unbounded walk on a pathological
+ * tree would hang the request.
+ */
+const maxWalkedEntries = 5_000;
+
+/**
  * Turn a caller's path into an absolute one inside the workspace, or null.
  *
  * Null means refused. It is never an error to be logged and continued past —
@@ -136,7 +146,21 @@ function ensureRoot(): string {
   return root;
 }
 
-export type WorkspaceEntry = { path: string; bytes: number; directory: boolean };
+export type WorkspaceEntry = {
+  path: string;
+  bytes: number;
+  directory: boolean;
+  /**
+   * Last modification, epoch milliseconds.
+   *
+   * Carried because "what did TRHAI just build" is the question the work view
+   * exists to answer, and it cannot be answered from a directory walk: the
+   * walk is in readdir order, so reversing it gives the alphabetically last
+   * file, not the newest one. The stat is already taken to get the size, so
+   * this costs nothing.
+   */
+  modifiedAt: number;
+};
 
 /** Everything in the workspace, as paths relative to its root. */
 export function listWorkspace(subdirectory = "."): WorkspaceEntry[] | null {
@@ -150,7 +174,7 @@ export function listWorkspace(subdirectory = "."): WorkspaceEntry[] | null {
   const found: WorkspaceEntry[] = [];
 
   const walk = (directory: string) => {
-    if (found.length >= maxListedFiles) return;
+    if (found.length >= maxWalkedEntries) return;
 
     let entries: string[];
     try {
@@ -160,7 +184,7 @@ export function listWorkspace(subdirectory = "."): WorkspaceEntry[] | null {
     }
 
     for (const entry of entries) {
-      if (found.length >= maxListedFiles) return;
+      if (found.length >= maxWalkedEntries) return;
 
       const full = path.join(directory, entry);
       let info: ReturnType<typeof statSync>;
@@ -180,16 +204,26 @@ export function listWorkspace(subdirectory = "."): WorkspaceEntry[] | null {
 
       const relative = path.relative(root, full).split(path.sep).join("/");
       if (info.isDirectory()) {
-        found.push({ path: relative, bytes: 0, directory: true });
+        found.push({ path: relative, bytes: 0, directory: true, modifiedAt: info.mtimeMs });
         walk(full);
       } else {
-        found.push({ path: relative, bytes: info.size, directory: false });
+        found.push({ path: relative, bytes: info.size, directory: false, modifiedAt: info.mtimeMs });
       }
     }
   };
 
   walk(target);
-  return found;
+
+  // Newest first, then truncate — in that order.
+  //
+  // Stopping the walk at maxListedFiles meant the listing was whatever
+  // readdir reached first, so a project created a minute ago could be missing
+  // entirely while a year-old one filled the response. The work view then
+  // showed six files from an unrelated old project and none of the ones that
+  // had just been written, and no amount of client-side sorting could fix it:
+  // the new files were never sent.
+  found.sort((left, right) => right.modifiedAt - left.modifiedAt);
+  return found.slice(0, maxListedFiles);
 }
 
 /**
@@ -274,4 +308,118 @@ export function writeWorkspaceFile(relativePath: string, content: string): Write
   } catch {
     return { ok: false, reason: `"${relativePath}" could not be written.` };
   }
+}
+
+/**
+ * Read a file by an already-resolved absolute path.
+ *
+ * The containment decision was made by the caller - see machinePaths - so this
+ * does no path checking of its own. Everything else about a read is unchanged:
+ * the same size cap, the same binary detection, the same truncation notice, so
+ * a file outside the workspace behaves exactly like one inside it.
+ */
+export function readFileAt(absolutePath: string): ReadResult {
+  if (!existsSync(absolutePath)) return { ok: false, reason: `There is no file at "${absolutePath}".` };
+
+  let info: ReturnType<typeof statSync>;
+  try {
+    info = statSync(absolutePath);
+  } catch {
+    return { ok: false, reason: `"${absolutePath}" could not be read.` };
+  }
+
+  if (info.isDirectory()) return { ok: false, reason: `"${absolutePath}" is a directory, not a file.` };
+
+  try {
+    const raw = readFileSync(absolutePath);
+    const content = raw.subarray(0, maxReadBytes).toString("utf8");
+    if (looksBinary(content)) {
+      return { ok: false, reason: `"${absolutePath}" looks like a binary file, so it was not read.` };
+    }
+    return { ok: true, content, truncated: raw.byteLength > maxReadBytes };
+  } catch {
+    return { ok: false, reason: `"${absolutePath}" could not be read.` };
+  }
+}
+
+/** Write to an already-resolved absolute path. Containment decided by the caller. */
+export function writeFileAt(absolutePath: string, content: string): WriteResult {
+  if (typeof content !== "string") return { ok: false, reason: "There was nothing to write." };
+  if (Buffer.byteLength(content, "utf8") > maxWriteBytes) {
+    return { ok: false, reason: `That is larger than the ${maxWriteBytes / 1000}KB write limit.` };
+  }
+
+  try {
+    mkdirSync(path.dirname(absolutePath), { recursive: true });
+    writeFileSync(absolutePath, content, "utf8");
+    return { ok: true, path: absolutePath };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: `Could not write ${absolutePath}: ${reason}` };
+  }
+}
+
+/**
+ * Skipped when walking a real project.
+ *
+ * A node_modules folder is tens of thousands of files nobody asked about, and
+ * walking into one exhausts the entry cap before reaching any of the source
+ * the assistant was pointed at - a listing of a project that shows only its
+ * dependencies is worse than no listing, because it looks like an answer.
+ */
+const uninterestingDirectories = new Set([
+  "node_modules", ".git", ".next", "dist", "build", "out",
+  "coverage", ".cache", "venv", ".venv", "__pycache__", "target"
+]);
+
+/**
+ * List a directory by an already-resolved absolute path.
+ *
+ * Containment was decided by the caller - see machinePaths - so this walks
+ * whatever it is given. Depth-limited and capped for the same reason the
+ * workspace walk is: a listing is for orienting in a project, not for
+ * enumerating a disk.
+ */
+export function listDirectoryAt(absolutePath: string, maxDepth = 3): WorkspaceEntry[] | null {
+  if (!existsSync(absolutePath)) return null;
+
+  const found: WorkspaceEntry[] = [];
+  const root = path.resolve(absolutePath);
+
+  const walk = (directory: string, depth: number) => {
+    if (found.length >= maxWalkedEntries || depth > maxDepth) return;
+
+    let entries: string[];
+    try {
+      entries = readdirSync(directory);
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (found.length >= maxWalkedEntries) return;
+      if (uninterestingDirectories.has(entry)) continue;
+
+      const full = path.join(directory, entry);
+      let info: ReturnType<typeof statSync>;
+      try {
+        info = statSync(full);
+      } catch {
+        continue;
+      }
+
+      const relative = path.relative(root, full).split(path.sep).join("/");
+      if (info.isDirectory()) {
+        found.push({ path: relative, bytes: 0, directory: true, modifiedAt: info.mtimeMs });
+        walk(full, depth + 1);
+      } else {
+        found.push({ path: relative, bytes: info.size, directory: false, modifiedAt: info.mtimeMs });
+      }
+    }
+  };
+
+  walk(root, 0);
+  // Newest first: in a project someone is working on, what changed recently is
+  // almost always what they mean.
+  return found.sort((a, b) => b.modifiedAt - a.modifiedAt);
 }

@@ -13,17 +13,26 @@
 // Two decisions worth stating, because both could reasonably have gone the
 // other way.
 //
-// Level 2 runs automatically. Requiring a click before every file write
-// would make the assistant useless for the thing it is mainly for, and the
-// workspace guard already bounds where a write can land — a level 2 tool
-// cannot reach outside it, so the blast radius is a directory the user
-// chose, not the machine.
+// Level 2 runs automatically. Requiring a click before every file write would
+// make the assistant useless for the thing it is mainly for.
+//
+// What bounds a level 2 write has changed, and the old reasoning here was left
+// behind by it. This used to say the workspace guard meant "a level 2 tool
+// cannot reach outside it, so the blast radius is a directory the user chose,
+// not the machine". That stopped being true when file access started following
+// the machine-access switch: with it on, write_file and edit_file reach the
+// whole disk.
+//
+// The bound is now that switch. It is off by default, granted deliberately for
+// a fixed window, not inherited by unattended runs, and refuses writes to
+// system locations even when on. That is a real boundary — but it is a
+// different one, and a comment claiming the old guarantee would be describing
+// an app that no longer exists.
 //
 // Level 3 is about recoverability, not importance. write_file overwrites and
-// is still level 2, because the workspace is the user's own scratch space and
-// an overwrite there is the ordinary way of working. forget and
-// delete_document destroy the only copy of something the user deliberately
-// saved, and nothing in this app can bring it back.
+// is still level 2, because overwriting is the ordinary way of working on
+// files. forget and delete_document destroy the only copy of something the
+// user deliberately saved, and nothing in this app can bring it back.
 
 export type PermissionLevel = 1 | 2 | 3 | 4;
 
@@ -64,12 +73,16 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // webFetch.ts for why that exception is safe to make at all.
   fetch_url: 1,
 
-  // 2 — creates or changes something, inside a bounded workspace.
+  // 2 — creates or changes something. Bounded by the workspace on its own, or
+  // by the machine-access switch when that has been granted.
   remember: 2,
   pin_memory: 2,
   write_document: 2,
   update_document: 2,
   write_file: 2,
+  // Targeted rather than wholesale, so if anything it is the safer of the two:
+  // it changes the text it was given and cannot silently drop the rest of a file.
+  edit_file: 2,
   build_app: 2,
 
   // 3 — destroys the only copy of something the user chose to keep, or
@@ -81,6 +94,25 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // window without which it is never offered to the model at all.
   run_command: 3
 };
+
+/**
+ * Whether running this tool can have changed something.
+ *
+ * Read off the ladder rather than kept as a second list. agentLoop has a
+ * `mutatingTools` set for a different job - whose output gets repeated verbatim
+ * in the reply - and it does not contain edit_file. Reusing it as the record of
+ * "did anything get written" would have called a real, successful edit a lie,
+ * because edit_file's absence from that set is correct for its actual purpose.
+ *
+ * Level 2 is defined above as "creates or changes something" and level 3 as
+ * destroying or escaping the workspace, so both count. Unknown tools land on 3
+ * and count too, which is the right way to be wrong here: a guard that accuses
+ * the model of claiming a change it never made must never fire on a change that
+ * really happened, since that replaces a true reply with a false denial.
+ */
+export function changesSomething(toolName: string): boolean {
+  return permissionLevelOf(toolName) >= 2;
+}
 
 /** Unknown tools are treated as destructive, so forgetting to classify is safe. */
 export function permissionLevelOf(toolName: string): PermissionLevel {
