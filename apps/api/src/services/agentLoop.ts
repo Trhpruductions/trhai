@@ -1,8 +1,22 @@
 import type { LocalModelConfig } from "./localModel.js";
-import { availableTools, runTool, toolDefinitions, type ToolContext, type ToolCall } from "./agentTools.js";
+import { availableTools, runTool, type ToolContext, type ToolCall } from "./agentTools.js";
 import { commandsArmed } from "./commandRunner.js";
 import { readStream, toLines } from "./streamReader.js";
 import { enterStage, stageForTool } from "./reasoningStage.js";
+import { beginEvent, endEvent, type ExecutionKind } from "./executionLog.js";
+import { stripFabricatedToolOutput } from "./fabricatedOutput.js";
+import {
+  answerDirectly, claimsUnperformedMutation, claimsUnusedTool, contradictsToolRecord,
+  correctionFor, noChangeWasMade, pendingConfirmationNotice, promisesUnperformedMutation
+} from "./contradictedClaims.js";
+import {
+  classifyIntent, clarificationFor, isExplanatoryQuestion, type ActionKind
+} from "./actionIntent.js";
+import { createToolActivity, type ToolActivity } from "./toolActivity.js";
+import { changesSomething } from "./toolPermissions.js";
+
+// Re-exported so nothing that already imports it from here has to move.
+export type { ToolActivity };
 import { increment, observe } from "./metrics.js";
 
 // The agent loop.
@@ -39,6 +53,25 @@ type ChatMessage = {
  */
 export type ToolOutcome = { name: string; ok: boolean };
 
+/**
+ * What the loop decided about this turn, recorded rather than inferred.
+ *
+ * Exists so the enforcement below can be inspected after the fact: whether the
+ * request was read as an order, how many tools the model actually asked for on
+ * its first pass, and whether it had to be told to try again. Without this the
+ * only evidence of a forced retry is that the turn took twice as long.
+ */
+export type ActionAudit = {
+  kind: ActionKind | "none";
+  actionIntent: boolean;
+  /** What happened to tools this turn. See ToolActivity. */
+  toolActivity: ToolActivity;
+  /** Tool calls the model asked for on its first turn, before any prompting. */
+  firstTurnToolCalls: number;
+  forcedRetry: boolean;
+  outcome: "tool-called" | "clarified" | "no-tool-failure" | "prose";
+};
+
 export type AgentResult =
   | {
     ok: true;
@@ -54,6 +87,8 @@ export type AgentResult =
      * is not a case worth designing for.
      */
     awaitingConfirmation?: { tool: string; arguments: Record<string, unknown> };
+    /** See ActionAudit. Present on every result, success or failure. */
+    actionAudit?: ActionAudit;
   }
   | {
     ok: false;
@@ -199,6 +234,54 @@ const mutatingTools = new Set([
   "remember", "forget", "write_document", "update_document", "delete_document",
   "pin_memory", "write_file", "build_app"
 ]);
+
+/**
+ * Tools that write their own execution events.
+ *
+ * build_app records a plan, a write and a verify step; run_command records the
+ * command and its output. Both say more than a single generic row would, so
+ * the loop stays out of their way rather than logging a second, vaguer entry
+ * beside each one.
+ */
+const selfLoggingTools = new Set(["build_app", "run_command"]);
+
+/** Which kind of work a tool represents, for the activity list's dot colour. */
+export function executionKindForTool(tool: string): ExecutionKind {
+  if (tool === "write_file" || tool === "write_document" || tool === "update_document") return "write";
+  if (tool === "plan_app") return "plan";
+  if (tool === "test") return "test";
+  // Everything else is the assistant looking something up — a file, a memory,
+  // a document, a page. "read" is the honest general case.
+  return "read";
+}
+
+/**
+ * One line describing a call, for the activity list.
+ *
+ * Names the tool and its most identifying argument, both taken from the call
+ * that is actually about to run. No argument is invented when a call has none:
+ * "Listed files" is the whole truth about `list_files()`.
+ */
+export function describeToolCall(call: ToolCall): string {
+  const words = call.name.replace(/_/g, " ");
+  const readable = words.charAt(0).toUpperCase() + words.slice(1);
+
+  const args = call.arguments;
+  if (!args || typeof args !== "object") return readable;
+
+  // The first argument that names a thing. Ordered by how specific it is, so
+  // a call carrying both a path and a query is described by its path.
+  for (const key of ["path", "file", "title", "query", "url", "name", "command", "fact"]) {
+    const value = (args as Record<string, unknown>)[key];
+    if (typeof value !== "string" || !value.trim()) continue;
+    const trimmed = value.trim();
+    // Truncated because this is one line in a narrow panel, and a 2 kB
+    // document body pasted into the label helps nobody.
+    return `${readable}: ${trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed}`;
+  }
+
+  return readable;
+}
 
 /**
  * Append what a mutating tool actually reported, unless the model's own text
@@ -482,9 +565,47 @@ export function parseTextToolCalls(text: string, known = advertisedToolNames()):
     .filter((call): call is ToolCall => call !== null);
 }
 
-/** The tools this app offers, by name. */
+/** The tools this app offers right now, by name. */
 function advertisedToolNames(): string[] {
   return availableTools(commandsArmed()).map((definition) => definition.function.name);
+}
+
+/** Every tool this app has, including any currently switched off. */
+function allToolNames(): string[] {
+  return availableTools(true).map((definition) => definition.function.name);
+}
+
+/**
+ * A call the model wrote for a tool that exists but is switched off.
+ *
+ * These fall through every other check. The parser only recognises tools that
+ * are currently advertised, so a `run_command` call written while machine
+ * control is off is not a call at all as far as this loop is concerned — it is
+ * just text, and it went to the user as their answer. Asking TRHAI to run
+ * something with the switch off replied with the literal line
+ * `{"name": "run_command", "arguments": {"command": "echo hello"}}`, which is
+ * internal plumbing presented as an answer.
+ *
+ * Parsing against the full set is what makes the difference visible: the model
+ * asked for something real, and the honest reply is why it did not happen.
+ */
+export function gatedToolCall(text: string): ToolCall | null {
+  const advertised = new Set(advertisedToolNames());
+  const calls = parseTextToolCalls(text, allToolNames());
+  return calls.find((call) => !advertised.has(call.name)) ?? null;
+}
+
+/** What to say instead of showing the user a tool call they cannot read. */
+export function explainGatedTool(call: ToolCall): string {
+  if (call.name === "run_command") {
+    const command = typeof call.arguments?.command === "string" ? call.arguments.command.trim() : "";
+    return "Machine control is switched off, so nothing was run."
+      + (command ? ` What I would have run is \`${command}\`.` : "")
+      + " You can turn it on under Machine control on the dashboard; it stays on for 30 minutes.";
+  }
+
+  const readable = call.name.replace(/_/g, " ");
+  return `That needs ${readable}, which is not switched on right now, so nothing was done.`;
 }
 
 function parseToolCalls(response: ChatResponse): ToolCall[] {
@@ -606,6 +727,34 @@ export async function runAgent(
   const toolsUsed: ToolOutcome[] = [];
   let awaitingConfirmation: { tool: string; arguments: Record<string, unknown> } | undefined;
 
+  // Whether this turn was an order or a question, decided before generating.
+  //
+  // Deterministic, so it can be regression-tested. Asking a model to classify
+  // the request would put the same unreliability that causes the bug in charge
+  // of detecting it.
+  const intent = classifyIntent(question);
+  let forcedRetry = false;
+  let correctedContradiction = false;
+  let correctedMutationClaim = false;
+  let correctedToolCredit = false;
+
+  // Fixed for the turn: what was asked does not change as the loop runs.
+  const askedAQuestion = isExplanatoryQuestion(question);
+  let firstTurnToolCalls: number | null = null;
+
+  // Stated at each path rather than inferred at the end, through named
+  // transitions that cannot return it to "none". See toolActivity.ts.
+  const toolActivity = createToolActivity();
+
+  const auditFor = (outcome: ActionAudit["outcome"]): ActionAudit => ({
+    kind: intent.kind ?? "none",
+    actionIntent: intent.action,
+    toolActivity: toolActivity.value,
+    firstTurnToolCalls: firstTurnToolCalls ?? 0,
+    forcedRetry,
+    outcome
+  });
+
   // Results from tools that changed something, kept so they can survive into
   // the final answer verbatim.
   //
@@ -617,7 +766,14 @@ export async function runAgent(
   // narrates instead of relaying cannot be fixed by asking it more firmly, so
   // the real result is now appended after whatever the model says, rather
   // than trusted to survive its retelling.
-  const mutationResults: string[] = [];
+  // Kept with their outcome, because a failed attempt's text is only worth
+  // showing when nothing else succeeded.
+  //
+  // Live: build_app failed once and then succeeded on a retry, and the reply
+  // carried both - "I could not write that app... Nothing was written."
+  // immediately followed by "Built \"Celsius\" in the workspace". The user is
+  // left to guess which half is true, and the app did in fact build.
+  const mutationAttempts: Array<{ content: string; ok: boolean }> = [];
 
   // How many times each exact call has actually been run, across every round
   // of this one request — not per round, since the failure this guards
@@ -642,11 +798,27 @@ export async function runAgent(
   // has no such reasonable next step.
   let fetchUrlFailed = false;
 
-  for (let round = 0; round <= maxToolRounds; round += 1) {
+  // Rounds spent being told the reply was wrong, rather than spent working.
+  //
+  // The three corrections below each push a message and go round again, and
+  // they were doing that on the same budget as tool calls - so being corrected
+  // cost the model a round it needed to act on the correction. Live consequence:
+  // read_file, a failed edit_file, a re-read, then a reply promising to write
+  // the file. The promise check fired, pushed its correction, and the loop ran
+  // out on the way back in - so the turn was discarded and the user got the
+  // generic "kept searching without reaching an answer" instead of either the
+  // edit or the truth about it.
+  //
+  // Bounded without needing a limit of its own: each correction is guarded by a
+  // one-shot flag, so this can rise by at most three over the whole turn.
+  let correctionRounds = 0;
+  const spendCorrection = () => { correctionRounds += 1; };
+
+  for (let round = 0; round <= maxToolRounds + correctionRounds; round += 1) {
     // On the last round, or the round after fetch_url failed, tools are
     // withheld, which forces an answer rather than another attempt at
     // something the model was not going to conclude on.
-    const offerTools = round < maxToolRounds && !fetchUrlFailed;
+    const offerTools = round < maxToolRounds + correctionRounds && !fetchUrlFailed;
 
     let response: ChatResponse;
     try {
@@ -664,7 +836,16 @@ export async function runAgent(
             // Withheld while disarmed rather than offered and refused: a
             // model that can see run_command will reason about it and try to
             // talk its way into it; one that never sees it cannot.
-            ...(offerTools ? { tools: availableTools(commandsArmed() && !unattended) } : {})
+            ...(offerTools
+              ? {
+                tools: availableTools(commandsArmed() && !unattended, {
+                  // A question does not get to scaffold a project. Decided from
+                  // the request rather than from the reply, because a build has
+                  // already written its files by the time a reply exists.
+                  scaffolding: !askedAQuestion
+                })
+              }
+              : {})
           }),
           signal
         }), cancel);
@@ -742,6 +923,7 @@ export async function runAgent(
     const requested = parseToolCalls(response);
     const written = requested.length === 0 && rawText ? parseTextToolCalls(rawText) : [];
     const calls = offerTools ? [...requested, ...written] : [];
+    if (firstTurnToolCalls === null) firstTurnToolCalls = calls.length;
 
     if (calls.length === 0) {
       if (!text) {
@@ -763,14 +945,220 @@ export async function runAgent(
           // installed on the same machine, answered it correctly.
           : { ok: false, reason: "The local model returned an empty reply.", toolsUsed, modelUnusable: true };
       }
+      // A call for a tool that is switched off is the model's working, not
+      // its answer, and printing it verbatim tells the user nothing they can
+      // act on. Answering with the reason does.
+      const gated = gatedToolCall(text);
+      if (gated) {
+        return {
+          ok: true,
+          text: explainGatedTool(gated),
+          model: typeof response.model === "string" ? response.model : config.model,
+          toolsUsed
+        };
+      }
+
+      // Tool results the model wrote itself, removed before anything else.
+      //
+      // Some models narrate in the tags of their training format, and one
+      // reply carried "<toolresponse> greet.js edited successfully.
+      // </toolresponse>" for an edit that had failed and changed nothing. A
+      // real tool result never reaches the user this way - it goes back to the
+      // model as a tool message, and what the user sees is the model's own
+      // words plus the trace written by the code that did the work. So this
+      // shape in a final reply is invention by definition.
+      // An order answered with prose is not an answer.
+      //
+      // This branch used to return whatever the model said. So "edit greet.js
+      // and add a guard" could come back as "Got it, I'll keep that in mind for
+      // this conversation" and the app presented it as the reply — nothing
+      // edited, nothing failed, and nothing saying so. The three outcomes below
+      // are the only ones an action request may end in.
+      //
+      // Guarded on toolsUsed and awaitingConfirmation as well as calls, so a
+      // turn that already ran a tool, or that is waiting on the user to approve
+      // one, is left exactly as it was. A permission refusal is a decision, not
+      // a failure to act, and must not be retried.
+      // Gated on the stated activity, not on an inference from toolsUsed. The
+      // terminal message below is an absolute claim that nothing ran, so it may
+      // only be reached from "none" - a tool that executed, one awaiting
+      // approval, and one refused before running are each a different thing
+      // that did happen.
+      if (intent.action && toolActivity.untouched) {
+        // Nothing to act on. One specific question beats another generation
+        // arriving at the same place - and the question is worded for the kind
+        // of work, because asking "which file?" of someone running npm test
+        // reads as not having understood them at all.
+        if (!intent.hasTarget && intent.kind) {
+          return {
+            ok: true,
+            text: clarificationFor(intent.kind),
+            model: typeof response.model === "string" ? response.model : config.model,
+            toolsUsed,
+            actionAudit: auditFor("clarified")
+          };
+        }
+
+        if (!forcedRetry) {
+          forcedRetry = true;
+          spendCorrection();
+          messages.push({
+            role: "user",
+            content:
+              "You did not call a tool. That was an instruction to act, not a message to "
+              + `acknowledge. Call ${intent.expects.join(" or ")} now with the path given. `
+              + "Do not acknowledge, explain, promise, or claim it is done without calling "
+              + "the tool."
+          });
+          continue;
+        }
+
+        // Told once and still nothing. Said plainly, naming what was wanted and
+        // what did not happen, because the one thing this must never do is imply
+        // the work was done.
+        return {
+          ok: true,
+          text: "I could not perform the requested action because no valid tool call was "
+            + "produced. No tool was executed during this attempt.",
+          model: typeof response.model === "string" ? response.model : config.model,
+          toolsUsed,
+          actionAudit: auditFor("no-tool-failure")
+        };
+      }
+
+      // A reply that denies work the record says succeeded.
+      //
+      // Seen live: two read_file calls returned ok, and the model then said the
+      // tool had refused because it lacked permission. The trace showed two
+      // ticks. Telling someone the app cannot do a thing it has just done sends
+      // them to fix a problem that does not exist.
+      //
+      // Corrected once, with the fact, rather than retried blindly - the model
+      // already has the results, it just described them wrongly.
+      if (!correctedContradiction && contradictsToolRecord(text, toolsUsed)) {
+        correctedContradiction = true;
+        spendCorrection();
+        messages.push({ role: "user", content: correctionFor(toolsUsed) });
+        continue;
+      }
+
+      // Credit given to a tool that never ran.
+      //
+      // Caught on the simplest question in the app. Asked "what is 2+2",
+      // llama3.1:8b answered, in full: "I used the `calculate` tool to evaluate
+      // the expression `2+2`." There is no calculate tool, no tool ran, and
+      // there is no answer in there either - the user asked what two plus two
+      // is and was told about a tool instead.
+      //
+      // Only corrected, never replaced. Unlike a false claim of saving, there
+      // is nothing true the app can substitute here: it does not know what the
+      // answer is, only that this is not it. So the model is told to answer
+      // directly and gets one more go.
+      if (!correctedToolCredit && claimsUnusedTool(text, toolsUsed)) {
+        correctedToolCredit = true;
+        spendCorrection();
+        messages.push({ role: "user", content: answerDirectly });
+        continue;
+      }
+
+      // A change the model says it made, and did not.
+      //
+      // Seen live: asked to read a file and edit it, it called read_file, never
+      // called edit_file, and answered "The edited code is saved as greet.js".
+      // The file was untouched. withMutationResults covers the opposite case -
+      // a real change the model forgot to mention - but nothing checked a
+      // change that was mentioned and never made.
+      //
+      // The record is toolsUsed filtered by the permission ladder, not
+      // mutationResults. mutationResults is fed from the `mutatingTools` set
+      // above, which exists to decide whose output is repeated verbatim and
+      // does not contain edit_file - so a real, successful edit would have been
+      // called a lie. changesSomething reads the ladder instead, where "creates
+      // or changes something" is the definition of level 2.
+      const wroteSomething = toolsUsed.some((used) => used.ok && changesSomething(used.name));
+
+      // Successes if there were any, otherwise the failures - so a retry that
+      // worked is not reported alongside the attempt that did not, and a build
+      // that never worked still says so.
+      const succeeded = mutationAttempts.filter((attempt) => attempt.ok);
+      const mutationResults = (succeeded.length > 0 ? succeeded : mutationAttempts)
+        .map((attempt) => attempt.content);
+
+      // A promise counts the same as a claim here. "I will now write the file"
+      // at the end of a turn is not a plan, it is a change that is never going
+      // to happen - there is no later for the model to do it in. Both get the
+      // same treatment: pushed once to actually call the tool, and if it still
+      // will not, the user is told plainly rather than left holding a promise.
+      const claimedAChange = claimsUnperformedMutation(text, wroteSomething)
+        || promisesUnperformedMutation(text, wroteSomething);
+
+      if (claimedAChange) {
+        // A held confirmation looks identical from the mutation record - nothing
+        // was written either way - but it is not the same situation. The offer
+        // is still open, and awaitingConfirmation is what drives the control
+        // that accepts it. Returning the "nothing was written, ask me again"
+        // message here would discard a confirmation the user was one word from
+        // giving, so the wording is corrected and the offer kept.
+        if (awaitingConfirmation) {
+          return {
+            ok: true,
+            text: pendingConfirmationNotice(awaitingConfirmation.tool),
+            model: typeof response.model === "string" ? response.model : config.model,
+            toolsUsed,
+            awaitingConfirmation,
+            actionAudit: auditFor("clarified")
+          };
+        }
+
+        if (!correctedMutationClaim) {
+          correctedMutationClaim = true;
+          spendCorrection();
+          messages.push({
+            role: "user",
+            content: "You did not change anything. No file was created, edited or deleted - you "
+              + "never called a tool that writes. This is your last turn, so there is no later: "
+              + "either call the tool now, or tell the user plainly that nothing was changed. Do "
+              + "not say a file was saved when it was not, and do not say you are about to write "
+              + "it - if you are going to write it, write it in this turn."
+          });
+          continue;
+        }
+
+        // Told once and still claiming it. The claim is replaced rather than
+        // appended to: a reply that says "saved!" followed by "nothing was
+        // changed" leaves the reader to guess which half is true.
+        return {
+          ok: true,
+          text: noChangeWasMade(toolsUsed),
+          model: typeof response.model === "string" ? response.model : config.model,
+          toolsUsed,
+          actionAudit: auditFor(toolsUsed.length > 0 ? "tool-called" : "prose")
+        };
+      }
+
+      const withoutInvention = stripFabricatedToolOutput(text);
+
+      // Nothing left once the invention is gone means there was no answer
+      // under it, only the fiction. Treated as an unusable reply so the caller
+      // falls through to the next model, exactly as an empty one is.
+      if (!withoutInvention.trim()) {
+        return {
+          ok: false,
+          reason: "The local model replied with fabricated tool output and no actual answer.",
+          toolsUsed,
+          modelUnusable: true
+        };
+      }
+
       const builtAnApp = toolsUsed.some((used) => used.name === "build_app");
-      const cleanedText = builtAnApp ? withoutFabricatedLiveClaims(text) : text;
+      const cleanedText = builtAnApp ? withoutFabricatedLiveClaims(withoutInvention) : withoutInvention;
       return {
         ok: true,
         text: withMutationResults(cleanedText, mutationResults),
         model: typeof response.model === "string" ? response.model : config.model,
         toolsUsed,
-        ...(awaitingConfirmation ? { awaitingConfirmation } : {})
+        ...(awaitingConfirmation ? { awaitingConfirmation } : {}),
+        actionAudit: auditFor(toolsUsed.length > 0 ? "tool-called" : "prose")
       };
     }
 
@@ -815,6 +1203,7 @@ export async function runAgent(
       // round boundary cannot reach: once fetch_url has failed this turn,
       // nothing queued alongside it in this same batch gets to run either.
       if (fetchUrlFailed) {
+        toolActivity.markBlocked();
         messages.push({
           role: "tool",
           content: `${call.name} was not run: fetch_url failed earlier in this same turn, and that is `
@@ -831,6 +1220,11 @@ export async function runAgent(
       const attempts = attemptsBySignature.get(signature) ?? 0;
 
       if (attempts >= maxIdenticalAttempts) {
+        // A valid call was produced and refused before running. Not "none":
+        // the model did ask for a tool, and the terminal message says it did
+        // not. markBlocked only moves from "none", so an earlier execution is
+        // never masked.
+        toolActivity.markBlocked();
         messages.push({
           role: "tool",
           content: `${call.name} was already called with these exact arguments and did not produce `
@@ -847,9 +1241,40 @@ export async function runAgent(
       // write race for the same workspace file with no ordering guarantee.
       // Timed around the real dispatch, so a slow tool shows up as a slow
       // tool rather than as a slow request with no explanation.
+      // Logged here, at the one place every tool passes through, so a tool
+      // added later is recorded without anyone remembering to wire it up.
+      // Before this the log only held build and command steps, which is why
+      // a turn that genuinely read the workspace left an empty activity list
+      // — the work happened and the screen said nothing had.
+      const logged = selfLoggingTools.has(call.name)
+        ? null
+        : beginEvent(context.sessionId, executionKindForTool(call.name), describeToolCall(call));
+
       const toolBegan = Date.now();
+
+      // Marked before dispatch, not after.
+      //
+      // A tool that throws has still run, and may have written half a file
+      // before it failed. Marking on the far side of the await left the turn
+      // looking untouched in exactly that case, because the marking line was
+      // never reached - and "no tool was executed" is the one thing the
+      // terminal message must never say wrongly. A call that turns out to need
+      // confirmation is corrected below; nothing reads the state in between.
+      toolActivity.markExecuted();
       const result = await runTool(call, context);
       observe("trhai_tool_duration", Date.now() - toolBegan, { tool: call.name });
+
+      if (logged) {
+        // "skipped" for a refusal: nothing ran, and calling that a failure
+        // would put a red mark on the permission system working correctly.
+        endEvent(
+          context.sessionId,
+          logged,
+          result.needsConfirmation ? "skipped" : result.ok ? "ok" : "failed",
+          result.needsConfirmation ? "waiting for confirmation" : undefined
+        );
+      }
+
       increment("trhai_tool_calls_total", {
         tool: call.name,
         // Three outcomes, because a refusal is neither a success nor a
@@ -869,7 +1294,11 @@ export async function runAgent(
       // awaitingConfirmation instead, which is the honest place for it.
       if (result.needsConfirmation) {
         awaitingConfirmation = { tool: call.name, arguments: call.arguments };
+        // Corrects the pre-dispatch mark: nothing actually ran, the call is
+        // being held. Set before the loop can continue or return.
+        toolActivity.markAwaitingConfirmation();
       } else {
+        // Already marked executed above. A tool that ran and failed still ran.
         toolsUsed.push({ name: call.name, ok: result.ok });
       }
       if (call.name === "fetch_url" && !result.ok) fetchUrlFailed = true;
@@ -882,7 +1311,7 @@ export async function runAgent(
       // would do and ask them to confirm" — verbatim underneath the reply,
       // where the user read internal plumbing addressed to someone else.
       if (mutatingTools.has(call.name) && !result.needsConfirmation) {
-        mutationResults.push(result.content);
+        mutationAttempts.push({ content: result.content, ok: result.ok });
       }
     }
   }

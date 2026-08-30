@@ -1,4 +1,5 @@
 import test from "node:test";
+import { armCommands, disarmCommands } from "../src/services/commandRunner.js";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
@@ -11,9 +12,11 @@ import path from "node:path";
 // is a test quietly modifying the project it is testing.
 const testWorkspace = mkdtempSync(path.join(tmpdir(), "ascend-agent-"));
 process.env.ASCEND_WORKSPACE = testWorkspace;
-import { maxToolRounds, runAgent, systemPrompt } from "../src/services/agentLoop.js";
+import {
+  describeToolCall, executionKindForTool, explainGatedTool, gatedToolCall,
+  looksLikeRawToolCalls, maxToolRounds, parseTextToolCalls, runAgent, systemPrompt
+} from "../src/services/agentLoop.js";
 import { runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
-import { looksLikeRawToolCalls, parseTextToolCalls } from "../src/services/agentLoop.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
 
 const at = new Date("2026-08-17T12:00:00Z").toISOString();
@@ -913,12 +916,17 @@ test("a build reports nothing when there is nothing to build", async () => {
   assert.match(result.content, /needs a description/);
 });
 
-test("read_file refuses a path outside the workspace", async () => {
+test("read_file refuses a path outside the workspace when access is off", async () => {
   // The tool layer must not be a way around the containment check.
+  //
+  // Switched off explicitly: machine access is on by default now, so the
+  // refusal being tested here is the one that applies when someone has turned
+  // it off, not an assumption about how the app starts.
+  disarmCommands();
   const result = await runTool({ name: "read_file", arguments: { path: "../../etc/passwd" } }, editContext);
 
   assert.equal(result.ok, false);
-  assert.match(result.content, /outside the workspace/);
+  assert.match(result.content, /outside my workspace/);
 });
 
 test("reading a file that genuinely is not there says so, not a fabricated success", async () => {
@@ -934,7 +942,8 @@ test("reading a file that genuinely is not there says so, not a fabricated succe
   assert.match(result.content, /this-file-was-never-created\.txt/);
 });
 
-test("write_file refuses a path outside the workspace and writes nothing", async () => {
+test("write_file refuses a path outside the workspace when access is off", async () => {
+  disarmCommands();
   const result = await runTool(
     { name: "write_file", arguments: { path: "../escape.txt", content: "x" } },
     editContext
@@ -944,11 +953,12 @@ test("write_file refuses a path outside the workspace and writes nothing", async
   assert.match(result.content, /Nothing was written/);
 });
 
-test("list_files refuses to list outside the workspace", async () => {
+test("list_files refuses to list outside the workspace when access is off", async () => {
+  disarmCommands();
   const result = await runTool({ name: "list_files", arguments: { directory: ".." } }, editContext);
 
   assert.equal(result.ok, false);
-  assert.match(result.content, /outside the workspace/);
+  assert.match(result.content, /outside my workspace/);
 });
 
 test("a model that cannot be loaded is reported as unusable, not just failed", async () => {
@@ -1489,6 +1499,402 @@ test("two attempts at the same call are both allowed to actually run", async () 
     const result = await runAgent(configFor(baseUrl), "what is my billing setup", emptyMemoryContext);
     assert.equal(result.ok, true);
     if (result.ok) assert.equal(result.toolsUsed.length, 2);
+  } finally {
+    server.close();
+  }
+});
+
+// --- the activity log ------------------------------------------------------
+//
+// Every tool call is meant to land in the execution log. It used to be that
+// only build_app and run_command wrote entries, so a turn that genuinely read
+// the workspace produced an empty activity list — the work happened and the
+// screen reported nothing. These pin the labelling down.
+
+test("a tool call is described by its most identifying argument", () => {
+  assert.equal(
+    describeToolCall({ name: "read_file", arguments: { path: "src/index.ts" } }),
+    "Read file: src/index.ts"
+  );
+  assert.equal(
+    describeToolCall({ name: "web_search", arguments: { query: "tide times" } }),
+    "Web search: tide times"
+  );
+});
+
+test("a call with no arguments is described without inventing one", () => {
+  assert.equal(describeToolCall({ name: "list_files", arguments: {} }), "List files");
+
+  // The type says `arguments` is always an object; the model that produces it
+  // is not bound by the type. A malformed call must still describe itself
+  // rather than throw inside the logging path and take the turn down with it,
+  // so the cast here represents what actually arrives, not what should.
+  assert.equal(
+    describeToolCall({ name: "list_files", arguments: undefined as unknown as Record<string, unknown> }),
+    "List files"
+  );
+});
+
+test("a long argument is truncated rather than pasted into the label", () => {
+  const body = "x".repeat(400);
+  const label = describeToolCall({ name: "write_document", arguments: { title: body } });
+
+  assert.ok(label.length < 80, `label was ${label.length} chars`);
+  assert.ok(label.endsWith("…"));
+});
+
+test("a path is preferred over a query when a call carries both", () => {
+  assert.equal(
+    describeToolCall({ name: "read_file", arguments: { query: "anything", path: "notes.md" } }),
+    "Read file: notes.md"
+  );
+});
+
+test("tools are filed under the kind of work they actually do", () => {
+  assert.equal(executionKindForTool("write_file"), "write");
+  assert.equal(executionKindForTool("plan_app"), "plan");
+  assert.equal(executionKindForTool("test"), "test");
+  // Looking something up is the general case, so an unknown tool reads as a
+  // read rather than claiming to have written anything.
+  assert.equal(executionKindForTool("list_files"), "read");
+  assert.equal(executionKindForTool("some_future_tool"), "read");
+});
+
+// --- tools that exist but are switched off ---------------------------------
+
+test("a call for a switched-off tool is explained, not printed as the answer", () => {
+  // Machine control is off in this suite, so run_command is not advertised and
+  // the parser does not recognise it — which is exactly how the raw JSON
+  // reached the user. Asking TRHAI to run something with the switch off
+  // replied with the literal line
+  // {"name": "run_command", "arguments": {"command": "echo hello"}}.
+  const raw = '{"name": "run_command", "arguments": {"command": "echo trhai-gate-test"}}';
+
+  const call = gatedToolCall(raw);
+  assert.ok(call, "a switched-off run_command was not recognised as a call at all");
+  assert.equal(call.name, "run_command");
+
+  const said = explainGatedTool(call);
+  assert.match(said, /switched off/i);
+  assert.ok(!said.includes('{"name"'), "the explanation still contains raw JSON");
+  // It says what it would have done, which is the part the user can act on.
+  assert.match(said, /echo trhai-gate-test/);
+});
+
+test("an ordinary answer is never mistaken for a switched-off call", () => {
+  for (const text of [
+    "I can run that once you switch machine control on.",
+    "The workspace has 6 files.",
+    "run_command is the tool that would do it, but it is not on."
+  ]) {
+    assert.equal(gatedToolCall(text), null, text);
+  }
+});
+
+test("a call for a tool that is available is left alone", () => {
+  // list_files is advertised, so it is a real call for the loop to dispatch —
+  // not something to explain away.
+  assert.equal(gatedToolCall('{"name": "list_files", "arguments": {}}'), null);
+});
+
+// A change the model says it made, and did not.
+//
+// Live failure: asked to read a file and edit it, the model called read_file,
+// never called edit_file, and answered "The edited code is saved as greet.js".
+// The file was untouched and the trace showed a single read.
+//
+// This slipped past all three existing guards. Action enforcement did not fire
+// because a tool did run; fabricated-output did not match because there were no
+// <toolresponse> tags; the contradiction check did not match because it looks
+// for claims of failure, and this was a claim of success.
+
+test("a claimed save with nothing written is corrected, then refused", async () => {
+  const target = path.join(testWorkspace, "greet.js");
+  const original = "function greet(name) {\n  return \"Hello \" + name;\n}\n";
+  writeFileSync(target, original, "utf8");
+
+  const { server, baseUrl } = await fakeModel([
+    toolCall("read_file", { path: target }),
+    answer("The edited code is saved as greet.js."),
+    answer("I have updated the file for you.")   // told once, still claiming it
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), `read ${target} and add a guard`, context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    assert.match(result.text, /nothing was written/i);
+    assert.doesNotMatch(result.text, /is saved as|have updated/i);
+    // The claim was false in the first place: the file must be untouched.
+    assert.equal(readFileSync(target, "utf8"), original);
+  } finally {
+    server.close();
+  }
+});
+
+test("the correction is enough when the model then tells the truth", async () => {
+  const target = path.join(testWorkspace, "greet-two.js");
+  writeFileSync(target, "const a = 1;\n", "utf8");
+
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("read_file", { path: target }),
+    answer("I've saved the change."),
+    answer("I read the file but did not change it. Tell me what to add and I will.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), `read ${target} and edit it`, context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    assert.match(result.text, /did not change it/);
+    // The correction reached the model rather than being applied behind it.
+    const sent = JSON.stringify(received.at(-1));
+    assert.match(sent, /You did not change anything/);
+  } finally {
+    server.close();
+  }
+});
+
+test("a real successful write is never called a lie", async () => {
+  // The false positive this check must not produce. write_file genuinely ran,
+  // so "I've created the file" is true and must survive untouched.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("write_file", { path: "notes.txt", content: "hello" }),
+    answer("I have created notes.txt for you.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "create notes.txt saying hello", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.match(result.text, /created notes\.txt/);
+    assert.doesNotMatch(result.text, /nothing was written/i);
+  } finally {
+    server.close();
+  }
+});
+
+test("an edit_file write is not called a lie either", async () => {
+  // The specific false positive that a first attempt at this check would have
+  // produced. edit_file is absent from agentLoop's `mutatingTools` set - which
+  // is correct for that set's actual job - so deriving "did anything change"
+  // from it would have denied a real edit. The permission ladder is the record.
+  const target = path.join(testWorkspace, "edited.js");
+  writeFileSync(target, "const value = 1;\n", "utf8");
+
+  const { server, baseUrl } = await fakeModel([
+    toolCall("edit_file", { path: target, old_text: "const value = 1;", new_text: "const value = 2;" }),
+    answer("I've updated the file - value is now 2.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), `edit ${target} to set value to 2`, context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    assert.doesNotMatch(result.text, /nothing was written/i);
+    assert.match(readFileSync(target, "utf8"), /const value = 2;/);
+  } finally {
+    server.close();
+  }
+});
+
+test("a claim made while a confirmation is pending keeps the offer open", async () => {
+  // The second false positive this nearly shipped with. A held call writes
+  // nothing, so it looks identical to "claimed a change and made none" - but the
+  // offer is still open and awaitingConfirmation drives the control that accepts
+  // it. Answering "nothing was written, ask me again" would throw away a
+  // confirmation the user was one word from giving.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("forget", { id: "m1" }),
+    answer("I have deleted that memory for you.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "forget the database memory", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    assert.ok(result.awaitingConfirmation, "the pending offer must survive");
+    assert.equal(result.awaitingConfirmation?.tool, "forget");
+    assert.match(result.text, /needs your confirmation/);
+    assert.doesNotMatch(result.text, /have deleted/);
+  } finally {
+    server.close();
+  }
+});
+
+test("a write that ran and failed is not reported as a save", async () => {
+  // Found by getting this test's own arguments wrong: edit_file was called with
+  // text that was not in the file, returned ok:false, and the model still said
+  // it had saved. The guard caught it. Worth keeping - a failed write is when a
+  // false success does the most damage, because the user stops checking.
+  const target = path.join(testWorkspace, "unchanged.js");
+  const original = "const value = 1;\n";
+  writeFileSync(target, original, "utf8");
+
+  const { server, baseUrl } = await fakeModel([
+    toolCall("edit_file", { path: target, old_text: "not in the file", new_text: "x" }),
+    answer("Done - I've saved the change."),
+    answer("Done - I've saved the change.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), `edit ${target}`, context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    assert.match(result.text, /nothing was written/i);
+    assert.equal(readFileSync(target, "utf8"), original);
+  } finally {
+    server.close();
+  }
+});
+
+test("being corrected does not cost the model the round it needs to act", async () => {
+  // The regression that made this visible. The correction pushes a message and
+  // goes round again, and it was spending the same budget as tool calls - so
+  // the model was told what it got wrong and then had no round left to fix it.
+  // The turn fell out of the loop and the user got "kept searching without
+  // reaching an answer" instead of either the edit or the truth about it.
+  //
+  // Four tool rounds are used up first, deliberately, so the correction is only
+  // affordable if it is charged somewhere else.
+  const target = path.join(testWorkspace, "budget.js");
+  writeFileSync(target, "const a = 1;\n", "utf8");
+
+  const { server, baseUrl } = await fakeModel([
+    toolCall("read_file", { path: target }),
+    toolCall("read_file", { path: target }),
+    answer("I will now write the file with the changes."),
+    // The correction lands here, and this is the round that was being lost.
+    toolCall("edit_file", { path: target, old_text: "const a = 1;", new_text: "const a = 2;" }),
+    answer("Done - a is now 2.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), `edit ${target} to set a to 2`, context);
+    assert.equal(result.ok, true, "the turn must not be discarded");
+    if (!result.ok) return;
+
+    assert.doesNotMatch(result.text, /kept searching/);
+    assert.match(readFileSync(target, "utf8"), /const a = 2;/, "the edit must actually land");
+  } finally {
+    server.close();
+  }
+});
+
+test("a promise with no follow-through is replaced by the truth", async () => {
+  const target = path.join(testWorkspace, "promised.js");
+  const original = "const b = 1;\n";
+  writeFileSync(target, original, "utf8");
+
+  const { server, baseUrl } = await fakeModel([
+    toolCall("read_file", { path: target }),
+    answer("I will now write the file with the changes."),
+    answer("I'll update it for you shortly.")   // corrected once, still promising
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), `edit ${target}`, context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    assert.match(result.text, /nothing was written/i);
+    assert.doesNotMatch(result.text, /I will now write|I'll update/);
+    assert.equal(readFileSync(target, "utf8"), original);
+  } finally {
+    server.close();
+  }
+});
+
+test("a question is not offered the tools that scaffold a project", async () => {
+  // The live failure this prevents. "explain how promises work in javascript"
+  // reached build_app and wrote a five-file app into the workspace. Checked at
+  // the request rather than at the reply, because a build has already written
+  // its files by the time there is a reply to inspect.
+  const { server, baseUrl, received } = await fakeModel([
+    answer("A promise represents a value that is not available yet.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "explain how promises work in javascript", context);
+    assert.equal(result.ok, true);
+
+    const offered = (received[0]?.tools ?? []) as Array<{ function: { name: string } }>;
+    const names = offered.map((tool) => tool.function.name);
+    assert.ok(names.length > 0, "ordinary tools must still be offered");
+    assert.ok(!names.includes("build_app"), "build_app must not be offered to a question");
+    assert.ok(!names.includes("plan_app"), "plan_app must not be offered to a question");
+    // Lookups still matter: a question may need to search memory to answer.
+    assert.ok(names.includes("search_memory"), "search must survive");
+  } finally {
+    server.close();
+  }
+});
+
+test("a request to build something still gets the build tools", async () => {
+  const { server, baseUrl, received } = await fakeModel([
+    answer("I can do that.")
+  ]);
+
+  try {
+    await runAgent(configFor(baseUrl), "build me a task tracker app", context);
+    const offered = (received[0]?.tools ?? []) as Array<{ function: { name: string } }>;
+    const names = offered.map((tool) => tool.function.name);
+    assert.ok(names.includes("build_app"), "build_app must stay available to a build request");
+  } finally {
+    server.close();
+  }
+});
+
+test("a retry that worked is not reported next to the attempt that failed", async () => {
+  // Live: build_app failed, the model called it again, the second call worked,
+  // and the reply carried both results - "I could not write that app...
+  // Nothing was written." immediately followed by "Built \"Celsius\" in the
+  // workspace". Both were true of their own call and together they are
+  // unreadable, so the user is left guessing whether they have an app.
+  //
+  // Driven with write_file rather than build_app: the same code path, without
+  // needing a model to author an application inside a unit test.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("write_file", { path: "C:/outside-the-workspace/nope.txt", content: "x" }),
+    toolCall("write_file", { path: "kept.txt", content: "hello" }),
+    answer("Done.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "write hello into kept.txt", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const failed = result.toolsUsed.filter((used) => used.name === "write_file" && !used.ok);
+    const worked = result.toolsUsed.filter((used) => used.name === "write_file" && used.ok);
+    assert.equal(failed.length, 1, "the first write must really have failed");
+    assert.equal(worked.length, 1, "the second must really have succeeded");
+
+    assert.match(result.text, /kept\.txt/, "the successful result must be shown");
+    assert.doesNotMatch(result.text, /outside-the-workspace/, "the failed one must not be");
+  } finally {
+    server.close();
+  }
+});
+
+test("a mutation that only ever failed still says so", async () => {
+  // The other half. Dropping failures wholesale would let a write that never
+  // happened pass silently, which is the failure this codebase exists to stop.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("write_file", { path: "C:/outside-the-workspace/nope.txt", content: "x" }),
+    answer("All done!")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "write x into that file", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.match(result.text, /workspace|refused|could not|nothing/i);
   } finally {
     server.close();
   }
