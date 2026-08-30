@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "../lib/api";
 import { speakableFrom } from "../lib/speech";
+import {
+  defaultVoice, readStoredVoice, writeStoredVoice, type VoiceChoice
+} from "../lib/voicePreference";
 
 // Voice, local by construction.
 //
@@ -17,6 +20,10 @@ import { speakableFrom } from "../lib/speech";
 // worse than no control.
 
 const enabledKey = "trhai.speech.enabled.v1";
+
+// How TRHAI sounds now lives in lib/voicePreference, chosen in the app rather
+// than fixed here. The default is unchanged - British, male, calm, slightly
+// under normal speed - but the choice belongs to whoever is listening.
 
 /**
  * How far to scale the neural voice's RMS to fill 0..1.
@@ -43,18 +50,60 @@ type NeuralStatus =
 export function useSpeech() {
   const synth = typeof window === "undefined" ? undefined : window.speechSynthesis;
 
-  const [enabled, setEnabledState] = useState(() => {
+  // Speaking is on unless it was switched off.
+  //
+  // It used to default off, which made an assistant that talks back something
+  // you had to know existed and go and find - and its only control was in a
+  // rail that is closed by default, so nothing on the screen ever suggested a
+  // voice was there at all. Reading replies aloud is what this is for, so it
+  // starts on and stays off only if that was an actual choice.
+  //
+  // Nothing speaks before the first reply, so the browser's autoplay rules are
+  // satisfied by the click or keypress that asked the question in the first
+  // place.
+  // Starts at the default and is corrected after mount, never read from
+  // storage during the first render.
+  //
+  // Reading localStorage in the initialiser makes the first client render
+  // depend on something the server cannot know, so a stored "off" produced a
+  // button whose text disagreed with the server's and React failed hydration
+  // on the whole tree. The preference is applied in the effect below instead;
+  // nothing can speak before the first reply, so a frame at the default costs
+  // nothing.
+  const [enabled, setEnabledState] = useState(true);
+  // Read after mount for the same reason `enabled` is: touching localStorage
+  // during the first render makes the server and client disagree and fails
+  // hydration for the whole tree.
+  const [voice, setVoiceState] = useState<VoiceChoice>(defaultVoice);
+
+  useEffect(() => {
+    setVoiceState(readStoredVoice(window.localStorage));
+  }, []);
+
+  const setVoice = useCallback((next: VoiceChoice) => {
+    setVoiceState(next);
+    writeStoredVoice(window.localStorage, next);
+  }, []);
+
+  useEffect(() => {
     try {
-      return window.localStorage.getItem(enabledKey) === "true";
+      const stored = window.localStorage.getItem(enabledKey);
+      if (stored !== null) setEnabledState(stored === "true");
     } catch {
-      return false;
+      // No storage - the default stands.
     }
-  });
+  }, []);
   const [neural, setNeural] = useState<NeuralStatus | null>(null);
+  const [installedVoices, setInstalledVoices] = useState<Array<{ id: string; name: string; locale: string; quality: string }>>([]);
   const [browserVoiceCount, setBrowserVoiceCount] = useState(0);
   const [speaking, setSpeaking] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Read inside speak() rather than captured by it, so choosing a new voice
+  // takes effect on the next thing said without rebuilding the callback.
+  const voiceRef = useRef<VoiceChoice>(defaultVoice);
+  voiceRef.current = voice;
 
   const audio = useRef<HTMLAudioElement | null>(null);
   const audioUrl = useRef<string | null>(null);
@@ -139,9 +188,36 @@ export function useSpeech() {
       .then((payload) => {
         if (cancelled) return;
         const data = payload?.data;
-        setNeural(data?.available === true && typeof data.voice === "string"
-          ? { available: true, voice: data.voice }
-          : { available: false, reason: typeof data?.reason === "string" ? data.reason : "The neural voice is not installed." });
+        if (data?.available !== true || typeof data.voice !== "string") {
+          setNeural({
+            available: false,
+            reason: typeof data?.reason === "string" ? data.reason : "The neural voice is not installed."
+          });
+          return;
+        }
+
+        // Report the voice this app will actually ask for, not the service's
+        // own default. They differ - the default is American and this asks for
+        // the British one - so naming the default meant the screen advertised
+        // a voice that was never going to come out of the speakers, and then
+        // disagreed with itself once a reply had been spoken and the real
+        // voice came back in the response header.
+        //
+        // Only if the requested voice is genuinely installed. Otherwise the
+        // service's default is the honest answer, because that is what the
+        // fallback will produce.
+        if (Array.isArray(data.voices)) {
+          setInstalledVoices(data.voices.filter((entry: { id?: unknown }) => typeof entry?.id === "string"));
+        }
+
+        // Reports the voice that will actually be used: the chosen one when it
+        // is genuinely installed, the service's own default otherwise, because
+        // that is what the fallback will produce.
+        const wanted = readStoredVoice(window.localStorage).voiceId;
+        const installed = Array.isArray(data.voices)
+          ? data.voices.some((entry: { id?: unknown }) => entry?.id === wanted)
+          : false;
+        setNeural({ available: true, voice: installed ? wanted : data.voice });
       })
       .catch(() => { if (!cancelled) setNeural({ available: false, reason: "Could not reach the speech service." }); });
     return () => { cancelled = true; };
@@ -212,7 +288,7 @@ export function useSpeech() {
       fetch(`${apiBaseUrl}/v1/speech`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: spoken }),
+        body: JSON.stringify({ text: spoken, ...voiceRef.current }),
         signal: controller.signal
       })
         .then(async (response) => {
@@ -223,6 +299,21 @@ export function useSpeech() {
           if (!response.ok) {
             const body = await response.json().catch(() => null);
             throw new Error(typeof body?.message === "string" ? body.message : "Speech synthesis failed.");
+          }
+
+          // Which voice actually spoke.
+          //
+          // The capability list reports the service's own default, and this
+          // app asks for a different one - so the screen was naming the voice
+          // it would have got rather than the voice it did. That matters most
+          // in the case this header exists for: the requested voice not being
+          // installed, where the service substitutes another and says so.
+          const spokeAs = response.headers.get("X-Speech-Voice");
+          if (spokeAs) {
+            setNeural((current) =>
+              current?.available === true && current.voice === spokeAs
+                ? current
+                : { available: true, voice: spokeAs });
           }
 
           const blob = await response.blob();
@@ -284,6 +375,11 @@ export function useSpeech() {
      */
     amplitude,
     speak,
-    stop
+    stop,
+    /** The chosen voice, and the setter the picker uses. */
+    voice,
+    setVoice,
+    /** Every voice the service reports installed, for the picker to list. */
+    installedVoices
   };
 }

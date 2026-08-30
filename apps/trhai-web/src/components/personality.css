@@ -1,0 +1,87 @@
+/* The personality picker, in the console rail. */
+
+.persona-pick { gap: 8px; }
+
+.persona-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 6px;
+  background: rgba(10, 15, 22, 0.9);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.persona-select:hover { border-color: var(--line-strong); }
+
+.persona-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.persona-summary {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+/* The disclaimer is the one thing here with a consequence attached, so it is
+   marked rather than left as another line of grey text. */
+.persona-disclaimer {
+  margin: 0;
+  padding: 7px 9px;
+  border-left: 2px solid var(--warn, #ffb347);
+  border-radius: 4px;
+  background: rgba(255, 179, 71, 0.07);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.persona-disclaimer-label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--warn, #ffb347);
+}
+
+/* The accent swatches. Colours are literal here rather than tokens: each dot
+   has to show the accent it selects, not the accent currently applied. */
+.accent-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.accent-dot {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--line-subtle);
+  border-radius: 50%;
+  cursor: pointer;
+  background: currentColor;
+  color: #35c7ff;
+}
+
+/* Copied from the --accent each option actually sets in globals.css, so a
+   swatch cannot advertise a colour the theme does not apply. Violet and amber
+   were approximated by eye first and both were wrong. */
+.accent-cyan { color: #35c7ff; }
+.accent-violet { color: #a855f7; }
+.accent-emerald { color: #34d399; }
+.accent-amber { color: #f5a524; }
+
+.accent-dot.on {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.18);
+}
+
+.accent-dot:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
