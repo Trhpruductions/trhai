@@ -300,3 +300,77 @@ test("a revoked token stops working", async () => {
     await server.close();
   }
 });
+
+// --- secrets at rest (E9-S1) ------------------------------------------------
+
+test("a session token is never written to disk in the clear", () => {
+  resetAccounts();
+  const created = registerAccount({
+    email: "atrest@example.com",
+    password: "a-long-enough-password",
+    displayName: "At Rest"
+  });
+  assert.ok(created.ok);
+  if (!created.ok) return;
+
+  const onDisk = readFileSync(accountsFile, "utf8");
+
+  // The finding this guards: passwords and recovery codes were hashed, and
+  // the session token beside them was not. A token is a bearer credential —
+  // anyone who could read this file could authenticate as the user for the
+  // rest of its month-long life without ever knowing the password.
+  assert.ok(
+    !onDisk.includes(created.token),
+    "the plaintext session token was found in accounts.json"
+  );
+
+  // And it still works, so the fix is a change of storage rather than of
+  // behaviour.
+  const resolved = accountForToken(created.token);
+  assert.ok(resolved, "the token stopped working once it was hashed");
+  assert.equal(resolved.email, "atrest@example.com");
+
+  // A near-miss must not authenticate: a hash lookup that fell back to
+  // anything fuzzy would be worse than storing the token.
+  assert.equal(accountForToken(created.token.slice(0, -1)), null);
+  assert.equal(accountForToken(`${created.token}x`), null);
+});
+
+test("nothing in the accounts file is a working credential", () => {
+  resetAccounts();
+  const created = registerAccount({
+    email: "sweep@example.com",
+    password: "another-long-password",
+    displayName: "Sweep"
+  });
+  assert.ok(created.ok);
+  if (!created.ok) return;
+
+  // Recovery codes are handed over once, in plaintext, and only hashes kept.
+  for (const code of created.recoveryCodes) {
+    assert.ok(
+      !readFileSync(accountsFile, "utf8").includes(code),
+      "a plaintext recovery code was found in accounts.json"
+    );
+  }
+
+  // The password itself, for completeness.
+  assert.ok(!readFileSync(accountsFile, "utf8").includes("another-long-password"));
+});
+
+test("signing out revokes the session it was given", () => {
+  resetAccounts();
+  const created = registerAccount({
+    email: "out@example.com",
+    password: "yet-another-password",
+    displayName: "Out"
+  });
+  assert.ok(created.ok);
+  if (!created.ok) return;
+
+  assert.ok(accountForToken(created.token));
+  assert.equal(logout(created.token), true);
+  assert.equal(accountForToken(created.token), null, "the token still worked after signing out");
+  // A second logout is not a failure to report, it is simply nothing to do.
+  assert.equal(logout(created.token), false);
+});

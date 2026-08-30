@@ -5,6 +5,7 @@ import { availableTools, toolDefinitions } from "../src/services/agentTools.js";
 import { armCommands, commandsArmed, disarmCommands } from "../src/services/commandRunner.js";
 import { toolPermissions } from "../src/services/toolPermissions.js";
 
+
 // The capability report has to be a description of the real registry, not a
 // second, hand-maintained list that can drift from it. Every assertion here
 // is checked against toolDefinitions/toolPermissions directly rather than

@@ -44,7 +44,11 @@ test("the capabilities route reports every tool on offer, and nothing else", asy
   }
 });
 
-test("the capabilities route reports honestly: filesystem and web are true, code execution is not", async () => {
+test("the capabilities route reports code execution as available, because it is", async () => {
+  // This asserted codeExecution: false, which was true when commands were off
+  // until armed. Machine access is on by default now, so reporting it as
+  // unavailable would be the route describing a different app from the one
+  // running - the exact dishonesty this test exists to prevent.
   const server = await startTestServer();
   try {
     const response = await fetch(`${server.baseUrl}/v1/capabilities`);
@@ -56,7 +60,7 @@ test("the capabilities route reports honestly: filesystem and web are true, code
     assert.equal(payload.data?.web, true);
     // False because machine control is off, not because no such tool exists —
     // one does now. The answer is unchanged; the reason for it is not.
-    assert.equal(payload.data?.codeExecution, false);
+    assert.equal(payload.data?.codeExecution, true);
     assert.deepEqual(payload.data?.integrations, []);
   } finally {
     await server.close();

@@ -4,9 +4,16 @@ import os from "node:os";
 import {
   cpuBusyFraction,
   formatGigabytes,
+  formatPair,
   parseGpuLine,
+  parseNetstat,
+  parseProcNetDev,
+  readDisk,
+  readIdentity,
   readMemory,
+  readNetwork,
   readTelemetry,
+  resetNetworkBaseline,
   sampleCpu
 } from "../src/services/systemTelemetry.js";
 
@@ -68,7 +75,7 @@ test("an nvidia-smi line becomes a reading", () => {
   assert.equal(parsed.name, "NVIDIA GeForce RTX 4060 Ti");
   assert.ok(Math.abs(parsed.fraction - 0.24) < 1e-9);
   assert.match(parsed.detail, /24% busy/);
-  assert.match(parsed.detail, /1\.3 of 8\.0 GB/);
+  assert.match(parsed.detail, /1\.3 \/ 8\.0 GB/);
 });
 
 test("a gpu line missing its memory figures still reports utilisation", () => {
@@ -91,7 +98,7 @@ test("memory is read from this machine and adds up", () => {
   assert.equal(memory.unavailable, null);
   assert.ok(memory.fraction !== null && memory.fraction > 0 && memory.fraction < 1,
     `expected a real fraction, got ${memory.fraction}`);
-  assert.match(memory.detail, /^[\d.]+ of [\d.]+ GB$/);
+  assert.match(memory.detail, /^[\d.]+ \/ [\d.]+ (GB|TB)$/);
 });
 
 test("a full reading describes this machine, and says plainly there is no cloud", async () => {
@@ -121,4 +128,95 @@ test("a reading never carries both a number and a reason it is missing", async (
       assert.ok((reading.unavailable ?? "").length > 0, `${name} is missing with no reason given`);
     }
   }
+});
+
+// --- identity -------------------------------------------------------------
+
+test("identity reports the real account rather than a constant", () => {
+  const identity = readIdentity();
+
+  // The point of this endpoint is that the screen greets whoever opened the
+  // app. A build that shipped a hardcoded name would pass every other test in
+  // this file, so this asserts the value tracks the machine.
+  assert.equal(identity.hostname, os.hostname());
+  assert.equal(identity.platform, `${os.platform()} ${os.release()}`);
+  assert.equal(typeof identity.username, "string");
+  assert.notEqual(identity.username.toLowerCase(), "hank the owner");
+});
+
+// --- disk -----------------------------------------------------------------
+
+test("disk reports a real fraction for a path that exists", async () => {
+  const reading = await readDisk(process.cwd());
+
+  assert.equal(reading.unavailable, null);
+  assert.ok(reading.fraction !== null && reading.fraction >= 0 && reading.fraction <= 1,
+    `expected a 0..1 fraction, got ${reading.fraction}`);
+  assert.match(reading.detail, /^[\d.]+ \/ [\d.]+ (GB|TB)$/);
+});
+
+test("disk says so rather than guessing when the path cannot be measured", async () => {
+  const reading = await readDisk("/definitely-not-a-real-volume-xyzzy");
+
+  assert.equal(reading.fraction, null);
+  assert.ok(reading.unavailable);
+});
+
+// --- network --------------------------------------------------------------
+
+test("netstat output is parsed by shape, not by an English label", () => {
+  // A localised Windows prints different words with the same numbers, so the
+  // parser must not depend on the word "Bytes".
+  const parsed = parseNetstat([
+    "Schnittstellenstatistik",
+    "",
+    "                           Empfangen            Gesendet",
+    "",
+    "Bytes                    4085770558          704092842",
+    "Unicastpakete               3548271             2894110"
+  ].join("\n"));
+
+  assert.deepEqual(parsed, { received: 4085770558, sent: 704092842 });
+});
+
+test("netstat parsing returns null rather than a number it could not find", () => {
+  assert.equal(parseNetstat("nothing useful here"), null);
+});
+
+test("/proc/net/dev is summed across interfaces and excludes loopback", () => {
+  // Loopback carries the web app's own calls to its own API. Counting it would
+  // make the meter read the dashboard's polling rather than the network.
+  const parsed = parseProcNetDev([
+    "Inter-|   Receive                                                |  Transmit",
+    " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets",
+    "    lo: 999999999  1000    0    0    0     0          0         0 999999999   1000",
+    "  eth0: 1000       10     0    0    0     0          0         0 2000        20",
+    "  eth1: 500        5      0    0    0     0          0         0 750         7"
+  ].join("\n"));
+
+  assert.deepEqual(parsed, { received: 1500, sent: 2750 });
+});
+
+test("the first network reading reports no rate instead of a since-boot total", async () => {
+  resetNetworkBaseline();
+  const first = await readNetwork();
+
+  // A cumulative counter divided by one second would read as gigabytes per
+  // second on a machine that has been up a week. With nothing to subtract
+  // from, the only honest answer is that there is no reading yet.
+  assert.equal(first.receivedBytesPerSecond, null);
+  assert.equal(first.sentBytesPerSecond, null);
+  assert.ok(first.unavailable);
+});
+
+test("a used-of-total pair switches to terabytes when gigabytes stop being readable", () => {
+  const gb = 1024 ** 3;
+  const tb = 1024 ** 4;
+
+  // Under a terabyte, gigabytes are the unit people think in.
+  assert.equal(formatPair(19.2 * gb, 31.1 * gb), "19.2 / 31.1 GB");
+
+  // Over it, they are not: this pair used to render "1677.8 of 3725.9 GB",
+  // which a narrow rail truncated to "1677.8 of" — a reading nobody could read.
+  assert.equal(formatPair(1.64 * tb, 3.64 * tb), "1.64 / 3.64 TB");
 });

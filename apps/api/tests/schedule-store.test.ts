@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   addSchedule,
+  claimRun,
   dailyGraceMs,
   describeAction,
   describeCadence,
@@ -245,4 +246,65 @@ test("listing returns copies, so a caller cannot mutate the store by accident", 
   const [copy] = listSchedules();
   copy.enabled = false;
   assert.equal(listSchedules()[0].enabled, true);
+});
+
+// --- idempotency (E6-S3) ---------------------------------------------------
+
+test("a claimed run is not still due, so a restart cannot repeat it", () => {
+  const schedule = seed({ kind: "daily", minuteOfDay: 9 * 60 });
+
+  const due = new Date(schedule.nextDueAt);
+  const firing = new Date(due.getTime() + 1000);
+
+  // Due when the tick finds it.
+  assert.equal(dueVerdict(schedule, firing), "run");
+
+  // The run is claimed, then the process dies before recordRun — which is
+  // exactly the window that used to duplicate side effects, because a local
+  // model turn can take half a minute and nextDueAt only moved afterwards.
+  const claimed = claimRun(schedule.id, firing);
+  assert.ok(claimed);
+
+  const afterRestart = listSchedules().find((entry) => entry.id === schedule.id);
+  assert.ok(afterRestart);
+  assert.notEqual(
+    afterRestart.nextDueAt, schedule.nextDueAt,
+    "claiming a run left the due time where it was"
+  );
+  assert.equal(
+    dueVerdict(afterRestart, firing), "waiting",
+    "a claimed run was still due, so the tick at startup would run it a second time"
+  );
+});
+
+test("an interrupted run says so rather than showing a status it did not earn", () => {
+  const schedule = seed({ kind: "daily", minuteOfDay: 9 * 60 });
+
+  claimRun(schedule.id, new Date(schedule.nextDueAt));
+  const claimed = listSchedules().find((entry) => entry.id === schedule.id);
+  assert.ok(claimed);
+
+  assert.equal(claimed.lastStatus, "interrupted");
+  // And it is not counted as a completed run: lastRunAt still points at the
+  // last time this genuinely did something, which is never.
+  assert.equal(claimed.lastRunAt, null);
+});
+
+test("a run that finishes overwrites its own claim", () => {
+  const schedule = seed({ kind: "daily", minuteOfDay: 9 * 60 });
+
+  claimRun(schedule.id, new Date(schedule.nextDueAt));
+  recordRun(schedule.id, "ok", "Ran fine.");
+
+  const done = listSchedules().find((entry) => entry.id === schedule.id);
+  assert.ok(done);
+  assert.equal(done.lastStatus, "ok");
+  assert.ok(done.lastRunAt, "a completed run did not record when it happened");
+});
+
+test("claiming a schedule that no longer exists is refused", () => {
+  resetSchedules();
+  // The caller must be able to tell a granted claim from a missing schedule,
+  // or it would go on to do the work for something that was deleted.
+  assert.equal(claimRun("no-such-schedule"), null);
 });
