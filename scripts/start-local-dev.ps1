@@ -6,7 +6,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $apiScript = Join-Path $repoRoot 'apps/api'
-$webScript = Join-Path $repoRoot 'apps/web'
+# trhai-web, not apps/web: the desktop shell loads TRHAI, so starting the older
+# Vite client here leaves the shell waiting on a port nothing serves.
+$webScript = Join-Path $repoRoot 'apps/trhai-web'
 
 function Start-DetachedProcess {
   param(
@@ -32,13 +34,15 @@ if (-not $SkipApi) {
 }
 
 if (-not $SkipWeb) {
-  # Must match apps/web/vite.config.ts and the port the desktop shell waits on
-  # (apps/desktop/src/main.ts reads ASCEND_WEB_PORT, defaulting to 5173). This
-  # script used to force 4173, so starting everything with dev:all and then
+  # Must match the port the desktop shell waits on (apps/desktop/src/main.ts
+  # reads ASCEND_WEB_PORT, defaulting to 3210). This script forced 4173 once and
+  # 5173 later, and both times starting everything with dev:all and then
   # launching the desktop shell left it waiting on an empty port and falling
-  # back to the placeholder window.
-  $webPort = if ($env:ASCEND_WEB_PORT) { [int]$env:ASCEND_WEB_PORT } else { 5173 }
-  Start-DetachedProcess -Name 'ascend-web' -WorkingDirectory $webScript -Arguments @('npm.cmd','run','dev','--','--host','127.0.0.1','--strictPort','--port',"$webPort")
+  # back to the placeholder window - the failure this comment has described
+  # through two different wrong values.
+  $webPort = if ($env:ASCEND_WEB_PORT) { [int]$env:ASCEND_WEB_PORT } else { 3210 }
+  # Next's flags: -H host, -p port.
+  Start-DetachedProcess -Name 'ascend-web' -WorkingDirectory $webScript -Arguments @('npm.cmd','run','dev','--','-H','127.0.0.1','-p',"$webPort")
 }
 
 Write-Host 'Started local services.'

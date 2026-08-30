@@ -62,14 +62,33 @@ function requireFsExists(candidatePath: string): boolean {
 }
 
 const workspaceRoot = resolveWorkspaceRoot();
-const webPort = Number(process.env.ASCEND_WEB_PORT ?? 5173);
-const localWebBuildPath = path.resolve(workspaceRoot, "apps/web/dist/index.html");
+/**
+ * The port the desktop window loads.
+ *
+ * 3210 is TRHAI, the actual product surface. The default used to be 5173,
+ * which is the older apps/web client — so launching this shell any way other
+ * than through scripts/launch-trhai.ps1 (which sets the variable explicitly)
+ * opened the superseded app, or nothing at all if it was not running. That is
+ * a trap rather than a fallback: the default should be the thing you meant.
+ */
+const webPort = Number(process.env.ASCEND_WEB_PORT ?? 3210);
 const fallbackHtmlPath = path.resolve(__dirname, "../renderer/index.html");
 const desktopHost = process.env.ASCEND_DESKTOP_HOST ?? "127.0.0.1";
 const autoStartDisabled = process.env.ASCEND_DISABLE_AUTOSTART === "1";
 const forceFallbackRenderer = process.env.ASCEND_FORCE_FALLBACK_RENDERER === "1";
 const startupRetryDelayMs = Number(process.env.ASCEND_STARTUP_RETRY_DELAY_MS ?? 1500);
-const logoPath = path.resolve(workspaceRoot, "apps/web/public/branding/ascend-logo.png");
+// The desktop app's own icon, beside the desktop app.
+//
+// This pointed into apps/web/public - the superseded client - which worked
+// when running from source and silently failed once packaged: electron-builder
+// ships dist, renderer and package.json, so the file simply was not there and
+// the window fell back to Electron's default icon. apps/desktop/assets already
+// held the .ico that electron-builder uses for the installer; the window now
+// uses the same one, and assets/ is shipped so it exists at runtime too.
+//
+// Resolved from __dirname rather than the workspace root, because a packaged
+// app has no workspace: dist/main.js sits beside assets/ inside the asar.
+const logoPath = path.resolve(__dirname, "../assets/ascend-logo.ico");
 
 type CpuSnapshot = {
   idle: number;
@@ -936,7 +955,29 @@ async function ensureSelfHostedServices() {
   }
 
   if (!webPortReady) {
-    spawnDetachedCommand("Ascend Web", "npm.cmd", ["run", "dev:web"]);
+    // The built app when there is one, the dev server only when there is not.
+    //
+    // This always started `next dev`, which meant the shipped experience was a
+    // development server: it compiles each page on first request, needs the
+    // whole source tree present, and takes seconds to answer the first load.
+    // Fine while building the thing, wrong as the way it runs for someone
+    // using it.
+    //
+    // Decided from whether a production build exists rather than from
+    // NODE_ENV, because that is the thing that actually determines whether
+    // `next start` can work. Build-TRHAI.bat produces it; without it this
+    // falls back to the dev server rather than refusing to start, so a source
+    // checkout still runs.
+    const builtWeb = path.resolve(workspaceRoot, "apps", "trhai-web", ".next");
+    const useBuiltWeb = await pathExists(path.join(builtWeb, "BUILD_ID"));
+
+    spawnDetachedCommand(
+      "Ascend Web",
+      "npm.cmd",
+      useBuiltWeb
+        ? ["run", "start", "--workspace", "trhai-web", "--", "-H", desktopHost, "-p", String(webPort)]
+        : ["run", "dev:web"]
+    );
   }
 
   // First launch can require extra time while tsx/vite warm up.
@@ -971,22 +1012,13 @@ async function renderInlineShell(reason: string, details?: string) {
 async function tryLoadDesktopStartUrl(): Promise<boolean> {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
 
-  const builtIndexPath = path.resolve(workspaceRoot, "apps/web/dist/index.html");
-  const builtIndexExists = await pathExists(builtIndexPath);
-
-  if (builtIndexExists) {
-    try {
-      await mainWindow.loadURL(`http://${desktopHost}:${webPort}`);
-      return true;
-    } catch (error) {
-      if (isNavigationAbort(error)) {
-        return false;
-      }
-
-      console.error("[desktop] Failed to load built web app", error);
-    }
-  }
-
+  // No check on apps/web/dist here any more.
+  //
+  // It used to load `http://host:webPort` if that file existed and otherwise
+  // fall through to desktopStartUrl — which resolves to the same URL. Both
+  // branches did the same thing, and the only effect of the check was to gate
+  // the real product surface on a build artifact belonging to an app it
+  // replaced.
   try {
     await mainWindow.loadURL(desktopStartUrl);
     return true;
@@ -1051,30 +1083,22 @@ async function loadDesktopContent() {
   const resolvedStartUrl = process.env.DESKTOP_START_URL ?? `http://${desktopHost}:${webPort}`;
   desktopStartUrl = resolvedStartUrl;
 
+  // One path, not two.
+  //
+  // This was an if/else on whether apps/web/dist/index.html existed, and the
+  // two arms were identical apart from one word in a log line. Twenty lines
+  // of branching that chose between doing the same thing and doing the same
+  // thing, keyed on a superseded app's build output.
   try {
-    const builtIndexExists = await pathExists(path.resolve(workspaceRoot, "apps/web/dist/index.html"));
-    if (builtIndexExists) {
-      const portReady = await waitForPort(webPort, 4000);
-      if (portReady) {
-        const loaded = await tryLoadDesktopStartUrl();
-        if (!loaded) {
-          await renderInlineShell("The desktop shell is ready.", `Open the web app at ${desktopStartUrl} manually if it does not appear automatically.`);
-        }
-        console.log(`[desktop] Desktop shell targeting built app at ${desktopStartUrl}; port ready=${portReady}`);
-      } else {
-        await renderInlineShell("The desktop shell is ready.", `The web app should appear at ${desktopStartUrl} once it is available.`);
+    const portReady = await waitForPort(webPort, 4000);
+    if (portReady) {
+      const loaded = await tryLoadDesktopStartUrl();
+      if (!loaded) {
+        await renderInlineShell("The desktop shell is ready.", `Open the web app at ${desktopStartUrl} manually if it does not appear automatically.`);
       }
+      console.log(`[desktop] Desktop shell targeting ${desktopStartUrl}; port ready=${portReady}`);
     } else {
-      const portReady = await waitForPort(webPort, 4000);
-      if (portReady) {
-        const loaded = await tryLoadDesktopStartUrl();
-        if (!loaded) {
-          await renderInlineShell("The desktop shell is ready.", `Open the web app at ${desktopStartUrl} manually if it does not appear automatically.`);
-        }
-        console.log(`[desktop] Desktop shell targeting ${desktopStartUrl}; port ready=${portReady}`);
-      } else {
-        await renderInlineShell("The desktop shell is ready.", `The web app should appear at ${desktopStartUrl} once it is available.`);
-      }
+      await renderInlineShell("The desktop shell is ready.", `The web app should appear at ${desktopStartUrl} once it is available.`);
     }
   } catch (error) {
     if (isNavigationAbort(error)) {
@@ -1102,8 +1126,15 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 860,
-    minWidth: 980,
-    minHeight: 680,
+    // The command centre is a fixed instrument layout, not a reflowing page,
+    // and these are the measured floor rather than round numbers. Below
+    // 1201px the three columns collapse into one stacked list, and below
+    // ~770px the left rail runs out of room for the console plus the two
+    // instrument panels plus the nav. The old 980x680 minimum let the window
+    // reach both of those states, so "one screen" quietly became a scrolling
+    // one. Verified at 1240x770: nothing overflows and nothing is clipped.
+    minWidth: 1240,
+    minHeight: 770,
     title: "Vexora AI",
     autoHideMenuBar: true,
     show: false,
