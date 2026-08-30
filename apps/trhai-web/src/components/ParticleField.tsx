@@ -15,19 +15,38 @@ import type { CoreState } from "./Core";
 // Canvas rather than DOM nodes: a few dozen animated elements each with their
 // own compositor layer is how an "alive" interface becomes a fan spinning up.
 // One canvas, one requestAnimationFrame loop, no per-particle allocation
-// after setup, and it stops entirely when the tab is hidden or the user has
-// asked for reduced motion.
+// after setup, and it stops entirely when the tab is hidden. Reduced motion
+// slows the drift rather than stopping it — see the note in the effect.
 
 type Particle = { x: number; y: number; vx: number; vy: number; radius: number; alpha: number };
 
 /** Deliberately modest. Density is not what makes this read as alive; motion is. */
 const particleCount = 48;
 
+/**
+ * How often the field is redrawn.
+ *
+ * The same reasoning as the core: this drifts slowly and gains nothing from
+ * sixty frames a second. Halving it is most of the cost of a canvas that is
+ * open all day behind an app people leave running.
+ */
+const targetFps = 30;
+const frameIntervalMs = 1000 / targetFps;
+
 /** How each state moves the field. Speed multiplies drift; pull draws toward the centre. */
 const behaviour: Record<CoreState, { speed: number; pull: number; alpha: number }> = {
   idle: { speed: 1, pull: 0, alpha: 0.5 },
   listening: { speed: 1.1, pull: -0.02, alpha: 0.75 },
   thinking: { speed: 2.4, pull: 0.015, alpha: 0.9 },
+  // The four work states move differently because the work differs, and each
+  // is entered by a real tool call. Searching pushes outward — the field is
+  // going somewhere to look. Reading draws inward, slowly: something is being
+  // taken in. Writing is fast and converging, output forming at the centre.
+  // Analysing is tight and quick, circling the same point.
+  searching: { speed: 3.2, pull: -0.05, alpha: 0.95 },
+  reading: { speed: 1.5, pull: 0.02, alpha: 0.8 },
+  writing: { speed: 2.8, pull: 0.04, alpha: 0.95 },
+  analysing: { speed: 2.6, pull: 0.03, alpha: 0.9 },
   // Strongest inward pull: a tool is genuinely running, and the field
   // converging is the most legible way to show work happening at the centre.
   executing: { speed: 3.4, pull: 0.045, alpha: 1 },
@@ -48,7 +67,15 @@ export function ParticleField({ state = "idle", className }: { state?: CoreState
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    // Reduced motion slows the field; it does not freeze it.
+    //
+    // This used to paint one still frame and stop. The intent was right and
+    // the result was an app whose background was a photograph — and because
+    // the core fell back at the same time, wherever Chromium reported reduce
+    // nothing on the entire screen moved. Drift is scaled instead, which is
+    // what the preference actually asks for: less motion, not a still image.
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const calm = reducedMotion ? 0.2 : 1;
     const context = canvas.getContext("2d");
     if (!context) return;
 
@@ -90,12 +117,9 @@ export function ParticleField({ state = "idle", className }: { state?: CoreState
 
     let frame: number | null = null;
 
-    /**
-     * Paint one frame. Deliberately separate from scheduling the next one:
-     * the reduced-motion path needs to repaint on resize and on becoming
-     * visible without ever starting a loop.
-     */
-    const renderFrame = () => {
+    /** Paint one frame. Separate from scheduling the next so a repaint can be
+     *  forced without touching the loop. */
+    const renderFrame = (delta = 1) => {
       const { speed, pull, alpha: stateAlpha } = behaviour[stateRef.current] ?? behaviour.idle;
       context.clearRect(0, 0, width, height);
 
@@ -107,8 +131,8 @@ export function ParticleField({ state = "idle", className }: { state?: CoreState
           const dx = centreX - particle.x;
           const dy = centreY - particle.y;
           const distance = Math.hypot(dx, dy) || 1;
-          particle.vx += (dx / distance) * pull;
-          particle.vy += (dy / distance) * pull;
+          particle.vx += (dx / distance) * pull * calm * delta;
+          particle.vy += (dy / distance) * pull * calm * delta;
           // Without a cap the pull compounds every frame and the field
           // collapses into a dot within a couple of seconds.
           const speedNow = Math.hypot(particle.vx, particle.vy);
@@ -119,8 +143,8 @@ export function ParticleField({ state = "idle", className }: { state?: CoreState
           }
         }
 
-        particle.x += particle.vx * speed;
-        particle.y += particle.vy * speed;
+        particle.x += particle.vx * speed * calm * delta;
+        particle.y += particle.vy * speed * calm * delta;
 
         // Wrap rather than respawn: a particle vanishing at an edge and
         // reappearing elsewhere reads as a glitch.
@@ -139,13 +163,23 @@ export function ParticleField({ state = "idle", className }: { state?: CoreState
       context.globalAlpha = 1;
     };
 
-    const loop = () => {
-      renderFrame();
+    let lastDrawAt = 0;
+
+    const loop = (nowMs: number) => {
       frame = requestAnimationFrame(loop);
+      if (nowMs - lastDrawAt < frameIntervalMs) return;
+
+      // Drift is per-frame, so a slower loop would move the field more slowly
+      // rather than the same distance less often. This keeps the speed the
+      // same at any rate; clamped so a stalled tab does not resume with every
+      // particle teleporting.
+      const delta = lastDrawAt === 0 ? 1 : Math.min(4, (nowMs - lastDrawAt) / (1000 / 60));
+      lastDrawAt = nowMs;
+      renderFrame(delta);
     };
 
     const start = () => {
-      if (frame === null && !reducedMotion && !document.hidden) frame = requestAnimationFrame(loop);
+      if (frame === null && !document.hidden) frame = requestAnimationFrame(loop);
     };
     const stop = () => {
       if (frame !== null) {
@@ -154,18 +188,12 @@ export function ParticleField({ state = "idle", className }: { state?: CoreState
       }
     };
 
-    // One still frame under reduced motion: the field is present and
-    // readable, and nothing moves.
-    if (reducedMotion) renderFrame();
-    else start();
+    start();
 
     // Nothing to animate for a tab nobody is looking at — this is most of
     // what keeps an always-on interface from costing a background CPU core.
-    // Reduced motion still repaints on return, because a canvas resized while
-    // hidden comes back blank otherwise.
     const onVisibility = () => {
       if (document.hidden) stop();
-      else if (reducedMotion) renderFrame();
       else start();
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -177,7 +205,6 @@ export function ParticleField({ state = "idle", className }: { state?: CoreState
     const observer = new ResizeObserver(() => {
       resize();
       seed();
-      if (reducedMotion) renderFrame();
     });
     observer.observe(canvas);
 

@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Orbitron } from "next/font/google";
-import { AppShell } from "../components/AppShell";
 import { themeBootScript } from "../lib/theme";
 import "./globals.css";
 
@@ -45,7 +44,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className="h-full">
         <div id="trhai-root">
-          <AppShell>{children}</AppShell>
+          {children}
         </div>
       </body>
     </html>

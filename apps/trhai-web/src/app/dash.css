@@ -113,6 +113,26 @@
   padding-right: 2px;
 }
 
+/* Panels keep their natural height and the column scrolls past them.
+   Without this, flex shrinking divides the overflow among every panel that
+   can give ground — and the console gives the most, because its feed is
+   allowed to scroll. The result was a console collapsed to its heading with
+   the conversation squeezed to nothing, while the rail below it looked fine.
+   A scrolling column must never compress what it is scrolling. */
+.cc-left > *, .cc-right > * { flex: none; }
+
+/* ...except the console, which takes whatever the instruments leave.
+   A fixed cap on the feed could not work: at rest the column fitted, and the
+   moment a conversation existed the console grew by the difference and pushed
+   the nav below the fold. The instrument panels have a natural size, the
+   console does not, so the console is the one that should give — and the
+   min-height is what stops flex shrinking from crushing it to its heading,
+   which is exactly what happened when every child could shrink. */
+.cc-left > .cc-console {
+  flex: 1 1 auto;
+  min-height: 132px;
+}
+
 /* ---- console ---- */
 
 .cc-console { min-height: 0; }
@@ -121,7 +141,9 @@
   display: flex;
   flex-direction: column;
   gap: 9px;
-  max-height: 280px;
+  /* Grows and shrinks with the panel; scrolls once it runs out of room. */
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   min-width: 0;
 }
@@ -145,7 +167,7 @@
   align-items: flex-end;
   justify-content: center;
   gap: 2px;
-  height: 28px;
+  height: 18px;
   padding: 0 2px;
 }
 
@@ -163,7 +185,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 4px 8px;
   border: 1px solid var(--line-subtle);
   border-radius: 6px;
 }
@@ -205,7 +227,19 @@
   padding: 8px 0;
 }
 
-.cc-particles { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+/* width/height are set explicitly because a <canvas> carries its width and
+   height attributes as presentational hints, so its CSS width is 300px rather
+   than auto. With inset:0 alone the box is over-constrained, left:0 wins,
+   right:0 is dropped, and the field renders into a 300x150 box in the corner
+   of the stage instead of spanning it. */
+.cc-particles {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
 
 .cc-core-title { position: relative; z-index: 1; text-align: center; }
 
@@ -266,6 +300,69 @@
 
 .cc-action.live { border-color: var(--ok); color: var(--ok); }
 .cc-action.live .cc-action-glyph { color: var(--ok); }
+
+/* Speaking, as distinct from switched on. The pulse is driven by the class,
+   which is set from speech.speaking - the audio element's own play/end events,
+   not a timer - so the button is lit exactly while sound is coming out. */
+.cc-action-speaking {
+  border-color: var(--accent-strong);
+  color: var(--accent-strong);
+  animation: cc-speaking 1.1s ease-in-out infinite;
+}
+
+.cc-action-speaking .cc-action-glyph { color: var(--accent-strong); }
+
+@keyframes cc-speaking {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(53, 199, 255, 0.35); }
+  50%      { box-shadow: 0 0 12px 2px rgba(53, 199, 255, 0.28); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still legibly "speaking", without the pulse. */
+  .cc-action-speaking { animation: none; box-shadow: 0 0 10px 1px rgba(53, 199, 255, 0.25); }
+}
+
+/* The current answer, on the stage.
+   Width matches the composer so the reply and the box it was typed into read
+   as one column. max-height keeps a long answer from pushing the core off the
+   top of the screen - it scrolls inside itself instead. */
+.cc-reply {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 620px);
+  max-height: min(34vh, 300px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--line-subtle);
+  border-left: 2px solid var(--accent);
+  border-radius: 10px;
+  background: rgba(10, 15, 22, 0.86);
+  backdrop-filter: blur(6px);
+}
+
+/* The question, kept above the answer because sending clears the input and
+   the thing you asked is otherwise gone from the screen. */
+.cc-reply-asked {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.cc-reply-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.cc-reply-text > :first-child { margin-top: 0; }
+.cc-reply-text > :last-child { margin-bottom: 0; }
 
 .cc-ask {
   position: relative;
@@ -470,29 +567,65 @@
   isolation: isolate;
 }
 
-/* A surveyor's grid, well under the content. Fixed rather than scrolling, so
-   it reads as the surface the panels sit on. */
+/* ---- the environment ----------------------------------------------------
+   The background is not a colour, it is a place.
+   It used to be near-black with a grid on it, and a grid on black is a
+   wireframe, not an environment — the app read as panels floating in a void.
+   What follows is a lit volume: a deep blue-teal base, three coloured blooms
+   at different depths, a grid that fades with distance, and a horizon glow.
+   None of it claims to measure anything, and none of it moves fast enough to
+   pull the eye off a panel someone is reading. */
+
 .cc::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  z-index: -3;
+  background:
+    /* Cool light from above-left, the key. */
+    radial-gradient(52% 44% at 18% 8%, rgba(40, 150, 220, 0.30), transparent 68%),
+    /* A warmer counter-light low and right, so the volume has two sides
+       instead of one flat wash. */
+    radial-gradient(48% 42% at 86% 88%, rgba(74, 96, 210, 0.26), transparent 66%),
+    /* Teal breathing up from the floor behind the core. */
+    radial-gradient(70% 40% at 50% 108%, rgba(28, 176, 178, 0.24), transparent 70%),
+    /* The base volume: lighter at the horizon, deeper top and bottom. */
+    linear-gradient(180deg, #060d18 0%, #0a1727 42%, #081420 72%, #050a12 100%);
+  /* Very slow and very small: enough that the light is never quite where it
+     was, not enough to notice it moving. */
+  animation: cc-drift 48s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes cc-drift {
+  from { transform: translate3d(-1.2%, -0.8%, 0) scale(1.02); }
+  to   { transform: translate3d(1.2%, 0.8%, 0) scale(1.06); }
+}
+
+/* A surveyor's grid, well under the content. Fixed rather than scrolling, so
+   it reads as the surface the panels sit on. Masked so it fades out toward
+   the edges and behind the core, which is what turns a flat lattice into
+   something with distance in it. */
+.cc::after {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -2;
   background-image:
-    linear-gradient(rgba(53, 199, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(53, 199, 255, 0.045) 1px, transparent 1px);
-  background-size: 46px 46px;
+    linear-gradient(rgba(90, 220, 255, 0.075) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(90, 220, 255, 0.075) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(ellipse 78% 68% at 50% 46%, #000 18%, transparent 88%);
+  mask-image: radial-gradient(ellipse 78% 68% at 50% 46%, #000 18%, transparent 88%);
   pointer-events: none;
 }
 
-/* Vignette: pulls the eye to the middle and keeps the corners from competing
-   with the panels. */
-.cc::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background: radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(3, 6, 10, 0.75) 100%);
-  pointer-events: none;
+/* The vignette moved onto the shell itself so it sits above the grid but
+   below every panel. It is far lighter than it was: the old one closed the
+   corners down to almost black, which is most of why the app looked like it
+   was painted on a black card. */
+.cc {
+  box-shadow: inset 0 0 240px 60px rgba(2, 8, 16, 0.55);
 }
 
 /* The core throws light onto the stage behind it. Sized to the core and
@@ -514,10 +647,6 @@
   transition: background 500ms ease;
 }
 
-.cc-executing .cc-stage::before { background: radial-gradient(circle, rgba(53, 199, 255, 0.18), transparent 62%); }
-.cc-listening .cc-stage::before { background: radial-gradient(circle, rgba(70, 227, 160, 0.14), transparent 62%); }
-.cc-error .cc-stage::before { background: radial-gradient(circle, rgba(255, 92, 92, 0.14), transparent 62%); }
-
 @media (prefers-reduced-motion: reduce) {
   .cc-stage::before { transition: none; }
 }
@@ -526,8 +655,9 @@
    what separates them from the background instead of a bare 1px line. */
 .hud-panel {
   box-shadow:
-    0 1px 0 rgba(53, 199, 255, 0.10) inset,
-    0 10px 26px rgba(0, 0, 0, 0.36);
+    inset 0 1px 0 rgba(140, 230, 255, 0.18),
+    inset 0 0 44px rgba(40, 140, 200, 0.06),
+    0 12px 30px rgba(0, 0, 0, 0.42);
 }
 
 /* A short accent rule beside every panel heading. Cheap, and it does more for
@@ -661,10 +791,15 @@
    console, which is why nothing on the left read as navigation. */
 
 .cc-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 6px;
+  /* One row of glyphs. Stacked it was 434px of a 673px column and three-across
+     was still 186px — in both cases the rail below the fold was the reason the
+     home screen could not fit on the one screen it is supposed to be. The
+     labels move to tooltips and to the surface heading, which names wherever
+     you land anyway. */
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 2px;
+  padding: 5px;
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius-lg);
   background: rgba(10, 15, 22, 0.72);
@@ -672,18 +807,18 @@
 }
 
 .cc-nav-item {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 9px 11px;
+  display: grid;
+  place-items: center;
+  padding: 7px 0;
+  min-width: 0;
   border: 1px solid transparent;
   border-radius: 9px;
   background: none;
   color: var(--text-faint);
   font: inherit;
-  font-size: 13.5px;
-  letter-spacing: 0.06em;
-  text-align: left;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  text-align: center;
   cursor: pointer;
   transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
 }
@@ -756,9 +891,13 @@
 
 /* ---- room ----
    Panels were packed to their edges, which reads as cramped however good the
-   type is. These are the last of the "basic" problem: space, not decoration. */
+   type is. These are the last of the "basic" problem: space, not decoration.
 
-.hud-panel { padding: 16px 18px; gap: 12px; }
+   Trimmed since: 16/18 was generous for a 230px rail carrying four panels, and
+   the padding alone put the bottom one below the fold. The breathing room that
+   mattered was between elements, and that is kept. */
+
+.hud-panel { padding: 11px 13px; gap: 8px; }
 
 .cc-top { padding: 12px 18px; gap: 20px; }
 
@@ -773,6 +912,592 @@
 
 /* The tiles were four to a row and unreadable at that width. Three gives each
    one enough space for its label to be a word rather than an ellipsis. */
-.tiles { grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.tile { padding: 12px 6px; gap: 6px; }
-.tile-glyph { font-size: 19px; }
+
+/* ---- who is at the machine ---- */
+
+.cc-user { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.cc-user-name {
+  font-family: var(--font-display);
+  font-size: 17px;
+  line-height: 1.1;
+  color: var(--accent-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cc-user-host { font-size: 12px; letter-spacing: 0.1em; white-space: nowrap; }
+
+/* ---- sound toggle ---- */
+
+.console-cue {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.console-cue:hover { border-color: var(--accent); color: var(--accent-strong); }
+.console-cue.on { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-quiet); }
+
+/* The instruments moved off the home rail, laid out to use the width the
+   surface gives them rather than stacked in a 300px column. */
+.cc-system-extra {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+  align-items: start;
+}
+
+/* Labels must not wrap in a third-of-a-column cell. */
+.cc-nav-item > span:last-child {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cc-nav-glyph { font-size: 17px; line-height: 1; }
+
+/* Glyph only. The text label stays in the DOM for screen readers and for the
+   tooltip, but takes no space in a 25px cell. */
+.cc-nav-item > span:last-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.cc-nav-item { position: relative; }
+.cc-nav-glyph { font-size: 16px; line-height: 1; }
+
+/* ---- the volumetric floor ----
+   A grid plane laid back in perspective under the core, so the core stands in
+   a space instead of on a flat panel. This is most of what separates a HUD
+   from a dashboard: the flat grid behind everything gives texture, but only a
+   receding plane gives a floor to stand on.
+
+   Pure CSS transform, painted once, never animated — it costs one composited
+   layer and nothing per frame. */
+.cc-stage::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  /* Under the core, not at the foot of the column. Anchored to the bottom of
+     the stage it sat behind the command box and the suggestion chips, where a
+     receding plane reads as nothing at all — the floor has to start where the
+     thing standing on it ends. */
+  bottom: 17%;
+  width: 150%;
+  height: 30%;
+  transform: translateX(-50%) perspective(560px) rotateX(66deg);
+  transform-origin: 50% 100%;
+  background-image:
+    linear-gradient(rgba(120, 226, 255, 0.34) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 226, 255, 0.30) 1px, transparent 1px);
+  background-size: 52px 52px;
+  /* Slowly drawing toward the viewer, which is what turns a static plane into
+     a floor being travelled over. One transform on a composited layer, and
+     the period is long enough that it never reads as scrolling. */
+  animation: cc-floor 9s linear infinite;
+  /* Fades toward the horizon, or the far edge terminates in a hard line and
+     the illusion of distance collapses. */
+  -webkit-mask-image: linear-gradient(to top, #000 0%, rgba(0, 0, 0, 0.35) 45%, transparent 82%);
+  mask-image: linear-gradient(to top, #000 0%, rgba(0, 0, 0, 0.35) 45%, transparent 82%);
+  z-index: 0;
+  pointer-events: none;
+}
+
+@keyframes cc-floor {
+  from { background-position: 0 0; }
+  to   { background-position: 0 52px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-stage::after { animation-duration: 36s; }
+}
+
+/* ---- stage reticles ----
+   Corner marks framing the working area. Four L-brackets, drawn with
+   gradients on one element, so the stage reads as an instrument bay. */
+.cc-core-row::before,
+.cc-core-row::after {
+  content: "";
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-strong, var(--line));
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.cc-core-row::before {
+  top: 4px; left: 6px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.cc-core-row::after {
+  bottom: 4px; right: 6px;
+  border-left: none;
+  border-top: none;
+}
+
+/* ---- scanlines ----
+   Very faint, and fixed to the viewport rather than to the content so they
+   read as the surface you are looking through rather than as texture on the
+   panels. Kept under 3% or it becomes a filter over the type. */
+.cc::before {
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(140, 230, 255, 0.022) 0px,
+      rgba(140, 230, 255, 0.022) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    radial-gradient(52% 44% at 18% 8%, rgba(40, 150, 220, 0.30), transparent 68%),
+    radial-gradient(48% 42% at 86% 88%, rgba(74, 96, 210, 0.26), transparent 66%),
+    radial-gradient(70% 40% at 50% 108%, rgba(28, 176, 178, 0.24), transparent 70%),
+    linear-gradient(180deg, #060d18 0%, #0a1727 42%, #081420 72%, #050a12 100%);
+}
+
+/* ---- attention ----
+   The core leans in while the command field genuinely has focus: the light it
+   throws lifts, the field's own edge brightens, and the whole thing settles
+   again on blur. Driven by real focus and blur events, so it never fires at a
+   mouse merely crossing the screen.
+
+   Deliberately small. The point is acknowledgement — the machine noticing you
+   have arrived — not a transition that pulls the eye away from what you were
+   about to type. */
+.cc-attentive .cc-stage::before {
+  background: radial-gradient(circle, rgba(53, 199, 255, 0.17), transparent 62%);
+}
+
+.cc-attentive .cc-ask {
+  border-color: var(--line-strong, var(--line));
+  box-shadow:
+    inset 0 1px 0 rgba(140, 230, 255, 0.22),
+    0 0 0 1px rgba(53, 199, 255, 0.16),
+    0 14px 34px rgba(0, 0, 0, 0.46);
+}
+
+.cc-attentive .cc-core-row::before,
+.cc-attentive .cc-core-row::after {
+  opacity: 0.85;
+  border-color: var(--accent);
+}
+
+.cc-stage::before,
+.cc-ask,
+.cc-core-row::before,
+.cc-core-row::after {
+  transition: opacity 260ms ease, border-color 260ms ease, box-shadow 260ms ease, background 260ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-stage::before,
+  .cc-ask,
+  .cc-core-row::before,
+  .cc-core-row::after { transition: none; }
+}
+
+/* ---- ambient HUD arcs ----
+   Large arcs sweeping well outside the core, framing the whole stage rather
+   than sitting on the core like a badge. This is the difference between a
+   glowing circle in the middle of a page and an interface built around
+   something: the structure extends past the object it describes.
+
+   SVG strokes with a dash pattern, not conic-gradients with a CSS mask. The
+   mask was the whole problem: it forces the element to be rasterised on the
+   main thread every frame it rotates, so two of them cost a third of the
+   frame rate — 60fps down to 40. A dashed circle is a path the compositor can
+   rotate as an already-painted texture, and it looks the same. */
+
+.cc-arcs {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 680px;
+  height: 680px;
+  margin: -340px 0 0 -340px;
+  z-index: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.cc-arcs circle {
+  fill: none;
+  transform-origin: 50% 50%;
+  transform-box: fill-box;
+}
+
+.cc-arc-outer {
+  transform: rotate(18deg);
+  stroke: rgba(96, 214, 255, 0.55);
+  stroke-width: 2;
+  /* Uneven dashes, so it reads as an instrument rather than a dotted circle. */
+  stroke-dasharray: 46 128 88 190 34 96;
+}
+
+.cc-arc-mid {
+  transform: rotate(-64deg);
+  stroke: rgba(140, 230, 255, 0.42);
+  stroke-width: 1.5;
+  stroke-dasharray: 118 96 30 210 62 74;
+}
+
+.cc-arc-inner {
+  transform: rotate(41deg);
+  stroke: rgba(96, 214, 255, 0.3);
+  stroke-width: 1;
+  stroke-dasharray: 8 26;
+}
+
+/* Fixed, at offset angles, rather than rotating.
+   Rotating them cost a third of the frame rate — 60fps to 40 — and not for
+   the reason it first looked like. These sit behind panels that use
+   backdrop-filter, and anything moving behind glass forces the blur to be
+   recomputed every frame. The arcs are structure, not a reading: they say
+   nothing that changing would communicate, and the spec is explicit that
+   alive does not mean everything moves. The motion that carries meaning —
+   the core, its sweep, the field, the floor — is untouched. */
+
+/* ---- window frame ----
+   Corner marks on the viewport itself, so the whole screen reads as an
+   instrument surface rather than a page with a picture on it. Four L-brackets
+   drawn on one fixed element with border segments. */
+.cc-frame {
+  position: fixed;
+  inset: 6px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.cc-frame span {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(120, 226, 255, 0.62);
+}
+
+/* Rule ticks running in from each corner, like the edge of a viewfinder. */
+.cc-frame span::before,
+.cc-frame span::after {
+  content: "";
+  position: absolute;
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(120, 226, 255, 0.5) 0 1px,
+    transparent 1px 7px
+  );
+}
+
+.cc-frame span::before { height: 1px; width: 54px; top: -1px; }
+.cc-frame span::after {
+  width: 1px;
+  height: 54px;
+  left: -1px;
+  background-image: repeating-linear-gradient(
+    180deg,
+    rgba(120, 226, 255, 0.5) 0 1px,
+    transparent 1px 7px
+  );
+}
+
+.cc-frame span:nth-child(1)::before { left: 46px; }
+.cc-frame span:nth-child(1)::after  { top: 46px; }
+.cc-frame span:nth-child(2)::before { right: 46px; }
+.cc-frame span:nth-child(2)::after  { top: 46px; left: auto; right: -1px; }
+.cc-frame span:nth-child(3)::before { left: 46px; top: auto; bottom: -1px; }
+.cc-frame span:nth-child(3)::after  { bottom: 46px; }
+.cc-frame span:nth-child(4)::before { right: 46px; top: auto; bottom: -1px; }
+.cc-frame span:nth-child(4)::after  { bottom: 46px; left: auto; right: -1px; }
+
+.cc-frame span:nth-child(1) { top: 0; left: 0; border-right: none; border-bottom: none; }
+.cc-frame span:nth-child(2) { top: 0; right: 0; border-left: none; border-bottom: none; }
+.cc-frame span:nth-child(3) { bottom: 0; left: 0; border-right: none; border-top: none; }
+.cc-frame span:nth-child(4) { bottom: 0; right: 0; border-left: none; border-top: none; }
+
+/* ---- the environment takes the state's colour ----
+   Until now only the core changed colour when the state changed: it could go
+   amber mid-build or green on success while the arcs, the floor and the light
+   in the room stayed the same cyan, as though the rest of the interface had
+   not noticed. The whole environment shifts instead, so a state change reads
+   as the system responding rather than one widget recolouring.
+
+   Text is deliberately excluded. Legibility is not a mood, and tinting body
+   copy amber for the duration of a build would make the screen harder to read
+   exactly while there is most to read. Only light, arcs and the floor move. */
+
+.cc {
+  --tint: 96, 214, 255;
+  --tint-soft: 140, 230, 255;
+}
+
+.cc-searching { --tint: 40, 230, 210; --tint-soft: 150, 245, 235; }
+.cc-reading   { --tint: 90, 200, 255; --tint-soft: 150, 225, 255; }
+.cc-writing   { --tint: 255, 182, 66;  --tint-soft: 255, 214, 140; }
+.cc-analysing { --tint: 160, 130, 255; --tint-soft: 205, 190, 255; }
+.cc-executing { --tint: 90, 220, 255;  --tint-soft: 255, 200, 120; }
+.cc-thinking  { --tint: 150, 120, 255; --tint-soft: 190, 175, 255; }
+.cc-listening { --tint: 120, 240, 255; --tint-soft: 190, 250, 255; }
+.cc-speaking  { --tint: 110, 235, 220; --tint-soft: 180, 250, 240; }
+.cc-success   { --tint: 74, 226, 168;  --tint-soft: 160, 245, 210; }
+.cc-error     { --tint: 255, 92, 92;   --tint-soft: 255, 165, 165; }
+/* Unreachable drains to grey, matching what the core itself does. */
+.cc-offline   { --tint: 110, 125, 140; --tint-soft: 150, 165, 180; }
+
+/* The arcs, the floor and the room's light all read from it. */
+.cc-arc-outer { stroke: rgba(var(--tint), 0.55); transition: stroke 700ms ease; }
+.cc-arc-mid   { stroke: rgba(var(--tint-soft), 0.42); transition: stroke 700ms ease; }
+.cc-arc-inner { stroke: rgba(var(--tint), 0.3); transition: stroke 700ms ease; }
+
+.cc-stage::after {
+  background-image:
+    linear-gradient(rgba(var(--tint), 0.34) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--tint), 0.30) 1px, transparent 1px);
+  transition: background-image 700ms ease;
+}
+
+.cc-frame span { border-color: rgba(var(--tint), 0.62); transition: border-color 700ms ease; }
+
+/* The stage light, which was already state-aware but only for three states
+   and with its colours written out by hand in each one. */
+.cc-stage::before {
+  background: radial-gradient(circle, rgba(var(--tint), 0.13), transparent 62%);
+}
+
+.cc-attentive .cc-stage::before {
+  background: radial-gradient(circle, rgba(var(--tint), 0.2), transparent 62%);
+}
+
+/* ---- the rails, and hiding them ----
+   The main screen is the core, the command box and the microphone. The rails
+   are reference material, shown when wanted. Hidden, the stage takes the whole
+   width and the core has room to be the thing you are looking at. */
+
+.cc-no-left .cc-left,
+.cc-no-right .cc-right { display: none; }
+
+.cc-no-left.cc-no-right .cc-body { grid-template-columns: minmax(0, 1fr); }
+.cc-no-left:not(.cc-no-right) .cc-body { grid-template-columns: minmax(0, 1fr) minmax(260px, 330px); }
+.cc-no-right:not(.cc-no-left) .cc-body { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); }
+
+/* With both rails away there is room for a bigger core and wider arcs. */
+.cc-no-left.cc-no-right .cc-arcs { width: 820px; height: 820px; margin: -410px 0 0 -410px; }
+
+/* ---- edge handles ---- */
+
+.cc-rail-tab {
+  position: fixed;
+  top: 50%;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 7px;
+  border: 1px solid var(--line-subtle);
+  background: rgba(9, 22, 38, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  /* Written down the edge, so a permanent handle costs a few pixels of width
+     rather than a slab of the screen. */
+  writing-mode: vertical-rl;
+  transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
+}
+
+.cc-rail-tab:hover { color: var(--accent-strong); border-color: var(--accent); }
+.cc-rail-tab.open { color: var(--accent-strong); border-color: var(--line-strong, var(--line)); }
+
+.cc-rail-tab-left {
+  left: 0;
+  transform: translateY(-50%);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+}
+
+.cc-rail-tab-right {
+  right: 0;
+  transform: translateY(-50%);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+}
+
+/* Out of the way of the columns when they are showing. */
+.cc:not(.cc-no-left) .cc-rail-tab-left,
+.cc:not(.cc-no-right) .cc-rail-tab-right { opacity: 0.55; }
+
+.cc-rail-tab-label { letter-spacing: 0.16em; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-rail-tab { transition: none; }
+}
+
+/* ---- the nav, now in the footer ---- */
+
+.cc-states .cc-nav {
+  display: flex;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  margin-right: 14px;
+}
+
+.cc-states .cc-nav-item { padding: 5px 7px; }
+
+/* ---- fixes for the bare screen ----
+   Three things the first pass got wrong, all visible the moment the rails came
+   down. */
+
+/* 1. The subsystem chips belong to the rails they sit beside, not to the core.
+      Left showing, they were the loudest thing on a screen that was supposed
+      to be the core, the command box and the microphone. */
+.cc-no-left .subs-left,
+.cc-no-right .subs-right { display: none; }
+
+/* 2. The handles were drawn straight over the chips, so both were unreadable.
+      A gutter the width of a handle keeps them apart. */
+.cc-body { padding-left: 30px; padding-right: 30px; }
+
+/* 3. The footer put the nav, the state rail and the note in one centred flex
+      row, so with nine glyphs added they overlapped rather than wrapped. Three
+      explicit columns instead: nav left, state centre, note right. */
+.cc-states {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  justify-content: initial;
+  flex-wrap: nowrap;
+}
+
+.cc-states .cc-nav { margin-right: 0; }
+
+.cc-states-stages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.cc-states-note { margin-left: 0; text-align: right; white-space: nowrap; }
+
+/* The suggestion chips were running under the footer once the stage grew. */
+.cc-suggestions { margin-bottom: 2px; }
+
+/* The footer had about two pixels of slack once the nav joined it: nav 358px
+   plus the state rail's 728px plus the note's 200px very nearly filled the
+   row, so the smallest difference in window height or font metrics pushed
+   COMPLETE onto a second line. Tightening the rail's own spacing buys back
+   roughly a hundred pixels, which is slack rather than luck. */
+.cc-states .cc-stage-word { letter-spacing: 0.13em; }
+.cc-states-stages { gap: 13px; }
+
+.cc-states-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 34ch;
+}
+
+/* No min-height override on the bare stage.
+   Forcing the core row taller pushed the whole column 32px past the stage,
+   and it bought nothing: the row is already sized by the 380px core inside
+   it. The extra room the bare screen has is better spent as breathing space
+   around the core than as a floor under it. */
+
+/* ---- where an answer came from ----
+   Small badges under a reply, one per source class that genuinely contributed.
+   Quiet on purpose: this is provenance, not a headline, and it should be there
+   when looked for rather than competing with the answer itself. */
+
+.console-sources { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+
+.console-source {
+  padding: 1px 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  background: var(--accent-quiet);
+  cursor: help;
+}
+
+/* An answer with nothing behind it reads differently from one with sources —
+   that difference is the whole point of showing this at all. */
+.console-source.unsourced {
+  background: none;
+  border-style: dashed;
+  border-color: var(--line);
+}
+
+/* ---- parallax ----
+   Each layer shifts by a different amount as the pointer moves, which is the
+   cue that tells the eye there is space between them. The depths are ordered:
+   the atmosphere behind moves least, the floor and arcs more, the annotations
+   in front most. Nothing that carries a reading moves far enough to be hard to
+   read while it does.
+
+   Transform only, on layers that are already composited, so this costs a
+   matrix per frame and no repaint. --px and --py are written by a pointermove
+   handler in page.tsx and default to 0, so a machine with no pointer simply
+   sits still. */
+.cc { --px: 0; --py: 0; }
+
+.cc::before {
+  transform: translate3d(calc(var(--px) * -8px), calc(var(--py) * -8px), 0) scale(1.04);
+}
+
+.cc-stage::after {
+  transform:
+    translateX(-50%)
+    translate3d(calc(var(--px) * -18px), calc(var(--py) * -6px), 0)
+    perspective(560px) rotateX(66deg);
+}
+
+.cc-arcs {
+  transform: translate3d(calc(var(--px) * 14px), calc(var(--py) * 14px), 0);
+}
+
+.cc-core-wrap {
+  transform: translate3d(calc(var(--px) * 6px), calc(var(--py) * 6px), 0);
+}
+
+/* The annotations sit closest to the viewer, so they travel furthest. */
+.hud-note {
+  transform: translate3d(calc(var(--px) * 26px), calc(var(--py) * 20px), 0);
+}
+
+.cc-frame span {
+  transform: translate3d(calc(var(--px) * -5px), calc(var(--py) * -5px), 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc::before, .cc-stage::after, .cc-arcs, .cc-core-wrap, .hud-note, .cc-frame span {
+    transform: none;
+  }
+  /* The floor still needs its perspective; only the parallax offset goes. */
+  .cc-stage::after { transform: translateX(-50%) perspective(560px) rotateX(66deg); }
+}

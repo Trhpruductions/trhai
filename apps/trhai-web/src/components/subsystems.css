@@ -105,3 +105,56 @@
   .subs-right .sub { align-items: flex-start; text-align: left; }
   .subs-right .sub-head { flex-direction: row; }
 }
+
+/* ---- connector traces ----
+   A thin line from each chip toward the core, with a node where it leaves the
+   chip. This is the element that makes a HUD read as one instrument rather
+   than as boxes arranged around a picture: the parts look wired together
+   because the eye can follow the wiring.
+
+   Drawn on the chip's own pseudo-element rather than as an overlay, so each
+   line starts exactly where its chip is and needs no measurement in JS. */
+.sub { position: relative; }
+
+.sub::after {
+  content: "";
+  position: absolute;
+  top: 13px;
+  width: 34px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line-strong, var(--line)), transparent);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.subs-left .sub::after {
+  left: 100%;
+  margin-left: 6px;
+}
+
+/* Mirrored so the fade always runs away from the chip and toward the core. */
+.subs-right .sub::after {
+  right: 100%;
+  margin-right: 6px;
+  background: linear-gradient(270deg, var(--line-strong, var(--line)), transparent);
+}
+
+/* A node where the trace leaves the chip. */
+.sub::before {
+  content: "";
+  position: absolute;
+  top: 11px;
+  width: 4px;
+  height: 4px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 50%;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.subs-left .sub::before { left: calc(100% + 2px); }
+.subs-right .sub::before { right: calc(100% + 2px); }
+
+/* An offline subsystem's trace goes dim with it — the wiring should not look
+   live when the thing on the end of it is not. */
+.sub-off::after, .sub-off::before { opacity: 0.25; }

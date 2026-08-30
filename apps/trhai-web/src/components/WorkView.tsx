@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiGet, sessionId } from "../lib/api";
+import { apiGet } from "../lib/api";
 import "./work.css";
 
 // The split view: what was built, and what was run to build it.
@@ -18,7 +18,7 @@ import "./work.css";
 // watching work happen, and an editor that could write back would be a
 // different feature with a different set of things to get right.
 
-type Entry = { path: string; bytes: number; directory: boolean };
+type Entry = { path: string; bytes: number; directory: boolean; modifiedAt: number };
 type CommandRun = { command: string; stdout: string; stderr: string; exitCode: number | null; timedOut: boolean };
 
 /** Poll fast while work is live, slowly when it is not. */
@@ -71,7 +71,18 @@ export function WorkView({ live, onClose }: { live: boolean; onClose: () => void
   }
 
   // Newest first: what just changed is what you came to look at.
-  const files = [...entries].filter((entry) => !entry.directory).reverse().slice(0, 40);
+  //
+  // Sorted by modification time, which is the only thing that actually means
+  // "newest". This used to reverse the listing and call that newest-first —
+  // the listing comes back in directory-walk order, so reversing it surfaced
+  // whichever project sorted last alphabetically. After building a house-plant
+  // tracker the panel showed six files from an unrelated older project and not
+  // one of the files it had just written, which is the exact opposite of what
+  // this view is for.
+  const files = [...entries]
+    .filter((entry) => !entry.directory)
+    .sort((left, right) => right.modifiedAt - left.modifiedAt)
+    .slice(0, 40);
 
   return (
     <section className="work" aria-label="Work in progress">

@@ -134,10 +134,16 @@
   transform-origin: 120px 120px;
 }
 
+/* No drop-shadow here, deliberately.
+   This element breathes, and a blur filter on a moving element is
+   re-rasterised every frame — the same combination that cost this app about a
+   third of its frame rate when two rotating arcs carried one. It was also
+   redundant: .core-bloom above is a radial gradient doing exactly this job,
+   and the orb was being haloed twice. See tests/motion-budget.test.ts, which
+   now fails if a filter and an animation share a rule. */
 .core-orb {
   transform-origin: 120px 120px;
   animation: core-breathe 4s var(--ease) infinite;
-  filter: drop-shadow(0 0 14px var(--accent));
 }
 
 .core-orb-ring {
