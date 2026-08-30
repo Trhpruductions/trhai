@@ -9,37 +9,6 @@ Status: Draft backlog for Phase 1 MVP
 - Story points: 1, 2, 3, 5, 8, 13.
 - Definition of done: code, tests, observability, docs, security checks, review approved.
 
-## Epic E1: Identity, Workspaces, and RBAC
-Goal: Secure workspace creation, membership, and permission model.
-
-Stories:
-1. E1-S1 Workspace creation flow
-- Priority: P0
-- Points: 5
-- Owner: Backend
-- Acceptance:
-  - User can create workspace from onboarding.
-  - Workspace has default roles and owner assigned.
-  - Workspace ID appears in all downstream API calls.
-
-2. E1-S2 Member invitations and role assignment
-- Priority: P1
-- Points: 5
-- Owner: Backend + Frontend
-- Acceptance:
-  - Owner/Admin can invite by email.
-  - Role assignment supports Owner/Admin/Member/Viewer.
-  - Invite links expire and are single-use.
-
-3. E1-S3 RBAC policy middleware
-- Priority: P0
-- Points: 8
-- Owner: Backend
-- Acceptance:
-  - All protected routes enforce policy checks.
-  - Unauthorized requests return deterministic error codes.
-  - Audit event written for denied privileged actions.
-
 ## Epic E2: Assistant Core and Session Handling
 Goal: Stable multi-turn assistant with workspace context.
 
@@ -115,14 +84,25 @@ Stories:
   - Writes tagged with source and confidence.
   - Duplicate suppression prevents memory spam.
 
-2. E4-S2 Memory controls UI
+2. E4-S2 Memory controls - REWRITTEN, BUILT
 - Priority: P0
 - Points: 5
 - Owner: Frontend
+- Rewritten because the app is now a single screen. The original story assumed
+  a memory management page with per-item rows and buttons. That page is gone,
+  so the controls live where the rest of the app already lives: in conversation.
 - Acceptance:
-  - User can pin, edit label, forget memory item.
-  - Deletion reflects in retrieval within 60 seconds.
-  - Control actions logged to audit stream.
+  - User can list, pin and forget memory items by asking, via the list_memories,
+    pin_memory and forget tools. Each is a real tool call, gated by the tool
+    switches like any other, and it names the item it acted on.
+  - Deletion reflects in retrieval immediately - forget mutates the store the
+    retriever reads, so the next search_memory cannot return it.
+  - Control actions are logged to the execution log with every other tool call,
+    and appear in the console rail as they happen.
+- Dropped with the surface: editing a memory label. There is no rename tool, and
+  nothing else in the app offers one. Re-stating a fact and forgetting the old
+  entry is the path that exists. Worth building only if relabelling turns out to
+  be something you actually reach for.
 
 3. E4-S3 Retrieval context builder
 - Priority: P1
@@ -177,14 +157,21 @@ Stories:
   - Versioned workflow definitions with migration support.
   - Schema validation rejects invalid graphs.
 
-2. E6-S2 Connector framework (OAuth + secrets)
-- Priority: P0
-- Points: 8
-- Owner: Backend
-- Acceptance:
-  - Connectors can request scoped permissions.
-  - Secrets stored encrypted and rotated safely.
-  - Connector actions emit structured execution logs.
+2. E6-S2 Connector framework (OAuth + secrets) - WITHDRAWN
+- Withdrawn 26 August 2026. Not built, and not a gap.
+- It described third-party connectors: scoped OAuth grants and encrypted,
+  rotating secrets for hosted services. This app talks to nothing it does not
+  own. There is no third party to grant a scope, no secret to rotate, and
+  `no-paid-dependencies.test.ts` forbids adding one.
+- The part that did apply is built and lives elsewhere. "Scoped permissions"
+  exists as the tool permission ladder (`systemCapabilities.ts`, `toolsByLevel`)
+  with a confirmation gate for anything destructive (`pendingConfirmation.ts`)
+  and a separate, expiring opt-in for running commands on the machine
+  (`commandRunner.ts`, armed for 30 minutes at a time). "Structured execution
+  logs" is E12-S2, which is built: every tool call is recorded with its real
+  timestamps and outcome.
+- If this ever connects to a hosted service, this story comes back and the
+  secret storage has to be designed then, not retrofitted.
 
 3. E6-S3 Idempotency and replay controls
 - Priority: P0
@@ -194,59 +181,6 @@ Stories:
   - Idempotency key required for side effects.
   - Failed jobs land in dead-letter queue.
   - Replay from dead-letter reproduces expected state.
-
-## Epic E7: Team Collaboration
-Goal: Shared workspace collaboration features.
-
-Stories:
-1. E7-S1 Shared project threads
-- Priority: P1
-- Points: 5
-- Owner: Frontend + Backend
-- Acceptance:
-  - Team members can view and continue shared threads.
-  - Permission checks enforce role restrictions.
-  - Thread history includes actor attribution.
-
-2. E7-S2 Comments and annotations
-- Priority: P2
-- Points: 3
-- Owner: Frontend
-- Acceptance:
-  - Users can leave comments on artifacts.
-  - Mentions generate in-app notifications.
-  - Comment edits are versioned.
-
-## Epic E8: Billing, Quotas, and Plans
-Goal: Enforce subscription limits and usage visibility.
-
-Stories:
-1. E8-S1 Usage event collector
-- Priority: P0
-- Points: 8
-- Owner: Backend
-- Acceptance:
-  - Captures tokens, generation jobs, storage usage.
-  - Events linked to user, workspace, plan.
-  - Collector handles burst traffic without drops.
-
-2. E8-S2 Quota enforcement middleware
-- Priority: P0
-- Points: 5
-- Owner: Backend
-- Acceptance:
-  - Requests over limit are blocked with clear errors.
-  - Grace thresholds configurable per plan.
-  - Quota counters update near real-time.
-
-3. E8-S3 Usage dashboard v1
-- Priority: P1
-- Points: 5
-- Owner: Frontend
-- Acceptance:
-  - Daily and monthly usage charts by feature class.
-  - Alert banner for nearing quota limits.
-  - Export usage CSV.
 
 ## Epic E9: Security and Compliance Baseline
 Goal: Production-grade security controls for Phase 1.
@@ -283,14 +217,29 @@ Stories:
 Goal: Stable operations under load and failure.
 
 Stories:
-1. E10-S1 OpenTelemetry instrumentation
-- Priority: P0
-- Points: 5
-- Owner: SRE + Backend
-- Acceptance:
-  - End-to-end trace for assistant requests.
-  - Error budget dashboard live.
-  - P95 latency dashboards per feature.
+1. E10-S1 Local instrumentation and latency budgets - REWRITTEN, BUILT
+- Rewritten 26 August 2026. The original asked for OpenTelemetry with a live
+  error-budget dashboard and P95 dashboards per feature. OTel is a wire format
+  for shipping traces to a collector, and there is no collector: this runs on
+  one machine and nothing leaves it. Adding the SDK would have meant a
+  dependency feeding an endpoint that does not exist, and a "live dashboard"
+  is a hosted service by definition.
+- What replaced it, and is built:
+  - Every tool call is timed and counted at the one place they are dispatched
+    (`agentLoop.ts`), with three outcomes rather than two: ok, failed, and
+    refused — a permission refusal is not an error and must not be counted as
+    one.
+  - `metrics.ts` keeps counters and observations in process and exposes them
+    in Prometheus text format at `/v1/metrics`, so anything that can scrape a
+    URL can read them without this app depending on a thing to send them to.
+  - `percentile()` gives P95 from real observations rather than an average.
+  - Latency budgets are enforced by tests rather than watched on a dashboard
+    (`latency-budget.test.ts`): every route the interface polls, plus the
+    combined poll, has a budget that fails the build. A budget that fails CI
+    is worth more here than a chart nobody is on call for.
+  - The reasoning-stage pipeline (`reasoningStage.ts`) is the end-to-end trace:
+    understanding, gathering, planning, building, verifying, answering, each
+    entered by the real work rather than predicted.
 
 2. E10-S2 Incident response runbooks
 - Priority: P1
@@ -311,15 +260,43 @@ Stories:
   - Recovery time objective validated in staging.
 
 ## Release Buckets
-- Release R1 (Weeks 1-4): E1, E2, E3 foundation, E4 baseline.
+- Release R1 (Weeks 1-4): E2, E3 foundation, E4 baseline.
 - Release R2 (Weeks 5-8): E5, E6, E9 baseline.
-- Release R3 (Weeks 9-12): E7, E8, E10 hardening and launch.
+- Release R3 (Weeks 9-12): E10 hardening and launch.
 
 ## Top Backlog Dependencies
-1. RBAC middleware before team and automation features.
-2. Model router before cost controls and SLA tuning.
-3. Memory controls before large-scale beta onboarding.
-4. Usage collector before subscription gating.
+1. Model router before SLA tuning.
+2. Memory controls before large-scale beta onboarding.
+
+## Withdrawn: E1, E7, E8
+
+Removed on 26 August 2026, not deferred. Between them they held four P0
+stories, and leaving them in made the backlog report the app as four P0s short
+of complete when it was not short of anything.
+
+- **E1 Identity, Workspaces, and RBAC** - workspace creation and membership,
+  email invitations with Owner/Admin/Member/Viewer roles, and RBAC middleware
+  on protected routes.
+- **E7 Team Collaboration** - shared threads with actor attribution, comments
+  and mentions.
+- **E8 Billing, Quotas, and Plans** - a usage event collector and quota
+  enforcement middleware, with events "linked to user, workspace, plan".
+
+Every one of those describes a hosted multi-tenant product. This one runs
+entirely on one person's machine: no accounts are required, nothing leaves the
+device, there are no other members for a role to distinguish, and
+`no-paid-dependencies.test.ts` forbids the hosted services a subscription would
+be billing for. A quota is a limit somebody sells you; there is nobody to sell
+it here.
+
+Sign-in still exists for people who want their memory to follow them between
+browsers (`accounts.ts`), which is why E2 and E9 stay. That is authentication,
+not tenancy - it identifies one person to their own machine rather than
+separating several from each other.
+
+If this ever becomes a hosted product these come back, and they come back
+rewritten: the acceptance criteria above assume a workspace id threaded through
+every API call, which is not a small change bolted onto what exists now.
 
 ## Epic E11: Premium Experience Engine (AI Core + Motion)
 Goal: Deliver a distinctive, alive, high-trust interface identity with meaningful state motion.
@@ -340,7 +317,8 @@ Stories:
 - Owner: Frontend + Design
 - Acceptance:
   - Color, spacing, radius, blur, and glow token sets are centralized.
-  - Tokens are used by top nav, side rails, prompt surface, and context rail.
+  - Tokens are used by the side rails, prompt surface, and context rail. (The
+    top nav is gone - the app is one screen with no navigation.)
   - Contrast and accessibility checks pass for interactive controls.
 
 3. E11-S3 Motion performance harness

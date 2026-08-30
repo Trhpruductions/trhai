@@ -1,0 +1,182 @@
+TRHAI — INDEPENDENT VERIFICATION BRIEF
+======================================
+
+Paste this whole file into ChatGPT, Perplexity, or any other assistant and ask
+it to review the design and tell you what to check. It is written to be read by
+someone with no prior context.
+
+Please be sceptical. If something below looks wrong, say so plainly. Several
+claims here were wrong when first written and were only caught by testing them.
+
+
+WHAT THIS IS
+------------
+A local-first AI desktop assistant, built for one person on one Windows machine.
+Nothing is sent to any cloud service. There are no API keys anywhere: every
+model runs locally through Ollama.
+
+Stack:
+  - apps/api          Express + TypeScript, port 4000. All the real work.
+  - apps/trhai-web    Next.js 16 / React 19, port 3210. The single screen.
+  - apps/desktop      Electron shell that starts the other two.
+  - packages/shared   Planning and code-generation shared by the above.
+  - apps/web          An older Vite client, superseded. Not loaded by the app.
+
+Local models installed:
+  vexora:latest      1.9 GB   general chat
+  qwen2.5-coder:7b   4.7 GB   used for writing and editing code
+  qwen2.5:3b         1.9 GB
+
+Current state: 1380 tests passing, 0 failing, 0 TypeScript errors.
+  apps/api 883, packages/shared 254, apps/trhai-web 108, apps/web 85, desktop 50
+
+
+THE DESIGN RULE EVERYTHING FOLLOWS
+----------------------------------
+The interface may only show things that are actually true. No fake progress
+bars, no invented data, no claiming an action succeeded unless it did. Most of
+the work below was fixing places where that rule was broken.
+
+Concrete examples of that rule in force:
+  - A reading that cannot be taken shows a dash, not a stale number.
+  - A sparkline draws a gap where nothing was measured, never a straight line.
+  - A generated app is only reported as built after its own checks pass.
+  - A failed edit reports failure and changes nothing.
+
+
+HOW TO RUN IT
+-------------
+  cd D:\trhai
+  npm install                       (first time only)
+  npm test                          expect 1380 passing, 0 failing
+  npm run typecheck                 expect no output
+  npm run dev:api                   API on port 4000
+  npm run dev --workspace trhai-web -- -p 3210      UI on port 3210
+
+Or launch the desktop app: Launch-Vexora.bat
+
+
+WHAT TO VERIFY, AND WHAT SHOULD HAPPEN
+--------------------------------------
+1. ONE SCREEN
+   Open http://localhost:3210
+   Expect: a single page. No navigation links, no tabs, no routes but "/".
+   Check:  the page source should contain zero <a href="/..."> links.
+   Two edge handles (CONSOLE, ACTIVITY) open side rails. Those are the only
+   things that change what is on screen.
+
+2. IT IS SHOWING REAL DATA
+   The top strip shows CPU, RAM, GPU as live percentages with sparklines, plus
+   the real username and a ticking clock.
+   Check:  compare CPU/RAM against Task Manager. They should track.
+   Check:  stop the API (kill the process on port 4000). Within ~4 seconds the
+           readings must become "—" and the core must turn grey and say NO
+           CONNECTION. They must NOT keep showing the last numbers.
+           This was a real bug: stale readings were displayed as current.
+
+3. IT SAYS WHAT IT IS DOING
+   Ask it anything that needs a tool ("how many files are in my workspace?").
+   Expect: an OPERATIONS panel listing each real step with a real duration and
+           a tick or a cross. A running step shows elapsed time counting up.
+   There is deliberately no percentage or progress bar, because nothing in the
+   app knows how far along a step is.
+
+4. BUILDING APPS
+   Ask: "build me a password generator"
+   Expect: it writes files to D:\Vexora\workspace\<name>\, runs the app's own
+           smoke checks, and only then reports success.
+   Then:   cd into that folder and run `node server.js`, open the port. It
+           should be a working password generator, not a database.
+
+   This is the part most worth scrutinising. Two shapes use fixed templates
+   (records apps like "track my books"; calculators). Everything else is
+   written by qwen2.5-coder and is genuinely variable — it retries up to three
+   times and reports failure if all three fail.
+
+   Known limits, by design: single-page Node apps with a browser UI and no npm
+   packages. No native or mobile apps, no databases, no large codebases.
+
+5. RUNNING COMMANDS
+   Ask: "run the command: node --version"
+   Expect: the real version, and a row in OPERATIONS showing what ran.
+
+6. EDITING EXISTING CODE
+   Make a small file somewhere outside the workspace, then ask it to change one
+   line. Expect the change to be made and THE REST OF THE FILE TO SURVIVE.
+   This is worth checking carefully: it used to rewrite whole files and silently
+   drop things like `module.exports`. There is now an edit_file tool that
+   replaces exact text only, and refuses if the text appears twice.
+
+7. VOICE
+   Replies are read aloud by default, using a local Piper voice (no cloud).
+   The console rail has a voice picker with a preview button, a speed slider,
+   and a delivery setting.
+   Check:  the voice named in the UI must match the voice you actually hear.
+           It used to name the service default while a different voice spoke.
+
+
+MACHINE ACCESS — PLEASE REVIEW THIS PART CLOSELY
+------------------------------------------------
+This is the highest-risk area and the owner asked for it deliberately.
+
+Machine access is ON BY DEFAULT. With it on, the assistant can:
+  - run any shell command as the user, in their home directory
+  - read any file on the disk
+  - write to any file EXCEPT Windows system locations
+
+It was previously off until switched on for 30 minutes at a time. The owner
+found that wrong for a personal assistant on their own machine and asked for it
+to be always on. The switch still exists in the console rail and turning it off
+is honoured and persists across restarts.
+
+The guardrails that remain:
+  - Writes to C:\Windows, C:\Program Files, C:\Program Files (x86) and
+    C:\ProgramData\Microsoft are refused even with access on. Reads are not
+    restricted. The reason is not distrust of the user — it is that a 7B local
+    model makes mistakes, and a mistake aimed at System32 is not recoverable.
+  - Scheduled/unattended runs do NOT get machine access, whatever the switch
+    says. Granting access is for working at the machine; a schedule firing at
+    3am should not inherit it.
+  - Every command that runs is logged with its output and exit code.
+  - Destructive tools (forget, delete_document, run_command) are classified at
+    a permission level that requires confirmation.
+  - Set TRHAI_MACHINE_ACCESS=off to restore the closed default.
+
+QUESTIONS WORTH ASKING ABOUT THIS:
+  - Is "on by default with a persistent off switch" a defensible design for a
+    single-user local assistant? What would you change?
+  - The protected-write list is prefix-based on the running platform only. Are
+    there Windows locations that should be on it and are not?
+  - Model-authored code is written to disk after validation (path safety, size
+    caps, allowed extensions, it must parse as JavaScript) but is NEVER
+    executed automatically. Is compile-checking without running the right line
+    to draw?
+  - Is excluding unattended runs from machine access sufficient, or should
+    scheduled tasks be blocked from file writes entirely?
+
+
+THINGS THAT ARE KNOWN-IMPERFECT (do not report these as discoveries)
+--------------------------------------------------------------------
+  - App generation succeeds roughly 1 attempt in 3; three failures reports
+    failure. A build takes 25-100 seconds.
+  - The local models are small. They sometimes fail to call a tool at all and
+    just acknowledge the request. Coding requests are routed to the coder model
+    specifically because the chat model was unreliable at this.
+  - apps/web is dead code kept in the repo. Nothing loads it.
+  - Tasks, personality and accent controls live in the side rails, not the main
+    screen, because the owner asked for the main screen to be only the visual,
+    the text box and the microphone.
+
+
+WHAT WOULD BE GENUINELY USEFUL FROM YOU
+---------------------------------------
+  1. Security review of the machine-access design above.
+  2. Anywhere the app could still claim something it has not verified.
+  3. Whether the app-generation approach (templates for two shapes, local model
+     for everything else, with retries and validation) is the right structure,
+     or whether there is a better one for a 7B local model.
+  4. Failure modes not covered: what happens on a full disk, a locked file, a
+     model that returns something adversarial.
+
+Please distinguish clearly between things you have reasoned about and things
+you would need to run to know.
