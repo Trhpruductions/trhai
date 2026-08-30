@@ -70,3 +70,37 @@ export function answeredFromModelAlone(
 ): boolean {
   return Array.isArray(toolsUsed) && toolsUsed.length === 0;
 }
+
+/**
+ * Who actually answered, for the line in the footer.
+ *
+ * The footer said "Answered by general-core-v1" — and there is no such model.
+ * That name comes from ModelRouter.pickModel, which labels the deterministic
+ * composer path; when it appears, no model ran at all and the reply was
+ * assembled from rules and your own stored data. Rendering it in the same
+ * sentence as "qwen2.5-coder:7b" made two different things look identical, and
+ * the one it flattered is the one that never involved a model.
+ *
+ * `strategy === "generated"` is the discriminator, and it is a real one:
+ * orchestrator.ts sets it in exactly one place, on the path where a model
+ * produced the text. Everything the composer returns carries one of its own
+ * strategies instead. That is better than sniffing the model name for a
+ * prefix, which would quietly start lying the day something other than Ollama
+ * is wired in.
+ *
+ * Returns null when there is nothing honest to say — no reply yet, or a
+ * restored turn recorded before strategy was stored. Not knowing is not the
+ * same as knowing it was direct, and the caller shows its default line.
+ */
+export function answerCredit(
+  strategy: string | undefined,
+  model: string | undefined
+): string | null {
+  if (!strategy) return null;
+  if (strategy === "generated") {
+    if (!model) return null;
+    return `Answered by ${model.replace(/^ollama\//, "")}`;
+  }
+  if (strategy === "stopped" || strategy === "error") return null;
+  return "Answered directly, without a model";
+}

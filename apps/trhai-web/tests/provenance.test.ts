@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { answeredFromModelAlone, sourceLabels, sourcesFor } from "../src/components/provenance.js";
+import { answerCredit, answeredFromModelAlone, sourceLabels, sourcesFor } from "../src/components/provenance.js";
 
 // A badge saying where an answer came from is a claim about the answer, so
 // every case here is the same question: can it credit a source that did not
@@ -80,4 +80,45 @@ test("every source class has a label and an explanation", () => {
 
 test("an unrecognised tool credits nothing rather than guessing", () => {
   assert.deepEqual(sourcesFor([{ name: "some_future_tool", ok: true }]), []);
+});
+
+// Who actually answered.
+
+test("a real model is named", () => {
+  assert.equal(
+    answerCredit("generated", "ollama/qwen2.5-coder:7b"),
+    "Answered by qwen2.5-coder:7b"
+  );
+});
+
+test("the deterministic path is not dressed up as a model", () => {
+  // The bug this fixes. "general-core-v1" is ModelRouter's label for the
+  // composer path, and there is no model by that name - nothing was generated
+  // and nothing was loaded. The footer rendered it in the same sentence as a
+  // real model, so the reply that never involved one looked identical to the
+  // reply that did.
+  for (const strategy of [
+    "acknowledge", "answer", "capability", "clarify",
+    "no-answer", "not-saved", "plan", "smalltalk"
+  ]) {
+    const credit = answerCredit(strategy, "general-core-v1");
+    assert.equal(credit, "Answered directly, without a model", `wrong for ${strategy}`);
+    assert.doesNotMatch(credit!, /core-v1/, "the invented name must not reach the screen");
+  }
+});
+
+test("not knowing is not the same as knowing it was direct", () => {
+  // A turn restored from before strategy was stored tells us nothing, so the
+  // caller falls back to its own line rather than asserting either.
+  assert.equal(answerCredit(undefined, "ollama/qwen2.5-coder:7b"), null);
+  assert.equal(answerCredit(undefined, undefined), null);
+});
+
+test("a stopped or failed turn claims nothing", () => {
+  assert.equal(answerCredit("stopped", "ollama/x"), null);
+  assert.equal(answerCredit("error", "ollama/x"), null);
+});
+
+test("generated with no model recorded claims nothing", () => {
+  assert.equal(answerCredit("generated", undefined), null);
 });

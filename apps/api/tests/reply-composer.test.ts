@@ -1051,3 +1051,37 @@ test("a saved statement says so, an unsaved one does not claim it", () => {
   });
   assert.doesNotMatch(notSaved.text, /saved/i);
 });
+
+test("a greeting with a vocative is still a greeting", () => {
+  // "hello there" fell through to the vague-request branch and was answered
+  // with "I need a bit more to work with. Tell me what you're trying to end up
+  // with, and any constraint that matters (stack, deadline, audience)" - the
+  // exact strange reply the smalltalk branches exist to prevent.
+  for (const greeting of ["hello there", "hi there", "hey there!", "hi again", "hey TRHAI", "hello vexora"]) {
+    const reply = composeReply({ mode: "general", message: greeting, memories: [], history: [] });
+    assert.equal(reply.strategy, "smalltalk", `"${greeting}" produced ${reply.strategy}`);
+    assert.doesNotMatch(reply.text, /bit more to work with/i);
+  }
+});
+
+test("a greeting attached to a real request stays a request", () => {
+  // The line this must not cross. Only a vocative is allowed after the
+  // greeting; anything else means they asked for something.
+  for (const message of [
+    "hi can you build me an app",
+    "hey what is the capital of France",
+    "hello I need a task tracker"
+  ]) {
+    const reply = composeReply({ mode: "general", message, memories: [], history: [] });
+    assert.notEqual(reply.strategy, "smalltalk", `"${message}" was swallowed as smalltalk`);
+  }
+});
+
+test("a bare greeting still works", () => {
+  for (const greeting of ["hello", "hi", "hey!", "good morning"]) {
+    assert.equal(
+      composeReply({ mode: "general", message: greeting, memories: [], history: [] }).strategy,
+      "smalltalk"
+    );
+  }
+});

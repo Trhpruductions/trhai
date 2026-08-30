@@ -256,7 +256,17 @@ export function rememberHasTrailingRequest(message: string): boolean {
 export const memoryPreference = 2;
 
 /** Openers and acknowledgements that are conversation, not a request for work. */
-const greetingPattern = /^(hi|hey|hello|yo|howdy|sup|good\s+(morning|afternoon|evening))\b[\s!.,]*$/i;
+// A greeting may be addressed to someone. "hello there" missed this and fell
+// through to the vague-request branch, which answered a hello with "I need a
+// bit more to work with. Tell me what you're trying to end up with, and any
+// constraint that matters (stack, deadline, audience)" - precisely the strange
+// reply the note above this block says these branches exist to prevent.
+//
+// Only a vocative is allowed after the greeting, never an arbitrary word, so
+// "hi can you build me an app" stays a request rather than being answered with
+// hello and nothing else.
+const greetingPattern =
+  /^(hi|hey|hello|yo|howdy|sup|good\s+(morning|afternoon|evening))(\s+(there|again|trhai|vexora))?\b[\s!.,]*$/i;
 const thanksPattern = /^(thanks|thank\s+you|ty|cheers|appreciate\s+it|nice|cool|great|awesome|perfect)\b[\s!.,]*$/i;
 const acknowledgementPattern = /^(ok|okay|k|sure|right|got\s+it|fine|yep|yes|no|nope|never\s*mind|nvm|forget\s+it)\b[\s!.,]*$/i;
 

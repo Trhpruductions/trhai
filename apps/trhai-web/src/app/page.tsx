@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CoreGL } from "../components/CoreGL";
 import { CoreHud, type HudReading } from "../components/CoreHud";
 import { Sparkline, type SparklinePoint } from "../components/Sparkline";
-import { answeredFromModelAlone, sourceLabels, sourcesFor } from "../components/provenance";
+import { answerCredit, answeredFromModelAlone, sourceLabels, sourcesFor } from "../components/provenance";
 import { activeStage, presence, stageReplyVisible, stages } from "../components/corePresence";
 import { useAssistant, type AssistantStatus } from "../hooks/useAssistant";
 import { useSpeech } from "../hooks/useSpeech";
@@ -1297,9 +1297,8 @@ export default function DashboardPage() {
           ))}
         </div>
         <span className="cc-states-note faint">
-          {lastReply?.model
-            ? `Answered by ${lastReply.model.replace(/^ollama\//, "")}`
-            : "Everything on this screen is measured on this machine."}
+          {answerCredit(lastReply?.strategy, lastReply?.model)
+            ?? "Everything on this screen is measured on this machine."}
         </span>
       </footer>
     </div>
