@@ -118,3 +118,40 @@ test("each personality offers real suggestions and a core palette", () => {
     assert.ok(entry.voice.rate > 0.5 && entry.voice.rate < 1.5, `${entry.id} voice rate is unusable`);
   }
 });
+
+test("every personality that declares a mandatory disclaimer actually appends it", () => {
+  // This is the check that would have caught the disclaimer going missing.
+  // applyResponseStyle existed, was tested, and was called from nowhere in the
+  // app — so choosing Medical gave a personality whose own summary says "Never
+  // a substitute for care" and replies that never once said so.
+  const withDisclaimer = allPersonalities().filter((p) => p.responseStyle.mandatoryDisclaimer);
+  assert.ok(withDisclaimer.length > 0, "no personality declares a disclaimer any more");
+
+  for (const personality of withDisclaimer) {
+    const disclaimer = personality.responseStyle.mandatoryDisclaimer as string;
+    const styled = applyResponseStyle("Take two aspirin.", personality.id);
+
+    assert.ok(
+      styled.includes(disclaimer),
+      `${personality.label} declares a mandatory disclaimer that its replies do not carry`
+    );
+    // The answer itself survives; the disclaimer is added, not substituted.
+    assert.ok(styled.includes("Take two aspirin."));
+  }
+});
+
+test("a disclaimer is not repeated when the reply already carries it", () => {
+  const medical = allPersonalities().find((p) => p.responseStyle.mandatoryDisclaimer);
+  assert.ok(medical);
+  const disclaimer = medical.responseStyle.mandatoryDisclaimer as string;
+
+  const once = applyResponseStyle(`Some guidance.\n\n${disclaimer}`, medical.id);
+  const occurrences = once.split(disclaimer).length - 1;
+  assert.equal(occurrences, 1, "the disclaimer was appended a second time");
+});
+
+test("a personality with no disclaimer leaves the reply alone", () => {
+  const plain = allPersonalities().find((p) => !p.responseStyle.mandatoryDisclaimer);
+  assert.ok(plain);
+  assert.equal(applyResponseStyle("Just the answer.", plain.id), "Just the answer.");
+});

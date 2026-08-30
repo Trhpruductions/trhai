@@ -1128,3 +1128,23 @@ test("no generated file routes to the entities the old bug invented", () => {
     assert.doesNotMatch(file.content, /\/api\/(applications|performs|arithmetics)\b/, file.path);
   }
 });
+
+test("an adjective before the container noun does not become the name", () => {
+  // Live: the model described its own build as "simple app that converts
+  // celsius to fahrenheit". "simple" is not a container noun, so the rule that
+  // drops "app" never fired, and the app that converts celsius to fahrenheit
+  // was called "Simple App" - in the folder name, the page heading and the
+  // browser tab. The scan now covers the opening words, not just the first.
+  assert.equal(deriveTitle("simple app that converts celsius to fahrenheit"), "Converts Celsius");
+  assert.equal(deriveTitle("build me a simple web app to track expenses"), "Track Expenses");
+});
+
+test("the container noun still works in first position", () => {
+  assert.equal(deriveTitle("an app to track invoices"), "Track Invoices");
+  assert.equal(deriveTitle("build me an app that converts celsius to fahrenheit"), "Converts Celsius");
+});
+
+test("a request that is only a container noun keeps it", () => {
+  // "App" beats "Generated Project" when there is genuinely nothing else said.
+  assert.equal(deriveTitle("build an app"), "App");
+});

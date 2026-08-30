@@ -645,12 +645,32 @@ export function deriveTitle(request: string): string {
   // "an app to track invoices" -> "track invoices". Only when something follows:
   // a request that really is just "build an app" has nothing better to offer,
   // and "App" beats "Generated Project" there.
-  if (words.length > 1 && containerNouns.has(words[0].replace(/,+$/, ""))) {
-    const rest = words.slice(1);
-    const withoutConnective = containerConnectives.has(rest[0]?.replace(/,+$/, "") ?? "")
-      ? rest.slice(1)
-      : rest;
-    if (withoutConnective.length > 0) words = withoutConnective;
+  //
+  // Scanned across the opening words rather than only the first, because an
+  // adjective in front of the container noun hid it. Live: the model described
+  // its own build as "simple app that converts celsius to fahrenheit", "simple"
+  // is not a container noun so the rule never fired, and the app that converts
+  // celsius to fahrenheit was called "Simple App" - a name that distinguishes it
+  // from nothing, in the folder name, the page heading and the browser tab.
+  // Beyond first position a connective is required, and that distinction is
+  // the whole rule. "simple app *that* converts celsius" redirects to what the
+  // thing actually does, so "app" carries nothing; "client portal *with*
+  // invoices" does not - there "portal" is the subject and "client" qualifies
+  // it, and stripping to "Invoices" would name the app after one of its fields.
+  // In first position the noun is unqualified and means nothing either way,
+  // which is the original rule, kept exactly.
+  const containerAt = words
+    .slice(0, 3)
+    .findIndex((word) => containerNouns.has(word.replace(/,+$/, "")));
+
+  if (containerAt !== -1 && words.length > containerAt + 1) {
+    const rest = words.slice(containerAt + 1);
+    const connective = containerConnectives.has(rest[0]?.replace(/,+$/, "") ?? "");
+
+    if (containerAt === 0 || connective) {
+      const withoutConnective = connective ? rest.slice(1) : rest;
+      if (withoutConnective.length > 0) words = withoutConnective;
+    }
   }
 
   const kept: string[] = [];
