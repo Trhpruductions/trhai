@@ -57,7 +57,14 @@ export async function verifyBuiltProject(
     try {
       child = spawn(process.execPath, ["smoke.js"], {
         cwd: projectDir,
-        env: { ...process.env, SMOKE_PORT: String(port) },
+        // PORT as well as SMOKE_PORT.
+        //
+        // The template's own smoke script reads SMOKE_PORT, but an app the
+        // model wrote has never heard of it and reads PORT like any other Node
+        // program. Setting only SMOKE_PORT left those checks on a hardcoded
+        // 3000 — fine in isolation, and a collision with anything already
+        // listening there, reported as the built app being broken.
+        env: { ...process.env, SMOKE_PORT: String(port), PORT: String(port) },
         stdio: ["ignore", "pipe", "pipe"]
       });
     } catch (error) {

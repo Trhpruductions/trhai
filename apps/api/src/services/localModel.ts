@@ -95,7 +95,19 @@ async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<
 const preferredModels = [
   "vexora:latest",
   "vexora",
+  // Tuned for code and the best tool-caller of these when it is installed.
+  "qwen2.5-coder",
   "qwen2.5",
+  // Ranked above llama3.2 because it is the 8B and llama3.2 is the 3B. The
+  // note above is specifically about preferring the larger model, and this
+  // list did not contain llama3.1 at all - so on a machine with 3.1 and 3.2
+  // installed it picked the 3B and the reasoning above never took effect.
+  //
+  // Live consequence, which is what found this: asked to read a file and edit
+  // it, llama3.2 invented a "Running command:" line, invented a "Result:"
+  // block containing code that was nowhere in the real file, called edit_file
+  // once with text that therefore did not match, and reported success.
+  "llama3.1",
   "llama3.2"
 ];
 /**
@@ -204,6 +216,15 @@ export type GenerationRequest = {
   question: string;
   /** Facts already known, offered as context. May be empty. */
   context: string[];
+  /**
+   * Send this instead of the assistant prompt, verbatim.
+   *
+   * The default prompt tells the model to answer in a few sentences and not to
+   * invent specifics - exactly right for a question, exactly wrong for asking
+   * it to write the files of an application. Authoring supplies its own
+   * instructions rather than fighting those.
+   */
+  rawPrompt?: string;
 };
 
 export type GenerationResult =
@@ -252,7 +273,7 @@ export async function generate(
         // Streaming would let the UI show tokens as they arrive, but this API
         // returns one JSON reply per request, so a single response is simpler
         // and the client is not built for a stream yet.
-        body: JSON.stringify({ model: config.model, prompt: buildPrompt(request), stream: false }),
+        body: JSON.stringify({ model: config.model, prompt: request.rawPrompt ?? buildPrompt(request), stream: false }),
         signal
       }));
 
