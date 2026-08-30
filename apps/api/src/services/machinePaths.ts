@@ -55,7 +55,20 @@ export type PathVerdict =
   | { ok: true; path: string }
   | { ok: false; reason: string };
 
-/** Whether `candidate` sits inside `parent`, as paths rather than as strings. */
+/**
+ * Whether `candidate` is `parent` or sits underneath it. Purely lexical.
+ *
+ * `startsWith(parent)` alone is wrong, and wrong in the direction that matters:
+ * "/workspace-evil" starts with "/workspace" and is not inside it. The
+ * separator is what makes a path a child, and path.relative is what encodes
+ * that - a result climbing out begins with "..", and one on another root comes
+ * back absolute.
+ *
+ * This was written twice. workspace.ts had its own copy, identical down to the
+ * reasoning above, and the two were only ever going to drift - which for a
+ * containment check is the kind of drift that ends with one of them letting
+ * something through. One implementation now, used by both.
+ */
 export function isInsidePath(parent: string, candidate: string): boolean {
   const from = path.resolve(parent);
   const to = path.resolve(candidate);

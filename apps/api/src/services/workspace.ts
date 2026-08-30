@@ -9,6 +9,9 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
+// One implementation of the containment check, not two. This file had its own
+// copy, identical down to the reasoning; see machinePaths.ts.
+import { isInsidePath } from "./machinePaths.js";
 
 // The one place on disk the assistant may touch.
 //
@@ -69,15 +72,7 @@ const maxWalkedEntries = 5_000;
  * Null means refused. It is never an error to be logged and continued past —
  * the caller must stop.
  */
-/** Whether `candidate` is `root` or sits underneath it. Purely lexical. */
-function isInside(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
-  if (relative === "") return true;
-  // `startsWith(root)` alone is wrong: "/workspace-evil" starts with
-  // "/workspace". The separator is what makes it a child, which is what
-  // path.relative encodes.
-  return !relative.startsWith("..") && !path.isAbsolute(relative);
-}
+
 
 /**
  * The path the filesystem would actually use, with every symlink followed.
@@ -118,7 +113,7 @@ export function resolveInWorkspace(relativePath: string): string | null {
   const resolved = path.resolve(root, relativePath);
 
   // Lexical containment: catches "..", an absolute path, a drive letter.
-  if (!isInside(root, resolved)) return null;
+  if (!isInsidePath(root, resolved)) return null;
 
   // Containment as the filesystem sees it.
   //
@@ -133,7 +128,7 @@ export function resolveInWorkspace(relativePath: string): string | null {
   // sits under a symlinked home directory would otherwise fail every check.
   const realRoot = resolveRealPath(root);
   const realTarget = resolveRealPath(resolved);
-  if (!isInside(realRoot, realTarget)) return null;
+  if (!isInsidePath(realRoot, realTarget)) return null;
 
   // The lexical path is what the caller asked for and what it will operate
   // on. The real path was only ever needed to answer whether that is allowed.

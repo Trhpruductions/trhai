@@ -1182,7 +1182,16 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       enterStage(sessionId, "verifying");
       const verifying = beginEvent(sessionId, "verify", "Running its own checks");
       const verification = await verifyBuiltProject(folder);
-      const runLine = "Run it with: cd " + folder + " && npm install && npm start";
+      // No install step, because there is nothing to install.
+      //
+      // This said "npm install && npm start" for every build, and the generated
+      // package.json has no dependencies field at all - that is the entire
+      // point of these projects, and findForeignImport now enforces it. So the
+      // instruction was telling you to run a command that does nothing, while
+      // implying the app needs fetching something before it will start. On a
+      // machine that is offline, or where npm is having a bad day, it would
+      // fail and make a working app look broken.
+      const runLine = "Run it with: cd " + folder + " && npm start";
 
       // Three outcomes, kept distinct. "Could not check" is not "passed", and
       // reporting it as either would be the kind of quiet rounding-up this

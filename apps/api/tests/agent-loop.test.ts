@@ -870,7 +870,12 @@ test("build_app writes a real, runnable project to disk, and verifies it runs", 
   assert.equal(result.ok, true, result.content);
   assert.match(result.content, /verified it/);
   assert.match(result.content, /\d+\/\d+ checks passed/);
-  assert.match(result.content, /npm install/);
+  // No install step, because there is nothing to install: the generated
+  // package.json has no dependencies field at all. Telling the user to run
+  // "npm install" implied the app needed to fetch something before starting,
+  // and would fail confusingly on a machine that is offline.
+  assert.match(result.content, /npm start/);
+  assert.doesNotMatch(result.content, /npm install/);
 
   // Read one back off disk rather than trusting the report. A tool that says
   // it built something and did not is exactly the failure this codebase keeps
