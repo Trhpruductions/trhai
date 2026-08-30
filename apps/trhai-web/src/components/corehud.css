@@ -1,0 +1,71 @@
+/* Annotations around the core. See CoreHud.tsx for why they only appear with
+   the rails hidden, and why every one of them can read "—". */
+
+.hud {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.hud-note {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* The leader line: a hairline running from the annotation toward the core,
+   which is what turns a floating number into a label pointing at something. */
+.hud-note-line {
+  position: absolute;
+  height: 1px;
+  width: 84px;
+  background: linear-gradient(90deg, rgba(var(--tint), 0.55), rgba(var(--tint), 0));
+  transition: background 700ms ease;
+}
+
+.hud-note-label {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.hud-note-value {
+  font-family: var(--font-display);
+  font-size: 21px;
+  line-height: 1.05;
+  color: rgba(var(--tint-soft), 0.95);
+  white-space: nowrap;
+  transition: color 700ms ease;
+}
+
+.hud-note.unknown .hud-note-value { color: var(--text-faint); font-size: 16px; }
+
+/* Placed well outside the arcs, so the annotations frame the core rather than
+   crowding it. Percentages rather than pixels: the stage is the full width of
+   the window once the rails are down, and these should sit near its corners
+   at any size. */
+.hud-top-left     { top: 15%; left: 6%; align-items: flex-start; }
+.hud-top-right    { top: 15%; right: 6%; align-items: flex-end; text-align: right; }
+.hud-bottom-left  { bottom: 24%; left: 6%; align-items: flex-start; }
+.hud-bottom-right { bottom: 24%; right: 6%; align-items: flex-end; text-align: right; }
+
+/* The line always runs from the annotation toward the middle. */
+.hud-top-left .hud-note-line,
+.hud-bottom-left .hud-note-line { left: 0; top: -10px; }
+
+.hud-top-right .hud-note-line,
+.hud-bottom-right .hud-note-line {
+  right: 0;
+  top: -10px;
+  background: linear-gradient(270deg, rgba(var(--tint), 0.55), rgba(var(--tint), 0));
+}
+
+/* Nothing to point at, and nothing to say, on a narrow window. */
+@media (max-width: 1200px) {
+  .hud { display: none; }
+}
