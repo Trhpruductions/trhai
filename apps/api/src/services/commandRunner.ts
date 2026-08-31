@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import path from "node:path";
 import { increment, observe } from "./metrics.js";
 
 // Running commands on this machine.
@@ -16,12 +18,20 @@ import { increment, observe } from "./metrics.js";
 // blocks "rm -rf" is defeated by writing it into a .bat file and running
 // that. So nothing is filtered on content. Instead:
 //
-//   - It is off until the user turns it on. The tool is not offered to the
-//     model at all while disarmed, so a model cannot decide to use it, be
-//     talked into using it, or mention that it exists as an option.
-//   - Arming is a decision with a horizon, not a permanent grant. It lapses
-//     on its own, so forgetting to turn it off is not the same as leaving the
-//     machine open indefinitely.
+//   - It can be switched off, and while it is off the tool is not offered to
+//     the model at all - so a model cannot decide to use it, be talked into
+//     using it, or mention that it exists as an option.
+//   - It is ON by default. This used to read "off until the user turns it on,
+//     and it lapses on its own", which was true when access was a thirty-minute
+//     grant and is not true now; see machineAccessDefault below for why that
+//     changed. Leaving the old wording here would have been worse than no
+//     comment at all, because the next person to reason about the safety of
+//     this file would have reasoned about a system that no longer exists.
+//   - Because access is on, run_command's level-3 confirmation does not fire:
+//     agentTools counts an armed machine as pre-authorisation. In practice
+//     this tool runs when the model asks for it.
+//   - An unattended run is refused outright and cannot be confirmed into
+//     being. Nobody is watching a scheduled run, so there is no one to ask.
 //   - Every command that runs is recorded with its output and exit code,
 //     whether it succeeded or not.
 //
@@ -41,64 +51,239 @@ export type CommandRun = {
   startedAt: string;
 };
 
-/** Long enough for an install or a build; short enough not to hang forever. */
-export const commandTimeoutMs = 120_000;
+/**
+ * Long enough for an install or a build; short enough not to hang forever.
+ *
+ * Two minutes was neither. It is under half of what `npm install` takes on a
+ * cold cache, so the one command most likely to be asked for was the one most
+ * likely to be killed halfway - leaving a half-populated node_modules and a
+ * timeout message that says nothing about what state the folder is now in.
+ * Ten minutes covers a real install or build. TRHAI_COMMAND_TIMEOUT_MS moves
+ * it for anyone whose builds are slower still.
+ */
+export const commandTimeoutMs = Number(process.env.TRHAI_COMMAND_TIMEOUT_MS ?? 600_000);
 
 /** Output beyond this is cut. A model cannot use more, and it crowds the turn. */
 export const maxOutputBytes = 20_000;
 
 /**
- * How long arming lasts.
+ * How long a grant lasts, when one is made by arming.
  *
- * A grant that never expires is one nobody remembers making. Thirty minutes
- * is long enough to work through a task and short enough that walking away
- * from the machine closes it again.
+ * Retained for the API's shape and for anyone who sets an expiry deliberately,
+ * but no longer how access normally works - see machineAccessDefault below.
  */
-export const armDurationMs = 30 * 60 * 1000;
+export const armDurationMs = Number(process.env.TRHAI_ARM_DURATION_MS ?? 4 * 60 * 60 * 1000);
 
-type ArmState = { armedUntil: number; armedAt: string } | null;
+/**
+ * Whether the machine is reachable when nothing has been decided.
+ *
+ * On. That is a deliberate change from an app that started closed and asked to
+ * be opened for thirty minutes at a time.
+ *
+ * The window was built on the idea that access is an exception - something
+ * granted for a task and withdrawn afterwards. For this app that was simply
+ * the wrong model of how it gets used. It is one person's assistant on their
+ * own machine, and the thing they want from it is to work on their projects;
+ * an assistant that cannot reach their files until they remember to flip a
+ * switch, and then forgets again while they are still working, is one they
+ * have to manage rather than use.
+ *
+ * The switch is still there and still means what it says. Turning it off turns
+ * it off, and it stays off - the decision persists either way. What has gone
+ * is the assumption that off is the natural resting state.
+ *
+ * TRHAI_MACHINE_ACCESS=off restores the closed default for anyone who wants
+ * it, without editing this.
+ */
+const machineAccessDefault = process.env.TRHAI_MACHINE_ACCESS !== "off";
 
-let armState: ArmState = null;
+/**
+ * What has actually been decided, as opposed to what the default is.
+ *
+ * null means nobody has decided, so the default stands. A boolean is a choice
+ * somebody made, and it persists until they make a different one - including
+ * "off", which has to survive a restart just as firmly as "on" or turning it
+ * off would be undone by the next reload.
+ *
+ * `expiresAt` is only set when access was granted through the timed arming
+ * path, which nothing does by default any more.
+ */
+type AccessState = { enabled: boolean; decidedAt: string; expiresAt?: number } | null;
+
+let accessState: AccessState = null;
+let accessLoaded = false;
+
+/** Every command that has run this session, newest first. */
 const history: CommandRun[] = [];
 const maxHistory = 50;
 
-export function armCommands(now: Date = new Date()): { armedUntil: string } {
-  armState = { armedUntil: now.getTime() + armDurationMs, armedAt: now.toISOString() };
-  return { armedUntil: new Date(armState.armedUntil).toISOString() };
+/**
+ * Where the decision is remembered across restarts.
+ *
+ * Resolved when used rather than when this module loads: as a constant it was
+ * captured before a test could redirect it, so tests deleted the real file and
+ * the app they were running alongside lost its access mid-task.
+ */
+export function accessFilePath(): string {
+  if (process.env.TRHAI_ARM_FILE) return process.env.TRHAI_ARM_FILE;
+
+  // Never the real file from inside a test process.
+  //
+  // tests/setup/isolate-state.ts redirects TRHAI_ARM_FILE, and that works - but
+  // only when the suite is started through `npm test`, because the redirect is
+  // carried by an --import flag in that script. Running one file directly
+  // (`node --test tests/agent-loop.test.ts`, or the tsx equivalent) skips the
+  // flag and therefore the isolation.
+  //
+  // Which is not hypothetical: it happened here. A direct run of one test file
+  // wrote {"enabled":false} into the developer's real grant, and the app they
+  // had running alongside stopped being able to open their files - the exact
+  // failure isolate-state.ts was written to prevent, arriving through the one
+  // door it did not cover.
+  //
+  // NODE_TEST_CONTEXT is set by the node test runner in every test child
+  // process however it was launched, and it is set before any module loads, so
+  // it is available at the moment this is asked. A throwaway path here means
+  // the protection travels with the code instead of with the command line.
+  if (process.env.NODE_TEST_CONTEXT) {
+    testArmFile ??= path.join(mkdtempSync(path.join(tmpdir(), "trhai-arm-")), "command-arm.json");
+    return testArmFile;
+  }
+
+  return path.join(process.cwd(), "data", "command-arm.json");
 }
 
-export function disarmCommands(): void {
-  armState = null;
+/** Cached so every call within one test process agrees on the same file. */
+let testArmFile: string | undefined;
+
+function loadAccessState(): void {
+  if (accessLoaded) return;
+  accessLoaded = true;
+
+  try {
+    if (!existsSync(accessFilePath())) return;
+    const parsed = JSON.parse(readFileSync(accessFilePath(), "utf8")) as Partial<{
+      enabled: boolean; decidedAt: string; expiresAt: number;
+      // The older shape, from when access was only ever a timed grant.
+      armedUntil: number; armedAt: string;
+    }>;
+
+    if (typeof parsed?.enabled === "boolean") {
+      if (typeof parsed.expiresAt === "number" && Date.now() >= parsed.expiresAt) return;
+      accessState = {
+        enabled: parsed.enabled,
+        decidedAt: typeof parsed.decidedAt === "string" ? parsed.decidedAt : new Date().toISOString(),
+        ...(typeof parsed.expiresAt === "number" ? { expiresAt: parsed.expiresAt } : {})
+      };
+      return;
+    }
+
+    // A file written by the previous version. An unexpired grant is honoured
+    // as an explicit "on" rather than discarded, so upgrading does not revoke
+    // access somebody had deliberately granted.
+    if (typeof parsed?.armedUntil === "number" && Date.now() < parsed.armedUntil) {
+      accessState = {
+        enabled: true,
+        decidedAt: typeof parsed.armedAt === "string" ? parsed.armedAt : new Date().toISOString(),
+        expiresAt: parsed.armedUntil
+      };
+    }
+  } catch {
+    // An unreadable file means no decision, so the default stands.
+  }
+}
+
+function saveAccessState(): void {
+  try {
+    mkdirSync(path.dirname(accessFilePath()), { recursive: true });
+    if (accessState) {
+      writeFileSync(accessFilePath(), JSON.stringify(accessState), "utf8");
+    } else if (existsSync(accessFilePath())) {
+      rmSync(accessFilePath(), { force: true });
+    }
+  } catch {
+    // Losing the file costs one re-decision after a restart, which is a better
+    // failure than refusing to change the setting at all.
+  }
+}
+
+/** Turn machine access on, permanently, until it is turned off. */
+export function armCommands(now: Date = new Date()): { armedUntil: string | null } {
+  accessLoaded = true;
+  accessState = { enabled: true, decidedAt: now.toISOString() };
+  saveAccessState();
+  return { armedUntil: null };
 }
 
 /**
- * Whether commands may run right now.
+ * Turn it on for a fixed window instead.
  *
- * Checked at the moment of use rather than cached, so an expiry that passes
- * mid-conversation takes effect on the next command instead of whenever
+ * Nothing in the app calls this now. It is kept because a bounded grant is a
+ * genuinely different thing from a permanent one, and deleting the ability to
+ * make one would be removing a capability rather than changing a default.
+ */
+export function armCommandsFor(durationMs: number, now: Date = new Date()): { armedUntil: string } {
+  accessLoaded = true;
+  const expiresAt = now.getTime() + durationMs;
+  accessState = { enabled: true, decidedAt: now.toISOString(), expiresAt };
+  saveAccessState();
+  return { armedUntil: new Date(expiresAt).toISOString() };
+}
+
+/** Turn it off, and keep it off across restarts. */
+export function disarmCommands(now: Date = new Date()): void {
+  accessLoaded = true;
+  accessState = { enabled: false, decidedAt: now.toISOString() };
+  saveAccessState();
+}
+
+/**
+ * Whether the machine may be reached right now.
+ *
+ * Checked at the moment of use rather than cached, so a decision made
+ * mid-conversation takes effect on the next call rather than whenever
  * something happens to re-read it.
  */
 export function commandsArmed(now: Date = new Date()): boolean {
-  if (!armState) return false;
-  if (now.getTime() >= armState.armedUntil) {
-    // Cleared on read so the expiry is a real state change, not a condition
-    // that keeps evaluating true-then-false depending on who asks.
-    armState = null;
-    return false;
+  loadAccessState();
+  if (!accessState) return machineAccessDefault;
+
+  if (accessState.expiresAt !== undefined && now.getTime() >= accessState.expiresAt) {
+    // A lapsed window is not a decision to stay off; it is the absence of one,
+    // so the default applies again.
+    accessState = null;
+    saveAccessState();
+    return machineAccessDefault;
   }
-  return true;
+
+  return accessState.enabled;
 }
 
+/** When a timed grant runs out, or null when access simply is or is not on. */
 export function armedUntil(): string | null {
-  return armState ? new Date(armState.armedUntil).toISOString() : null;
+  if (!accessState?.expiresAt) return null;
+  return new Date(accessState.expiresAt).toISOString();
 }
 
 export function commandHistory(): CommandRun[] {
   return history.map((entry) => ({ ...entry }));
 }
 
-export function resetCommandRunner(): void {
-  armState = null;
+/**
+ * Clear everything this module is holding.
+ *
+ * By default nothing is re-read from disk afterwards. A test run would
+ * otherwise inherit whatever the developer had set on their own machine, and a
+ * test about access would pass or fail depending on whether somebody had used
+ * the app that afternoon.
+ *
+ * `rereadFromDisk` is how a restart is simulated: the process comes back with
+ * no memory of the decision and has to find it in the file, which is the only
+ * way to prove a stored "off" is actually honoured rather than merely written.
+ */
+export function resetCommandRunner(options: { rereadFromDisk?: boolean } = {}): void {
+  accessState = null;
+  accessLoaded = options.rereadFromDisk !== true;
   history.length = 0;
 }
 

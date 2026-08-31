@@ -298,3 +298,29 @@ test("an unranked model is still a candidate", () => {
 test("nothing installed yields no candidates", () => {
   assert.deepEqual(orderedCandidates("llama3.2", [], true), []);
 });
+
+test("the larger llama is preferred over the smaller one", () => {
+  // The bug this list had: it named llama3.2 and never llama3.1, so on a
+  // machine with both it chose the 3B over the 8B - the exact opposite of what
+  // the note on the list says it is for. Found live, after the two preferred
+  // models were no longer installed and the fallback became the real choice.
+  assert.equal(pickModel("gone:latest", ["llama3.2:latest", "llama3.1:8b"], true), "llama3.1:8b");
+  assert.equal(orderedCandidates("gone:latest", ["llama3.2:latest", "llama3.1:8b"], true)[0], "llama3.1:8b");
+});
+
+test("a coding model outranks both general ones", () => {
+  assert.equal(
+    pickModel("gone:latest", ["llama3.2:latest", "llama3.1:8b", "qwen2.5-coder:7b"], true),
+    "qwen2.5-coder:7b"
+  );
+});
+
+test("a model the user named still wins over the preference list", () => {
+  // The list picks a good default; it must not overrule a real choice.
+  assert.equal(pickModel("llama3.2:latest", ["llama3.2:latest", "llama3.1:8b"], true), "llama3.2:latest");
+});
+
+test("a configured model that is not installed falls through to the list", () => {
+  // The live situation: .env pinned qwen2.5-coder:7b after it had been removed.
+  assert.equal(pickModel("qwen2.5-coder:7b", ["llama3.2:latest", "llama3.1:8b"], true), "llama3.1:8b");
+});

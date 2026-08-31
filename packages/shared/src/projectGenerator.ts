@@ -1410,7 +1410,6 @@ function smokeFile(spec: ProjectSpec): string {
 
   const primaryRef = entity.fields.find((field) => field.type === "reference");
   const adminHeader = hasRoles ? ", \"x-role\": \"admin\"" : "";
-  const adminGet = hasRoles ? ", { headers: { \"x-role\": \"admin\" } }" : "";
 
   const relationChecks = primaryRef
     ? [

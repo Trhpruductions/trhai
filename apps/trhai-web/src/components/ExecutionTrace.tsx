@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { apiGet, sessionId } from "../lib/api";
+import { useState } from "react";
+import type { ExecutionEvent } from "../hooks/useExecutionEvents";
 import "./trace.css";
 
 // What the assistant is actually doing, step by step, while it does it.
@@ -19,22 +19,6 @@ import "./trace.css";
 // actually returns. A list of steps drawn in advance would be a plan wearing
 // a progress bar, which is the failure this whole interface is built against.
 
-type ExecutionEvent = {
-  id: string;
-  kind: "plan" | "create" | "write" | "install" | "test" | "verify" | "launch" | "command" | "read";
-  label: string;
-  status: "running" | "ok" | "failed" | "skipped";
-  detail?: string;
-  artifact?: string;
-  startedAt: string;
-  durationMs?: number;
-};
-
-/** How often the trace re-reads while work is in flight. */
-const activeMs = 400;
-/** And when nothing is running — slow enough to be nearly free. */
-const idleMs = 2500;
-
 const glyphs: Record<ExecutionEvent["kind"], string> = {
   plan: "◇", create: "✦", write: "▣", install: "⤓",
   test: "◎", verify: "✓", launch: "▶", command: "›", read: "▥"
@@ -46,27 +30,12 @@ function duration(ms: number | undefined): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-export function ExecutionTrace({ busy }: { busy: boolean }) {
-  const [events, setEvents] = useState<ExecutionEvent[]>([]);
+// The events are read once for the whole screen and handed down - see
+// useExecutionEvents. This panel used to poll for itself, which meant adding
+// the stage's live view would have had two components asking for the same log
+// on two different intervals.
+export function ExecutionTrace({ events }: { events: ExecutionEvent[] }) {
   const [open, setOpen] = useState<string | null>(null);
-
-  const read = useCallback(async () => {
-    const result = await apiGet<{ events: ExecutionEvent[] }>(
-      `/v1/execution?sessionId=${encodeURIComponent(sessionId())}`
-    );
-    if (result.ok) setEvents(result.data.events);
-  }, []);
-
-  // Polls quickly only while something is actually running. A trace that
-  // asked four times a second forever would be a cost paid permanently for a
-  // panel that is empty most of the time.
-  const anyRunning = events.some((event) => event.status === "running");
-  useEffect(() => {
-    void read();
-    const period = busy || anyRunning ? activeMs : idleMs;
-    const poller = window.setInterval(() => void read(), period);
-    return () => window.clearInterval(poller);
-  }, [read, busy, anyRunning]);
 
   if (events.length === 0) {
     return (

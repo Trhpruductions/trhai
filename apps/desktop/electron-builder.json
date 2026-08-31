@@ -9,6 +9,7 @@
   "files": [
     "dist/**/*",
     "renderer/**/*",
+    "assets/**/*",
     "package.json"
   ],
   "win": {

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -31,11 +31,31 @@ type StoredAccount = Account & {
 };
 
 type StoredToken = {
-  token: string;
+  /**
+   * A hash of the session token, never the token itself.
+   *
+   * This file already refuses to store passwords or recovery codes in the
+   * clear — "a stolen accounts file must not hand over working codes" — and
+   * tokens were the one credential it did hand over. A session token is a
+   * bearer credential: anyone who could read data/accounts.json could
+   * authenticate as that user for the rest of the token's month-long life,
+   * without ever knowing the password.
+   *
+   * SHA-256 rather than scrypt, deliberately. Passwords need a slow hash
+   * because people choose guessable ones; a token is 32 random bytes, so
+   * there is no dictionary to run and nothing to gain from making every
+   * request pay for a key derivation.
+   */
+  tokenHash: string;
   userId: string;
   createdAt: string;
   expiresAt: string;
 };
+
+/** The lookup key for a presented token. */
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 export type AuthResult =
   | { ok: true; account: Account; token: string; expiresAt: string }
@@ -148,10 +168,18 @@ function loadFromDisk(): void {
 
     const now = Date.now();
     for (const token of parsed.tokens ?? []) {
-      if (!token || typeof token.token !== "string" || typeof token.userId !== "string") continue;
+      if (!token || typeof token.userId !== "string") continue;
       // Expired tokens are simply not restored.
       if (Date.parse(token.expiresAt) <= now) continue;
-      tokens.set(token.token, token);
+
+      // Only hashed sessions are restored. A file written before tokens were
+      // hashed holds them in the clear, and those are dropped rather than
+      // migrated: hashing one on load would keep a credential alive that has
+      // already been sitting readable on disk, which is the thing this change
+      // exists to stop. The cost is that everyone signed in at the time of the
+      // upgrade signs in again once.
+      if (typeof token.tokenHash !== "string") continue;
+      tokens.set(token.tokenHash, token);
     }
   } catch {
     // A corrupt file must not take the API down; start with no accounts.
@@ -175,15 +203,23 @@ function saveToDisk(): void {
   }
 }
 
-function issueToken(userId: string): StoredToken {
+/**
+ * A new session.
+ *
+ * Returns the token to hand to the caller alongside the record that is kept.
+ * The plain token exists only in this return value and in the response — it is
+ * never stored, so it cannot be read back out of the file later.
+ */
+function issueToken(userId: string): { token: string; record: StoredToken } {
+  const token = randomBytes(32).toString("hex");
   const record: StoredToken = {
-    token: randomBytes(32).toString("hex"),
+    tokenHash: hashToken(token),
     userId,
     createdAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + tokenLifetimeMs).toISOString()
   };
-  tokens.set(record.token, record);
-  return record;
+  tokens.set(record.tokenHash, record);
+  return { token, record };
 }
 
 export function registerAccount(input: {
@@ -229,7 +265,7 @@ export function registerAccount(input: {
     ok: true,
     account: publicView(account),
     token: token.token,
-    expiresAt: token.expiresAt,
+    expiresAt: token.record.expiresAt,
     // The only moment these exist in plaintext.
     recoveryCodes
   };
@@ -300,7 +336,7 @@ export function recoverWithCode(input: {
     ok: true,
     account: publicView(account),
     token: replacement.token,
-    expiresAt: replacement.expiresAt
+    expiresAt: replacement.record.expiresAt
   };
 }
 
@@ -327,7 +363,7 @@ export function login(input: { email?: unknown; password?: unknown }): AuthResul
 
   const token = issueToken(account.id);
   saveToDisk();
-  return { ok: true, account: publicView(account), token: token.token, expiresAt: token.expiresAt };
+  return { ok: true, account: publicView(account), token: token.token, expiresAt: token.record.expiresAt };
 }
 
 /** Resolve a bearer token to an account, or null when absent/expired/unknown. */
@@ -335,11 +371,11 @@ export function accountForToken(token: unknown): Account | null {
   loadFromDisk();
   if (typeof token !== "string" || !token) return null;
 
-  const record = tokens.get(token);
+  const record = tokens.get(hashToken(token));
   if (!record) return null;
 
   if (Date.parse(record.expiresAt) <= Date.now()) {
-    tokens.delete(token);
+    tokens.delete(hashToken(token));
     saveToDisk();
     return null;
   }
@@ -363,7 +399,7 @@ export function changePassword(input: {
   loadFromDisk();
 
   const token = typeof input.token === "string" ? input.token : "";
-  const record = tokens.get(token);
+  const record = token ? tokens.get(hashToken(token)) : undefined;
   const account = record ? accountsById.get(record.userId) : undefined;
   if (!record || !account) return { ok: false, error: "Not signed in" };
 
@@ -396,14 +432,16 @@ export function changePassword(input: {
     ok: true,
     account: publicView(account),
     token: replacement.token,
-    expiresAt: replacement.expiresAt
+    expiresAt: replacement.record.expiresAt
   };
 }
 
 export function logout(token: unknown): boolean {
   loadFromDisk();
-  if (typeof token !== "string" || !tokens.has(token)) return false;
-  tokens.delete(token);
+  if (typeof token !== "string") return false;
+  const key = hashToken(token);
+  if (!tokens.has(key)) return false;
+  tokens.delete(key);
   saveToDisk();
   return true;
 }
@@ -413,11 +451,6 @@ export function bearerToken(headerValue: unknown): string | null {
   if (typeof headerValue !== "string") return null;
   const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
   return match ? match[1].trim() : null;
-}
-
-export function accountCount(): number {
-  loadFromDisk();
-  return accountsById.size;
 }
 
 /** Test seam. */

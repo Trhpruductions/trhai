@@ -23,7 +23,18 @@ import "./core.css";
 // a core captioned "listening" with nothing behind it is the decoration
 // this component was written to refuse.
 
-export type CoreState = "idle" | "listening" | "thinking" | "executing" | "speaking" | "success" | "error" | "offline";
+// The states are the work, not a mood board.
+//
+// "searching", "reading", "writing" and "analysing" exist because the
+// orchestrator genuinely reports which tool is mid-call, so the core can show
+// which kind of work is happening rather than one undifferentiated "busy".
+// Each one is entered by a real tool invocation and left when that call
+// returns. None of them can be reached by a timer.
+export type CoreState =
+  | "idle" | "listening" | "thinking"
+  | "searching" | "reading" | "writing" | "analysing" | "executing"
+  | "speaking" | "success" | "error" | "offline";
+
 
 /**
  * Rounded to 3 decimals — plenty of precision for a 240-unit viewBox, and

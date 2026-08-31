@@ -1,0 +1,29 @@
+/* The GPU core. See CoreGL.tsx for what the shader draws and why there is no
+   library behind it. */
+
+.coregl {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.coregl-canvas {
+  display: block;
+  /* The shader already fades to nothing at the edge, so there is no box to
+     hide — this only keeps the element from catching pointer events aimed at
+     the controls sitting under the core. */
+  pointer-events: none;
+}
+
+/* A dark halo behind the canvas, so the core reads as lit rather than as a
+   bright shape pasted onto the background. Pure CSS: it never animates, which
+   keeps it off the per-frame budget entirely. */
+.coregl::before {
+  content: "";
+  position: absolute;
+  inset: -12%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(6, 20, 32, 0.55) 0%, rgba(6, 20, 32, 0) 70%);
+  pointer-events: none;
+}

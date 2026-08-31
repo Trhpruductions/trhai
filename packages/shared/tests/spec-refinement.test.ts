@@ -4,6 +4,7 @@ import { planProject } from "../src/projectPlan.js";
 import {
   buildClarifyingQuestion,
   clarifyBuildPrefix,
+  describeAssumptions,
   findSpecGaps,
   isAwaitingRefinement,
   mergeRefinement
@@ -83,4 +84,16 @@ test("the merged text plans the app the user actually described", () => {
 test("merging tolerates an empty side", () => {
   assert.equal(mergeRefinement("Build a CRM", ""), "Build a CRM");
   assert.equal(mergeRefinement("", "customers with email"), "customers with email");
+});
+
+test("a spec with nothing to store does not crash the request", () => {
+  // "build me a tip calculator" returned a 500 in about a millisecond:
+  // "Cannot read properties of undefined (reading 'fields')". A calculator has
+  // no entities by design - that is what the archetype means - and both of
+  // these read spec.entities[0].fields without checking. Found by building
+  // five different things in a row and watching which ones failed.
+  const calculator = { ...planProject("a tip calculator"), entities: [], features: [] };
+
+  assert.deepEqual(findSpecGaps(calculator), [], "nothing to store is not a missing field");
+  assert.equal(describeAssumptions(calculator, ["fields"]), "", "and nothing to assume about");
 });

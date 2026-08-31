@@ -39,6 +39,10 @@ export type MicrophoneState = {
   start: () => Promise<void>;
   /** Stops the microphone and resolves with what was said, or null. */
   stop: () => Promise<string | null>;
+  /** Hands-free: mark where the current utterance began. */
+  markUtteranceStart: () => void;
+  /** Hands-free: transcribe since the mark, leaving the microphone open. */
+  takeUtterance: () => Promise<string | null>;
 };
 
 /** Rises fast so a word registers immediately, falls slowly so it does not flicker. */
@@ -65,8 +69,18 @@ export function useMicrophone(): MicrophoneState {
   const captured = useRef<Float32Array[]>([]);
   const capturedRate = useRef(0);
   const capturedLength = useRef(0);
+  /**
+   * Where the current hands-free utterance began, as a sample offset.
+   *
+   * Hands-free keeps one audio graph open for the whole conversation and cuts
+   * utterances out of it. Calling start()/stop() per sentence would reacquire
+   * the device each time — slow, and it flashes the browser's recording
+   * indicator on and off, which makes a microphone feel untrustworthy.
+   */
+  const utteranceStart = useRef<number | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- navigator.mediaDevices does not exist on the server
     setSupported(typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia));
   }, []);
 
@@ -170,6 +184,55 @@ export function useMicrophone(): MicrophoneState {
     }
   }, [listening, teardown, transcriptionAvailable]);
 
+  /** Mark the start of an utterance at the current position in the capture. */
+  const markUtteranceStart = useCallback(() => {
+    utteranceStart.current = capturedLength.current;
+  }, []);
+
+  /**
+   * Transcribe everything captured since the mark, leaving the mic open.
+   *
+   * Returns null when there is nothing usable — no mark, no audio, whisper not
+   * installed, or no recognisable words in it. Null is an ordinary outcome
+   * here: hands-free listening hands over every noise that looked like speech,
+   * and most rooms produce a few that are not.
+   */
+  const takeUtterance = useCallback(async (): Promise<string | null> => {
+    const from = utteranceStart.current;
+    utteranceStart.current = null;
+    if (from === null || transcriptionAvailable !== true) return null;
+
+    const rate = capturedRate.current;
+    if (!rate) return null;
+
+    const all = concatSamples(captured.current);
+    const slice = all.subarray(Math.min(from, all.length));
+    if (slice.length === 0) return null;
+
+    // The buffer is trimmed to what has not been transcribed yet, so a long
+    // conversation does not grow one array until the cap silently truncates it.
+    captured.current = [all.subarray(all.length)];
+    capturedLength.current = 0;
+
+    setTranscribing(true);
+    try {
+      const wav = encodeWav(resampleMono(slice, rate));
+      const response = await fetch(`${apiBaseUrl}/v1/transcribe`, {
+        method: "POST",
+        headers: { "Content-Type": "audio/wav" },
+        body: wav
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) return null;
+      const text = typeof payload?.data?.text === "string" ? payload.data.text.trim() : "";
+      return text || null;
+    } catch {
+      return null;
+    } finally {
+      setTranscribing(false);
+    }
+  }, [transcriptionAvailable]);
+
   const start = useCallback(async () => {
     if (listening) return;
     setError(null);
@@ -271,6 +334,8 @@ export function useMicrophone(): MicrophoneState {
   useEffect(() => () => { teardown(); }, [teardown]);
 
   return {
+    markUtteranceStart,
+    takeUtterance,
     supported,
     listening,
     transcribing,

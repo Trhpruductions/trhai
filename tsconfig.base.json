@@ -5,6 +5,18 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "strict": true,
+    // Dead code is caught by the compiler rather than by somebody noticing.
+    //
+    // This repo has a documented history of things written, tested and never
+    // wired - and turning these on found five more, including a stray
+    // writeWorkspaceFile() stranded at module scope in workspace.test.ts,
+    // outside any test, writing a file into the workspace at import time. All
+    // five workspaces are clean now, so this costs nothing today and stops the
+    // next one arriving unnoticed.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,

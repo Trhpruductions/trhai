@@ -1,5 +1,7 @@
 import { ModelRouter, type ComposerKnowledge, type MemoryWriteOutcome } from "./modelRouter.js";
-import { checkAvailability, generate, orderedCandidates, readLocalModelConfig } from "./localModel.js";
+import { checkAvailability, orderedCandidates, readLocalModelConfig } from "./localModel.js";
+import { isCodeWork } from "./machinePaths.js";
+import { pickAuthorModel } from "./appAuthor.js";
 import { buildCapabilityReply } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
 import { setActivity } from "./agentActivity.js";
@@ -45,6 +47,8 @@ export type OrchestratorInput = {
   deleteDocument?: (id: string) => boolean;
   /** Pins or unpins a memory, for the "pin_memory" tool. */
   pinMemory?: (id: string, pinned: boolean) => boolean;
+  /** Writes an application with the local model, for requests no template covers. */
+  authorApp?: (description: string) => Promise<{ ok: true; text: string } | { ok: false; reason: string }>;
   /**
    * Fired with each new piece of a generated reply, for callers that can show
    * it arriving. Optional throughout: without it every request is made and
@@ -409,7 +413,22 @@ async function answerWithLocalModel(
   // and a failed CPU buffer allocation for the 3B one — while the app went on
   // reporting the first as available and silently falling back on every single
   // question, with nothing on screen to say why.
-  const candidates = orderedCandidates(config.model, availability.installedModels, config.modelFromEnv ?? true);
+  // Code work goes to the coding model when one is installed.
+  //
+  // The chat model runs everything by default, and for conversation that is
+  // right. For editing a file it is not: asked to use edit_file on a real path,
+  // the 1.9GB chat model replied "Got it - I'll keep that in mind for this
+  // conversation" and called no tool at all. The tools were fine; the model
+  // did not act. The same request to the coding model picks the tool.
+  //
+  // Put in front of the ordinary candidates rather than replacing them, so if
+  // it fails to load the existing fallback still works its way down the list.
+  const codeWork = isCodeWork(input.mode, input.userMessage ?? "");
+  const ordinary = orderedCandidates(config.model, availability.installedModels, config.modelFromEnv ?? true);
+  const coder = codeWork ? pickAuthorModel(availability.installedModels, "") : "";
+  const candidates = coder && ordinary[0] !== coder
+    ? [coder, ...ordinary.filter((name) => name !== coder)]
+    : ordinary;
   const attempted: string[] = [];
 
   for (const model of candidates) {
@@ -437,12 +456,22 @@ async function answerWithLocalModel(
     updateDocument: input.updateDocument,
     deleteDocument: input.deleteDocument,
     pinMemory: input.pinMemory,
+    authorApp: input.authorApp,
     confirmedActions,
     unattended: input.unattended,
     sessionId: input.sessionId,
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
-    conversation: input.history
+    conversation: input.history,
+    // The user's own words, so a built app is named after what they asked for
+    // rather than after the model's paraphrase of it.
+    //
+    // input.userMessage, not baseQuestion: baseQuestion is the constructed
+    // prompt, and it carries the instruction telling the model to call
+    // build_app. Naming an app from that produced folders called
+    // calculator-call-build-app and snake-game-call-build-app - right at the
+    // front, wrong from there on.
+    request: input.userMessage
   }, fetch, onToolStart, input.onToken, input.unattended, input.cancel);
 
     if (result.ok) {

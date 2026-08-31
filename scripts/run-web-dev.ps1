@@ -2,12 +2,17 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$webDir = Join-Path $repoRoot 'apps/web'
-# Must match apps/web/vite.config.ts and the port the desktop shell waits on
-# (ASCEND_WEB_PORT in apps/desktop/src/main.ts). When these disagree the desktop
-# window waits forever on an empty port and falls back to the placeholder shell,
-# which looks like the app failing to start.
-$targetPort = if ($env:ASCEND_WEB_PORT) { [int]$env:ASCEND_WEB_PORT } else { 5173 }
+# trhai-web, not apps/web. The desktop shell loads TRHAI, and this script is
+# what the shell runs to bring the web client up; pointing it at the older Vite
+# client meant launching the desktop app started the wrong app on the wrong
+# port, waited the full 45s for a port nothing was listening on, and then
+# showed the placeholder shell. The two ends of the same launch disagreed.
+$webDir = Join-Path $repoRoot 'apps/trhai-web'
+# Must match the port the desktop shell waits on (ASCEND_WEB_PORT in
+# apps/desktop/src/main.ts). When these disagree the desktop window waits
+# forever on an empty port and falls back to the placeholder shell, which
+# looks like the app failing to start.
+$targetPort = if ($env:ASCEND_WEB_PORT) { [int]$env:ASCEND_WEB_PORT } else { 3210 }
 
 function Get-PortListenerPids {
   param(
@@ -56,7 +61,10 @@ if ($listenerPids.Count -gt 0) {
 
 Push-Location $webDir
 try {
-  npm.cmd run dev -- --host 127.0.0.1 --strictPort --port $targetPort
+  # Next's flags, not Vite's: -p for the port, -H for the host. The old
+  # --strictPort has no Next equivalent, but the listener check above already
+  # bails when the port is taken, so nothing silently lands on a second port.
+  npm.cmd run dev -- -H 127.0.0.1 -p $targetPort
 }
 finally {
   Pop-Location

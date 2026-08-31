@@ -622,8 +622,13 @@ test("asking what it can do gets an honest capability answer", () => {
     // It must state the limit rather than let the user find it by being disappointed.
     assert.match(reply.text, /no language model/i);
     // And it must name what actually works.
-    assert.match(reply.text, /remember that/i);
+    assert.match(reply.text, /Remember what you tell me/i);
     assert.match(reply.text, /Knowledge/);
+    // Without coaching a magic phrase. Extraction runs on every message, so
+    // telling the user to prefix their sentence asks them to do filing the
+    // system has already done - and it was their loudest complaint about
+    // this app.
+    assert.doesNotMatch(reply.text, /start with "remember/i);
   }
 });
 
@@ -649,9 +654,10 @@ test("the capability reply states which backend is actually answering", () => {
 
 test("both capability replies still describe what the app does", () => {
   for (const reply of [buildCapabilityReply(), buildCapabilityReply("ollama/x")]) {
-    assert.match(reply, /remember that/i);
+    assert.match(reply, /Remember what you tell me/i);
     assert.match(reply, /Knowledge/);
     assert.match(reply, /Build a working app/i);
+    assert.doesNotMatch(reply, /start with "remember/i);
   }
 });
 
@@ -665,10 +671,14 @@ test("the capability reply lists real tool names read from the registry", () => 
   assert.match(reply, /build_app/);
   assert.match(reply, /forget/);
   assert.match(reply, /fetch_url/);
-  // fetch_url is real now, so this must not claim otherwise — and code
-  // execution genuinely still has no tool, so that one stays honest too.
+  // Both of these were once honest disclaimers and are now false. fetch_url is
+  // real, and run_command is offered by default since machine access stopped
+  // being off-until-armed. A reply still saying it cannot run code would be
+  // describing a different app from the one running - which is precisely the
+  // dishonesty this test was written to catch, pointed the other way.
   assert.doesNotMatch(reply, /no web or internet access/i);
-  assert.match(reply, /no arbitrary code execution/i);
+  assert.doesNotMatch(reply, /no arbitrary code execution/i);
+  assert.match(reply, /run_command/);
 });
 
 // A capability question, unlike a request to retrieve something, must never
@@ -985,4 +995,93 @@ test("the same short message with no clarification pending is still too vague", 
   const reply = composeReply({ mode: "general", message: "a CRM", memories: [], history: [] });
 
   assert.equal(reply.strategy, "clarify");
+});
+
+// The app never asks the user to do its filing.
+//
+// Facts are extracted from every message on the way in - preferences,
+// conventions, constraints, not just sentences opening with "remember". So
+// telling someone to prefix their sentence with a magic phrase asks them to do
+// work the system has already done. It was the loudest complaint about this
+// app, and these cases exist so it cannot come back by accident.
+
+test("no reply ever coaches a magic phrase", () => {
+  const nagging = /say "remember|start with "remember|remember that \.\.\.|save it for later|saved for next time|beyond this session/i;
+
+  const messages = [
+    "the api runs on port 4000",           // a plain statement
+    "thanks, that helps",                  // conversational
+    "what can you do",                     // capability
+    "what is my staging server called",    // a question with nothing stored
+    "remember",                            // the prefix with no fact after it
+    "i prefer tabs over spaces"            // a preference
+  ];
+
+  for (const message of messages) {
+    const reply = composeReply({ mode: "general", message, memories: [], history: [] });
+    assert.doesNotMatch(reply.text, nagging, `"${message}" nagged: ${reply.text}`);
+  }
+});
+
+test("acknowledging a statement is short and does not deflect", () => {
+  // What the user actually saw: "Got it — I'll keep that in mind for this
+  // conversation. Say \"remember that ...\" if you want me to hold on to it
+  // permanently, or tell me what you'd like done with it."
+  const reply = composeReply({
+    mode: "general", message: "the api runs on port 4000", memories: [], history: []
+  });
+
+  assert.equal(reply.strategy, "acknowledge");
+  assert.doesNotMatch(reply.text, /keep that in mind|permanently|what you'd like done/i);
+  assert.ok(reply.text.length < 40, `too wordy for an acknowledgement: ${reply.text}`);
+});
+
+test("a saved statement says so, an unsaved one does not claim it", () => {
+  // The confirmation has to track the real write, or it is the same false
+  // success this codebase spends most of its effort preventing.
+  const saved = composeReply({
+    mode: "general", message: "the api runs on port 4000", memories: [], history: [],
+    memoryWrite: { available: true, saved: 1, savedBodies: ["the api runs on port 4000"] }
+  });
+  assert.match(saved.text, /saved/i);
+
+  const notSaved = composeReply({
+    mode: "general", message: "the api runs on port 4000", memories: [], history: [],
+    memoryWrite: { available: false, saved: 0, savedBodies: [] }
+  });
+  assert.doesNotMatch(notSaved.text, /saved/i);
+});
+
+test("a greeting with a vocative is still a greeting", () => {
+  // "hello there" fell through to the vague-request branch and was answered
+  // with "I need a bit more to work with. Tell me what you're trying to end up
+  // with, and any constraint that matters (stack, deadline, audience)" - the
+  // exact strange reply the smalltalk branches exist to prevent.
+  for (const greeting of ["hello there", "hi there", "hey there!", "hi again", "hey TRHAI", "hello vexora"]) {
+    const reply = composeReply({ mode: "general", message: greeting, memories: [], history: [] });
+    assert.equal(reply.strategy, "smalltalk", `"${greeting}" produced ${reply.strategy}`);
+    assert.doesNotMatch(reply.text, /bit more to work with/i);
+  }
+});
+
+test("a greeting attached to a real request stays a request", () => {
+  // The line this must not cross. Only a vocative is allowed after the
+  // greeting; anything else means they asked for something.
+  for (const message of [
+    "hi can you build me an app",
+    "hey what is the capital of France",
+    "hello I need a task tracker"
+  ]) {
+    const reply = composeReply({ mode: "general", message, memories: [], history: [] });
+    assert.notEqual(reply.strategy, "smalltalk", `"${message}" was swallowed as smalltalk`);
+  }
+});
+
+test("a bare greeting still works", () => {
+  for (const greeting of ["hello", "hi", "hey!", "good morning"]) {
+    assert.equal(
+      composeReply({ mode: "general", message: greeting, memories: [], history: [] }).strategy,
+      "smalltalk"
+    );
+  }
 });

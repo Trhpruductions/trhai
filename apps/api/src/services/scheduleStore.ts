@@ -17,7 +17,7 @@ export type Cadence =
   | { kind: "daily"; minuteOfDay: number }
   | { kind: "interval"; minutes: number };
 
-export type ScheduleRunStatus = "ok" | "failed" | "missed";
+export type ScheduleRunStatus = "ok" | "failed" | "missed" | "interrupted";
 
 /**
  * What a schedule does when it fires.
@@ -310,6 +310,37 @@ export function removeSchedule(id: string): boolean {
 }
 
 /** Record what a run did and move the schedule on to its next occurrence. */
+/**
+ * Take a due run, before doing the work rather than after.
+ *
+ * nextDueAt used to advance only in recordRun, which happens once the work has
+ * finished — and a scheduled turn against a local model can take half a
+ * minute. Restart inside that window and the in-process guard is gone, the
+ * schedule still looks due, and the tick that runs at startup fires it a
+ * second time. For an action that builds an app or writes a document, that is
+ * the same side effect happening twice with nothing to show it was a repeat.
+ *
+ * Claiming first inverts the failure. A run interrupted by a restart is lost
+ * rather than repeated, which is the safer direction: a missed daily summary
+ * is an inconvenience, a duplicated write is corruption. The claim is marked
+ * "interrupted" so a run that never reported back says so, instead of the
+ * schedule showing a cheerful last-status it did not earn.
+ *
+ * Returns null when the schedule is gone, so a caller cannot act on a claim
+ * that was not granted.
+ */
+export function claimRun(id: string, now = new Date()): Schedule | null {
+  loadFromDisk();
+  const target = schedules.find((entry) => entry.id === id);
+  if (!target) return null;
+
+  target.lastStatus = "interrupted";
+  target.lastDetail = "Started. If this is still showing, the run did not finish.";
+  target.nextDueAt = nextDueAfter(target.cadence, now).toISOString();
+  saveToDisk();
+  return { ...target };
+}
+
 export function recordRun(
   id: string,
   status: ScheduleRunStatus,
@@ -322,7 +353,7 @@ export function recordRun(
 
   // A missed run is not a run: it moves the schedule on and is noted, but
   // lastRunAt keeps pointing at the last time this actually did something.
-  if (status !== "missed") {
+  if (status !== "missed" && status !== "interrupted") {
     target.lastRunAt = now.toISOString();
   }
   target.lastStatus = status;

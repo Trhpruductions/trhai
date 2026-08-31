@@ -43,7 +43,13 @@ function outcomeOf(run: CommandRun): { word: string; tone: string } {
   return { word: `exit ${run.exitCode}`, tone: "danger" };
 }
 
-export function CommandAccess() {
+// `active` is whether the rail holding this is actually open.
+//
+// The rails are hidden with display:none rather than unmounted, so this kept
+// polling every three seconds into a column nobody could see - and since the
+// rails start closed, that was the normal state of the app. The countdown it
+// drives is only meaningful while visible anyway.
+export function CommandAccess({ active = true }: { active?: boolean }) {
   const [state, setState] = useState<CommandState | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -57,11 +63,15 @@ export function CommandAccess() {
   }, []);
 
   useEffect(() => {
+    if (!active) return;
+    // Reads immediately on becoming visible, so opening the rail shows the
+    // current state rather than whatever was true when it was last closed.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads the real clock and the live switch when the rail opens
     setNow(Date.now());
     void read();
     const poller = window.setInterval(() => { setNow(Date.now()); void read(); }, 3000);
     return () => window.clearInterval(poller);
-  }, [read]);
+  }, [read, active]);
 
   async function toggle() {
     if (busy || !state) return;
@@ -87,8 +97,8 @@ export function CommandAccess() {
 
       <p className="faint cmd-what">
         {armed
-          ? "TRHAI can run commands on this machine right now. It switches off on its own shortly, or now if you say so."
-          : "Off. TRHAI can read and write in its workspace, but cannot run anything on this machine."}
+          ? "On. TRHAI can run commands and reach files anywhere on this machine. It stays on until you switch it off."
+          : "Off. TRHAI can read and write in its workspace, but cannot run anything or reach files elsewhere."}
       </p>
 
       <button
@@ -98,7 +108,7 @@ export function CommandAccess() {
         aria-pressed={armed}
         onClick={() => void toggle()}
       >
-        {busy ? "…" : armed ? "Switch off" : "Let TRHAI use this machine"}
+        {busy ? "…" : armed ? "Switch off machine access" : "Let TRHAI use this machine"}
       </button>
 
       {state && state.history.length > 0 ? (

@@ -1,6 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    /* Dead code is a compiler error here, not something to be found by hand.
+       Unused imports, locals and parameters had accumulated across every
+       workspace - including whole functions written, exported and never
+       called. Prefix a parameter with _ when it genuinely must exist unused. */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",

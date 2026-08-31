@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBaseUrl, sessionId as resolveSessionId } from "../lib/api";
+import { applyResponseStyle } from "@ascend/shared";
+import { readStoredPersonality } from "../lib/personality";
 
 // Conversation state, talking to the real local orchestrator — the same
 // service the rest of this monorepo already built, tested, and runs against
@@ -225,10 +227,27 @@ export function useAssistant() {
       // it safe for tokens to be withheld mid-stream when the model turns out
       // to have been writing a tool call: what is on screen is provisional
       // until this lands.
+      // The selected personality's mandatory disclaimer, appended here.
+      //
+      // Three personalities carry one — Medical, Legal and Cyber Security —
+      // and applyResponseStyle, the only thing that appends it, was never
+      // called from anywhere in the app. Choosing "Medical" gave you a
+      // personality whose own summary says "Never a substitute for care" and
+      // replies that never once said so. A disclaimer the field itself calls
+      // mandatory is not decoration, and a picker that silently changes
+      // nothing is the fake this build exists to refuse.
+      //
+      // Applied to the finished message rather than at render, so it is part
+      // of the text that gets stored and the text that gets read aloud — a
+      // spoken medical answer needs the caveat more than a written one, not
+      // less. Read at this moment rather than captured, so it follows whatever
+      // is selected when the reply lands.
+      const answered = typeof data.assistantMessage === "string" ? data.assistantMessage : streamed;
+
       const finished: ChatMessage = {
         id: replyId,
         role: "assistant",
-        text: typeof data.assistantMessage === "string" ? data.assistantMessage : streamed,
+        text: applyResponseStyle(answered, readStoredPersonality(window.localStorage)),
         at: Date.now(),
         strategy: data.strategy as string | undefined,
         model: data.model as string | undefined,

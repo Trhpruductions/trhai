@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import "./panels.css";
 
 // The right-hand column of the command centre.
@@ -41,7 +40,11 @@ export function SystemOverview({ rows }: { rows: HealthRow[] }) {
 
   return (
     <section className="hud-panel">
-      <span className="hud-label">System overview</span>
+      {/* "Health checks", not "System overview": the gauges panel owns that
+          name now, and two panels with one label is a screen that cannot be
+          talked about. This one lists the individual checks and what each
+          returned, which is what it has always actually shown. */}
+      <span className="hud-label">Health checks</span>
       <div className="overview">
         <div className={`health health-${tone}`}>
           <svg viewBox="0 0 64 64" aria-hidden="true">
@@ -127,67 +130,6 @@ export function ActiveTasks({ tasks }: { tasks: AgentTask[] | null }) {
   );
 }
 
-export type Tile = { href: string; label: string; glyph: string; hint: string };
-
-/**
- * The app's surfaces, as tiles.
- *
- * `onOpen` switches the panel on this screen instead of routing away. Every
- * part of TRHAI used to be its own page, which meant using it took you away
- * from the core, the machine readings and any reply still arriving — the
- * wrong shape for an interface whose whole point is being a live view of one
- * machine. Without the callback these fall back to real links, which is what
- * keeps the old routes usable as bookmarks.
- */
-export function ToolsGrid({ tiles, onOpen }: { tiles: Tile[]; onOpen?: (href: string) => void }) {
-  return (
-    <section className="hud-panel">
-      <span className="hud-label">Tools &amp; apps</span>
-      <div className="tiles">
-        {tiles.map((tile) => (onOpen ? (
-          <button key={tile.href} type="button" className="tile" title={tile.hint}
-            onClick={() => onOpen(tile.href)}>
-            <span className="tile-glyph" aria-hidden="true">{tile.glyph}</span>
-            <span className="tile-label">{tile.label}</span>
-          </button>
-        ) : (
-          <Link key={tile.href} href={tile.href} className="tile" title={tile.hint}>
-            <span className="tile-glyph" aria-hidden="true">{tile.glyph}</span>
-            <span className="tile-label">{tile.label}</span>
-          </Link>
-        )))}
-      </div>
-    </section>
-  );
-}
-
-/**
- * Connected services.
- *
- * Empty, and that is the finding rather than a gap. Everything this build
- * does runs against this machine's own storage and a local model, so there is
- * no account to connect and no key to paste in. Stating that is worth a panel;
- * drawing five logos for services that are not wired to anything would not be.
- */
-export function ConnectedServices({ services }: { services: string[] }) {
-  return (
-    <section className="hud-panel">
-      <span className="hud-label">Connected services</span>
-      {services.length === 0 ? (
-        <p className="faint services-none">
-          None. Nothing leaves this machine — no accounts, no API keys, nothing to sign into.
-        </p>
-      ) : (
-        <div className="tiles">
-          {services.map((service) => (
-            <span key={service} className="tile">{service}</span>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
 export function MemoryStatus({
   entries, pinned, documents, workspaceBytes, workspaceFiles
 }: {
@@ -215,31 +157,6 @@ export function MemoryStatus({
           <dd>{workspaceFiles === null ? "—" : `${workspaceFiles} files · ${kb} KB`}</dd>
         </div>
       </dl>
-      <Link href="/memory" className="hud-more">View memory</Link>
-    </section>
-  );
-}
-
-export function PersonalityCard({
-  name, traits, focus, agentName
-}: {
-  name: string;
-  traits: string[];
-  focus: string | null;
-  agentName: string | null;
-}) {
-  return (
-    <section className="hud-panel">
-      <span className="hud-label">Personality</span>
-      <div className="persona">
-        <b className="persona-name">{name}</b>
-        {/* Real traits from the chosen personality, not a fixed
-            "Adaptive · Proactive · Loyal" printed under every mode. */}
-        <span className="persona-traits">{traits.join(" · ")}</span>
-        {focus ? <p className="faint persona-focus">{focus}</p> : null}
-        {agentName ? <span className="faint persona-agent">Agent: {agentName}</span> : null}
-      </div>
-      <Link href="/settings" className="hud-more">Change personality</Link>
     </section>
   );
 }

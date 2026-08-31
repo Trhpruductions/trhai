@@ -46,7 +46,8 @@ import {
   retrieveKnowledgePassages
 } from "./services/knowledgeStore.js";
 import { isAllowedOrigin } from "./services/originPolicy.js";
-import { checkAvailability, readLocalModelConfig } from "./services/localModel.js";
+import { checkAvailability, generate, readLocalModelConfig } from "./services/localModel.js";
+import { pickAuthorModel } from "./services/appAuthor.js";
 import { readPreferences, updatePreferences } from "./services/preferences.js";
 import { getBuildInfo } from "./services/buildInfo.js";
 import { getSystemCapabilities, toolsByLevel } from "./services/systemCapabilities.js";
@@ -65,15 +66,16 @@ import {
   isCadence,
   isScheduleAction,
   listSchedules,
+  schedulePersistenceError,
   removeSchedule,
   setScheduleEnabled
 } from "./services/scheduleStore.js";
 import { getFlow, saveFlow } from "./services/flowStore.js";
-import { readTelemetry } from "./services/systemTelemetry.js";
+import { readTelemetry, readIdentity } from "./services/systemTelemetry.js";
 import { getTask } from "./services/taskStore.js";
 import { clearEvents, listEvents } from "./services/executionLog.js";
 import { finishStages, getStage, stageLabels } from "./services/reasoningStage.js";
-import { increment, observe, snapshot, toPrometheus } from "./services/metrics.js";
+import { snapshot, toPrometheus } from "./services/metrics.js";
 import {
   armCommands,
   armedUntil,
@@ -154,7 +156,7 @@ function normalizeAssistMode(mode: unknown): AssistRouteMode {
  * difference only shows up as "it works in chat but not on the dashboard".
  */
 function buildAssistInput(
-  req: express.Request,
+  _req: express.Request,
   options: {
     mode: AssistRouteMode;
     message: string;
@@ -227,9 +229,37 @@ function buildAssistInput(
     pinMemory: sessionId
       ? (id: string, pinned: boolean) => Boolean(setMemoryPinned(sessionId, id, pinned))
       : undefined,
+    authorApp: authorAppWithModel,
     ...(onToken ? { onToken } : {}),
     ...(cancel ? { cancel } : {})
   };
+}
+
+/**
+ * Ask the local model to write an application.
+ *
+ * Only reached for requests that are neither a records app nor a calculator -
+ * the shapes the templates cover. The prompt is passed through verbatim
+ * (rawPrompt) because the assistant's own prompt tells the model to answer in
+ * a few sentences and not to invent specifics, which is the opposite of what
+ * writing an application needs.
+ */
+async function authorAppWithModel(prompt: string) {
+  const base = readLocalModelConfig();
+
+  // Written by a coding model when one is installed, and given longer than a
+  // chat reply gets. Both matter: on this machine the general model did not
+  // finish a snake game in five minutes and the coder model wrote one in
+  // thirty seconds, and the default timeout is tuned for answering a question
+  // rather than producing five files.
+  const availability = await checkAvailability(base);
+  const model = availability.available
+    ? pickAuthorModel(availability.installedModels, availability.model)
+    : base.model;
+
+  const config = { ...base, model, timeoutMs: Math.max(base.timeoutMs, 300000) };
+  const result = await generate(config, { question: prompt, context: [], rawPrompt: prompt });
+  return result.ok ? { ok: true as const, text: result.text } : { ok: false as const, reason: result.reason };
 }
 
 /** The per-turn session state both assist routes derive the same way. */
@@ -394,7 +424,8 @@ export function createApp() {
         deleteDocument: sessionId ? (id: string) => removeDocument(sessionId, id) : undefined,
         pinMemory: sessionId
           ? (id: string, pinned: boolean) => Boolean(setMemoryPinned(sessionId, id, pinned))
-          : undefined
+          : undefined,
+        authorApp: authorAppWithModel
       }).finally(() => {
         // Whatever a client polling /v1/assist/activity mid-turn was told is
         // stale the instant this turn ends, success or failure alike.
@@ -864,7 +895,14 @@ export function createApp() {
           ...schedule,
           cadenceLabel: describeCadence(schedule.cadence),
           actionLabel: describeAction(schedule.action)
-        }))
+        })),
+        // Whether the last write to disk failed.
+        //
+        // scheduleStore has recorded this since it was written and nothing ever
+        // read it, so a store that could no longer save - a locked file, a full
+        // disk - kept accepting schedules, logged to a console nobody has open,
+        // and lost them all on restart. Sent so the screen can say so.
+        persistenceError: schedulePersistenceError()
       },
       traceId: "trace-local"
     });
@@ -896,6 +934,16 @@ export function createApp() {
   // claims to show.
   app.get("/v1/system-telemetry", async (_req, res) => {
     res.json({ data: await readTelemetry(), traceId: "trace-local" });
+  });
+
+  // Who is at the keyboard, from the OS rather than from a constant.
+  //
+  // The screen greets the user by name, and the name has to come from
+  // somewhere real or it is decoration that happens to be right on one
+  // machine. This is the account the API process runs under, which on a
+  // desktop build is the person who launched it.
+  app.get("/v1/identity", (_req, res) => {
+    res.json({ data: readIdentity(), traceId: "trace-local" });
   });
 
   // The same turn as /v1/assist, streamed.

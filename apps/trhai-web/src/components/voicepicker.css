@@ -1,0 +1,56 @@
+/* The voice picker, in the console rail beside the personality. */
+
+.voicepick { gap: 8px; }
+
+.voicepick-none { font-size: 12.5px; line-height: 1.45; margin: 0; }
+
+.voicepick-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 6px;
+  background: rgba(10, 15, 22, 0.9);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.voicepick-select:hover { border-color: var(--line-strong); }
+.voicepick-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.voicepick-rate { display: flex; flex-direction: column; gap: 3px; }
+
+.voicepick-rate-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.voicepick-rate-value {
+  font-family: var(--font-geist-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.voicepick-rate input { width: 100%; accent-color: var(--accent); }
+
+.voicepick-preview {
+  padding: 6px 10px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 6px;
+  background: var(--accent-quiet);
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.voicepick-preview:hover:not(:disabled) { border-color: var(--accent); }
+.voicepick-preview:disabled { opacity: 0.55; cursor: default; }
+.voicepick-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

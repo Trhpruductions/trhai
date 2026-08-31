@@ -1,0 +1,152 @@
+TRHAI — RESEARCH BRIEF FOR PERPLEXITY
+=====================================
+
+I have built a local-first AI desktop assistant. It works. I want you to
+research whether the approaches I have taken are sound, and what better options
+exist that I may not know about. Please cite sources and prefer information
+from the last 12 months, since local model tooling moves quickly.
+
+Where you are not sure, say so rather than guessing. I would rather have three
+well-sourced answers than ten confident ones.
+
+
+PART 1 — WHAT IS ACTUALLY BUILT AND WORKING
+===========================================
+
+A single-screen AI assistant that runs entirely on one Windows 11 machine. No
+cloud services, no API keys anywhere, by deliberate design.
+
+Architecture
+  - Express + TypeScript API on port 4000
+  - Next.js 16 / React 19 single-page UI on port 3210
+  - Electron desktop shell that starts both
+  - All models run locally via Ollama
+
+Local models installed
+  vexora:latest      1.9 GB   general conversation
+  qwen2.5-coder:7b   4.7 GB   writing and editing code
+  qwen2.5:3b         1.9 GB
+
+Scale: 1380 automated tests passing, 0 TypeScript errors.
+
+What it can do, verified working:
+  - Answer questions using local memory, documents and conversation history
+  - Show live system telemetry (CPU, RAM, GPU, temperature, disk, network)
+  - Run real shell commands on the machine and report real output
+  - Read, write and edit files anywhere on the disk
+  - Build small working applications from a description
+  - Speak replies aloud with a local Piper neural voice
+  - Transcribe speech locally with whisper
+
+The design rule the whole app follows: the interface may only show things that
+are actually true. No fake progress bars, no placeholder data, no reporting an
+action as successful unless it verifiably was. A reading that cannot be taken
+shows a dash. A generated app is only called built after its own tests pass.
+
+
+PART 2 — WHAT I WANT YOU TO RESEARCH
+====================================
+
+QUESTION 1 — Better local models for tool calling
+--------------------------------------------------
+My chat model is unreliable at deciding to use tools. Asked to edit a file, it
+sometimes replies "Got it, I'll keep that in mind" and calls nothing. I worked
+around this by routing coding requests to qwen2.5-coder:7b, which is reliable.
+
+Research: which locally-runnable models available through Ollama are currently
+strongest at FUNCTION CALLING / TOOL USE specifically, as opposed to general
+chat quality? I have roughly 8 GB of VRAM to work with. I am interested in
+benchmarks such as BFCL (Berkeley Function Calling Leaderboard) and any
+more recent equivalent. Please give actual model names and sizes I can pull.
+
+QUESTION 2 — Small models writing whole applications
+-----------------------------------------------------
+When asked to build something the templates do not cover, I ask
+qwen2.5-coder:7b to write the whole app in one generation. It returns files in
+a delimited plain-text format (I switched away from JSON because the model kept
+producing invalid JSON when escaping code). It succeeds roughly one attempt in
+three; I retry up to three times and validate before writing to disk.
+
+Research: what techniques currently work best for getting reliable multi-file
+code generation out of a 7B-class local model? I am specifically interested in:
+  - Whether one-shot whole-app generation or an iterative plan-then-file-by-file
+    approach gives better results at this model size
+  - Whether constrained/grammar-based decoding (GBNF, outlines, guidance) would
+    solve the malformed-output problem better than my retry loop
+  - Any published prompt structures that materially improve first-attempt
+    success rates for code generation
+  - Whether a larger quantised model would beat a smaller unquantised one here
+
+QUESTION 3 — Better British male neural voices
+-----------------------------------------------
+Replies are spoken with Piper. I want a British male voice. Piper publishes
+en_GB-alan at medium quality but, as far as I can tell, no British male at
+"high" quality. I am currently using en_GB-alan-medium.
+
+Research: what are the best currently-available options for a natural-sounding
+British male voice that runs fully offline on Windows, with no cloud service and
+no per-use cost? Please consider Piper, Kokoro, Coqui/XTTS, Orpheus, and any
+newer local TTS worth knowing about. I care about quality and latency, in that
+order. Include rough model sizes and whether they run on CPU or need a GPU.
+
+QUESTION 4 — Security posture for a local agent with machine access
+--------------------------------------------------------------------
+My assistant can run arbitrary shell commands as me, and read and write files
+anywhere on the disk. This is on by default. I chose that deliberately: it is
+my own machine and my own tool, and an assistant that cannot reach my files is
+not useful to me.
+
+The safeguards I have:
+  - Writes to Windows system directories are refused even so; reads are not
+  - Scheduled/unattended runs do not get machine access at all
+  - Every command is logged with its output and exit code
+  - Model-generated code is validated and written to disk but NEVER executed
+    automatically
+  - A switch to turn it all off, which persists
+
+Research: what do comparable tools actually do here? I am thinking of Claude
+Code, Cursor, Aider, OpenHands/OpenDevin, Continue.dev, and similar local or
+semi-local coding agents. Specifically:
+  - What is the prevailing default: sandboxed, ask-per-action, or full access?
+  - Are there documented incidents of local coding agents causing real damage,
+    and what was the failure mode?
+  - Is there an established set of directories that such tools protect?
+  - What is the current thinking on running model-generated code — containers,
+    VMs, or simply not running it?
+
+QUESTION 5 — Am I missing an obvious category of capability?
+--------------------------------------------------------------
+The assistant currently has 24 tools: memory, documents, files, editing, web
+page fetching, arithmetic, dates, app building, and command execution.
+
+Research: for a personal local AI assistant in 2026, what capabilities are
+considered table stakes that I have not listed? I am not looking for
+integrations with cloud services — no API keys, that is a firm constraint.
+I mean things that can work entirely locally.
+
+QUESTION 6 — Local speech-to-text
+-----------------------------------
+Transcription uses a local whisper model (ggml-base.en).
+
+Research: what is currently the best accuracy-per-millisecond option for local
+real-time speech-to-text on Windows without a cloud service? Consider
+whisper.cpp variants, faster-whisper, distil-whisper, Moonshine, NVIDIA Parakeet
+and anything newer. I want low latency for short spoken commands more than I
+want perfect accuracy on long dictation.
+
+
+PART 3 — HOW TO ANSWER
+======================
+For each question please give me:
+  1. A direct recommendation, not a survey of everything that exists
+  2. The reasoning, briefly
+  3. Sources, with dates
+  4. Anything that would change your answer within six months
+
+Constraints that are not up for negotiation:
+  - Everything must run locally. No API keys, no cloud inference, no per-use
+    costs.
+  - Windows 11, roughly 8 GB VRAM.
+  - It must keep working offline.
+
+Please tell me plainly if any of my current choices are simply wrong.

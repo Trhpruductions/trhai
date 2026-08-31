@@ -64,13 +64,3 @@ export function saveFlow(candidate: unknown): Flow | null {
   saveToDisk();
   return getFlow();
 }
-
-export function resetFlow(): void {
-  flow = null;
-  loaded = true;
-  saveToDisk();
-}
-
-export function setFlowPersistence(enabled: boolean): void {
-  persistenceEnabled = enabled;
-}

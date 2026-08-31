@@ -109,11 +109,6 @@ export type ComposedReply = {
   planTaskType?: string;
 };
 
-function isCodingMode(mode: ComposerMode): boolean {
-  return mode === "build" || mode === "code" || mode === "debug"
-    || mode === "research" || mode === "plan" || mode === "coding";
-}
-
 /**
  * A follow-up borrows the previous turn's subject only when it has almost no
  * subject of its own ("what about staging?"). Any looser and carry-over pollutes
@@ -261,7 +256,17 @@ export function rememberHasTrailingRequest(message: string): boolean {
 export const memoryPreference = 2;
 
 /** Openers and acknowledgements that are conversation, not a request for work. */
-const greetingPattern = /^(hi|hey|hello|yo|howdy|sup|good\s+(morning|afternoon|evening))\b[\s!.,]*$/i;
+// A greeting may be addressed to someone. "hello there" missed this and fell
+// through to the vague-request branch, which answered a hello with "I need a
+// bit more to work with. Tell me what you're trying to end up with, and any
+// constraint that matters (stack, deadline, audience)" - precisely the strange
+// reply the note above this block says these branches exist to prevent.
+//
+// Only a vocative is allowed after the greeting, never an arbitrary word, so
+// "hi can you build me an app" stays a request rather than being answered with
+// hello and nothing else.
+const greetingPattern =
+  /^(hi|hey|hello|yo|howdy|sup|good\s+(morning|afternoon|evening))(\s+(there|again|trhai|vexora))?\b[\s!.,]*$/i;
 const thanksPattern = /^(thanks|thank\s+you|ty|cheers|appreciate\s+it|nice|cool|great|awesome|perfect)\b[\s!.,]*$/i;
 const acknowledgementPattern = /^(ok|okay|k|sure|right|got\s+it|fine|yep|yes|no|nope|never\s*mind|nvm|forget\s+it)\b[\s!.,]*$/i;
 
@@ -370,7 +375,7 @@ export function buildCapabilityReply(localModel?: string): string {
     "",
     "What I can actually do:",
     "- Build a working app from a description. \"Build a task tracker where projects have many tasks\" produces a real REST API with storage, validation and tests.",
-    "- Remember things you tell me. Start with \"remember that ...\" and I'll use it later.",
+    "- Remember what you tell me. Just say it — I pick the facts out myself.",
     "- Answer from your documents. Add them under Knowledge and I'll quote the relevant passage back with its source.",
     "- Run flows you build under Automation, and keep your schedule under Calendar.",
     "",
@@ -478,7 +483,7 @@ export function composeReply(input: ComposerInput): ComposedReply {
     if (fromHistory.length > 0) {
       const quoted = fromHistory.map((entry) => `- "${entry.memory.body}"`).join("\n");
       return {
-        text: `You mentioned this earlier in our conversation:\n\n${quoted}\n\nSay "remember that ..." if you want me to keep it beyond this session.`,
+        text: `You mentioned this earlier in our conversation:\n\n${quoted}`,
         strategy: "answer",
         groundedOn: [],
         groundedOnHistory: fromHistory.length
@@ -500,7 +505,7 @@ export function composeReply(input: ComposerInput): ComposedReply {
     const storedButUnmatched = `I searched ${searched} and nothing matched that question. Matching is on wording, so it may be phrased differently in there.`;
 
     return {
-      text: `${searched === "" ? nothingStored : storedButUnmatched}\n\nTell me the answer and I'll remember it — start with "remember that ..." and it will be saved for next time.`,
+      text: `${searched === "" ? nothingStored : storedButUnmatched}\n\nTell me and I'll keep it.`,
       strategy: "no-answer",
       groundedOn: [],
       groundedOnHistory: 0
@@ -529,7 +534,12 @@ export function composeReply(input: ComposerInput): ComposedReply {
     // Only a confirmed write earns the confirmation.
     if (write && write.saved > 0) {
       return {
-        text: "Saved. I'll use that as context from here on — you can review or remove it in the Memory panel.",
+        // Points at what exists. It used to send people to "the Memory panel",
+        // which was a page this app no longer has - the same broken signpost as
+        // the copy that once offered to add a task from a deleted Tasks screen.
+        // Listing and forgetting are conversational now, so the reply says so.
+        text: "Saved. I'll use that as context from here on — ask me to list what you've "
+          + "told me, or to forget it, whenever you like.",
         strategy: "acknowledge",
         groundedOn: [],
         groundedOnHistory: 0,
@@ -554,7 +564,7 @@ export function composeReply(input: ComposerInput): ComposedReply {
 
     // A session exists but nothing could be pulled out of the sentence.
     return {
-      text: "Nothing was saved — I couldn't pick a clear fact out of that. Try \"remember that <subject> is <fact>\", for example \"remember that the deploy server is rack-4\".",
+      text: "Nothing was saved — I couldn't pick a clear fact out of that. Say it plainly and I'll keep it, like \"the deploy server is rack-4\".",
       strategy: "not-saved",
       groundedOn: [],
       groundedOnHistory: 0
@@ -568,8 +578,19 @@ export function composeReply(input: ComposerInput): ComposedReply {
   // keywords, so merely saying "api" lands you in code mode — which must not by
   // itself turn a statement of fact into a request for work.
   if (analysis.shape === "statement" && !analysis.hasRequestMarker && !refining) {
+    // Facts are pulled out of every message, not only ones that open with
+    // "remember" - recordMemoriesFromMessage runs on the way in, for preferences,
+    // conventions and constraints alike. So this can report what was actually
+    // kept rather than teaching a magic phrase.
+    //
+    // The old reply here was: "Got it - I'll keep that in mind for this
+    // conversation. Say \"remember that ...\" if you want me to hold on to it
+    // permanently." It asks the user to do the filing for a system that had
+    // already filed it, and it was the single thing about this app they
+    // complained about most.
+    const kept = input.memoryWrite;
     return {
-      text: "Got it — I'll keep that in mind for this conversation. Say \"remember that ...\" if you want me to hold on to it permanently, or tell me what you'd like done with it.",
+      text: kept && kept.saved > 0 ? "Got it, saved." : "Got it.",
       strategy: "acknowledge",
       groundedOn: [],
       groundedOnHistory: 0

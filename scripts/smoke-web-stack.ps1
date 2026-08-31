@@ -1,5 +1,7 @@
 param(
-  [string]$WebBaseUrl = 'http://127.0.0.1:4173',
+  # 3210 is TRHAI. This defaulted to 4173, the old Vite preview port, so a smoke
+  # run with no arguments checked a server that is no longer part of the app.
+  [string]$WebBaseUrl = 'http://127.0.0.1:3210',
   [string]$ApiBaseUrl = 'http://127.0.0.1:4000'
 )
 

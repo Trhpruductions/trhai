@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
+import { tmpdir } from "node:os";
 import {
+  accessFilePath,
   armCommands,
+  armCommandsFor,
   armedUntil,
   armDurationMs,
   commandHistory,
@@ -16,6 +20,7 @@ import {
 import { availableTools, runTool, toolDefinitions } from "../src/services/agentTools.js";
 import { permissionLevelOf, requiresConfirmation } from "../src/services/toolPermissions.js";
 
+
 // This is the only capability in the app that is not bounded by the
 // workspace, so the tests care most about the boundary: that it is off by
 // default, that it is not even offered while off, and that it reports what
@@ -24,29 +29,47 @@ import { permissionLevelOf, requiresConfirmation } from "../src/services/toolPer
 test.beforeEach(() => resetCommandRunner());
 test.after(() => resetCommandRunner());
 
-test("commands are off until switched on", () => {
-  assert.equal(commandsArmed(), false, "off is the default, not a setting to find");
+test("the machine is reachable unless it has been switched off", () => {
+  // Changed deliberately. Access used to be off until armed, for thirty
+  // minutes at a time, which treated it as an exception granted for a task.
+  // For one person's assistant on their own machine that was the wrong model:
+  // an assistant that cannot reach their files until they flip a switch, and
+  // forgets again while they are still working, is one they have to manage
+  // rather than use.
+  assert.equal(commandsArmed(), true, "on is the resting state now");
+  assert.equal(armedUntil(), null, "nothing permanent has an expiry to report");
+});
+
+test("switching it off is honoured and has no expiry", () => {
+  disarmCommands();
+  assert.equal(commandsArmed(), false, "off must mean off");
   assert.equal(armedUntil(), null);
 });
 
-test("arming lasts a while and then lapses on its own", () => {
+test("a bounded grant lasts its window and then lapses", () => {
+  // armCommands is permanent now; armCommandsFor is how a time-limited grant
+  // is still made. Kept because a bounded grant is a genuinely different thing
+  // from a permanent one.
   const now = new Date(2026, 7, 25, 12, 0, 0);
-  armCommands(now);
+  disarmCommands(now);
+  armCommandsFor(armDurationMs, now);
 
   assert.equal(commandsArmed(new Date(now.getTime() + 1000)), true);
   assert.equal(commandsArmed(new Date(now.getTime() + armDurationMs - 1000)), true);
-  // A grant that never expires is one nobody remembers making.
-  assert.equal(commandsArmed(new Date(now.getTime() + armDurationMs + 1)), false);
+
+  // Past the window it falls back to the default rather than to "off": a
+  // window running out is the absence of a decision, not a decision to close.
+  assert.equal(commandsArmed(new Date(now.getTime() + armDurationMs + 1)), true);
+  assert.equal(armedUntil(), null, "the lapsed window is cleared, not left half-true");
 });
 
 test("an expiry that passes clears the state rather than staying half-true", () => {
   const now = new Date(2026, 7, 25, 12, 0, 0);
-  armCommands(now);
+  armCommandsFor(armDurationMs, now);
   commandsArmed(new Date(now.getTime() + armDurationMs + 1));
 
-  // Reading it again at the original moment must still be off: the window
-  // closed, and it does not reopen because a caller asked with an older clock.
-  assert.equal(commandsArmed(new Date(now.getTime() + 1000)), false);
+  // The window is gone rather than lingering: asking again with an older clock
+  // must not resurrect it.
   assert.equal(armedUntil(), null);
 });
 
@@ -257,10 +280,20 @@ test("a scheduled run is refused command access even while armed", async () => {
 test("an unattended turn is not offered the tool in the first place", () => {
   // Withheld at the list as well as refused at the call: a model that cannot
   // see the tool will not spend a round trying to use it.
+  //
+  // This test only ever asserted the attended half, despite its name. Anyone
+  // reading the suite would have believed the unattended case was covered when
+  // nothing checked it - the behaviour was right, the evidence was not.
+  //
+  // agentLoop folds the two together at the call site as
+  // `availableTools(commandsArmed() && !unattended)`, so unattended arrives
+  // here as armed:false. Both halves are asserted now.
   armCommands();
   try {
     assert.ok(availableTools(true).some((d) => d.function.name === "run_command"),
       "armed and attended still offers it");
+    assert.ok(!availableTools(false).some((d) => d.function.name === "run_command"),
+      "an unattended turn must not be offered run_command");
   } finally {
     disarmCommands();
   }
@@ -275,4 +308,44 @@ test("the same scheduled run keeps every other tool", async () => {
   );
 
   assert.equal(result.ok, true);
+});
+
+// Where the grant is remembered, and where it must not be.
+
+test("a test process never resolves the real grant file", () => {
+  // The regression this exists for. tests/setup/isolate-state.ts redirects
+  // TRHAI_ARM_FILE, but it is carried by an --import flag on the npm script, so
+  // running a single test file directly skipped it - and a direct run here
+  // wrote {"enabled":false} into the developer's real grant. Their assistant
+  // stopped being able to open their own files, mid-task, for a reason nothing
+  // on screen explained.
+  //
+  // The env var is unset for the length of this case so the fallback is the
+  // thing under test rather than the redirect that normally hides it.
+  const redirect = process.env.TRHAI_ARM_FILE;
+  delete process.env.TRHAI_ARM_FILE;
+
+  try {
+    const resolved = accessFilePath();
+    const real = path.join(process.cwd(), "data", "command-arm.json");
+    assert.notEqual(resolved, real, "a test must not resolve the real grant file");
+    assert.match(resolved, /command-arm\.json$/);
+    // Stable within the process, or two calls would disagree about the state.
+    assert.equal(accessFilePath(), resolved);
+  } finally {
+    if (redirect === undefined) delete process.env.TRHAI_ARM_FILE;
+    else process.env.TRHAI_ARM_FILE = redirect;
+  }
+});
+
+test("an explicit redirect still wins over the test fallback", () => {
+  const redirect = process.env.TRHAI_ARM_FILE;
+  process.env.TRHAI_ARM_FILE = path.join(tmpdir(), "explicit-arm.json");
+
+  try {
+    assert.equal(accessFilePath(), path.join(tmpdir(), "explicit-arm.json"));
+  } finally {
+    if (redirect === undefined) delete process.env.TRHAI_ARM_FILE;
+    else process.env.TRHAI_ARM_FILE = redirect;
+  }
 });

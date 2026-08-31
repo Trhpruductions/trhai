@@ -301,13 +301,19 @@ button, input, select, textarea {
   position: relative;
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius-lg);
+  /* Glass, not card. A flat opaque fill made every panel a dark rectangle
+     pasted over the background, which is what read as "black app with boxes
+     on it". Letting the environment through, tinted and blurred, is what puts
+     the panels in the same room as the core. */
   background:
-    linear-gradient(180deg, rgba(53, 199, 255, 0.05), transparent 42%),
-    rgba(10, 15, 22, 0.72);
-  padding: 14px 16px;
+    linear-gradient(180deg, rgba(96, 214, 255, 0.10), rgba(96, 214, 255, 0.02) 38%, transparent 70%),
+    linear-gradient(180deg, rgba(9, 22, 38, 0.62), rgba(6, 14, 26, 0.72));
+  backdrop-filter: blur(14px) saturate(135%);
+  -webkit-backdrop-filter: blur(14px) saturate(135%);
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
 }
 
 /* Corner brackets: the detail that reads "instrument panel" rather than

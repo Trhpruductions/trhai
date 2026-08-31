@@ -1,19 +1,25 @@
 import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.js";
 import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
 import { describeDifference, shiftDate } from "./dateMath.js";
-import { generateProject, planProject, slugify } from "@ascend/shared";
+import { classifyRequest, deriveTitle, generateProject, planProject, slugify } from "@ascend/shared";
+import { authorPrompt, findAppFault, parseAuthoredFiles, type AuthoredFile } from "./appAuthor.js";
 import { verifyBuiltProject } from "./buildVerification.js";
 import { describeConfirmationNeeded, requiresConfirmation } from "./toolPermissions.js";
 import {
+  listDirectoryAt,
   listWorkspace,
+  readFileAt,
   readWorkspaceFile,
+  resolveInWorkspace,
+  writeFileAt,
   writeWorkspaceFile
 } from "./workspace.js";
 import { fetchWebPage } from "./webFetch.js";
 import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
+import { resolveForAccess } from "./machinePaths.js";
+import { applyEdit, describeEdit } from "./fileEdit.js";
 import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
 import { enterStage } from "./reasoningStage.js";
-import { increment, observe } from "./metrics.js";
 
 // What the assistant can actually do.
 //
@@ -110,6 +116,22 @@ export type ToolContext = {
    */
   conversation?: Array<{ role: "user" | "assistant"; content: string }>;
   /**
+   * What the user actually asked for, in their own words.
+   *
+   * Used to name a built app. build_app is handed a `description` written by
+   * the model, and the model writes descriptions as behaviour rather than as
+   * names - so "build me a calculator" arrived as "performs basic arithmetic
+   * operations like addition" and the app was filed under
+   * performs-basic-arithmetic-operations-like, which is also its browser tab
+   * and page heading.
+   *
+   * Chasing that with phrasing rules does not converge; there is always
+   * another way to describe what an app does. The user's own sentence names
+   * the thing, so the title comes from there when it yields something usable
+   * and falls back to the description when it does not.
+   */
+  request?: string;
+  /**
    * Tool names the user has explicitly authorised for this turn.
    *
    * Per turn, not stored: an authorisation that outlived the exchange it was
@@ -145,6 +167,16 @@ export type ToolContext = {
    * defences, when nothing is supplied.
    */
   fetchPage?: typeof fetchWebPage;
+  /**
+   * Asks the local model to write an application, for requests that are not one
+   * of the two shapes the templates cover.
+   *
+   * Optional, and its absence is a real state rather than a configuration
+   * error: with no model running there is nothing to author with, and
+   * build_app says so instead of falling back to a records app that would be
+   * the wrong thing built confidently.
+   */
+  authorApp?: (description: string) => Promise<{ ok: true; text: string } | { ok: false; reason: string }>;
 };
 
 export const toolDefinitions: ToolDefinition[] = [
@@ -430,12 +462,19 @@ export const toolDefinitions: ToolDefinition[] = [
     function: {
       name: "list_files",
       description:
-        "List the files in the user's workspace — the folder where apps you build and files you "
-        + "write are kept. Use this to see what is already there.",
+        "List files. Omit the directory for the workspace — the folder where apps you build are "
+        + "kept. Pass a full path such as D:/projects/app to look inside a real project on this "
+        + "machine when machine access is on. Use this to find out what is actually there before "
+        + "guessing at filenames.",
       parameters: {
         type: "object",
         properties: {
-          directory: { type: "string", description: "A subfolder to list. Omit for everything." }
+          directory: {
+            type: "string",
+            description:
+              "A workspace subfolder, or a full path to a folder anywhere on this machine. "
+              + "Omit for the whole workspace."
+          }
         },
         required: []
       }
@@ -446,12 +485,17 @@ export const toolDefinitions: ToolDefinition[] = [
     function: {
       name: "read_file",
       description:
-        "Read a file from the workspace. Use it to look at code you or the user wrote before "
-        + "changing or explaining it.",
+        "Read a file. Use it to look at code before changing or explaining it. Accepts a "
+        + "workspace path, or a full path to anywhere on this machine such as "
+        + "D:/projects/app/src/index.ts when machine access is on. Never answer questions about "
+        + "the contents of a file without reading it first.",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "The path as shown by list_files." }
+          path: {
+            type: "string",
+            description: "A workspace path, or a full path to a file anywhere on this machine."
+          }
         },
         required: ["path"]
       }
@@ -462,15 +506,47 @@ export const toolDefinitions: ToolDefinition[] = [
     function: {
       name: "write_file",
       description:
-        "Write a file into the workspace, creating folders as needed. Use this for code, scripts, "
-        + "or anything named like a file, such as test.txt or app.js — not as a knowledge document.",
+        "Write a file, creating folders as needed. Use this for code, scripts, or anything named "
+        + "like a file, such as test.txt or app.js — not as a knowledge document. Accepts a "
+        + "workspace path, or a full path to anywhere on this machine when machine access is on, "
+        + "so it can edit a real project in place. Writing replaces the whole file, so read it "
+        + "first and send back the complete updated contents rather than only the changed part.",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "Where to write it, relative to the workspace." },
+          path: {
+            type: "string",
+            description: "A workspace path, or a full path to a file anywhere on this machine."
+          },
           content: { type: "string", description: "The full contents of the file." }
         },
         required: ["path", "content"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "edit_file",
+      description:
+        "Change part of an existing file by replacing exact text, leaving the rest untouched. "
+        + "Prefer this over write_file for any file that already exists: write_file replaces the "
+        + "whole file, so anything you do not repeat is deleted. Read the file first and copy the "
+        + "lines to change verbatim, including indentation. The text must appear exactly once.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "A workspace path, or a full path to a file anywhere on this machine."
+          },
+          old_text: {
+            type: "string",
+            description: "The exact text to replace, copied from the file including indentation."
+          },
+          new_text: { type: "string", description: "What to put in its place." }
+        },
+        required: ["path", "old_text", "new_text"]
       }
     }
   },
@@ -540,9 +616,56 @@ export const toolDefinitions: ToolDefinition[] = [
  * the same reason the capability report reads from the registry — what is
  * described and what is enforced have to be the same thing.
  */
-export function availableTools(armed: boolean): ToolDefinition[] {
-  if (armed) return toolDefinitions;
-  return toolDefinitions.filter((definition) => definition.function.name !== "run_command");
+/**
+ * Tools that create a whole project, as opposed to answering about one.
+ *
+ * Withheld from questions. See the note on isExplanatoryQuestion: "explain how
+ * promises work in javascript" reached for build_app and scaffolded a five-file
+ * app into the workspace. Checking the reply afterwards cannot help, because by
+ * then the directory exists - the only effective place to stop it is before the
+ * tool is offered.
+ */
+const scaffoldingTools = new Set(["build_app", "plan_app"]);
+
+/**
+ * Name a built app after what the user asked for, not the model's paraphrase.
+ *
+ * build_app's `description` is written by the model, and models describe an app
+ * by what it does: "build me a calculator" arrived as "performs basic
+ * arithmetic operations like addition", and the project was filed under
+ * performs-basic-arithmetic-operations-like - which is the folder, the browser
+ * tab and the page heading. Stripping those lead-ins by pattern does not
+ * converge; there is always another way to phrase behaviour.
+ *
+ * The user's sentence names the thing, so it wins whenever it produces a real
+ * name. It does not always: "build me an app" derives "App", which distinguishes
+ * nothing, and there the model's fuller description is genuinely better. The
+ * test is whether the derived title survives being a bare container noun.
+ */
+function titledFromRequest<T extends { title: string }>(spec: T, request?: string): T {
+  if (!request?.trim()) return spec;
+
+  const fromRequest = deriveTitle(request);
+  if (!fromRequest) return spec;
+
+  // "App", "Tool", "Project" - a name that names nothing. Keep the model's.
+  if (/^(app|application|tool|system|program|platform|service|site|website|project|thing)$/i
+    .test(fromRequest.trim())) {
+    return spec;
+  }
+
+  return { ...spec, title: fromRequest };
+}
+
+export function availableTools(armed: boolean, options: { scaffolding?: boolean } = {}): ToolDefinition[] {
+  const allowScaffolding = options.scaffolding ?? true;
+
+  return toolDefinitions.filter((definition) => {
+    const name = definition.function.name;
+    if (!armed && name === "run_command") return false;
+    if (!allowScaffolding && scaffoldingTools.has(name)) return false;
+    return true;
+  });
 }
 
 /** How many results a search hands back before it stops being useful context. */
@@ -973,18 +1096,118 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       const description = requireString(call.arguments.description);
       if (!description) return { ok: false, content: "build_app needs a description." };
 
-      const spec = planProject(description);
-      // A calculator has nothing to store by design — spec.entities is
-      // empty on purpose, not because nothing was understood. Caught live:
-      // this check predates the calculator archetype and does not know
-      // about it, so it was rejecting every calculator request on exactly
-      // the condition that is normal for one.
-      if (spec.kind !== "calculator" && spec.entities.length === 0) {
-        return { ok: false, content: "That description does not name anything to store, so there is nothing to build yet." };
-      }
+      const spec = titledFromRequest(planProject(description), context.request);
 
-      const folder = slugify(spec.title, "app", 60);
-      const files = generateProject(spec);
+      // Which of the two templates this is, or neither.
+      //
+      // It used to be neither question nor choice: every request became a
+      // records app, because entity extraction always finds a noun. "A snake
+      // game" became a REST API storing `game` records and passed its own
+      // smoke checks doing it. The template never fails at being a template,
+      // which is exactly why nothing reported the app was wrong.
+      const namedFields = spec.entities.some((entity) =>
+        entity.fields.some((field) => !["title", "description"].includes(field.name)));
+      // Classified from what the user asked for, then from the description.
+      //
+      // Same root cause as the title above: `description` is the model's
+      // paraphrase, and a paraphrase loses the word that decides the shape.
+      // "build me a calculator" arrived as "performs basic arithmetic
+      // operations like addition" - which names no calculator, so it was not
+      // classified as one, and a request that stores nothing was sent down the
+      // path that builds a store.
+      //
+      // The request cannot simply win, though: "authored" is the fallback the
+      // classifier returns when it recognises nothing, and a short request
+      // ("build me a plant diary") lands there while the model's fuller
+      // description names the tracker and the fields outright. So the specific
+      // answer wins wherever it comes from, and only a request that actually
+      // decides something overrules the description.
+      const askedFor = context.request?.trim();
+      const fromRequest = askedFor ? classifyRequest(askedFor, namedFields) : "authored";
+      const archetype = fromRequest !== "authored"
+        ? fromRequest
+        : classifyRequest(description, namedFields);
+
+      let files: AuthoredFile[];
+      let folder: string;
+
+      if (archetype === "authored") {
+        if (!context.authorApp) {
+          return {
+            ok: false,
+            content: "That is not a records app or a calculator, so it needs the local model to write it "
+              + "- and no model is available. Start the model and ask again."
+          };
+        }
+
+        // Tried more than once, because the generation is genuinely random.
+        //
+        // Measured over three runs of the same request: one reply could not be
+        // parsed, one produced files that did not run, and one produced a
+        // working game. One attempt would therefore fail most of the time on a
+        // request the model is perfectly capable of. Each attempt is recorded,
+        // so a build that took three goes says so rather than looking clean.
+        const attempts = 3;
+        let authoredFiles: AuthoredFile[] | null = null;
+        let lastFault = "";
+
+        for (let attempt = 1; attempt <= attempts && !authoredFiles; attempt += 1) {
+          const tryEvent = beginEvent(context.sessionId, "create",
+            `Writing the app${attempt > 1 ? ` (attempt ${attempt})` : ""}`);
+
+          const authored = await context.authorApp(authorPrompt(description));
+          if (!authored.ok) {
+            lastFault = authored.reason;
+            endEvent(context.sessionId, tryEvent, "failed", lastFault);
+            continue;
+          }
+
+          const parsed = parseAuthoredFiles(authored.text);
+          if (!parsed.ok) {
+            lastFault = parsed.reason;
+            endEvent(context.sessionId, tryEvent, "failed", lastFault);
+            continue;
+          }
+
+          // Compiled, never run: generated code has not earned the right to
+          // execute, and the machine-access switch that governs running things
+          // is off by default. This catches the breakage that is detectable
+          // without running - a file that does not parse, and the server that
+          // exits the moment it starts.
+          const fault = findAppFault(parsed.files);
+          if (fault) {
+            lastFault = fault;
+            endEvent(context.sessionId, tryEvent, "failed", lastFault);
+            continue;
+          }
+
+          authoredFiles = parsed.files;
+          endEvent(context.sessionId, tryEvent, "ok", `${parsed.files.length} files`);
+        }
+
+        if (!authoredFiles) {
+          return {
+            ok: false,
+            content: `I could not write that app. ${attempts} attempts were made and the last failed because `
+              + `${lastFault}. Nothing was written.`
+          };
+        }
+
+        files = authoredFiles;
+        folder = slugify(spec.title, "app", 60);
+      } else {
+        // A calculator has nothing to store by design — spec.entities is
+        // empty on purpose, not because nothing was understood. Caught live:
+        // this check predates the calculator archetype and does not know
+        // about it, so it was rejecting every calculator request on exactly
+        // the condition that is normal for one.
+        if (archetype !== "calculator" && spec.entities.length === 0) {
+          return { ok: false, content: "That description does not name anything to store, so there is nothing to build yet." };
+        }
+
+        folder = slugify(spec.title, "app", 60);
+        files = generateProject(archetype === "calculator" ? { ...spec, kind: "calculator" } : spec);
+      }
 
       // Recorded as it happens, not described in advance. Each event is
       // written by the code that does the thing, at the moment it does it, so
@@ -1024,7 +1247,16 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       enterStage(sessionId, "verifying");
       const verifying = beginEvent(sessionId, "verify", "Running its own checks");
       const verification = await verifyBuiltProject(folder);
-      const runLine = "Run it with: cd " + folder + " && npm install && npm start";
+      // No install step, because there is nothing to install.
+      //
+      // This said "npm install && npm start" for every build, and the generated
+      // package.json has no dependencies field at all - that is the entire
+      // point of these projects, and findForeignImport now enforces it. So the
+      // instruction was telling you to run a command that does nothing, while
+      // implying the app needs fetching something before it will start. On a
+      // machine that is offline, or where npm is having a bad day, it would
+      // fail and make a working app look broken.
+      const runLine = "Run it with: cd " + folder + " && npm start";
 
       // Three outcomes, kept distinct. "Could not check" is not "passed", and
       // reporting it as either would be the kind of quiet rounding-up this
@@ -1067,20 +1299,39 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         ? call.arguments.directory.trim()
         : ".";
 
-      const entries = listWorkspace(directory);
+      // Anywhere on the disk once machine access is granted, as read_file and
+      // write_file already are. Without this the assistant could open and edit
+      // a file in a project but not see what was in the folder - able to work
+      // on a codebase only if told every filename in advance.
+      const verdict = resolveForAccess(directory, {
+        granted: commandsArmed() && !context.unattended,
+        intent: "read",
+        insideWorkspace: resolveInWorkspace
+      });
+      if (!verdict.ok) return { ok: false, content: verdict.reason };
+
+      const inWorkspace = resolveInWorkspace(directory) === verdict.path;
+      const entries = inWorkspace ? listWorkspace(directory) : listDirectoryAt(verdict.path);
+
       if (entries === null) {
-        return { ok: false, content: "That path is outside the workspace, so it was not listed." };
+        return { ok: false, content: `There is no folder at ${directory}.` };
       }
       if (entries.length === 0) {
-        return { ok: false, content: "The workspace is empty." };
+        return { ok: false, content: inWorkspace ? "The workspace is empty." : `${directory} is empty.` };
       }
 
+      const files = entries.filter((entry) => !entry.directory);
+      const shown = files.slice(0, 200);
+      const listing = shown.map((entry) => `- ${entry.path} (${entry.bytes} bytes)`).join("\n");
+
+      // Says when it is showing part of a folder. A truncated listing that
+      // looks complete is how "that file does not exist" gets said about a
+      // file that does.
       return {
         ok: true,
-        content: entries
-          .filter((entry) => !entry.directory)
-          .map((entry) => `- ${entry.path} (${entry.bytes} bytes)`)
-          .join("\n")
+        content: files.length > shown.length
+          ? `${listing}\n\n[showing ${shown.length} of ${files.length} files, newest first]`
+          : listing
       };
     }
 
@@ -1088,7 +1339,22 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       const target = requireString(call.arguments.path);
       if (!target) return { ok: false, content: "read_file needs a path." };
 
-      const result = readWorkspaceFile(target);
+      // Anywhere on the disk once machine access is granted, the workspace
+      // otherwise. run_command could always reach the whole filesystem, so a
+      // sandboxed reader beside an unsandboxed shell was never a boundary -
+      // only an obstruction with a shell-shaped hole in it.
+      const verdict = resolveForAccess(target, {
+        // Not granted to a run nobody is watching, whatever the arming window
+        // says - the same rule run_command already follows. Switching machine
+        // control on is a grant for working at the machine, and a schedule
+        // firing at 3am must not inherit it because the window is still open.
+        granted: commandsArmed() && !context.unattended,
+        intent: "read",
+        insideWorkspace: resolveInWorkspace
+      });
+      if (!verdict.ok) return { ok: false, content: verdict.reason };
+
+      const result = readFileAt(verdict.path);
       if (!result.ok) return { ok: false, content: result.reason };
 
       // A truncated read says so. Answering about a file it has only partly
@@ -1108,10 +1374,75 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         return { ok: false, content: "write_file needs both a path and content." };
       }
 
-      const result = writeWorkspaceFile(target, content);
-      return result.ok
-        ? { ok: true, content: `Wrote ${result.path} to the workspace.` }
-        : { ok: false, content: `${result.reason} Nothing was written.` };
+      const verdict = resolveForAccess(target, {
+        // As above: an unattended run stays in the workspace.
+        granted: commandsArmed() && !context.unattended,
+        intent: "write",
+        insideWorkspace: resolveInWorkspace
+      });
+      if (!verdict.ok) return { ok: false, content: `${verdict.reason} Nothing was written.` };
+
+      const result = writeFileAt(verdict.path, content);
+      if (!result.ok) return { ok: false, content: `${result.reason} Nothing was written.` };
+
+      // Named the way the user asked for it. A file in the workspace reports
+      // the short path they typed; one outside reports where it actually
+      // landed, because "wrote config.json" is not enough information when
+      // that could have been anywhere on the disk.
+      const inWorkspace = resolveInWorkspace(target);
+      return {
+        ok: true,
+        content: inWorkspace === result.path
+          ? `Wrote ${target} to the workspace.`
+          : `Wrote ${result.path}.`
+      };
+    }
+
+    case "edit_file": {
+      const target = requireString(call.arguments.path);
+      const oldText = typeof call.arguments.old_text === "string" ? call.arguments.old_text : null;
+      const newText = typeof call.arguments.new_text === "string" ? call.arguments.new_text : null;
+      if (!target || oldText === null || newText === null) {
+        return { ok: false, content: "edit_file needs a path, old_text and new_text." };
+      }
+
+      // Read and write are checked separately with the same rule, so an edit
+      // cannot reach anywhere a read or a write could not.
+      const readVerdict = resolveForAccess(target, {
+        granted: commandsArmed() && !context.unattended,
+        intent: "read",
+        insideWorkspace: resolveInWorkspace
+      });
+      if (!readVerdict.ok) return { ok: false, content: `${readVerdict.reason} Nothing was changed.` };
+
+      const writeVerdict = resolveForAccess(target, {
+        granted: commandsArmed() && !context.unattended,
+        intent: "write",
+        insideWorkspace: resolveInWorkspace
+      });
+      if (!writeVerdict.ok) return { ok: false, content: `${writeVerdict.reason} Nothing was changed.` };
+
+      const current = readFileAt(readVerdict.path);
+      if (!current.ok) return { ok: false, content: `${current.reason} Nothing was changed.` };
+
+      // A file too long to have been read whole must not be edited: the copy
+      // in hand is missing its end, and writing it back would delete the part
+      // that was never seen.
+      if (current.truncated) {
+        return {
+          ok: false,
+          content: `${target} is longer than I can read in one go, so editing it here would `
+            + "discard the part I cannot see. Nothing was changed."
+        };
+      }
+
+      const edited = applyEdit(current.content, oldText, newText);
+      if (!edited.ok) return { ok: false, content: `${edited.reason} Nothing was changed.` };
+
+      const written = writeFileAt(writeVerdict.path, edited.content);
+      if (!written.ok) return { ok: false, content: `${written.reason} Nothing was changed.` };
+
+      return { ok: true, content: `Edited ${written.path} — ${describeEdit(oldText, newText)}.` };
     }
 
     case "current_datetime": {

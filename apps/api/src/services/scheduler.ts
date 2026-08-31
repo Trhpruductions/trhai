@@ -1,7 +1,7 @@
 import { executeFlow } from "@ascend/shared";
 import { runAssistantOrchestrator } from "./orchestrator.js";
 import { getFlow } from "./flowStore.js";
-import { dueVerdict, listSchedules, recordRun, type ScheduleAction } from "./scheduleStore.js";
+import { claimRun, dueVerdict, listSchedules, recordRun, type ScheduleAction } from "./scheduleStore.js";
 
 // The thing that makes a schedule real.
 //
@@ -42,7 +42,9 @@ const inFlight = new Set<string>();
  * that step as skipped with its reason, so a scheduled flow says what it did
  * and did not do rather than quietly appearing to have run everything.
  */
-async function runFlowAction(id: string): Promise<{ status: "ok" | "failed"; detail: string }> {
+// No id parameter: there is one saved flow, not a flow per schedule, and
+// getFlow() is how it is reached. The argument was passed and ignored.
+async function runFlowAction(): Promise<{ status: "ok" | "failed"; detail: string }> {
   const flow = getFlow();
   if (!flow) {
     return { status: "failed", detail: "No flow is saved, so there was nothing to run." };
@@ -66,9 +68,20 @@ async function runSchedule(id: string, name: string, action: ScheduleAction): Pr
   if (inFlight.has(id)) return;
   inFlight.add(id);
 
+  // Claimed before the work, not after.
+  //
+  // inFlight only guards a second fire inside this process. A restart during
+  // a run loses it, and the schedule — whose nextDueAt had not moved — was
+  // still due, so the tick at startup ran it again. Advancing the due time
+  // now means an interrupted run is lost rather than repeated.
+  if (!claimRun(id)) {
+    inFlight.delete(id);
+    return;
+  }
+
   try {
     if (action.kind === "flow") {
-      const { status, detail } = await runFlowAction(id);
+      const { status, detail } = await runFlowAction();
       recordRun(id, status, detail);
       console.log(`schedule "${name}" ${status === "ok" ? "ran the flow" : "failed"}: ${detail}`);
       return;

@@ -1,0 +1,117 @@
+/* The to-do list in the activity rail. */
+
+.tasks { gap: 8px; }
+
+.tasks-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tasks-count {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.tasks-add {
+  display: flex;
+  gap: 6px;
+}
+
+.tasks-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 6px;
+  background: rgba(10, 15, 22, 0.9);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.tasks-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tasks-add-go {
+  width: 28px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 6px;
+  background: var(--accent-quiet);
+  color: var(--accent);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tasks-add-go:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tasks-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  /* A long list scrolls inside the panel rather than pushing the rest of the
+     rail off the bottom of the column. */
+  max-height: 190px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.tasks-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.tasks-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.tasks-check input { margin-top: 2px; flex: none; accent-color: var(--accent); }
+
+.tasks-title { min-width: 0; overflow-wrap: anywhere; }
+
+.tasks-row.done .tasks-title {
+  text-decoration: line-through;
+  color: var(--text-faint);
+}
+
+.tasks-remove {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+/* Revealed on hover or focus rather than always shown: a column of × marks
+   beside every row reads as clutter, and a remove that can only be reached by
+   a mouse is not reachable at all for anyone using the keyboard. */
+.tasks-row:hover .tasks-remove,
+.tasks-remove:focus-visible { opacity: 1; }
+
+.tasks-remove:hover { color: var(--danger, #ff5c5c); }
+
+.tasks-empty { font-size: 12.5px; margin: 0; line-height: 1.45; }

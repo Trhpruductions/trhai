@@ -45,14 +45,18 @@ if not exist "node_modules" (
   call npm install >>"%LOG%" 2>&1
 )
 
-REM Build output goes to the log rather than nul. A failed build used to be
-REM invisible, and the app would then open on whatever was built last.
-echo [%time%] building web>> "%LOG%"
-call npm run build --workspace @ascend/web >>"%LOG%" 2>&1
-if errorlevel 1 (
-  echo [%time%] ERROR: web build failed - see above>> "%LOG%"
-  goto :fail
-)
+REM No web build here.
+REM
+REM This used to build @ascend/web and abort the launch if that failed - the
+REM older Vite client, which this app no longer loads. It was building one app
+REM and opening another, and a broken build of the dead one stopped the live
+REM one from starting at all.
+REM
+REM Nothing replaces it: the desktop shell serves TRHAI through `next dev`
+REM (ensureSelfHostedServices -> dev:web -> scripts/run-web-dev.ps1), which
+REM compiles on demand, so a production build would be output nothing reads. A
+REM web client that genuinely fails to come up is reported by the shell's own
+REM port wait rather than by a build gate here.
 
 echo [%time%] building desktop>> "%LOG%"
 call npm run build --workspace @ascend/desktop >>"%LOG%" 2>&1

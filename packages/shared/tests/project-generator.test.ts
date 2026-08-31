@@ -1128,3 +1128,38 @@ test("no generated file routes to the entities the old bug invented", () => {
     assert.doesNotMatch(file.content, /\/api\/(applications|performs|arithmetics)\b/, file.path);
   }
 });
+
+test("an adjective before the container noun does not become the name", () => {
+  // Live: the model described its own build as "simple app that converts
+  // celsius to fahrenheit". "simple" is not a container noun, so the rule that
+  // drops "app" never fired, and the app that converts celsius to fahrenheit
+  // was called "Simple App" - in the folder name, the page heading and the
+  // browser tab. The scan now covers the opening words, not just the first.
+  assert.equal(deriveTitle("simple app that converts celsius to fahrenheit"), "Converts Celsius");
+  assert.equal(deriveTitle("build me a simple web app to track expenses"), "Track Expenses");
+});
+
+test("the container noun still works in first position", () => {
+  assert.equal(deriveTitle("an app to track invoices"), "Track Invoices");
+  assert.equal(deriveTitle("build me an app that converts celsius to fahrenheit"), "Converts Celsius");
+});
+
+test("a request that is only a container noun keeps it", () => {
+  // "App" beats "Generated Project" when there is genuinely nothing else said.
+  assert.equal(deriveTitle("build an app"), "App");
+});
+
+test("a description of what the app does for someone is not its name", () => {
+  // The model writes build_app's description as behaviour rather than as a
+  // name, and "allows users to calculate tips" became the title "Allows
+  // Users" - so asking for a calculator produced a folder called
+  // allows-users, which is also the browser tab and the page heading.
+  assert.equal(deriveTitle("allows users to calculate tips"), "Calculate Tips");
+  assert.equal(deriveTitle("lets you track expenses"), "Track Expenses");
+  assert.equal(deriveTitle("an app that allows users to convert currencies"), "Convert Currencies");
+});
+
+test("a real name starting with a similar word is untouched", () => {
+  // Only the lead-in form is stripped, and it needs the person it serves.
+  assert.equal(deriveTitle("helpdesk tickets"), "Helpdesk Tickets");
+});

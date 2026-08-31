@@ -9,6 +9,7 @@ process.env.ASCEND_WORKSPACE = root;
 
 const {
   listWorkspace,
+  maxListedFiles,
   maxReadBytes,
   readWorkspaceFile,
   resolveInWorkspace,
@@ -136,7 +137,6 @@ test("listing reports files under the workspace with sizes", () => {
   assert.equal(one!.bytes, 3);
   assert.equal(one!.directory, false);
 });
- const written = writeWorkspaceFile("listed/one.txt", "abc");
 
 test("listing outside the workspace is refused", () => {
   assert.equal(listWorkspace(".."), null);
@@ -235,4 +235,75 @@ test("a link that stays inside the workspace still works", () => {
   assert.ok(resolveInWorkspace("inside-link/inside.txt"));
   const read = readWorkspaceFile("inside-link/inside.txt");
   assert.equal(read.ok, true);
+});
+
+test("a listing carries modification times, so newest-first is answerable", async () => {
+  // Inside the suite's own workspace rather than a fresh one: reassigning
+  // ASCEND_WORKSPACE mid-file would leak into every test that ran after this.
+  const folder = path.join(root, "mtime-check");
+  mkdirSync(folder, { recursive: true });
+
+  // Written oldest-first, but named so alphabetical order is the reverse of
+  // chronological order. That is the exact shape that made the work view show
+  // an unrelated older project: reversing a directory walk is not the same as
+  // sorting by time, and with these names the two disagree completely.
+  writeFileSync(path.join(folder, "zebra.txt"), "written first");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  writeFileSync(path.join(folder, "apple.txt"), "written second");
+
+  const entries = listWorkspace("mtime-check");
+  assert.ok(entries);
+
+  const byName = Object.fromEntries(entries.map((entry) => [entry.path, entry]));
+  const zebra = byName["mtime-check/zebra.txt"];
+  const apple = byName["mtime-check/apple.txt"];
+  assert.ok(zebra && apple, `expected both files, got ${Object.keys(byName).join(", ")}`);
+  assert.equal(typeof zebra.modifiedAt, "number");
+
+  // The newer file really is newer by the number the client sorts on.
+  assert.ok(
+    apple.modifiedAt > zebra.modifiedAt,
+    "the file written second did not report a later modification time"
+  );
+
+  // And sorting by it disagrees with reversing the walk, which is the point.
+  const newestFirst = entries
+    .filter((entry) => !entry.directory)
+    .sort((left, right) => right.modifiedAt - left.modifiedAt);
+  assert.equal(newestFirst[0].path, "mtime-check/apple.txt");
+});
+
+test("a truncated listing keeps the newest files, not the first ones walked", async () => {
+  const folder = path.join(root, "truncation-check");
+  mkdirSync(folder, { recursive: true });
+
+  // More files than a listing returns, written oldest-first with names that
+  // put the newest last in directory order. Before the server sorted ahead of
+  // truncating, the response was simply the first N the walk reached — so a
+  // project created a minute ago could be absent from the listing entirely
+  // while a year-old one filled it, and the work view showed the wrong app.
+  const count = maxListedFiles + 30;
+  for (let index = 0; index < count; index += 1) {
+    writeFileSync(path.join(folder, `f${String(index).padStart(4, "0")}.txt`), `file ${index}`);
+  }
+
+  const entries = listWorkspace("truncation-check");
+  assert.ok(entries);
+  assert.ok(entries.length <= maxListedFiles, `listing returned ${entries.length}`);
+
+  // The last file written must survive truncation.
+  const newestName = `truncation-check/f${String(count - 1).padStart(4, "0")}.txt`;
+  assert.ok(
+    entries.some((entry) => entry.path === newestName),
+    "the most recently written file was truncated out of the listing"
+  );
+
+  // And the listing is ordered newest-first, so the client does not have to
+  // guess at it either.
+  for (let index = 1; index < entries.length; index += 1) {
+    assert.ok(
+      entries[index - 1].modifiedAt >= entries[index].modifiedAt,
+      `listing was not newest-first at index ${index}`
+    );
+  }
 });
