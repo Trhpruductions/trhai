@@ -241,7 +241,14 @@
   pointer-events: none;
 }
 
-.cc-core-title { position: relative; z-index: 1; text-align: center; }
+/* Above the core, not level with it.
+ *
+ * Both were z-index 1, so paint order decided and the core - later in the DOM
+ * - drew over the title. The core throws a bright sweep across its own width,
+ * and at the window size this app actually opens at, that sweep crosses the
+ * words TRH AI CORE. A beam through the middle of the one piece of type the
+ * screen is built around. */
+.cc-core-title { position: relative; z-index: 3; text-align: center; }
 
 .cc-core-title h1 {
   margin: 0;
@@ -249,10 +256,17 @@
   font-size: 26px;
   letter-spacing: 0.14em;
   color: var(--accent-strong);
-  text-shadow: var(--glow-soft);
+  /* The glow stays - it is the look - but a glow alone cannot separate cyan
+   * type from a cyan beam; it blends them. The dark halo underneath is what
+   * holds the letterforms against anything bright passing behind. */
+  text-shadow: var(--glow-soft), 0 1px 10px rgba(2, 6, 12, 0.9), 0 0 3px rgba(2, 6, 12, 0.75);
 }
 
 .cc-core-state {
+  position: relative;
+  z-index: 3;
+  /* Same halo, smaller: this sits closer to the core than the title does. */
+  text-shadow: 0 1px 8px rgba(2, 6, 12, 0.9);
   font-size: 12.5px;
   letter-spacing: 0.14em;
   color: var(--text-faint);
@@ -1472,10 +1486,33 @@
 .cc-states .cc-stage-word { letter-spacing: 0.13em; }
 .cc-states-stages { gap: 13px; }
 
+/* The cap outlived the thing it was protecting against.
+ *
+ * 34ch was set when a nav shared this row - see the note above about the
+ * footer having "about two pixels of slack once the nav joined it". The nav
+ * was removed with the rest of the navigation when the app became one screen,
+ * and nothing widened this again. Measured at 1360x860, the row now has 587px
+ * of free space while this element is held to 272px.
+ *
+ * What that cost: the old fallback, "Everything on this screen is measured on
+ * this machine.", needs 432px and was rendering as "Everything on this screen
+ * is meas..", cut mid-word - the app's own claim about itself was the one line
+ * on screen that got truncated.
+ *
+ * That sentence has since been shortened in page.tsx, which fixes it from the
+ * other side and is the better copy. This stays anyway, because the shorter
+ * text is not the only thing in this slot: "Answered directly, without a
+ * model" measures exactly 272px, sitting on the old cap with nothing to
+ * spare, and the rest are model names - "Answered by qwen2.5-coder:7b" and
+ * whatever is installed next - which are not under this app's control.
+ *
+ * 56ch is about 448px here, which clears every line the app puts here with
+ * room left, and the row still measures 42px with no wrap at 1360x860. The
+ * ellipsis stays as a backstop rather than as the normal case. */
 .cc-states-note {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 34ch;
+  max-width: 56ch;
 }
 
 /* No min-height override on the bare stage.
