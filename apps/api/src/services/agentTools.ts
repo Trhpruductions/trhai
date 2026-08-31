@@ -1426,6 +1426,26 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       const target = requireString(call.arguments.path);
       if (!target) return { ok: false, content: "read_file needs a path." };
 
+      // A URL is not a file, and saying so is the whole fix.
+      //
+      // "fetch https://example.com and tell me what it says" called read_file,
+      // which resolved the address as a relative path and reported "There is
+      // no file at D:\Vexora\workspace\example.com". The model then wrote
+      // "Did you mean to use fetch_url instead?" to the user - it knew, and
+      // still did not do it. The prompt already describes fetch_url; another
+      // sentence there would not have helped.
+      //
+      // Refused here rather than resolved, because the tool result is what the
+      // model reads next, and a refusal that names the right tool is a move it
+      // can make.
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+        return {
+          ok: false,
+          content: `"${target}" is a URL, not a file on this machine. `
+            + "Use fetch_url for an address; read_file only opens files."
+        };
+      }
+
       // Anywhere on the disk once machine access is granted, the workspace
       // otherwise. run_command could always reach the whole filesystem, so a
       // sandboxed reader beside an unsandboxed shell was never a boundary -
