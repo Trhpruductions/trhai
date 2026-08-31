@@ -52,6 +52,27 @@ if (-not (Test-Path (Join-Path $root "apps\trhai-web\.next"))) {
     exit 1
 }
 
+# The shortcut serves the built output, not the source. A build older than the
+# code it was built from opens yesterday's app behind today's icon, which is
+# worse than a crash: it looks like the change simply did not work.
+#
+# Said, never enforced. Rebuilding here would turn a fourteen-second launch
+# into a several-minute one, and refusing to open would let a stray keystroke
+# in an editor lock you out of your own app.
+try {
+    $buildStamp = (Get-Item (Join-Path $root "apps/trhai-web/.next/BUILD_ID") -ErrorAction Stop).LastWriteTime
+    $newestSource = Get-ChildItem (Join-Path $root "apps/trhai-web/src") -Recurse -File -ErrorAction Stop |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($newestSource -and $newestSource.LastWriteTime -gt $buildStamp) {
+        Write-Host "Note: the interface has changed since it was last built."
+        Write-Host "      Opening the previous build. Run Build-TRHAI.bat for the new one."
+        Write-Log "stale build: $($newestSource.Name) is newer than BUILD_ID"
+    }
+} catch {
+    Write-Log "could not compare build age: $($_.Exception.Message)"
+}
+
+
 # Stop a window that is already open rather than stacking a second one on the
 # same services. Matched on the command line so this only ever touches this
 # app's own shell, never another Electron app that happens to be running.
