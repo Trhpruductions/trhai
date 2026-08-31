@@ -69,7 +69,7 @@ export function summariseWorkspace(): ProjectSummary {
  * "there are no projects", which is true but not worth the tokens, and the
  * root is still worth stating so a first write lands somewhere sensible.
  */
-export function describeWorkspace(summary: ProjectSummary): string {
+export function describeWorkspace(summary: ProjectSummary, working?: string | null): string {
   const lines = [
     `The workspace is at ${summary.root}. Every path you pass to list_files, read_file,`,
     "write_file or edit_file is relative to it unless it is already absolute. Never invent",
@@ -103,6 +103,25 @@ export function describeWorkspace(summary: ProjectSummary): string {
     "To run something inside a project, cd into it first or use an absolute path:",
     `cd ${summary.root}/<project> && npm start`
   );
+
+  // Which one the conversation is actually in.
+  //
+  // The list above lets the model find a project when it is named. This is
+  // what lets "fix the router" work without naming one - the spec's own
+  // example, and the friction it asks to remove: "It should not force me to
+  // repeatedly explain the same project."
+  //
+  // Only stated when a tool in this session has genuinely worked inside a
+  // project. Guessing a current project from nothing would be worse than
+  // having none: the model would confidently edit the wrong app.
+  if (working) {
+    lines.push(
+      "",
+      `You are currently working in ${working}. When the user says "the router", "this`,
+      `project" or names a file with no directory, they mean ${working} unless they say`,
+      "otherwise."
+    );
+  }
 
   return lines.join("\n");
 }

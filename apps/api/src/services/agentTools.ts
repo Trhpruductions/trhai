@@ -18,6 +18,7 @@ import { fetchWebPage } from "./webFetch.js";
 import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
 import { resolveForAccess } from "./machinePaths.js";
 import { explainMiss } from "./projectContext.js";
+import { noteProjectTouched, withinActiveProject } from "./activeProject.js";
 import { applyEdit, describeEdit } from "./fileEdit.js";
 import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
 import { enterStage } from "./reasoningStage.js";
@@ -1327,6 +1328,9 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         };
       }
 
+      // A build you just asked for is the project you are working in.
+      noteProjectTouched(context.sessionId, folder);
+
       return {
         ok: true,
         content: "Built \"" + spec.title + "\" in the workspace at " + folder + "/ with "
@@ -1395,7 +1399,30 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       });
       if (!verdict.ok) return { ok: false, content: verdict.reason };
 
-      const result = readFileAt(verdict.path);
+      let result = readFileAt(verdict.path);
+
+      // A bare filename means the project this session is working in.
+      //
+      // "read the smoke test" right after reading calculator/server.js came
+      // through as a name with no directory. The prompt says which project is
+      // current and the model does not reliably use it, so the resolution
+      // happens here instead of being asked for again.
+      if (!result.ok) {
+        const inProject = withinActiveProject(context.sessionId, target);
+        if (inProject) {
+          const retry = resolveForAccess(inProject, {
+            granted: commandsArmed() && !context.unattended,
+            intent: "read",
+            insideWorkspace: resolveInWorkspace
+          });
+          if (retry.ok) {
+            const second = readFileAt(retry.path);
+            if (second.ok) result = second;
+          }
+        }
+      }
+
+      if (result.ok) noteProjectTouched(context.sessionId, target);
       // A miss that names what does exist. "There is no file at
       // calculator/public/server.js" is true and a dead end: the model guessed
       // a subdirectory, was told no, said it would try the main directory, and
@@ -1435,6 +1462,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // landed, because "wrote config.json" is not enough information when
       // that could have been anywhere on the disk.
       const inWorkspace = resolveInWorkspace(target);
+      noteProjectTouched(context.sessionId, target);
       return {
         ok: true,
         content: inWorkspace === result.path
@@ -1487,6 +1515,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       const written = writeFileAt(writeVerdict.path, edited.content);
       if (!written.ok) return { ok: false, content: `${written.reason} Nothing was changed.` };
 
+      noteProjectTouched(context.sessionId, target);
       return { ok: true, content: `Edited ${written.path} — ${describeEdit(oldText, newText)}.` };
     }
 

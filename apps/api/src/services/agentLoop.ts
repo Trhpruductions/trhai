@@ -15,6 +15,7 @@ import {
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
+import { activeProject } from "./activeProject.js";
 
 // Re-exported so nothing that already imports it from here has to move.
 export type { ToolActivity };
@@ -732,7 +733,7 @@ export async function runAgent(
         // it called list_files on D:/projects/calculator, which has never
         // existed on this machine, then asked the user for a full path to a
         // project it could have found by name. See projectContext.ts.
-        + `\n\n${describeWorkspace(summariseWorkspace())}`
+        + `\n\n${describeWorkspace(summariseWorkspace(), activeProject(context.sessionId))}`
     },
     { role: "user", content: question }
   ];
