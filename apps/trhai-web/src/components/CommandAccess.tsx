@@ -66,6 +66,7 @@ export function CommandAccess({ active = true }: { active?: boolean }) {
     if (!active) return;
     // Reads immediately on becoming visible, so opening the rail shows the
     // current state rather than whatever was true when it was last closed.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads the real clock and the live switch when the rail opens
     setNow(Date.now());
     void read();
     const poller = window.setInterval(() => { setNow(Date.now()); void read(); }, 3000);

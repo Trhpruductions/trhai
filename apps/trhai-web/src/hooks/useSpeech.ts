@@ -77,6 +77,7 @@ export function useSpeech() {
   const [voice, setVoiceState] = useState<VoiceChoice>(defaultVoice);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the stored preference lives in localStorage
     setVoiceState(readStoredVoice(window.localStorage));
   }, []);
 
@@ -88,6 +89,7 @@ export function useSpeech() {
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(enabledKey);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the stored preference lives in localStorage
       if (stored !== null) setEnabledState(stored === "true");
     } catch {
       // No storage - the default stands.
@@ -103,7 +105,10 @@ export function useSpeech() {
   // Read inside speak() rather than captured by it, so choosing a new voice
   // takes effect on the next thing said without rebuilding the callback.
   const voiceRef = useRef<VoiceChoice>(defaultVoice);
-  voiceRef.current = voice;
+  // Written after commit, not during render. A render React discards would
+  // otherwise leave its value here, and speak() would use a voice that was
+  // never actually chosen. No dep array, so it tracks every commit.
+  useEffect(() => { voiceRef.current = voice; });
 
   const audio = useRef<HTMLAudioElement | null>(null);
   const audioUrl = useRef<string | null>(null);

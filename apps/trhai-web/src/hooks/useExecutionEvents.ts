@@ -46,6 +46,7 @@ export function useExecutionEvents(busy: boolean) {
   const anyRunning = events.some((event) => event.status === "running");
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- polls the execution log - this state comes from outside React
     void read();
     const period = busy || anyRunning ? activeMs : idleMs;
     const poller = window.setInterval(() => void read(), period);

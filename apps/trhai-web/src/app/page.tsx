@@ -225,6 +225,7 @@ export default function DashboardPage() {
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(railsKey);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only value; the server has no localStorage and no clock the client will agree with
       if (stored) setRails(JSON.parse(stored) as { left: boolean; right: boolean });
     } catch {
       // A blocked or corrupt store just means the default, which is the one
@@ -316,11 +317,6 @@ export default function DashboardPage() {
     status: event.status
   }));
 
-  // A new turn with nothing built yet clears the dismissal, so closing the
-  // work view once does not hide it for every build afterwards.
-  useEffect(() => {
-    if (!didWork) setDismissedWork(false);
-  }, [didWork]);
 
   // Which turns were already on disk when the app opened.
   //
@@ -338,6 +334,7 @@ export default function DashboardPage() {
   // Clock fills in on the client. Rendering a time on the server guarantees
   // it disagrees with the client a second later.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only value; the server has no localStorage and no clock the client will agree with
     setClock(new Date());
     const ticker = window.setInterval(() => setClock(new Date()), 1000);
     return () => window.clearInterval(ticker);
@@ -345,6 +342,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const storedId = readStoredPersonality(window.localStorage);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only value; the server has no localStorage and no clock the client will agree with
     setPersonalityId(storedId);
     setAccent(readStoredAccent(window.localStorage));
     const chosen = personalityById(storedId);
@@ -490,6 +488,7 @@ export default function DashboardPage() {
   // would show dashes for up to four seconds after the click - which reads as
   // the panel being broken rather than as data on its way.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only value; the server has no localStorage and no clock the client will agree with
     if (rails.right) void readAll();
   }, [rails.right, readAll]);
 
@@ -556,6 +555,11 @@ export default function DashboardPage() {
         if (said) ask(said);
       });
     }
+    // `ask` is rebuilt every render, so listing it would re-run this on every
+    // frame of microphone level. What `ask` actually closes over that matters
+    // here is `busy`, and that is listed - so the version captured is refreshed
+    // exactly when it could otherwise go stale.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
   }, [handsFree, mic, speech.speaking, busy]);
 
   // Turning hands-free on opens the microphone; turning it off closes it.
@@ -568,6 +572,7 @@ export default function DashboardPage() {
     if (!handsFree && mic.listening) void mic.stop();
     // Only on the toggle itself: listing the microphone here would re-run this
     // on every level change and fight the loop above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
   }, [handsFree]);
 
   async function handleMic() {
@@ -599,6 +604,12 @@ export default function DashboardPage() {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
     setDraft("");
+    // Closing the work view applies to the build you closed it on, not to
+    // every build afterwards. Cleared here, where the new turn actually
+    // begins, rather than in an effect watching didWork go false - starting a
+    // turn is the event, and reacting to the state it produces is a longer way
+    // round to the same place that costs an extra render.
+    setDismissedWork(false);
     cues.play("send");
     void send(trimmed);
   }

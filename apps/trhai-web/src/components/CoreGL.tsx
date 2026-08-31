@@ -424,7 +424,10 @@ export function CoreGL({ state = "idle", size = 300, amplitude, load }: {
   // this stays a ref regardless: resizing a canvas does not need a new context
   // at all, since the draw loop already sets its dimensions every frame.
   const live = useRef({ state, amplitude, load, size });
-  live.current = { state, amplitude, load, size };
+  // After commit rather than during render. The draw loop reads this every
+  // frame, so a value written by a render React then threw away would be
+  // rendered on screen despite never having been committed.
+  useEffect(() => { live.current = { state, amplitude, load, size }; });
 
   useEffect(() => {
     const canvas = canvasRef.current;

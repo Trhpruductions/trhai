@@ -61,7 +61,9 @@ export function ParticleField({ state = "idle", className }: { state?: CoreState
   // Read inside the loop rather than captured, so a state change steers the
   // existing particles instead of restarting the animation.
   const stateRef = useRef<CoreState>(state);
-  stateRef.current = state;
+  // After commit rather than during render: a discarded render must not be
+  // able to steer the field toward a state the app never entered.
+  useEffect(() => { stateRef.current = state; });
 
   useEffect(() => {
     const canvas = canvasRef.current;

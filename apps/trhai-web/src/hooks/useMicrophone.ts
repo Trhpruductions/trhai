@@ -80,6 +80,7 @@ export function useMicrophone(): MicrophoneState {
   const utteranceStart = useRef<number | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- navigator.mediaDevices does not exist on the server
     setSupported(typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia));
   }, []);
 

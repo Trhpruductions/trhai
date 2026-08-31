@@ -57,6 +57,7 @@ export function useCues() {
   const context = useRef<AudioContext | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the stored preference lives in localStorage
     setEnabled(readStored());
   }, []);
 
