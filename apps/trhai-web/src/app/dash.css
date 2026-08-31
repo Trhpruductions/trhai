@@ -416,7 +416,64 @@
   line-height: 1.45;
 }
 
-.cc-suggestions { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.cc-suggestions { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+
+/* The suggestions under the input.
+ *
+ * `hud-chip` was applied in page.tsx and defined in no stylesheet at all - the
+ * one place in the app referencing it was the markup. So three separate
+ * buttons rendered as bare text 6px apart, and read as a single run-on
+ * sentence: "Build me a tool that tracks... Explain this error What is failing
+ * in the test suite?" They are clickable, and nothing on screen said so.
+ *
+ * Quieter than .cc-mic deliberately. These are an offer, not a control you
+ * came here to use, so they sit at --line-subtle until you approach them. */
+.hud-chip {
+  padding: 7px 13px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-pill);
+  background: rgba(120, 200, 255, 0.045);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* --fast is already 1ms under prefers-reduced-motion, so honouring the
+   * preference costs nothing here and needs no second rule. */
+  transition:
+    border-color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease),
+    color var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+
+.hud-chip:hover {
+  border-color: var(--line-strong);
+  background: var(--accent-quiet);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.hud-chip:active { transform: translateY(0); }
+
+/* Keyboard users get the same signal the mouse gets, and then some: these are
+ * the only controls on the stage reachable by tab before the input. */
+.hud-chip:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--text);
+  box-shadow: 0 0 0 3px var(--accent-quiet), var(--glow-soft);
+}
+
+/* The lift is the one part a motion preference should actually remove. */
+@media (prefers-reduced-motion: reduce) {
+  .hud-chip:hover { transform: none; }
+}
 
 /* ---- state rail ---- */
 
