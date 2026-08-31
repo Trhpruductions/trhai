@@ -90,8 +90,22 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   forget: 3,
   delete_document: 3,
   // The only tool here not bounded by the workspace: it runs as the user and
-  // can do anything they can. Gated twice over — this level, and an arming
-  // window without which it is never offered to the model at all.
+  // can do anything they can.
+  //
+  // Level 3 here is NOT a confirmation prompt in practice, and it is worth
+  // being exact about that rather than leaving a comfortable-sounding comment
+  // in place. agentTools treats machine access being on as pre-authorisation
+  // (`preAuthorised`), and access now defaults to on - so this tool runs
+  // without asking. That is the behaviour the user asked for: an assistant
+  // that has to beg before every command is one they have to manage.
+  //
+  // This entry still matters for everything else that reads the ladder -
+  // changesSomething, the interface labels - and it becomes a real
+  // confirmation again the moment access is switched off. What actually
+  // constrains this tool day to day is elsewhere: an unattended run is refused
+  // outright and cannot be confirmed into being, the tool is not offered to the
+  // model at all while access is off, and every command is recorded with its
+  // output and exit code whether it succeeded or not.
   run_command: 3
 };
 

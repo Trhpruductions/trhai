@@ -1584,6 +1584,16 @@ test("a call for a switched-off tool is explained, not printed as the answer", (
   assert.ok(!said.includes('{"name"'), "the explanation still contains raw JSON");
   // It says what it would have done, which is the part the user can act on.
   assert.match(said, /echo trhai-gate-test/);
+
+  // And it points somewhere that exists. This sentence used to read "under
+  // Machine control on the dashboard; it stays on for 30 minutes" - both
+  // halves false. There is no dashboard since the app became one screen, and
+  // access stopped lapsing when it stopped being a timed grant. It is the
+  // third broken signpost in this codebase, after the "Memory panel" and the
+  // offer to add a task from a deleted Tasks screen, so it is worth a test.
+  assert.doesNotMatch(said, /dashboard/i, "points at a screen that no longer exists");
+  assert.doesNotMatch(said, /30 minutes/i, "access does not lapse any more");
+  assert.match(said, /ACTIVITY rail/, "it must say where the switch actually is");
 });
 
 test("an ordinary answer is never mistaken for a switched-off call", () => {

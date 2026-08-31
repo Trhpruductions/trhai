@@ -599,9 +599,16 @@ export function gatedToolCall(text: string): ToolCall | null {
 export function explainGatedTool(call: ToolCall): string {
   if (call.name === "run_command") {
     const command = typeof call.arguments?.command === "string" ? call.arguments.command.trim() : "";
+    // Both halves of this sentence used to be wrong, which is the third time
+    // this codebase has sent someone to a screen that no longer exists - after
+    // the "Memory panel" and the offer to add a task from a deleted Tasks page.
+    // There is no dashboard any more; machine control lives in the ACTIVITY
+    // rail, behind the handle on the right edge. And access has not lapsed
+    // after thirty minutes since it stopped being a timed grant: it stays as
+    // you leave it, in both directions.
     return "Machine control is switched off, so nothing was run."
       + (command ? ` What I would have run is \`${command}\`.` : "")
-      + " You can turn it on under Machine control on the dashboard; it stays on for 30 minutes.";
+      + " Open the ACTIVITY rail on the right to switch it back on; it stays on until you turn it off.";
   }
 
   const readable = call.name.replace(/_/g, " ");

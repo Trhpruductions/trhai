@@ -280,10 +280,20 @@ test("a scheduled run is refused command access even while armed", async () => {
 test("an unattended turn is not offered the tool in the first place", () => {
   // Withheld at the list as well as refused at the call: a model that cannot
   // see the tool will not spend a round trying to use it.
+  //
+  // This test only ever asserted the attended half, despite its name. Anyone
+  // reading the suite would have believed the unattended case was covered when
+  // nothing checked it - the behaviour was right, the evidence was not.
+  //
+  // agentLoop folds the two together at the call site as
+  // `availableTools(commandsArmed() && !unattended)`, so unattended arrives
+  // here as armed:false. Both halves are asserted now.
   armCommands();
   try {
     assert.ok(availableTools(true).some((d) => d.function.name === "run_command"),
       "armed and attended still offers it");
+    assert.ok(!availableTools(false).some((d) => d.function.name === "run_command"),
+      "an unattended turn must not be offered run_command");
   } finally {
     disarmCommands();
   }

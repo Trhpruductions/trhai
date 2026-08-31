@@ -18,12 +18,20 @@ import { increment, observe } from "./metrics.js";
 // blocks "rm -rf" is defeated by writing it into a .bat file and running
 // that. So nothing is filtered on content. Instead:
 //
-//   - It is off until the user turns it on. The tool is not offered to the
-//     model at all while disarmed, so a model cannot decide to use it, be
-//     talked into using it, or mention that it exists as an option.
-//   - Arming is a decision with a horizon, not a permanent grant. It lapses
-//     on its own, so forgetting to turn it off is not the same as leaving the
-//     machine open indefinitely.
+//   - It can be switched off, and while it is off the tool is not offered to
+//     the model at all - so a model cannot decide to use it, be talked into
+//     using it, or mention that it exists as an option.
+//   - It is ON by default. This used to read "off until the user turns it on,
+//     and it lapses on its own", which was true when access was a thirty-minute
+//     grant and is not true now; see machineAccessDefault below for why that
+//     changed. Leaving the old wording here would have been worse than no
+//     comment at all, because the next person to reason about the safety of
+//     this file would have reasoned about a system that no longer exists.
+//   - Because access is on, run_command's level-3 confirmation does not fire:
+//     agentTools counts an armed machine as pre-authorisation. In practice
+//     this tool runs when the model asks for it.
+//   - An unattended run is refused outright and cannot be confirmed into
+//     being. Nobody is watching a scheduled run, so there is no one to ask.
 //   - Every command that runs is recorded with its output and exit code,
 //     whether it succeeded or not.
 //
