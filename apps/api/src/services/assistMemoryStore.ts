@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { extractMemoryCandidates, suppressDuplicateMemories, type MemoryCandidate } from "./memoryExtraction.js";
+import { dataFile } from "./dataDirectory.js";
 
 // Memory for the `/v1/assist` endpoint.
 //
@@ -59,7 +60,7 @@ const auditLog: MemoryAuditEntry[] = [];
 // ---------------------------------------------------------------------------
 
 const memoryFilePath = process.env.ASSIST_MEMORY_FILE
-  ?? path.join(process.cwd(), "data", "assist-memory.json");
+  ?? dataFile("assist-memory.json");
 
 let loaded = false;
 /** Disabled in tests that assert in-memory behaviour without touching disk. */

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ScorableMemory } from "./memoryRelevance.js";
+import { dataFile } from "./dataDirectory.js";
 
 // Knowledge base for `/v1/assist`.
 //
@@ -48,7 +49,7 @@ export const knowledgeRetrievalLimit = 6;
 const documentsBySession = new Map<string, KnowledgeDocument[]>();
 
 const knowledgeFilePath = process.env.ASSIST_KNOWLEDGE_FILE
-  ?? path.join(process.cwd(), "data", "assist-knowledge.json");
+  ?? dataFile("assist-knowledge.json");
 
 let loaded = false;
 let persistenceEnabled = process.env.ASSIST_KNOWLEDGE_PERSIST !== "off";

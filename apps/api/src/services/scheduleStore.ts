@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { dataFile } from "./dataDirectory.js";
 
 // Scheduled work, and the arithmetic that decides when it is due.
 //
@@ -164,7 +165,7 @@ export function dueVerdict(schedule: Schedule, now: Date): DueVerdict {
 type PersistedShape = { version: 1; schedules: Schedule[] };
 
 const scheduleFilePath = process.env.ASSIST_SCHEDULE_FILE
-  ?? path.join(process.cwd(), "data", "assist-schedules.json");
+  ?? dataFile("assist-schedules.json");
 
 let schedules: Schedule[] = [];
 let loaded = false;

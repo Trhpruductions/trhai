@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { dataFile } from "./dataDirectory.js";
 
 // Conversation storage, keyed the same way as memory: `user:<id>` when signed in,
 // the anonymous session id otherwise. That is what makes a conversation follow an
@@ -31,7 +32,7 @@ export const maxTrackedConversations = 500;
 const maxContentLength = 8000;
 
 const conversationFilePath = process.env.ASSIST_CONVERSATION_FILE
-  ?? path.join(process.cwd(), "data", "conversations.json");
+  ?? dataFile("conversations.json");
 
 let persistenceEnabled = process.env.ASSIST_CONVERSATION_PERSIST !== "off";
 let loaded = false;

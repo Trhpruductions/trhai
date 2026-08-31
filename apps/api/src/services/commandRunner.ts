@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { increment, observe } from "./metrics.js";
+import { dataFile } from "./dataDirectory.js";
 
 // Running commands on this machine.
 //
@@ -168,7 +169,7 @@ export function accessFilePath(): string {
     return testArmFile;
   }
 
-  return path.join(process.cwd(), "data", "command-arm.json");
+  return dataFile("command-arm.json");
 }
 
 /** Cached so every call within one test process agrees on the same file. */

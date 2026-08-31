@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { dataFile } from "./dataDirectory.js";
 
 // What the assistant is part-way through, so "do it" has something to resume.
 //
@@ -57,7 +58,7 @@ const maxRequestLength = 4000;
 const maxResultLength = 4000;
 
 const taskFilePath = process.env.ASSIST_TASK_FILE
-  ?? path.join(process.cwd(), "data", "tasks.json");
+  ?? dataFile("tasks.json");
 
 const persistenceEnabled = process.env.ASSIST_TASK_PERSIST !== "off";
 let loaded = false;
