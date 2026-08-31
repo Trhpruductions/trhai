@@ -9,7 +9,8 @@
 // question, it says so plainly rather than filling the gap with confident-sounding
 // boilerplate.
 
-import { analyzeRequest, type RequestAnalysis } from "./requestAnalysis.js";
+import { analyzeRequest, isContinuationRequest, type RequestAnalysis } from "./requestAnalysis.js";
+import { classifyIntent } from "./actionIntent.js";
 import { selectRelevantMemories, type ScorableMemory, type ScoredMemory } from "./memoryRelevance.js";
 import { buildTaskPlan } from "./taskPlanning.js";
 import { getSystemCapabilities, toolsByLevel } from "./systemCapabilities.js";
@@ -519,6 +520,33 @@ export function composeReply(input: ComposerInput): ComposedReply {
   // answering; asking the same clarifying question a second time would leave
   // the conversation unable to progress. Found by inspection while fixing the
   // sibling bug just above at line 483, which already carries this guard.
+  // "Continue" with nothing to continue.
+  //
+  // The orchestrator resumes an unfinished task when there is one, and
+  // deliberately leaves the message alone when there is not - finished work is
+  // not resumable, so "continue" after a completed build is a new request.
+  // That reasoning is right; what came out of it was not. The message fell
+  // through to the vague branch below and was answered "I need a bit more to
+  // work with. Tell me what you're trying to end up with, and any constraint
+  // that matters (stack, deadline, audience)" - a planning questionnaire in
+  // reply to a one-word instruction, which reads as not having understood it
+  // at all.
+  //
+  // Saying there is nothing in progress is both shorter and true.
+  if (isContinuationRequest(message) && !refining) {
+    return {
+      // Careful not to assert a previous request. "do it" is a continuation
+      // phrase and may well be the first thing said in a session, where
+      // "the last thing you asked for finished" would be a claim about
+      // something that never happened.
+      text: "Nothing is in progress right now. Tell me what to do and I will "
+        + "start; if something stops halfway, \"continue\" will pick it up.",
+      strategy: "clarify",
+      groundedOn: [],
+      groundedOnHistory: 0
+    };
+  }
+
   if (analysis.vague && !refining) {
     return {
       text: "I need a bit more to work with. Tell me what you're trying to end up with, and any constraint that matters (stack, deadline, audience), and I'll turn it into a concrete plan.",
@@ -577,7 +605,24 @@ export function composeReply(input: ComposerInput): ComposedReply {
   // This is deliberately independent of mode. The client infers mode from
   // keywords, so merely saying "api" lands you in code mode — which must not by
   // itself turn a statement of fact into a request for work.
-  if (analysis.shape === "statement" && !analysis.hasRequestMarker && !refining) {
+  // An order is not a statement, whatever its grammar looks like.
+  //
+  // "edit C:/…/greet.js so it throws when name is empty" parses as a statement
+  // here - it has no question mark and no request marker - and was answered
+  // "Got it." with nothing edited and no tool called. That is exactly the
+  // failure the rest of this codebase is built against, arriving through the
+  // one branch that never asked whether the message was an instruction.
+  //
+  // classifyIntent is the deterministic classifier written for precisely this
+  // question, and it is regression-tested. Where the two disagree it wins:
+  // treating an order as conversation costs the user the work, while treating
+  // a statement as an order costs one wasted generation.
+  if (
+    analysis.shape === "statement"
+    && !analysis.hasRequestMarker
+    && !refining
+    && !classifyIntent(message).action
+  ) {
     // Facts are pulled out of every message, not only ones that open with
     // "remember" - recordMemoriesFromMessage runs on the way in, for preferences,
     // conventions and constraints alike. So this can report what was actually

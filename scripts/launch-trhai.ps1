@@ -52,6 +52,27 @@ if (-not (Test-Path (Join-Path $root "apps\trhai-web\.next"))) {
     exit 1
 }
 
+# The shortcut serves the built output, not the source. A build older than the
+# code it was built from opens yesterday's app behind today's icon, which is
+# worse than a crash: it looks like the change simply did not work.
+#
+# Said, never enforced. Rebuilding here would turn a fourteen-second launch
+# into a several-minute one, and refusing to open would let a stray keystroke
+# in an editor lock you out of your own app.
+try {
+    $buildStamp = (Get-Item (Join-Path $root "apps/trhai-web/.next/BUILD_ID") -ErrorAction Stop).LastWriteTime
+    $newestSource = Get-ChildItem (Join-Path $root "apps/trhai-web/src") -Recurse -File -ErrorAction Stop |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($newestSource -and $newestSource.LastWriteTime -gt $buildStamp) {
+        Write-Host "Note: the interface has changed since it was last built."
+        Write-Host "      Opening the previous build. Run Build-TRHAI.bat for the new one."
+        Write-Log "stale build: $($newestSource.Name) is newer than BUILD_ID"
+    }
+} catch {
+    Write-Log "could not compare build age: $($_.Exception.Message)"
+}
+
+
 # Stop a window that is already open rather than stacking a second one on the
 # same services. Matched on the command line so this only ever touches this
 # app's own shell, never another Electron app that happens to be running.
@@ -68,15 +89,50 @@ Write-Log "launch requested"
 
 # Started only when the port is free, so launching twice opens the app you have
 # rather than racing a second copy onto a taken port.
-function Start-Service-IfDown([int]$port, [string]$name, [string]$argumentList) {
+function Start-Service-IfDown([int]$port, [string]$name, [string]$argumentList, [string]$logName) {
     if (Test-Port $port) {
         Write-Log "$name already listening on $port"
         return
     }
     Write-Log "starting $name on $port"
+
+    # Keep what the service prints.
+    #
+    # These are started hidden, so until now every line they wrote was
+    # discarded. That silently threw away the app's own diagnostics: the
+    # orchestrator logs "[assist] <model> unusable" when a model fails to load
+    # and it falls through to a weaker one, and that line exists precisely
+    # because a model failing used to be invisible. Launched from the desktop
+    # shortcut it was invisible again - not for want of logging, but for want
+    # of anywhere to put it.
+    #
+    # Overwritten per launch rather than appended, because Start-Process cannot
+    # append and an ever-growing file nobody rotates is its own problem. The
+    # previous run is kept as .prev so a crash is still readable after the
+    # restart that follows it.
+    $out = Join-Path $logDir "$logName.log"
+    $errors = Join-Path $logDir "$logName.err.log"
+    foreach ($file in @($out, $errors)) {
+        try {
+            if (Test-Path $file) { Move-Item -Path $file -Destination "$file.prev" -Force -ErrorAction Stop }
+        } catch {
+            # Keeping the previous log is a convenience, never a reason to fail.
+        }
+    }
+
     # Working directory is the repo root so npm resolves the workspace.
-    Start-Process -FilePath "npm.cmd" -ArgumentList $argumentList `
-        -WorkingDirectory $root -WindowStyle Hidden
+    try {
+        Start-Process -FilePath "npm.cmd" -ArgumentList $argumentList `
+            -WorkingDirectory $root -WindowStyle Hidden `
+            -RedirectStandardOutput $out -RedirectStandardError $errors -ErrorAction Stop
+    } catch {
+        # A held handle on a log file must never stop the app starting. That is
+        # the lesson Launch-Vexora.bat records, and it applies to the log this
+        # function just tried to open as much as to the launcher's own.
+        Write-Log "could not write $name logs ($($_.Exception.Message)); starting without them"
+        Start-Process -FilePath "npm.cmd" -ArgumentList $argumentList `
+            -WorkingDirectory $root -WindowStyle Hidden
+    }
 }
 
 # Ollama, which the assistant answers with.
@@ -128,8 +184,8 @@ function Start-Ollama-IfDown {
 }
 
 Start-Ollama-IfDown
-Start-Service-IfDown 4000 "API" "run start --workspace @ascend/api"
-Start-Service-IfDown 3210 "app" "run start --workspace trhai-web -- -p 3210"
+Start-Service-IfDown 4000 "API" "run start --workspace @ascend/api" "api"
+Start-Service-IfDown 3210 "app" "run start --workspace trhai-web -- -p 3210" "web"
 
 # Wait for the app to actually answer before opening a window at it. A fixed
 # sleep is the wrong tool: too short on a cold start, wasted on a warm one.

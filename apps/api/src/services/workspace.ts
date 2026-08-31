@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -8,7 +9,7 @@ import {
   writeFileSync
 } from "node:fs";
 import path from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 // One implementation of the containment check, not two. This file had its own
 // copy, identical down to the reasoning; see machinePaths.ts.
 import { isInsidePath } from "./machinePaths.js";
@@ -38,10 +39,47 @@ import { isInsidePath } from "./machinePaths.js";
  *
  * ASCEND_WORKSPACE still overrides, which is what the tests use.
  */
+let testWorkspaceRoot: string | undefined;
+
 export function workspaceRoot(): string {
   const configured = process.env.ASCEND_WORKSPACE;
   if (configured) return configured;
 
+  // A test that forgets ASCEND_WORKSPACE lands in the real workspace and
+  // writes there for real. That is not hypothetical: apps/api/workspace/it-nice
+  // and a stray apps/escape.txt were both left behind by test runs, and each
+  // was fixed by adding the override to one more file - a fix that holds only
+  // until the next test file is written without it.
+  //
+  // So the guarantee moves here, where forgetting is not possible. Nine test
+  // files currently reach workspace code without setting the override; whether
+  // any of them writes today matters less than the fact that nothing stops one
+  // from starting to.
+  //
+  // ASCEND_WORKSPACE still wins, because the tests that set it need to know
+  // the path in order to assert against it.
+  if (process.env.NODE_TEST_CONTEXT) {
+    testWorkspaceRoot ??= mkdtempSync(path.join(tmpdir(), "trhai-test-workspace-"));
+    return testWorkspaceRoot;
+  }
+
+  return defaultWorkspaceRoot();
+}
+
+/**
+ * Where a real run puts the workspace, with no test isolation in front of it.
+ *
+ * Separate from workspaceRoot because the guard above would otherwise make the
+ * production choice untestable: a test asking workspaceRoot where the default
+ * lives gets the throwaway directory and learns nothing. That is exactly what
+ * happened - "the default workspace is outside the repo" started failing on the
+ * commit that added the isolation, because a temp directory is indeed outside
+ * the repo but is not the user's Vexora folder.
+ *
+ * Both properties are worth keeping, so both are kept: this function answers
+ * what the policy is, workspaceRoot answers where to write right now.
+ */
+export function defaultWorkspaceRoot(): string {
   // homedir() is empty in some containerised environments; falling back to the
   // working directory is worse than nothing there, so it keeps the old
   // behaviour rather than writing to the filesystem root.

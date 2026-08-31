@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseFlow, type Flow } from "@ascend/shared";
+import { dataFile } from "./dataDirectory.js";
 
 // The saved automation flow, kept where the scheduler can reach it.
 //
@@ -15,7 +16,7 @@ import { parseFlow, type Flow } from "@ascend/shared";
 // the smallest move that makes the connection real rather than implied.
 
 const flowFilePath = process.env.ASSIST_FLOW_FILE
-  ?? path.join(process.cwd(), "data", "assist-flow.json");
+  ?? dataFile("assist-flow.json");
 
 let flow: Flow | null = null;
 let loaded = false;

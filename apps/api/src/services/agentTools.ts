@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.js";
 import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
 import { describeDifference, shiftDate } from "./dateMath.js";
@@ -17,9 +18,14 @@ import {
 import { fetchWebPage } from "./webFetch.js";
 import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
 import { resolveForAccess } from "./machinePaths.js";
+import { explainMiss } from "./projectContext.js";
+import { noteProjectTouched, withinActiveProject } from "./activeProject.js";
 import { applyEdit, describeEdit } from "./fileEdit.js";
 import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
 import { enterStage } from "./reasoningStage.js";
+import {
+  addSchedule, describeAction, describeCadence, listSchedules, type Cadence
+} from "./scheduleStore.js";
 
 // What the assistant can actually do.
 //
@@ -550,6 +556,44 @@ export const toolDefinitions: ToolDefinition[] = [
       }
     }
   },
+  // The app has a scheduler. The assistant could not reach it.
+  //
+  // Asked "remind me every day at 9am to check the build", it called no tool
+  // and explained how to use Windows Task Scheduler. Asked "what schedules do
+  // I have?", it answered "I do not have access to information about your
+  // personal schedule" - which is false: the schedules live in this process,
+  // behind /v1/schedules, and the interface lists them. An assistant denying a
+  // capability the app plainly has is the same failure as claiming one it
+  // lacks, pointed the other way.
+  {
+    type: "function",
+    function: {
+      name: "list_schedules",
+      description: "List the user's saved schedules - what runs, how often, and whether it "
+        + "is enabled. Use this whenever they ask what is scheduled.",
+      parameters: { type: "object", properties: {}, required: [] }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_schedule",
+      description: "Save a recurring schedule that asks the assistant something on a cadence. "
+        + "Use it when the user asks to be reminded of something, or for something to happen "
+        + "daily or every so many minutes.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "A short name for the schedule." },
+          prompt: { type: "string", description: "What to ask the assistant when it fires." },
+          daily_at: { type: "string", description: "A 24-hour time like 09:00 to run once a day." },
+          every_minutes: { type: "string", description: "Run every N minutes instead of daily." }
+        },
+        required: ["name", "prompt"]
+      }
+    }
+  },
+
   {
     type: "function",
     function: {
@@ -628,6 +672,27 @@ export const toolDefinitions: ToolDefinition[] = [
 const scaffoldingTools = new Set(["build_app", "plan_app"]);
 
 /**
+ * Tools that act on the machine, withheld when the request was only to look.
+ *
+ * Asked to "read server.js from the calculator app", the model read it and
+ * then made three write_file calls, reporting "app.js has been written to the
+ * workspace". Nobody asked for a file. An earlier run did the same thing with
+ * run_command, inventing a path for it. Reading is reading.
+ *
+ * Safe to gate on because of the order actionIntent checks its verb groups in:
+ * write is tested before read, so "read config.json and update the port"
+ * classifies as write and keeps every one of these. Only a request with
+ * nothing but a read verb in it lands here.
+ *
+ * Memory is deliberately not in this set. remember and forget act on the
+ * conversation rather than on the machine, and "read notes.txt and remember
+ * the port" is an ordinary thing to ask.
+ */
+const machineChangingTools = new Set([
+  "write_file", "edit_file", "build_app", "plan_app", "run_command", "run_script"
+]);
+
+/**
  * Name a built app after what the user asked for, not the model's paraphrase.
  *
  * build_app's `description` is written by the model, and models describe an app
@@ -657,13 +722,32 @@ function titledFromRequest<T extends { title: string }>(spec: T, request?: strin
   return { ...spec, title: fromRequest };
 }
 
-export function availableTools(armed: boolean, options: { scaffolding?: boolean } = {}): ToolDefinition[] {
+/**
+ * The verdict, not just the detail.
+ *
+ * summarize() in buildVerification returns "no output" when a smoke test exits
+ * 0 without printing anything - which is a pass, decided by the exit code. The
+ * reply rendered that as "verified it: no output", which reads like the
+ * verification did nothing. A countdown timer that genuinely built, served
+ * HTTP 200 and rendered its own UI was described in words that gave no reason
+ * to believe any of it.
+ */
+export function verifiedDetail(output: string): string {
+  return output === "no output" ? "its own checks passed, without printing anything" : output;
+}
+
+export function availableTools(
+  armed: boolean,
+  options: { scaffolding?: boolean; changes?: boolean } = {}
+): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
+  const allowChanges = options.changes ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
     if (!armed && name === "run_command") return false;
     if (!allowScaffolding && scaffoldingTools.has(name)) return false;
+    if (!allowChanges && machineChangingTools.has(name)) return false;
     return true;
   });
 }
@@ -1286,10 +1370,13 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         };
       }
 
+      // A build you just asked for is the project you are working in.
+      noteProjectTouched(context.sessionId, folder);
+
       return {
         ok: true,
         content: "Built \"" + spec.title + "\" in the workspace at " + folder + "/ with "
-          + written.length + " files, and verified it: " + verification.output
+          + written.length + " files, and verified it: " + verifiedDetail(verification.output)
           + "\n\n" + runLine
       };
     }
@@ -1339,6 +1426,26 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       const target = requireString(call.arguments.path);
       if (!target) return { ok: false, content: "read_file needs a path." };
 
+      // A URL is not a file, and saying so is the whole fix.
+      //
+      // "fetch https://example.com and tell me what it says" called read_file,
+      // which resolved the address as a relative path and reported "There is
+      // no file at D:\Vexora\workspace\example.com". The model then wrote
+      // "Did you mean to use fetch_url instead?" to the user - it knew, and
+      // still did not do it. The prompt already describes fetch_url; another
+      // sentence there would not have helped.
+      //
+      // Refused here rather than resolved, because the tool result is what the
+      // model reads next, and a refusal that names the right tool is a move it
+      // can make.
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+        return {
+          ok: false,
+          content: `"${target}" is a URL, not a file on this machine. `
+            + "Use fetch_url for an address; read_file only opens files."
+        };
+      }
+
       // Anywhere on the disk once machine access is granted, the workspace
       // otherwise. run_command could always reach the whole filesystem, so a
       // sandboxed reader beside an unsandboxed shell was never a boundary -
@@ -1354,8 +1461,35 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       });
       if (!verdict.ok) return { ok: false, content: verdict.reason };
 
-      const result = readFileAt(verdict.path);
-      if (!result.ok) return { ok: false, content: result.reason };
+      let result = readFileAt(verdict.path);
+
+      // A bare filename means the project this session is working in.
+      //
+      // "read the smoke test" right after reading calculator/server.js came
+      // through as a name with no directory. The prompt says which project is
+      // current and the model does not reliably use it, so the resolution
+      // happens here instead of being asked for again.
+      if (!result.ok) {
+        const inProject = withinActiveProject(context.sessionId, target);
+        if (inProject) {
+          const retry = resolveForAccess(inProject, {
+            granted: commandsArmed() && !context.unattended,
+            intent: "read",
+            insideWorkspace: resolveInWorkspace
+          });
+          if (retry.ok) {
+            const second = readFileAt(retry.path);
+            if (second.ok) result = second;
+          }
+        }
+      }
+
+      if (result.ok) noteProjectTouched(context.sessionId, target);
+      // A miss that names what does exist. "There is no file at
+      // calculator/public/server.js" is true and a dead end: the model guessed
+      // a subdirectory, was told no, said it would try the main directory, and
+      // then stopped. Naming the real path turns that into a recovery.
+      if (!result.ok) return { ok: false, content: explainMiss(result.reason, target) };
 
       // A truncated read says so. Answering about a file it has only partly
       // seen, with no way for the reader to know, is the failure to avoid.
@@ -1390,6 +1524,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // landed, because "wrote config.json" is not enough information when
       // that could have been anywhere on the disk.
       const inWorkspace = resolveInWorkspace(target);
+      noteProjectTouched(context.sessionId, target);
       return {
         ok: true,
         content: inWorkspace === result.path
@@ -1442,7 +1577,69 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       const written = writeFileAt(writeVerdict.path, edited.content);
       if (!written.ok) return { ok: false, content: `${written.reason} Nothing was changed.` };
 
+      noteProjectTouched(context.sessionId, target);
       return { ok: true, content: `Edited ${written.path} — ${describeEdit(oldText, newText)}.` };
+    }
+
+    case "list_schedules": {
+      const saved = listSchedules();
+      if (saved.length === 0) {
+        return { ok: true, content: "Nothing is scheduled." };
+      }
+      const lines = saved.map((entry) =>
+        `- ${entry.name}: ${describeCadence(entry.cadence)}`
+        + `${entry.enabled ? "" : " (paused)"} - ${describeAction(entry.action)}`);
+      return { ok: true, content: lines.join("\n") };
+    }
+
+    case "add_schedule": {
+      const name = requireString(call.arguments.name);
+      const prompt = requireString(call.arguments.prompt);
+      if (!name || !prompt) {
+        return { ok: false, content: "add_schedule needs a name and what to ask." };
+      }
+
+      // Either a time of day or an interval, never both. A caller that supplies
+      // both has not decided, and picking one for them would be a guess the
+      // user never sees.
+      const dailyAt = requireString(call.arguments.daily_at);
+      const everyRaw = call.arguments.every_minutes;
+      const every = typeof everyRaw === "number"
+        ? everyRaw
+        : Number(requireString(everyRaw as string) ?? NaN);
+
+      let cadence: Cadence | null = null;
+      if (dailyAt) {
+        const at = /^([0-9]{1,2}):([0-9]{2})$/.exec(dailyAt.trim());
+        const hours = at ? Number(at[1]) : NaN;
+        const minutes = at ? Number(at[2]) : NaN;
+        if (!at || hours > 23 || minutes > 59) {
+          return { ok: false, content: `"${dailyAt}" is not a 24-hour time like 09:00.` };
+        }
+        cadence = { kind: "daily", minuteOfDay: hours * 60 + minutes };
+      } else if (Number.isFinite(every) && every > 0) {
+        cadence = { kind: "interval", minutes: Math.round(every) };
+      }
+
+      if (!cadence) {
+        return {
+          ok: false,
+          content: "add_schedule needs either daily_at (a time like 09:00) or every_minutes."
+        };
+      }
+
+      const saved = addSchedule({ id: randomUUID(), name, prompt, cadence });
+      if (!saved) {
+        // Reports the outcome, not the attempt - the store refuses a bad
+        // cadence or a full list, and saying "scheduled" either way is the
+        // false success this codebase is built against.
+        return { ok: false, content: "That schedule could not be saved. Nothing was scheduled." };
+      }
+
+      return {
+        ok: true,
+        content: `Scheduled "${saved.name}": ${describeCadence(saved.cadence)}.`
+      };
     }
 
     case "current_datetime": {

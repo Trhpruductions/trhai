@@ -14,6 +14,8 @@ import {
 } from "./actionIntent.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
+import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
+import { activeProject } from "./activeProject.js";
 
 // Re-exported so nothing that already imports it from here has to move.
 export type { ToolActivity };
@@ -727,6 +729,11 @@ export async function runAgent(
       role: "system",
       content: `${systemPrompt}\n\nThe date and time on this machine right now is ${today}. `
         + "That is current and correct — use it directly and never say the date is unknown or unrecorded."
+        // Where the work actually lives. Without this the model invents paths:
+        // it called list_files on D:/projects/calculator, which has never
+        // existed on this machine, then asked the user for a full path to a
+        // project it could have found by name. See projectContext.ts.
+        + `\n\n${describeWorkspace(summariseWorkspace(), activeProject(context.sessionId))}`
     },
     { role: "user", content: question }
   ];
@@ -747,6 +754,23 @@ export async function runAgent(
 
   // Fixed for the turn: what was asked does not change as the loop runs.
   const askedAQuestion = isExplanatoryQuestion(question);
+
+  // A request that names the file it wants written is not a request to
+  // scaffold a project.
+  //
+  // Found by asking the app to do the plainest thing it offers: "create a file
+  // called launch-check.txt containing the single line: it works". It wrote the
+  // file correctly and also called build_app, which refused for want of a
+  // description - so the answer opened "Sorry, I can't build an app without a
+  // description", and only then mentioned the file. The work succeeded and the
+  // reply led with an apology for something nobody asked for.
+  //
+  // Safe on the same argument machineChangingTools already makes from verb
+  // order: generate is tested before write, so "build me a todo app", "create
+  // an app that tracks tasks" and "write me an app for invoices" all classify
+  // as generate and keep build_app. Only a write verb with a named file target
+  // lands here. "create a todo app" names no file, so it is not caught either.
+  const namedAFileToWrite = intent.kind === "write" && intent.hasTarget;
   let firstTurnToolCalls: number | null = null;
 
   // Stated at each path rather than inferred at the end, through named
@@ -846,10 +870,14 @@ export async function runAgent(
             ...(offerTools
               ? {
                 tools: availableTools(commandsArmed() && !unattended, {
+                  // A request to look does not get the tools that change
+                  // things. Asked to read one file, the model read it and then
+                  // wrote three - see machineChangingTools in agentTools.
+                  changes: intent.kind !== "read",
                   // A question does not get to scaffold a project. Decided from
                   // the request rather than from the reply, because a build has
                   // already written its files by the time a reply exists.
-                  scaffolding: !askedAQuestion
+                  scaffolding: !askedAQuestion && !namedAFileToWrite
                 })
               }
               : {})

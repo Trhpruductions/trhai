@@ -245,6 +245,21 @@ export default function DashboardPage() {
     });
   }, []);
   const [online, setOnline] = useState<boolean | null>(null);
+  /**
+   * Work left over from last time, read once when the screen opens.
+   *
+   * The product spec asks for this by name: "Welcome back. You still have one
+   * unfinished development task from yesterday." Everything needed was already
+   * here - the store keeps the task, the orchestrator resumes it, "continue"
+   * replays it - but nothing ever mentioned it, so the only way to discover
+   * unfinished work was to remember it yourself.
+   *
+   * Read once on open rather than polled. The rail panels were deliberately
+   * taken out of the four-second poll because their answers were being
+   * rendered into a hidden column, and putting one back would undo that. A
+   * greeting needs the answer once.
+   */
+  const [unfinished, setUnfinished] = useState<AgentTask | null>(null);
   const [model, setModel] = useState<ModelInfo | null>(null);
   const [stt, setStt] = useState<TranscribeInfo | null>(null);
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
@@ -481,6 +496,22 @@ export default function DashboardPage() {
       stop();
     };
   }, [readAll]);
+
+  // Once, on open. See the note on `unfinished` for why this is not polled.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const result = await apiGet<{ tasks: AgentTask[] }>(
+        `/v1/agent-tasks?sessionId=${sessionId()}`
+      );
+      if (cancelled || !result.ok) return;
+      const task = result.data.tasks[0];
+      // Finished work is not unfinished work.
+      setUnfinished(task && task.status !== "succeeded" ? task : null);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
 
   // Opening the activity rail fills it now rather than on the next tick.
   //
@@ -888,11 +919,24 @@ export default function DashboardPage() {
             <span className="hud-label">TRH AI console</span>
             <div className="console-feed">
               {messages.length === 0 ? (
-                <p className="faint">
-                  {modelName
-                    ? `${greetingFor(clock ?? new Date())}${identity?.username ? `, ${displayName(identity.username)}` : ""}. Answering with ${modelName}.`
-                    : "No local model is loaded yet."}
-                </p>
+                <>
+                  <p className="faint">
+                    {modelName
+                      ? `${greetingFor(clock ?? new Date())}${identity?.username ? `, ${displayName(identity.username)}` : ""}. Answering with ${modelName}.`
+                      : "No local model is loaded yet."}
+                  </p>
+                  {/* Work left from last time, said once and only when there is
+                      some. The spec asks for exactly this - "Welcome back. You
+                      still have one unfinished development task" - and it is
+                      the one kind of proactivity that cannot become noise,
+                      because it appears only where a greeting already was and
+                      only when a real task is really unfinished. */}
+                  {unfinished ? (
+                    <p className="faint console-unfinished">
+                      {`You left something unfinished: "${unfinished.request}". Say "continue" to pick it up.`}
+                    </p>
+                  ) : null}
+                </>
               ) : (
                 messages.slice(-6).map((message) => (
                   <article key={message.id} className={`console-turn console-${message.role}`}>

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { dataFile } from "./dataDirectory.js";
 
 // A to-do list for `/v1/tasks` — TRHAI's "Tasks" screen, not to be confused
 // with taskStore.ts's StoredTask, which is a different thing under a
@@ -30,7 +31,7 @@ export const maxTrackedTaskSessions = 500;
 const tasksBySession = new Map<string, TaskItem[]>();
 
 const taskListFilePath = process.env.ASSIST_TASKS_FILE
-  ?? path.join(process.cwd(), "data", "assist-tasks.json");
+  ?? dataFile("assist-tasks.json");
 
 let loaded = false;
 let persistenceEnabled = process.env.ASSIST_TASKS_PERSIST !== "off";

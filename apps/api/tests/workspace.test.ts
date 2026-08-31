@@ -156,8 +156,11 @@ test("the default workspace is outside the repo", async () => {
   delete process.env.ASCEND_WORKSPACE;
 
   try {
-    const { workspaceRoot } = await import("../src/services/workspace.js");
-    const resolved = path.resolve(workspaceRoot());
+    // defaultWorkspaceRoot, not workspaceRoot: under the test runner the latter
+    // hands back a throwaway directory so no test can write into the real
+    // workspace, which would make the question this test asks unanswerable.
+    const { defaultWorkspaceRoot } = await import("../src/services/workspace.js");
+    const resolved = path.resolve(defaultWorkspaceRoot());
 
     assert.ok(
       !resolved.startsWith(path.resolve(process.cwd())),

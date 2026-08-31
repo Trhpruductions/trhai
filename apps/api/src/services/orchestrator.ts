@@ -7,6 +7,7 @@ import { runAgent, type ToolOutcome } from "./agentLoop.js";
 import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
 import { isContinuationRequest } from "./requestAnalysis.js";
+import { classifyIntent } from "./actionIntent.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
 import {
@@ -250,8 +251,28 @@ export async function runAssistantOrchestrator(
     // is told what to do and does something else anyway is not fixed by
     // asking more politely; it is fixed by removing the choice that goes
     // wrong.
+    // Naming a file to write is not asking for an app, however create-shaped
+    // the sentence looks.
+    //
+    // "Create a file called launch-check.txt containing the single line: it
+    // works" reaches the composer's create plan, because it does open with
+    // "create". Instructing build_app from there set two parts of the system
+    // against each other: agentLoop withholds the scaffolding tools from a
+    // write that names its file, so the model was ordered to call a tool it
+    // could not see, produced nothing, and the turn fell back to a generic
+    // four-step plan. No file was written at all - worse than the spurious
+    // build_app it replaced.
+    //
+    // The same classifier both sites already consult decides it, so they can
+    // no longer disagree. classifyIntent tests generate before write, so
+    // "build me a todo app" is untouched and keeps its instruction.
+    const planWritesANamedFile = (() => {
+      const planIntent = classifyIntent(modelReply.buildRequest ?? "");
+      return planIntent.kind === "write" && planIntent.hasTarget;
+    })();
+
     const question = isPlan && modelReply.buildRequest
-      ? modelReply.planTaskType === "create"
+      ? modelReply.planTaskType === "create" && !planWritesANamedFile
         ? `${modelReply.buildRequest}\n\nCall build_app with this. Not plan_app — the user wants it `
           + `actually built, not described. Do not stop at explaining what it would contain.`
         : modelReply.buildRequest

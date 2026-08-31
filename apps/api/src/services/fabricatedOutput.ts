@@ -20,9 +20,18 @@
 // plus the execution trace, which is written by the code that did the work.
 // So anything wearing this shape in a final reply is invention by definition.
 
-/** Tag names models use for this, opening or closing, with or without an underscore. */
+/**
+ * Tag names models use for this, opening or closing, with or without an
+ * underscore.
+ *
+ * `request` earned its place the hard way. An edit failed, and the model
+ * replied "Understood. I will read the file again and copy the lines
+ * verbatim." followed by a literal `<tool_request> read_file {"path":...}` -
+ * internal plumbing presented to the user as an answer. The list had
+ * response, result, output and call, so a request sailed straight through.
+ */
 const fabricatedBlock =
-  /<\s*\/?\s*tool[_-]?(?:response|result|output|call)s?\s*>/gi;
+  /<\s*\/?\s*tool[_-]?(?:response|result|output|call|request|use|invocation)s?\s*>/gi;
 
 /**
  * The same invention written as prose instead of as tags.

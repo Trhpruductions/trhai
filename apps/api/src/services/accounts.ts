@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { dataFile } from "./dataDirectory.js";
 
 // Accounts for the assistant.
 //
@@ -73,7 +74,7 @@ export const minPasswordLength = 10;
 export const tokenLifetimeMs = 30 * 24 * 60 * 60 * 1000;
 
 const accountsFilePath = process.env.ASSIST_ACCOUNTS_FILE
-  ?? path.join(process.cwd(), "data", "accounts.json");
+  ?? dataFile("accounts.json");
 
 let persistenceEnabled = process.env.ASSIST_ACCOUNTS_PERSIST !== "off";
 let loaded = false;

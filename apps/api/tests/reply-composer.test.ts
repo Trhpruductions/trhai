@@ -463,10 +463,19 @@ test("a plan carries relevant memory through as constraints", () => {
 });
 
 test("asks for clarification instead of planning against nothing", () => {
+  // "do it" is a continuation phrase, so with nothing running it now gets the
+  // specific answer rather than the generic one. Both are "clarify"; this one
+  // says what is actually true instead of asking about stack and deadline.
   const reply = composeReply({ mode: "general", message: "do it", memories: [], history: [] });
 
   assert.equal(reply.strategy, "clarify");
-  assert.match(reply.text, /need a bit more/i);
+  assert.match(reply.text, /nothing is in progress/i);
+
+  // A genuinely vague request that is not a continuation still gets the
+  // planning question, which is the right answer there.
+  const vague = composeReply({ mode: "general", message: "make me a thing", memories: [], history: [] });
+  assert.equal(vague.strategy, "clarify");
+  assert.match(vague.text, /need a bit more/i);
 });
 
 test("acknowledges a remember statement without inventing work", () => {
@@ -1084,4 +1093,51 @@ test("a bare greeting still works", () => {
       "smalltalk"
     );
   }
+});
+
+test("an instruction is never answered as a statement", () => {
+  // "edit C:/…/greet.js so it throws when name is empty" has no question mark
+  // and no request marker, so analyzeRequest called it a statement and the
+  // acknowledge branch answered "Got it." - nothing edited, no tool called.
+  // That is the failure this whole codebase is built against, arriving through
+  // the one branch that never asked whether the message was an order.
+  for (const order of [
+    "edit D:/work/greet.js so it throws an Error when name is empty",
+    "write a config.json with the port in it",
+    "delete D:/work/old.log"
+  ]) {
+    const reply = composeReply({ mode: "general", message: order, memories: [], history: [] });
+    assert.notEqual(reply.strategy, "acknowledge", `"${order}" was acknowledged instead of acted on`);
+    assert.notEqual(reply.text.trim(), "Got it.");
+  }
+});
+
+test("a real statement is still acknowledged", () => {
+  // The line this must not cross: classifyIntent has to actually distinguish,
+  // not just disable the branch.
+  const reply = composeReply({
+    mode: "general", message: "the api runs on port 4000", memories: [], history: []
+  });
+  assert.equal(reply.strategy, "acknowledge");
+});
+
+test("\"continue\" with nothing running says so", () => {
+  // The orchestrator resumes an unfinished task when there is one and leaves
+  // the message alone when there is not - finished work is not resumable. That
+  // reasoning is right; the reply was not. It fell to the vague branch and
+  // answered a one-word instruction with a planning questionnaire: "Tell me
+  // what you're trying to end up with, and any constraint that matters (stack,
+  // deadline, audience)."
+  for (const said of ["continue", "proceed", "carry on", "do it"]) {
+    const reply = composeReply({ mode: "general", message: said, memories: [], history: [] });
+    assert.doesNotMatch(reply.text, /stack, deadline, audience/, `"${said}" got the questionnaire`);
+    assert.match(reply.text, /nothing is in progress/i);
+  }
+});
+
+test("a real request is not mistaken for a continuation", () => {
+  const reply = composeReply({
+    mode: "general", message: "build me a task tracker", memories: [], history: []
+  });
+  assert.doesNotMatch(reply.text, /nothing is in progress/i);
 });

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { dataFile } from "./dataDirectory.js";
 
 // Machine preferences.
 //
@@ -22,7 +23,7 @@ export type Preferences = {
 export const defaultPreferences: Preferences = { personality: "professional" };
 
 const preferencesFile = process.env.ASCEND_PREFERENCES_FILE
-  ?? path.join(process.cwd(), "data", "preferences.json");
+  ?? dataFile("preferences.json");
 
 let persistenceEnabled = process.env.ASCEND_PREFERENCES_PERSIST !== "off";
 let loaded = false;

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { increment, observe } from "./metrics.js";
+import { dataFile } from "./dataDirectory.js";
 
 // Running commands on this machine.
 //
@@ -65,6 +66,24 @@ export const commandTimeoutMs = Number(process.env.TRHAI_COMMAND_TIMEOUT_MS ?? 6
 
 /** Output beyond this is cut. A model cannot use more, and it crowds the turn. */
 export const maxOutputBytes = 20_000;
+
+/**
+ * Where a command runs when the caller does not say.
+ *
+ * The home directory, which is a sensible default for "check the disk" and a
+ * trap for anything about a project. The model was never told this, so asked to
+ * look at an app it ran `node index.js` and got "Cannot find module
+ * C:\Users\hankh\index.js" - not a wild guess, just the shell resolving a
+ * relative path against a directory nobody had mentioned to it.
+ *
+ * Exported so projectContext can state it in the prompt from the same place the
+ * runner reads it. Two copies of this would drift, and the drift would be
+ * invisible: the prompt would describe one directory and commands would run in
+ * another.
+ */
+export function commandWorkingDirectory(): string {
+  return homedir() || process.cwd();
+}
 
 /**
  * How long a grant lasts, when one is made by arming.
@@ -150,7 +169,7 @@ export function accessFilePath(): string {
     return testArmFile;
   }
 
-  return path.join(process.cwd(), "data", "command-arm.json");
+  return dataFile("command-arm.json");
 }
 
 /** Cached so every call within one test process agrees on the same file. */
@@ -313,7 +332,7 @@ export async function runCommand(
 ): Promise<CommandRun> {
   const startedAt = options.now ?? new Date();
   const began = Date.now();
-  const cwd = options.cwd ?? homedir() ?? process.cwd();
+  const cwd = options.cwd ?? commandWorkingDirectory();
 
   const isWindows = process.platform === "win32";
   const shell = isWindows ? "cmd.exe" : "/bin/sh";
