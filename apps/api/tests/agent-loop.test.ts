@@ -1,5 +1,5 @@
 import test from "node:test";
-import { armCommands, disarmCommands } from "../src/services/commandRunner.js";
+import { disarmCommands } from "../src/services/commandRunner.js";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
@@ -14,7 +14,7 @@ const testWorkspace = mkdtempSync(path.join(tmpdir(), "ascend-agent-"));
 process.env.ASCEND_WORKSPACE = testWorkspace;
 import {
   describeToolCall, executionKindForTool, explainGatedTool, gatedToolCall,
-  looksLikeRawToolCalls, maxToolRounds, parseTextToolCalls, runAgent, systemPrompt
+  looksLikeRawToolCalls, parseTextToolCalls, runAgent, systemPrompt
 } from "../src/services/agentLoop.js";
 import { runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
@@ -172,7 +172,7 @@ test("a model that never concludes is stopped rather than left running", async (
   // "kept searching" verdict this test has always checked for. The round
   // limit is still real and still the backstop; it is just no longer what
   // ends this particular scenario.
-  const { server, baseUrl, received } = await fakeModel([toolCall("search_memory", { query: "again" })]);
+  const { server, baseUrl } = await fakeModel([toolCall("search_memory", { query: "again" })]);
 
   try {
     const result = await runAgent(configFor(baseUrl), "Loop forever", context);

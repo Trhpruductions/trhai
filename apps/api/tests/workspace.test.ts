@@ -137,7 +137,6 @@ test("listing reports files under the workspace with sizes", () => {
   assert.equal(one!.bytes, 3);
   assert.equal(one!.directory, false);
 });
- const written = writeWorkspaceFile("listed/one.txt", "abc");
 
 test("listing outside the workspace is refused", () => {
   assert.equal(listWorkspace(".."), null);

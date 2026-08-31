@@ -35,7 +35,21 @@ export function findSpecGaps(spec: ProjectSpec): SpecGap[] {
     gaps.push("entity");
   }
 
+  // A spec with nothing to store has no primary record, and no gap either.
+  //
+  // This read spec.entities[0].fields unguarded, and a calculator has no
+  // entities by design - that is what the archetype means. So "build me a tip
+  // calculator" crashed the request with "Cannot read properties of undefined
+  // (reading 'fields')" and returned a 500 in about a millisecond, before the
+  // model was ever asked. Found by building five different things in a row and
+  // watching which ones failed.
+  //
+  // Returning no gaps is right rather than merely safe: a gap means the request
+  // left something out that the build needs. A calculator storing nothing has
+  // left nothing out.
   const primary = spec.entities[0];
+  if (!primary) return gaps;
+
   const hasOwnFields = primary.fields.some((field) => !defaultFieldNames.includes(field.name));
   if (!hasOwnFields && spec.features.length === 0) {
     gaps.push("fields");
@@ -109,7 +123,13 @@ export const assumedSpecMarker = "and I'll rebuild it";
 export function describeAssumptions(spec: ProjectSpec, gaps: SpecGap[]): string {
   if (gaps.length === 0) return "";
 
+  // Guarded for the same reason as findSpecGaps above. With that fixed this
+  // cannot be reached with an empty spec - gaps would be empty and the line
+  // above returns - but a crash here would be a 500 on a perfectly ordinary
+  // request, so it does not rest on a caller getting it right.
   const primary = spec.entities[0];
+  if (!primary) return "";
+
   const fields = primary.fields.map((field) => field.name).join(", ");
   const lines: string[] = [];
 

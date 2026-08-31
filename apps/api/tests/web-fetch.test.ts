@@ -190,7 +190,7 @@ test("a redirect to a private address is refused, not silently followed", async 
 
 test("redirects are followed manually, not handed off to fetch's own automatic following", async () => {
   let sawManualRedirect = false;
-  const stubFetch = (async (url: string, init?: RequestInit) => {
+  const stubFetch = (async (_url: string, init?: RequestInit) => {
     if (init?.redirect === "manual") sawManualRedirect = true;
     return {
       ok: true,
