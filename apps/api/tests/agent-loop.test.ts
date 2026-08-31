@@ -1865,6 +1865,35 @@ test("a request to build something still gets the build tools", async () => {
   }
 });
 
+test("a request naming the file to write is not offered the scaffolding tools", async () => {
+  // Found by asking the app the plainest thing it offers. "create a file called
+  // launch-check.txt containing the single line: it works" wrote the file
+  // correctly and also called build_app, which refused for want of a
+  // description. The reply then opened "Sorry, I can't build an app without a
+  // description" and mentioned the file second: the work succeeded, and the
+  // answer led with an apology for something nobody had asked for.
+  const { server, baseUrl, received } = await fakeModel([
+    answer("Done.")
+  ]);
+
+  try {
+    await runAgent(
+      configFor(baseUrl),
+      "create a file called launch-check.txt containing the single line: it works",
+      context
+    );
+
+    const offered = (received[0]?.tools ?? []) as Array<{ function: { name: string } }>;
+    const names = offered.map((tool) => tool.function.name);
+    assert.ok(!names.includes("build_app"), "build_app must not be offered for a named file write");
+    assert.ok(!names.includes("plan_app"), "plan_app must not be offered for a named file write");
+    // The tool that actually does the job has to survive the gate.
+    assert.ok(names.includes("write_file"), "write_file must stay available");
+  } finally {
+    server.close();
+  }
+});
+
 test("a retry that worked is not reported next to the attempt that failed", async () => {
   // Live: build_app failed, the model called it again, the second call worked,
   // and the reply carried both results - "I could not write that app...

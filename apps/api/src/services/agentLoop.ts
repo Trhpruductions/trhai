@@ -754,6 +754,23 @@ export async function runAgent(
 
   // Fixed for the turn: what was asked does not change as the loop runs.
   const askedAQuestion = isExplanatoryQuestion(question);
+
+  // A request that names the file it wants written is not a request to
+  // scaffold a project.
+  //
+  // Found by asking the app to do the plainest thing it offers: "create a file
+  // called launch-check.txt containing the single line: it works". It wrote the
+  // file correctly and also called build_app, which refused for want of a
+  // description - so the answer opened "Sorry, I can't build an app without a
+  // description", and only then mentioned the file. The work succeeded and the
+  // reply led with an apology for something nobody asked for.
+  //
+  // Safe on the same argument machineChangingTools already makes from verb
+  // order: generate is tested before write, so "build me a todo app", "create
+  // an app that tracks tasks" and "write me an app for invoices" all classify
+  // as generate and keep build_app. Only a write verb with a named file target
+  // lands here. "create a todo app" names no file, so it is not caught either.
+  const namedAFileToWrite = intent.kind === "write" && intent.hasTarget;
   let firstTurnToolCalls: number | null = null;
 
   // Stated at each path rather than inferred at the end, through named
@@ -860,7 +877,7 @@ export async function runAgent(
                   // A question does not get to scaffold a project. Decided from
                   // the request rather than from the reply, because a build has
                   // already written its files by the time a reply exists.
-                  scaffolding: !askedAQuestion
+                  scaffolding: !askedAQuestion && !namedAFileToWrite
                 })
               }
               : {})
