@@ -14,6 +14,7 @@ import {
 } from "./actionIntent.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
+import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
 
 // Re-exported so nothing that already imports it from here has to move.
 export type { ToolActivity };
@@ -727,6 +728,11 @@ export async function runAgent(
       role: "system",
       content: `${systemPrompt}\n\nThe date and time on this machine right now is ${today}. `
         + "That is current and correct — use it directly and never say the date is unknown or unrecorded."
+        // Where the work actually lives. Without this the model invents paths:
+        // it called list_files on D:/projects/calculator, which has never
+        // existed on this machine, then asked the user for a full path to a
+        // project it could have found by name. See projectContext.ts.
+        + `\n\n${describeWorkspace(summariseWorkspace())}`
     },
     { role: "user", content: question }
   ];

@@ -17,6 +17,7 @@ import {
 import { fetchWebPage } from "./webFetch.js";
 import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
 import { resolveForAccess } from "./machinePaths.js";
+import { explainMiss } from "./projectContext.js";
 import { applyEdit, describeEdit } from "./fileEdit.js";
 import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
 import { enterStage } from "./reasoningStage.js";
@@ -1355,7 +1356,11 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       if (!verdict.ok) return { ok: false, content: verdict.reason };
 
       const result = readFileAt(verdict.path);
-      if (!result.ok) return { ok: false, content: result.reason };
+      // A miss that names what does exist. "There is no file at
+      // calculator/public/server.js" is true and a dead end: the model guessed
+      // a subdirectory, was told no, said it would try the main directory, and
+      // then stopped. Naming the real path turns that into a recovery.
+      if (!result.ok) return { ok: false, content: explainMiss(result.reason, target) };
 
       // A truncated read says so. Answering about a file it has only partly
       // seen, with no way for the reader to know, is the failure to avoid.

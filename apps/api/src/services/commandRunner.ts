@@ -67,6 +67,24 @@ export const commandTimeoutMs = Number(process.env.TRHAI_COMMAND_TIMEOUT_MS ?? 6
 export const maxOutputBytes = 20_000;
 
 /**
+ * Where a command runs when the caller does not say.
+ *
+ * The home directory, which is a sensible default for "check the disk" and a
+ * trap for anything about a project. The model was never told this, so asked to
+ * look at an app it ran `node index.js` and got "Cannot find module
+ * C:\Users\hankh\index.js" - not a wild guess, just the shell resolving a
+ * relative path against a directory nobody had mentioned to it.
+ *
+ * Exported so projectContext can state it in the prompt from the same place the
+ * runner reads it. Two copies of this would drift, and the drift would be
+ * invisible: the prompt would describe one directory and commands would run in
+ * another.
+ */
+export function commandWorkingDirectory(): string {
+  return homedir() || process.cwd();
+}
+
+/**
  * How long a grant lasts, when one is made by arming.
  *
  * Retained for the API's shape and for anyone who sets an expiry deliberately,
@@ -313,7 +331,7 @@ export async function runCommand(
 ): Promise<CommandRun> {
   const startedAt = options.now ?? new Date();
   const began = Date.now();
-  const cwd = options.cwd ?? homedir() ?? process.cwd();
+  const cwd = options.cwd ?? commandWorkingDirectory();
 
   const isWindows = process.platform === "win32";
   const shell = isWindows ? "cmd.exe" : "/bin/sh";
