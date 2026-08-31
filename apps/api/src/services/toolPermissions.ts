@@ -72,6 +72,7 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // own definition — it changes nothing on this machine — but see
   // webFetch.ts for why that exception is safe to make at all.
   fetch_url: 1,
+  list_schedules: 1,
 
   // 2 — creates or changes something. Bounded by the workspace on its own, or
   // by the machine-access switch when that has been granted.
@@ -84,6 +85,9 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // it changes the text it was given and cannot silently drop the rest of a file.
   edit_file: 2,
   build_app: 2,
+  // Creating a schedule changes what this machine will do later, unattended.
+  // That is a change, not a read - level 2, the same as writing a file.
+  add_schedule: 2,
 
   // 3 — destroys the only copy of something the user chose to keep, or
   // reaches outside the workspace entirely.

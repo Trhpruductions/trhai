@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.js";
 import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
 import { describeDifference, shiftDate } from "./dateMath.js";
@@ -22,6 +23,9 @@ import { noteProjectTouched, withinActiveProject } from "./activeProject.js";
 import { applyEdit, describeEdit } from "./fileEdit.js";
 import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
 import { enterStage } from "./reasoningStage.js";
+import {
+  addSchedule, describeAction, describeCadence, listSchedules, type Cadence
+} from "./scheduleStore.js";
 
 // What the assistant can actually do.
 //
@@ -552,6 +556,44 @@ export const toolDefinitions: ToolDefinition[] = [
       }
     }
   },
+  // The app has a scheduler. The assistant could not reach it.
+  //
+  // Asked "remind me every day at 9am to check the build", it called no tool
+  // and explained how to use Windows Task Scheduler. Asked "what schedules do
+  // I have?", it answered "I do not have access to information about your
+  // personal schedule" - which is false: the schedules live in this process,
+  // behind /v1/schedules, and the interface lists them. An assistant denying a
+  // capability the app plainly has is the same failure as claiming one it
+  // lacks, pointed the other way.
+  {
+    type: "function",
+    function: {
+      name: "list_schedules",
+      description: "List the user's saved schedules - what runs, how often, and whether it "
+        + "is enabled. Use this whenever they ask what is scheduled.",
+      parameters: { type: "object", properties: {}, required: [] }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_schedule",
+      description: "Save a recurring schedule that asks the assistant something on a cadence. "
+        + "Use it when the user asks to be reminded of something, or for something to happen "
+        + "daily or every so many minutes.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "A short name for the schedule." },
+          prompt: { type: "string", description: "What to ask the assistant when it fires." },
+          daily_at: { type: "string", description: "A 24-hour time like 09:00 to run once a day." },
+          every_minutes: { type: "string", description: "Run every N minutes instead of daily." }
+        },
+        required: ["name", "prompt"]
+      }
+    }
+  },
+
   {
     type: "function",
     function: {
@@ -1517,6 +1559,67 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
 
       noteProjectTouched(context.sessionId, target);
       return { ok: true, content: `Edited ${written.path} — ${describeEdit(oldText, newText)}.` };
+    }
+
+    case "list_schedules": {
+      const saved = listSchedules();
+      if (saved.length === 0) {
+        return { ok: true, content: "Nothing is scheduled." };
+      }
+      const lines = saved.map((entry) =>
+        `- ${entry.name}: ${describeCadence(entry.cadence)}`
+        + `${entry.enabled ? "" : " (paused)"} - ${describeAction(entry.action)}`);
+      return { ok: true, content: lines.join("\n") };
+    }
+
+    case "add_schedule": {
+      const name = requireString(call.arguments.name);
+      const prompt = requireString(call.arguments.prompt);
+      if (!name || !prompt) {
+        return { ok: false, content: "add_schedule needs a name and what to ask." };
+      }
+
+      // Either a time of day or an interval, never both. A caller that supplies
+      // both has not decided, and picking one for them would be a guess the
+      // user never sees.
+      const dailyAt = requireString(call.arguments.daily_at);
+      const everyRaw = call.arguments.every_minutes;
+      const every = typeof everyRaw === "number"
+        ? everyRaw
+        : Number(requireString(everyRaw as string) ?? NaN);
+
+      let cadence: Cadence | null = null;
+      if (dailyAt) {
+        const at = /^([0-9]{1,2}):([0-9]{2})$/.exec(dailyAt.trim());
+        const hours = at ? Number(at[1]) : NaN;
+        const minutes = at ? Number(at[2]) : NaN;
+        if (!at || hours > 23 || minutes > 59) {
+          return { ok: false, content: `"${dailyAt}" is not a 24-hour time like 09:00.` };
+        }
+        cadence = { kind: "daily", minuteOfDay: hours * 60 + minutes };
+      } else if (Number.isFinite(every) && every > 0) {
+        cadence = { kind: "interval", minutes: Math.round(every) };
+      }
+
+      if (!cadence) {
+        return {
+          ok: false,
+          content: "add_schedule needs either daily_at (a time like 09:00) or every_minutes."
+        };
+      }
+
+      const saved = addSchedule({ id: randomUUID(), name, prompt, cadence });
+      if (!saved) {
+        // Reports the outcome, not the attempt - the store refuses a bad
+        // cadence or a full list, and saying "scheduled" either way is the
+        // false success this codebase is built against.
+        return { ok: false, content: "That schedule could not be saved. Nothing was scheduled." };
+      }
+
+      return {
+        ok: true,
+        content: `Scheduled "${saved.name}": ${describeCadence(saved.cadence)}.`
+      };
     }
 
     case "current_datetime": {
