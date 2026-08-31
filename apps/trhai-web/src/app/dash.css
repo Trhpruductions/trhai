@@ -810,20 +810,41 @@
 /* The ask field is the one control people reach for, so it reads as raised
    rather than as another outline. */
 .cc-ask {
+  /* The one control people reach for, so it is the most raised thing on the
+   * stage - and now the same frosted glass as the panels around it rather
+   * than a flat fill with a shadow under it. */
+  background: linear-gradient(
+    180deg,
+    rgba(12, 20, 30, 0.72),
+    rgba(7, 13, 21, 0.62)
+  );
+  backdrop-filter: blur(10px) saturate(118%);
+  -webkit-backdrop-filter: blur(10px) saturate(118%);
   box-shadow:
-    0 1px 0 rgba(53, 199, 255, 0.10) inset,
-    0 8px 22px rgba(0, 0, 0, 0.45);
+    inset 0 1px 0 rgba(var(--tint), 0.16),
+    0 12px 30px rgba(0, 0, 0, 0.46);
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
 }
 
+/* Focus lifts it rather than merely outlining it: this is where typing goes,
+ * and on a screen this busy an outline alone disappears. */
 .cc-ask:focus-within {
-  border-color: var(--accent);
+  border-color: rgba(var(--tint), 0.55);
   box-shadow:
-    0 1px 0 rgba(53, 199, 255, 0.16) inset,
-    0 0 0 1px rgba(53, 199, 255, 0.25),
-    0 8px 26px rgba(0, 0, 0, 0.5);
+    inset 0 1px 0 rgba(var(--tint), 0.24),
+    0 0 0 3px rgba(var(--tint), 0.10),
+    0 16px 38px rgba(0, 0, 0, 0.52),
+    0 0 28px rgba(var(--tint), 0.10);
 }
 
-.cc-action { box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3); }
+/* Deliberately not re-declaring box-shadow here.
+ *
+ * This used to be `box-shadow: 0 6px 16px rgba(0,0,0,0.3)`, which sits after
+ * the .cc-action rule above and therefore replaced its inset highlight - the
+ * top edge that makes a frosted panel look lit rather than printed. The panel
+ * kept its blur and lost the thing that made it read as glass, which is a
+ * hard bug to see and an easy one to reintroduce. The seating shadow lives
+ * with the rest of that panel's shadows now. */
 
 /* ---- the projector base ----
    The reference sits its core on a lit platform with light rising from it, and
@@ -838,17 +859,58 @@
   content: "";
   position: absolute;
   left: 50%;
-  bottom: -34px;
-  width: 300px;
-  height: 66px;
+  bottom: -38px;
+  width: 360px;
+  height: 78px;
   transform: translateX(-50%);
   border-radius: 50%;
+  /* Follows the state, unlike before, where it was hardcoded cyan while
+   * everything else around it shifted. Light is explicitly the thing the note
+   * on --tint says may move - "only light, arcs and the floor" - so a platform
+   * that stays blue while the core turns amber is the one part of the scene
+   * telling a different story from the rest. */
   background:
-    radial-gradient(ellipse at 50% 50%, rgba(53, 199, 255, 0.22), transparent 68%),
-    radial-gradient(ellipse at 50% 42%, rgba(120, 225, 255, 0.16), transparent 52%);
-  border-top: 1px solid rgba(53, 199, 255, 0.30);
+    radial-gradient(ellipse at 50% 50%, rgba(var(--tint), 0.26), transparent 68%),
+    radial-gradient(ellipse at 50% 42%, rgba(var(--tint-soft), 0.18), transparent 52%);
+  border-top: 1px solid rgba(var(--tint), 0.34);
   pointer-events: none;
   z-index: -1;
+  transition: background 700ms ease, border-color 700ms ease;
+}
+
+/* The light rising off it.
+ *
+ * The product spec describes the reference as a core sitting on a lit platform
+ * "with light rising from it", and the platform was there without the light -
+ * so the silhouette read as a disc under a circle rather than as a projection.
+ * A soft column, widest at the base and fading out well before the title, is
+ * the whole of it.
+ *
+ * Decorative and honest about it: it carries no number and encodes no value,
+ * exactly like the platform it stands on. */
+.cc-core-wrap::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -30px;
+  width: 300px;
+  height: 300px;
+  transform: translateX(-50%);
+  background: linear-gradient(
+    to top,
+    rgba(var(--tint), 0.13),
+    rgba(var(--tint), 0.05) 38%,
+    transparent 72%
+  );
+  -webkit-mask-image: radial-gradient(ellipse at 50% 100%, #000 0%, transparent 72%);
+  mask-image: radial-gradient(ellipse at 50% 100%, #000 0%, transparent 72%);
+  pointer-events: none;
+  z-index: -1;
+  transition: background 700ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-core-wrap::after, .cc-core-wrap::before { transition: none; }
 }
 
 /* The beam: a soft cone between the platform and the core. Kept faint so the
