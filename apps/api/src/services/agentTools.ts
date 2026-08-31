@@ -679,6 +679,20 @@ function titledFromRequest<T extends { title: string }>(spec: T, request?: strin
   return { ...spec, title: fromRequest };
 }
 
+/**
+ * The verdict, not just the detail.
+ *
+ * summarize() in buildVerification returns "no output" when a smoke test exits
+ * 0 without printing anything - which is a pass, decided by the exit code. The
+ * reply rendered that as "verified it: no output", which reads like the
+ * verification did nothing. A countdown timer that genuinely built, served
+ * HTTP 200 and rendered its own UI was described in words that gave no reason
+ * to believe any of it.
+ */
+export function verifiedDetail(output: string): string {
+  return output === "no output" ? "its own checks passed, without printing anything" : output;
+}
+
 export function availableTools(
   armed: boolean,
   options: { scaffolding?: boolean; changes?: boolean } = {}
@@ -1316,7 +1330,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       return {
         ok: true,
         content: "Built \"" + spec.title + "\" in the workspace at " + folder + "/ with "
-          + written.length + " files, and verified it: " + verification.output
+          + written.length + " files, and verified it: " + verifiedDetail(verification.output)
           + "\n\n" + runLine
       };
     }
