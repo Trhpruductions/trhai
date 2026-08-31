@@ -1309,7 +1309,12 @@ export default function DashboardPage() {
         </div>
         <span className="cc-states-note faint">
           {answerCredit(lastReply?.strategy, lastReply?.model)
-            ?? "Everything on this screen is measured on this machine."}
+            // 34ch, and that cap is deliberate - widening it pushes COMPLETE
+            // onto a second line (see .cc-states-note). The old sentence was
+            // 54 characters and rendered as "Everything on this screen is
+            // meas...", so the app's own claim about itself was the one line
+            // on screen that got cut off. Said shorter instead of louder.
+            ?? "Measured on this machine."}
         </span>
       </footer>
     </div>

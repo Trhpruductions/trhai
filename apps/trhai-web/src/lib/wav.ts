@@ -10,7 +10,16 @@
 // Keeping the conversion client-side means the only thing the user has to
 // install is whisper itself.
 
-/** What whisper.cpp requires. Mirrors requiredSampleRate in whisperTranscribe.ts. */
+/**
+ * What whisper.cpp requires. Mirrors requiredSampleRate in whisperTranscribe.ts.
+ *
+ * The two are enforced to agree by apps/api/tests/audio-format-agreement.test.ts,
+ * which reads this line off disk - trhai-web is not a dependency of that
+ * workspace and should not become one for a number. Change this and that test
+ * fails, which is the point: if these ever drift, voice input stops working
+ * with no error naming the cause. The client sends, the server answers "Audio
+ * must be 16 kHz mono", and the microphone simply appears to be broken.
+ */
 export const targetSampleRate = 16_000;
 
 /**
