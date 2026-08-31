@@ -20,6 +20,8 @@
 // process was started. A repo-root anchor would have been just as stable and
 // would have moved everything, which is a migration nobody asked for.
 
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,5 +38,34 @@ export function packageRoot(): string {
  * cwd-relative fallback behind it.
  */
 export function dataFile(name: string): string {
-  return path.join(packageRoot(), "data", name);
+  return path.join(dataRoot(), name);
+}
+
+/** Cached so every store in one test process agrees on the same directory. */
+let testDataRoot: string | undefined;
+
+/**
+ * The data directory, which is never the real one from inside a test.
+ *
+ * Caught by diffing the folder across a suite run: `npm test` was modifying
+ * apps/api/data/tasks.json - the developer's real task store, five hundred
+ * entries of their own work. Tests were writing live data.
+ *
+ * That is a bug on its own, and a strong candidate for the intermittent
+ * failure this suite has shown roughly once in twenty runs: stores shared
+ * between tests, and shared with any API process running alongside them, is
+ * precisely the shape that fails occasionally and passes on the retry.
+ *
+ * Same guard as commandRunner's arm file, and for the same reason: it has to
+ * be in the code rather than in an --import flag on the npm script, because
+ * running one test file directly skips the flag. NODE_TEST_CONTEXT is set by
+ * node's runner in every test child process however it was launched.
+ */
+function dataRoot(): string {
+  if (process.env.NODE_TEST_CONTEXT) {
+    testDataRoot ??= mkdtempSync(path.join(tmpdir(), "trhai-test-data-"));
+    return testDataRoot;
+  }
+
+  return path.join(packageRoot(), "data");
 }

@@ -22,12 +22,27 @@ import { dataFile, packageRoot } from "../src/services/dataDirectory.js";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const apiDir = path.resolve(here, "..");
 
-test("the data directory is this package, wherever the process started", () => {
+test("the package root is this package, wherever the process started", () => {
+  // The anchor that replaced process.cwd(). It does not move with the shell.
   assert.equal(path.resolve(packageRoot()), path.resolve(apiDir));
-  assert.equal(
-    path.resolve(dataFile("accounts.json")),
-    path.resolve(apiDir, "data", "accounts.json")
-  );
+});
+
+test("a test process never resolves the real data directory", () => {
+  // Caught by diffing apps/api/data across a suite run: npm test was modifying
+  // tasks.json, the developer's real task store with five hundred entries of
+  // their own work. Tests were writing live data, and sharing it with any API
+  // process running alongside them.
+  //
+  // This assertion used to require the real path, which was right before the
+  // isolation existed and wrong the moment it did - so this test failed on the
+  // very change that fixed the bug it should have been guarding against.
+  const resolved = path.resolve(dataFile("accounts.json"));
+  assert.notEqual(resolved, path.resolve(apiDir, "data", "accounts.json"),
+    "a test must not resolve the real data file");
+  assert.match(resolved, /accounts\.json$/);
+
+  // Stable within the process, or two stores would disagree about where they live.
+  assert.equal(path.resolve(dataFile("accounts.json")), resolved);
 });
 
 test("no store resolves its data path against the working directory", () => {

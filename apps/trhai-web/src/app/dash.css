@@ -1723,3 +1723,16 @@
   /* The floor still needs its perspective; only the parallax offset goes. */
   .cc-stage::after { transform: translateX(-50%) perspective(560px) rotateX(66deg); }
 }
+
+/* The unfinished-work line in the console greeting.
+ *
+ * Quieter than the greeting above it and set apart by a rule, because it is
+ * an offer rather than an announcement: it should be findable when you look
+ * and ignorable when you do not. */
+.console-unfinished {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line-subtle);
+  font-size: 12px;
+  line-height: 1.45;
+}
