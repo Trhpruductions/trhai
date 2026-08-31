@@ -1085,3 +1085,29 @@ test("a bare greeting still works", () => {
     );
   }
 });
+
+test("an instruction is never answered as a statement", () => {
+  // "edit C:/…/greet.js so it throws when name is empty" has no question mark
+  // and no request marker, so analyzeRequest called it a statement and the
+  // acknowledge branch answered "Got it." - nothing edited, no tool called.
+  // That is the failure this whole codebase is built against, arriving through
+  // the one branch that never asked whether the message was an order.
+  for (const order of [
+    "edit D:/work/greet.js so it throws an Error when name is empty",
+    "write a config.json with the port in it",
+    "delete D:/work/old.log"
+  ]) {
+    const reply = composeReply({ mode: "general", message: order, memories: [], history: [] });
+    assert.notEqual(reply.strategy, "acknowledge", `"${order}" was acknowledged instead of acted on`);
+    assert.notEqual(reply.text.trim(), "Got it.");
+  }
+});
+
+test("a real statement is still acknowledged", () => {
+  // The line this must not cross: classifyIntent has to actually distinguish,
+  // not just disable the branch.
+  const reply = composeReply({
+    mode: "general", message: "the api runs on port 4000", memories: [], history: []
+  });
+  assert.equal(reply.strategy, "acknowledge");
+});

@@ -153,3 +153,26 @@ test("the narrated-run check is not stateful across calls", () => {
   assert.doesNotMatch(first, /made up/);
   assert.match(first, /Real answer here/);
 });
+
+test("an unclosed tool_request takes its payload with it", () => {
+  // Verbatim shape from a live reply. An edit had failed and the model
+  // answered: "Understood. I will read the file again and copy the lines
+  // verbatim." followed by a literal <tool_request> block. The tag list had
+  // response, result, output and call - a request sailed straight through and
+  // internal plumbing was shown to the user as the answer.
+  const reply = 'Understood. I will read the file again.\n\n'
+    + '<tool_request> read_file {"path":"C:/work/greet.js"}';
+
+  const cleaned = stripFabricatedToolOutput(reply);
+  assert.doesNotMatch(cleaned, /tool_request/);
+  assert.doesNotMatch(cleaned, /read_file/, "the payload goes with the tag");
+  assert.match(cleaned, /Understood/, "the model's own sentence survives");
+});
+
+test("the other spellings are caught too", () => {
+  for (const tag of ["tool_request", "toolrequest", "tool-use", "tool_invocation"]) {
+    const cleaned = stripFabricatedToolOutput(`Answer.\n\n<${tag}> secret payload </${tag}>`);
+    assert.doesNotMatch(cleaned, /secret payload/, `${tag} leaked`);
+    assert.match(cleaned, /Answer/);
+  }
+});

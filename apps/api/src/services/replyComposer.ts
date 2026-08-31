@@ -10,6 +10,7 @@
 // boilerplate.
 
 import { analyzeRequest, type RequestAnalysis } from "./requestAnalysis.js";
+import { classifyIntent } from "./actionIntent.js";
 import { selectRelevantMemories, type ScorableMemory, type ScoredMemory } from "./memoryRelevance.js";
 import { buildTaskPlan } from "./taskPlanning.js";
 import { getSystemCapabilities, toolsByLevel } from "./systemCapabilities.js";
@@ -577,7 +578,24 @@ export function composeReply(input: ComposerInput): ComposedReply {
   // This is deliberately independent of mode. The client infers mode from
   // keywords, so merely saying "api" lands you in code mode — which must not by
   // itself turn a statement of fact into a request for work.
-  if (analysis.shape === "statement" && !analysis.hasRequestMarker && !refining) {
+  // An order is not a statement, whatever its grammar looks like.
+  //
+  // "edit C:/…/greet.js so it throws when name is empty" parses as a statement
+  // here - it has no question mark and no request marker - and was answered
+  // "Got it." with nothing edited and no tool called. That is exactly the
+  // failure the rest of this codebase is built against, arriving through the
+  // one branch that never asked whether the message was an instruction.
+  //
+  // classifyIntent is the deterministic classifier written for precisely this
+  // question, and it is regression-tested. Where the two disagree it wins:
+  // treating an order as conversation costs the user the work, while treating
+  // a statement as an order costs one wasted generation.
+  if (
+    analysis.shape === "statement"
+    && !analysis.hasRequestMarker
+    && !refining
+    && !classifyIntent(message).action
+  ) {
     // Facts are pulled out of every message, not only ones that open with
     // "remember" - recordMemoriesFromMessage runs on the way in, for preferences,
     // conventions and constraints alike. So this can report what was actually
