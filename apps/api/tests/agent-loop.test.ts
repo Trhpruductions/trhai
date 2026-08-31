@@ -1914,3 +1914,46 @@ test("a mutation that only ever failed still says so", async () => {
     server.close();
   }
 });
+
+test("a request to read is not given the tools that change things", async () => {
+  // Asked to "read server.js from the calculator app", the model read it and
+  // then made three write_file calls, reporting "app.js has been written to
+  // the workspace". Nobody asked for a file. An earlier run did the same with
+  // run_command, inventing a path for it.
+  const { server, baseUrl, received } = await fakeModel([answer("Here is what it contains.")]);
+
+  try {
+    await runAgent(configFor(baseUrl), "read server.js from the calculator app", context);
+
+    const offered = (received[0]?.tools ?? []) as Array<{ function: { name: string } }>;
+    const names = offered.map((tool) => tool.function.name);
+
+    assert.ok(names.includes("read_file"), "reading must still be possible");
+    assert.ok(names.includes("list_files"));
+    for (const changing of ["write_file", "edit_file", "build_app", "run_command"]) {
+      assert.ok(!names.includes(changing), `${changing} must not be offered for a read`);
+    }
+    // Memory acts on the conversation, not the machine: "read notes.txt and
+    // remember the port" is an ordinary thing to ask.
+    assert.ok(names.includes("remember"), "memory must survive a read request");
+  } finally {
+    server.close();
+  }
+});
+
+test("a read that also asks for a change keeps the write tools", async () => {
+  // The line this must not cross. actionIntent checks write before read, so
+  // this classifies as write and nothing is withheld.
+  const { server, baseUrl, received } = await fakeModel([answer("Done.")]);
+
+  try {
+    await runAgent(configFor(baseUrl), "read config.json and update the port", context);
+
+    const names = ((received[0]?.tools ?? []) as Array<{ function: { name: string } }>)
+      .map((tool) => tool.function.name);
+    assert.ok(names.includes("edit_file"), "an edit was explicitly asked for");
+    assert.ok(names.includes("write_file"));
+  } finally {
+    server.close();
+  }
+});

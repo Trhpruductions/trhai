@@ -629,6 +629,27 @@ export const toolDefinitions: ToolDefinition[] = [
 const scaffoldingTools = new Set(["build_app", "plan_app"]);
 
 /**
+ * Tools that act on the machine, withheld when the request was only to look.
+ *
+ * Asked to "read server.js from the calculator app", the model read it and
+ * then made three write_file calls, reporting "app.js has been written to the
+ * workspace". Nobody asked for a file. An earlier run did the same thing with
+ * run_command, inventing a path for it. Reading is reading.
+ *
+ * Safe to gate on because of the order actionIntent checks its verb groups in:
+ * write is tested before read, so "read config.json and update the port"
+ * classifies as write and keeps every one of these. Only a request with
+ * nothing but a read verb in it lands here.
+ *
+ * Memory is deliberately not in this set. remember and forget act on the
+ * conversation rather than on the machine, and "read notes.txt and remember
+ * the port" is an ordinary thing to ask.
+ */
+const machineChangingTools = new Set([
+  "write_file", "edit_file", "build_app", "plan_app", "run_command", "run_script"
+]);
+
+/**
  * Name a built app after what the user asked for, not the model's paraphrase.
  *
  * build_app's `description` is written by the model, and models describe an app
@@ -658,13 +679,18 @@ function titledFromRequest<T extends { title: string }>(spec: T, request?: strin
   return { ...spec, title: fromRequest };
 }
 
-export function availableTools(armed: boolean, options: { scaffolding?: boolean } = {}): ToolDefinition[] {
+export function availableTools(
+  armed: boolean,
+  options: { scaffolding?: boolean; changes?: boolean } = {}
+): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
+  const allowChanges = options.changes ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
     if (!armed && name === "run_command") return false;
     if (!allowScaffolding && scaffoldingTools.has(name)) return false;
+    if (!allowChanges && machineChangingTools.has(name)) return false;
     return true;
   });
 }

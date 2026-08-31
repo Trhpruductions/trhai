@@ -852,6 +852,10 @@ export async function runAgent(
             ...(offerTools
               ? {
                 tools: availableTools(commandsArmed() && !unattended, {
+                  // A request to look does not get the tools that change
+                  // things. Asked to read one file, the model read it and then
+                  // wrote three - see machineChangingTools in agentTools.
+                  changes: intent.kind !== "read",
                   // A question does not get to scaffold a project. Decided from
                   // the request rather than from the reply, because a build has
                   // already written its files by the time a reply exists.
