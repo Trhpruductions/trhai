@@ -9,7 +9,7 @@
 // question, it says so plainly rather than filling the gap with confident-sounding
 // boilerplate.
 
-import { analyzeRequest, type RequestAnalysis } from "./requestAnalysis.js";
+import { analyzeRequest, isContinuationRequest, type RequestAnalysis } from "./requestAnalysis.js";
 import { classifyIntent } from "./actionIntent.js";
 import { selectRelevantMemories, type ScorableMemory, type ScoredMemory } from "./memoryRelevance.js";
 import { buildTaskPlan } from "./taskPlanning.js";
@@ -520,6 +520,33 @@ export function composeReply(input: ComposerInput): ComposedReply {
   // answering; asking the same clarifying question a second time would leave
   // the conversation unable to progress. Found by inspection while fixing the
   // sibling bug just above at line 483, which already carries this guard.
+  // "Continue" with nothing to continue.
+  //
+  // The orchestrator resumes an unfinished task when there is one, and
+  // deliberately leaves the message alone when there is not - finished work is
+  // not resumable, so "continue" after a completed build is a new request.
+  // That reasoning is right; what came out of it was not. The message fell
+  // through to the vague branch below and was answered "I need a bit more to
+  // work with. Tell me what you're trying to end up with, and any constraint
+  // that matters (stack, deadline, audience)" - a planning questionnaire in
+  // reply to a one-word instruction, which reads as not having understood it
+  // at all.
+  //
+  // Saying there is nothing in progress is both shorter and true.
+  if (isContinuationRequest(message) && !refining) {
+    return {
+      // Careful not to assert a previous request. "do it" is a continuation
+      // phrase and may well be the first thing said in a session, where
+      // "the last thing you asked for finished" would be a claim about
+      // something that never happened.
+      text: "Nothing is in progress right now. Tell me what to do and I will "
+        + "start; if something stops halfway, \"continue\" will pick it up.",
+      strategy: "clarify",
+      groundedOn: [],
+      groundedOnHistory: 0
+    };
+  }
+
   if (analysis.vague && !refining) {
     return {
       text: "I need a bit more to work with. Tell me what you're trying to end up with, and any constraint that matters (stack, deadline, audience), and I'll turn it into a concrete plan.",
