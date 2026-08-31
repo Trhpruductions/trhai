@@ -69,10 +69,33 @@ test('dev:web serves the app shell from the workspace root', async () => {
   const startedAt = Date.now();
   let served = false;
 
+  // Two budgets, not one, because two different things are being waited for.
+  //
+  // A flat 120s failed here roughly once in a dozen runs, and the captured
+  // output showed why: "Ready in 33.7s", then "Compiling /" and nothing more
+  // before the wait expired. Next reports itself ready before it compiles the
+  // route; the first Turbopack compile on a cold .next is the slow part, and on
+  // this machine it shares the disk with whatever else is running. Next printed
+  // "Slow filesystem detected" in the same run.
+  //
+  // So starting keeps the short budget - a server that never comes up is broken
+  // and should say so quickly - and compiling gets a generous one. This costs
+  // nothing in the failure cases that matter: a server that dies is caught by
+  // the exitCode check on the next pass, and one serving the wrong application
+  // is caught by the marker on the first fetch that succeeds. Only the genuinely
+  // slow case waits longer.
+  let deadline = startedAt + 120000;
+  let compiling = false;
+
   try {
-    while (Date.now() - startedAt < 120000) {
+    while (Date.now() < deadline) {
       if (child.exitCode !== null) {
         break;
+      }
+
+      if (!compiling && /Ready in|Compiling /.test(output)) {
+        compiling = true;
+        deadline = Date.now() + 240000;
       }
 
       try {
@@ -140,5 +163,5 @@ test('dev:web serves the app shell from the workspace root', async () => {
     }
   }
 
-  assert.ok(served, `Expected dev:web to serve TRHAI's shell. Output:\n${output}`);
+  assert.ok(served, `Expected dev:web to serve TRHAI's shell - ${compiling ? 'it started and was still compiling when the wait ran out' : 'it never reported itself ready'}. Output:\n${output}`);
 });
