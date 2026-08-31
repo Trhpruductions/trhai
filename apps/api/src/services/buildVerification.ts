@@ -17,8 +17,22 @@ export type VerificationResult =
   | { ran: false; reason: string }
   | { ran: true; passed: boolean; output: string };
 
-/** However long the generated server takes to boot and answer six requests. */
-const verifyTimeoutMs = 20_000;
+/**
+ * However long the generated server takes to boot and answer six requests.
+ *
+ * Raised from 20s after watching the same build report "could not verify it
+ * automatically: the check did not finish within 20s" on one run and pass on
+ * the next. The budget was sized for the templated projects, whose smoke test
+ * is written here and does the same six things every time. A model-authored
+ * app writes its own, and that one can spawn a child process, poll a port and
+ * back off between attempts - on a machine that is also running a 7B model,
+ * twenty seconds is inside the noise.
+ *
+ * "Could not verify" is deliberately not "failed", so this was never reported
+ * as a broken app. But an app of unknown quality is nearly as unhelpful, and
+ * the cost of waiting longer is only paid when something is genuinely stuck.
+ */
+const verifyTimeoutMs = Number(process.env.TRHAI_VERIFY_TIMEOUT_MS ?? 60_000);
 
 /**
  * Run a just-built project's own smoke test and report what happened.

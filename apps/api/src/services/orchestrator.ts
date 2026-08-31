@@ -462,7 +462,16 @@ async function answerWithLocalModel(
     sessionId: input.sessionId,
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
-    conversation: input.history
+    conversation: input.history,
+    // The user's own words, so a built app is named after what they asked for
+    // rather than after the model's paraphrase of it.
+    //
+    // input.userMessage, not baseQuestion: baseQuestion is the constructed
+    // prompt, and it carries the instruction telling the model to call
+    // build_app. Naming an app from that produced folders called
+    // calculator-call-build-app and snake-game-call-build-app - right at the
+    // front, wrong from there on.
+    request: input.userMessage
   }, fetch, onToolStart, input.onToken, input.unattended, input.cancel);
 
     if (result.ok) {

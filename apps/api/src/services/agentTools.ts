@@ -1,7 +1,7 @@
 import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.js";
 import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
 import { describeDifference, shiftDate } from "./dateMath.js";
-import { classifyRequest, generateProject, planProject, slugify } from "@ascend/shared";
+import { classifyRequest, deriveTitle, generateProject, planProject, slugify } from "@ascend/shared";
 import { authorPrompt, findAppFault, parseAuthoredFiles, type AuthoredFile } from "./appAuthor.js";
 import { verifyBuiltProject } from "./buildVerification.js";
 import { describeConfirmationNeeded, requiresConfirmation } from "./toolPermissions.js";
@@ -115,6 +115,22 @@ export type ToolContext = {
    * ask you" except by whatever happens to be in its context window.
    */
   conversation?: Array<{ role: "user" | "assistant"; content: string }>;
+  /**
+   * What the user actually asked for, in their own words.
+   *
+   * Used to name a built app. build_app is handed a `description` written by
+   * the model, and the model writes descriptions as behaviour rather than as
+   * names - so "build me a calculator" arrived as "performs basic arithmetic
+   * operations like addition" and the app was filed under
+   * performs-basic-arithmetic-operations-like, which is also its browser tab
+   * and page heading.
+   *
+   * Chasing that with phrasing rules does not converge; there is always
+   * another way to describe what an app does. The user's own sentence names
+   * the thing, so the title comes from there when it yields something usable
+   * and falls back to the description when it does not.
+   */
+  request?: string;
   /**
    * Tool names the user has explicitly authorised for this turn.
    *
@@ -611,6 +627,36 @@ export const toolDefinitions: ToolDefinition[] = [
  */
 const scaffoldingTools = new Set(["build_app", "plan_app"]);
 
+/**
+ * Name a built app after what the user asked for, not the model's paraphrase.
+ *
+ * build_app's `description` is written by the model, and models describe an app
+ * by what it does: "build me a calculator" arrived as "performs basic
+ * arithmetic operations like addition", and the project was filed under
+ * performs-basic-arithmetic-operations-like - which is the folder, the browser
+ * tab and the page heading. Stripping those lead-ins by pattern does not
+ * converge; there is always another way to phrase behaviour.
+ *
+ * The user's sentence names the thing, so it wins whenever it produces a real
+ * name. It does not always: "build me an app" derives "App", which distinguishes
+ * nothing, and there the model's fuller description is genuinely better. The
+ * test is whether the derived title survives being a bare container noun.
+ */
+function titledFromRequest<T extends { title: string }>(spec: T, request?: string): T {
+  if (!request?.trim()) return spec;
+
+  const fromRequest = deriveTitle(request);
+  if (!fromRequest) return spec;
+
+  // "App", "Tool", "Project" - a name that names nothing. Keep the model's.
+  if (/^(app|application|tool|system|program|platform|service|site|website|project|thing)$/i
+    .test(fromRequest.trim())) {
+    return spec;
+  }
+
+  return { ...spec, title: fromRequest };
+}
+
 export function availableTools(armed: boolean, options: { scaffolding?: boolean } = {}): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
 
@@ -1050,7 +1096,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       const description = requireString(call.arguments.description);
       if (!description) return { ok: false, content: "build_app needs a description." };
 
-      const spec = planProject(description);
+      const spec = titledFromRequest(planProject(description), context.request);
 
       // Which of the two templates this is, or neither.
       //
@@ -1061,7 +1107,26 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // which is exactly why nothing reported the app was wrong.
       const namedFields = spec.entities.some((entity) =>
         entity.fields.some((field) => !["title", "description"].includes(field.name)));
-      const archetype = classifyRequest(description, namedFields);
+      // Classified from what the user asked for, then from the description.
+      //
+      // Same root cause as the title above: `description` is the model's
+      // paraphrase, and a paraphrase loses the word that decides the shape.
+      // "build me a calculator" arrived as "performs basic arithmetic
+      // operations like addition" - which names no calculator, so it was not
+      // classified as one, and a request that stores nothing was sent down the
+      // path that builds a store.
+      //
+      // The request cannot simply win, though: "authored" is the fallback the
+      // classifier returns when it recognises nothing, and a short request
+      // ("build me a plant diary") lands there while the model's fuller
+      // description names the tracker and the fields outright. So the specific
+      // answer wins wherever it comes from, and only a request that actually
+      // decides something overrules the description.
+      const askedFor = context.request?.trim();
+      const fromRequest = askedFor ? classifyRequest(askedFor, namedFields) : "authored";
+      const archetype = fromRequest !== "authored"
+        ? fromRequest
+        : classifyRequest(description, namedFields);
 
       let files: AuthoredFile[];
       let folder: string;

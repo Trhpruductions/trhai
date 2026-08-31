@@ -584,6 +584,25 @@ function fieldsFor(features: ProjectFeature[], primary: boolean, requested: stri
 
 /** Framing that opens a request without being part of what is being built. */
 const requestOpeners = [
+  // Behaviour lead-ins come first, before the "let's" opener below.
+  //
+  // The model writes build_app's description as what the app does for
+  // somebody rather than as a name, and "allows users to calculate tips"
+  // became the title "Allows Users" - so asking for a calculator produced a
+  // folder called allows-users, which is also the browser tab and the page
+  // heading. Dropping the lead-in leaves "calculate tips", which is what the
+  // thing actually is.
+  //
+  // Order matters and cost a test to find: /^let'?s\s+/ below matches the
+  // "lets" in "lets you track expenses", strips it, and leaves "you track
+  // expenses" - titled "You Track Expenses". These have to see the string
+  // first.
+  /^(?:it\s+)?(?:allows|lets|enables|helps|permits)\s+(?:the\s+)?(?:users?|people|you|me|us)\s+(?:to\s+)?/i,
+  // The article matters: "an app that allows users to convert currencies" is
+  // the commonest phrasing of all, and without a/an here the container-noun
+  // rule further down strips "app that" and re-exposes the lead-in this was
+  // meant to remove - landing back on "Allows Users".
+  /^(?:an?\s+|this\s+|the\s+)?(?:app|tool|program)\s+(?:that\s+)?(?:allows|lets|enables|helps)\s+(?:the\s+)?(?:users?|you)\s+(?:to\s+)?/i,
   /^(?:i|we)\s+(?:need|want|would\s+like)\s+(?:you\s+to\s+)?/i,
   /^(?:can|could|would)\s+you\s+(?:please\s+)?/i,
   /^help\s+(?:me|us)\s+(?:to\s+)?/i,
