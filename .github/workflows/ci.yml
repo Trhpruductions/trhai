@@ -1,0 +1,80 @@
+# What has to be true before anything lands on master.
+#
+# Nothing gated this repo until now: four pull requests were merged on local
+# runs alone, and one of them was merged with a CSS syntax error that had taken
+# the web build down minutes earlier. Everything below already passes, so this
+# starts green rather than arriving as a backlog.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# A second push to the same branch makes the first run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    # Windows on purpose. This is an Electron desktop app launched by
+    # PowerShell, its paths are Windows paths, and apps/desktop/tests spawn
+    # processes and kill them with taskkill. Ubuntu would be cheaper and would
+    # be testing something the app never runs on. The repo is public, so
+    # Windows minutes cost nothing.
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # package.json declares >=20. 22 is the LTS inside that range; the
+          # machine this is developed on runs 24, so a failure here that does
+          # not reproduce locally is a version difference worth knowing about
+          # rather than a flake.
+          node-version: '22'
+          cache: npm
+
+      # ci, not install: the lockfile is committed and a run that quietly
+      # resolves a different tree is not verifying what was pushed.
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      # The build is not redundant with typecheck. A CSS syntax error takes the
+      # Next build down while leaving lint, types and every test untouched -
+      # which is exactly how a broken build reached master here once already.
+      - name: Build
+        run: npm run build
+
+      # Nothing else covers these. The launcher and its helpers are PowerShell,
+      # so lint, typecheck and the test suite all skip them entirely, and a
+      # syntax error in launch-trhai.ps1 would only ever be found by a person
+      # double-clicking the desktop icon and getting nothing.
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Path scripts -Filter *.ps1 -Recurse | ForEach-Object {
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$null, [ref]$errors)
+            if ($errors -and $errors.Count) {
+              $failed = $true
+              Write-Host "::error file=$($_.FullName)::$($errors[0].Message)"
+            } else {
+              Write-Host "ok  $($_.Name)"
+            }
+          }
+          if ($failed) { exit 1 }
