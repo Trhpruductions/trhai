@@ -262,14 +262,26 @@
   text-shadow: var(--glow-soft), 0 1px 10px rgba(2, 6, 12, 0.9), 0 0 3px rgba(2, 6, 12, 0.75);
 }
 
+/* The live state of the app, and the least legible thing on the screen.
+ *
+ * 12.5px in --text-faint, sitting directly on the brightest part of the core.
+ * It is the one word that says what TRHAI is doing right now, and it was the
+ * hardest thing here to read.
+ *
+ * Not tinted with --tint, deliberately. The note above that block is right:
+ * legibility is not a mood, and this is exactly the text that must stay
+ * readable while the core is at its busiest. Bigger and brighter, with a
+ * heavier halo to hold it against a beam passing behind - the same trick the
+ * title above it already uses, which is why the title reads and this did not. */
 .cc-core-state {
   position: relative;
   z-index: 3;
-  /* Same halo, smaller: this sits closer to the core than the title does. */
-  text-shadow: 0 1px 8px rgba(2, 6, 12, 0.9);
-  font-size: 12.5px;
-  letter-spacing: 0.14em;
-  color: var(--text-faint);
+  text-shadow:
+    0 1px 10px rgba(2, 6, 12, 0.95),
+    0 0 4px rgba(2, 6, 12, 0.85);
+  font-size: 13.5px;
+  letter-spacing: 0.22em;
+  color: var(--text-muted);
 }
 
 .cc-core-row {
@@ -293,10 +305,24 @@
   gap: 3px;
   min-width: 76px;
   padding: 8px 12px;
-  border: 1px solid var(--line-subtle);
-  border-radius: 8px;
-  background: rgba(10, 15, 22, 0.72);
-  color: var(--text-faint);
+  /* The same glass as the readouts around the core and the tiles in the
+   * header. These three sit directly on the brightest part of the scene, and
+   * a flat panel there reads as a sticker on top of the picture rather than
+   * part of it - the "flat gray utility box" the product spec rules out by
+   * name. Frosted, so the light behind them still shows through. */
+  border: 1px solid rgba(var(--tint), 0.14);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    180deg,
+    rgba(12, 20, 30, 0.60),
+    rgba(7, 13, 21, 0.48)
+  );
+  backdrop-filter: blur(8px) saturate(115%);
+  -webkit-backdrop-filter: blur(8px) saturate(115%);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--tint), 0.16),
+    0 10px 24px rgba(0, 0, 0, 0.38);
+  color: var(--text-muted);
   font: inherit;
   font-size: 12.5px;
   letter-spacing: 0.14em;
@@ -304,7 +330,23 @@
   cursor: pointer;
 }
 
-.cc-action:hover:not(:disabled) { border-color: var(--line-strong); color: var(--accent-strong); }
+.cc-action:hover:not(:disabled) {
+  border-color: rgba(var(--tint), 0.42);
+  color: var(--accent-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--tint), 0.26),
+    0 12px 30px rgba(0, 0, 0, 0.42),
+    0 0 22px rgba(var(--tint), 0.14);
+}
+
+/* Keyboard users get the same signal, plus a ring - these are the primary
+   controls on the screen and the first thing tab reaches after the input. */
+.cc-action:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  box-shadow: 0 0 0 3px var(--accent-quiet), 0 10px 24px rgba(0, 0, 0, 0.38);
+}
 
 .cc-action:disabled { opacity: 0.45; cursor: not-allowed; }
 

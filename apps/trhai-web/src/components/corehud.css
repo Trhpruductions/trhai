@@ -69,3 +69,51 @@
 @media (max-width: 1200px) {
   .hud { display: none; }
 }
+
+/* A plate behind each readout.
+ *
+ * These are instrument readings sitting directly on a moving background: the
+ * core's beams sweep past them, the floor grid runs under them, and the
+ * particle field crosses them. Bare text on that is a legibility problem
+ * before it is a style one - the value flickers in and out of contrast as the
+ * light moves.
+ *
+ * Frosted rather than solid, which is the design language the product spec
+ * asks for and also the honest choice: a solid box would cut a hole in the
+ * scene, and the point is that these belong to it. The blur is small and the
+ * plates are few, so this stays cheap - see the note in dash.css about
+ * measuring per-process rather than watching total CPU on this machine.
+ */
+.hud-note {
+  padding: 9px 13px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(var(--tint), 0.10);
+  background: linear-gradient(
+    180deg,
+    rgba(10, 18, 28, 0.42),
+    rgba(6, 12, 20, 0.30)
+  );
+  backdrop-filter: blur(7px) saturate(115%);
+  -webkit-backdrop-filter: blur(7px) saturate(115%);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--tint), 0.14),
+    0 10px 26px rgba(0, 0, 0, 0.34);
+  transition: border-color 700ms ease, box-shadow 700ms ease;
+}
+
+/* The value reads as lit rather than printed, which is what separates an
+   instrument from a caption. Kept off the label: two glowing things next to
+   each other is one too many, and the label is the quieter half by design. */
+.hud-note-value {
+  text-shadow: 0 0 18px rgba(var(--tint), 0.28);
+}
+
+/* The leader line starts at the plate's edge now, not at the text. */
+.hud-top-left .hud-note-line,
+.hud-bottom-left .hud-note-line { left: 13px; }
+.hud-top-right .hud-note-line,
+.hud-bottom-right .hud-note-line { right: 13px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-note { transition: none; }
+}
