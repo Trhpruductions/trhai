@@ -1103,7 +1103,7 @@ export default function DashboardPage() {
             <div className="cc-core-wrap">
               <CoreGL
                 state={core}
-                size={bare ? 500 : 380}
+                size={bare ? 560 : 460}
                 amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
                 load={machineLoad}
               />
@@ -1347,9 +1347,23 @@ export default function DashboardPage() {
       <footer className="cc-states mono">
 
         <div className="cc-states-stages">
-          {stages.map((name) => (
-            <span key={name} className={`cc-stage-word${stage === name ? " on" : ""}`}>{name}</span>
-          ))}
+          {stages.map((name, index) => {
+            const activeIndex = stages.findIndex((candidate) => candidate === stage);
+            const passed = activeIndex >= 0 && index < activeIndex;
+            const active = name === stage;
+            return (
+              <span key={name} className="cc-stage-step">
+                <span
+                  className={`cc-stage-dot${active ? " on" : ""}${passed ? " passed" : ""}`}
+                  aria-hidden="true"
+                />
+                <span className={`cc-stage-word${active ? " on" : ""}${passed ? " passed" : ""}`}>{name}</span>
+                {index < stages.length - 1 && (
+                  <span className={`cc-stage-link${passed ? " passed" : ""}`} aria-hidden="true" />
+                )}
+              </span>
+            );
+          })}
         </div>
         <span className="cc-states-note faint">
           {answerCredit(lastReply?.strategy, lastReply?.model)

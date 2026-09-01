@@ -30,8 +30,8 @@
   background:
     linear-gradient(180deg, rgba(96, 214, 255, 0.07), rgba(96, 214, 255, 0.015) 40%, transparent 72%),
     linear-gradient(180deg, rgba(9, 22, 38, 0.70), rgba(6, 14, 26, 0.78));
-  backdrop-filter: blur(14px) saturate(130%);
   -webkit-backdrop-filter: blur(14px) saturate(130%);
+  backdrop-filter: blur(14px) saturate(130%);
 }
 
 .cc-brand { display: flex; align-items: center; gap: 9px; flex: none; }
@@ -303,7 +303,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 340px;
+  /* The core is the hero of this screen, not one instrument among several -
+     it should dominate the stage the way the reference design's does. */
+  min-height: 460px;
 }
 
 .cc-core-wrap { position: relative; display: grid; place-items: center; }
@@ -329,8 +331,8 @@
     rgba(12, 20, 30, 0.60),
     rgba(7, 13, 21, 0.48)
   );
-  backdrop-filter: blur(8px) saturate(115%);
   -webkit-backdrop-filter: blur(8px) saturate(115%);
+  backdrop-filter: blur(8px) saturate(115%);
   box-shadow:
     inset 0 1px 0 rgba(var(--tint), 0.16),
     0 10px 24px rgba(0, 0, 0, 0.38);
@@ -410,6 +412,7 @@
   border-left: 2px solid var(--accent);
   border-radius: 10px;
   background: rgba(10, 15, 22, 0.86);
+  -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 }
 
@@ -564,8 +567,8 @@
   background:
     linear-gradient(180deg, rgba(96, 214, 255, 0.07), rgba(96, 214, 255, 0.015) 40%, transparent 72%),
     linear-gradient(180deg, rgba(9, 22, 38, 0.70), rgba(6, 14, 26, 0.78));
-  backdrop-filter: blur(14px) saturate(130%);
   -webkit-backdrop-filter: blur(14px) saturate(130%);
+  backdrop-filter: blur(14px) saturate(130%);
   flex-wrap: wrap;
 }
 
@@ -574,6 +577,7 @@
   letter-spacing: 0.2em;
   color: var(--text-faint);
   opacity: 0.5;
+  transition: opacity 0.35s ease, color 0.35s ease;
 }
 
 /* Lit only by real state, which is why this is a class and not an
@@ -584,13 +588,58 @@
   text-shadow: var(--glow-soft);
 }
 
+.cc-stage-word.passed { opacity: 0.75; color: var(--text); }
+
+.cc-stage-step { display: inline-flex; align-items: center; gap: 8px; }
+
+.cc-stage-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  opacity: 0.4;
+  flex: none;
+  transition: opacity 0.35s ease, background 0.35s ease, box-shadow 0.35s ease, transform 0.35s ease;
+}
+
+.cc-stage-dot.passed { background: var(--accent); opacity: 0.85; }
+
+/* The one real-time signal on the rail: a soft pulse on the stage actually
+   happening now, not a decorative loop running regardless of state. */
+.cc-stage-dot.on {
+  background: var(--accent-strong);
+  opacity: 1;
+  box-shadow: 0 0 10px var(--accent-strong), 0 0 2px var(--accent-strong);
+  transform: scale(1.35);
+  animation: cc-stage-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes cc-stage-pulse {
+  0%, 100% { box-shadow: 0 0 8px var(--accent-strong), 0 0 2px var(--accent-strong); }
+  50% { box-shadow: 0 0 16px var(--accent-strong), 0 0 4px var(--accent-strong); }
+}
+
+.cc-stage-link {
+  width: 18px;
+  height: 1px;
+  background: var(--line-subtle);
+  flex: none;
+  transition: background 0.4s ease;
+}
+
+.cc-stage-link.passed { background: var(--accent); opacity: 0.6; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-stage-dot.on { animation: none; }
+}
+
 .cc-states-note { margin-left: auto; font-size: 13px; }
 
 /* ---- narrower screens ---- */
 
 @media (max-width: 1500px) {
   .cc-body { grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(230px, 280px); }
-  .cc-core-row { min-height: 300px; }
+  .cc-core-row { min-height: 380px; }
 }
 
 @media (max-width: 1200px) {
@@ -842,8 +891,8 @@
     rgba(12, 20, 30, 0.72),
     rgba(7, 13, 21, 0.62)
   );
-  backdrop-filter: blur(10px) saturate(118%);
   -webkit-backdrop-filter: blur(10px) saturate(118%);
+  backdrop-filter: blur(10px) saturate(118%);
   box-shadow:
     inset 0 1px 0 rgba(var(--tint), 0.16),
     0 12px 30px rgba(0, 0, 0, 0.46);
@@ -908,26 +957,40 @@
  * "with light rising from it", and the platform was there without the light -
  * so the silhouette read as a disc under a circle rather than as a projection.
  * A soft column, widest at the base and fading out well before the title, is
- * the whole of it.
+ * the whole of it, with a brighter core beam layered inside it so the column
+ * reads as a projection of the core's own light rather than ambient haze.
  *
  * Decorative and honest about it: it carries no number and encodes no value,
- * exactly like the platform it stands on. */
+ * exactly like the platform it stands on. Tint-reactive like the platform
+ * below it - a beam that stayed cyan while the core turned amber for
+ * "executing" would be telling a different story from the rest of the scene.
+ *
+ * This used to be declared a second time further down with a hardcoded cyan
+ * clip-path cone, which - being later in the file - silently overrode every
+ * property here at equal specificity. The column described in this comment
+ * was never actually visible; the duplicate is gone and this is one rule now.
+ */
 .cc-core-wrap::before {
   content: "";
   position: absolute;
   left: 50%;
   bottom: -30px;
-  width: 300px;
-  height: 300px;
+  width: 320px;
+  height: 380px;
   transform: translateX(-50%);
-  background: linear-gradient(
-    to top,
-    rgba(var(--tint), 0.13),
-    rgba(var(--tint), 0.05) 38%,
-    transparent 72%
-  );
-  -webkit-mask-image: radial-gradient(ellipse at 50% 100%, #000 0%, transparent 72%);
-  mask-image: radial-gradient(ellipse at 50% 100%, #000 0%, transparent 72%);
+  background:
+    linear-gradient(to top, rgba(var(--tint), 0.22), rgba(var(--tint), 0.07) 34%, transparent 68%),
+    linear-gradient(
+      to top,
+      rgba(var(--tint-soft), 0.30) 0%,
+      rgba(var(--tint-soft), 0.10) 22%,
+      transparent 55%
+    );
+  background-size: 100% 100%, 42% 100%;
+  background-position: center bottom, center bottom;
+  background-repeat: no-repeat;
+  -webkit-mask-image: radial-gradient(ellipse at 50% 100%, #000 0%, transparent 74%);
+  mask-image: radial-gradient(ellipse at 50% 100%, #000 0%, transparent 74%);
   pointer-events: none;
   z-index: -1;
   transition: background 700ms ease;
@@ -935,22 +998,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .cc-core-wrap::after, .cc-core-wrap::before { transition: none; }
-}
-
-/* The beam: a soft cone between the platform and the core. Kept faint so the
-   core stays the brightest thing on the screen. */
-.cc-core-wrap::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -12px;
-  width: 210px;
-  height: 150px;
-  transform: translateX(-50%);
-  background: linear-gradient(to top, rgba(53, 199, 255, 0.16), transparent 76%);
-  clip-path: polygon(28% 100%, 72% 100%, 60% 0%, 40% 0%);
-  pointer-events: none;
-  z-index: -1;
 }
 
 /* The state colours the base too, so the platform belongs to the core rather
@@ -1509,8 +1556,8 @@
   padding: 11px 7px;
   border: 1px solid var(--line-subtle);
   background: rgba(9, 22, 38, 0.72);
-  backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
   color: var(--text-faint);
   font: inherit;
   font-size: 11px;
