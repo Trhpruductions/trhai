@@ -27,6 +27,7 @@
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "health:api": "curl -fsS http://localhost:4000/health",
-    "smoke:web-stack": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/smoke-web-stack.ps1"
+    "smoke:web-stack": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/smoke-web-stack.ps1",
+    "smoke:video": "tsx scripts/smoke-video.ts"
   }
 }

@@ -9,6 +9,7 @@ export * from "./knowledgeImport.js";
 export * from "./localCalendar.js";
 export * from "./automation.js";
 export * from "./markdown.js";
+export * from "./videoScript.js";
 
 export type AssistantMode = "general" | "coding" | "business" | "creator";
 

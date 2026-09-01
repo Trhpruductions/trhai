@@ -85,6 +85,8 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // it changes the text it was given and cannot silently drop the rest of a file.
   edit_file: 2,
   build_app: 2,
+  // Renders to disk and nothing beyond it - the same bound as build_app.
+  make_video: 2,
   // Creating a schedule changes what this machine will do later, unattended.
   // That is a change, not a read - level 2, the same as writing a file.
   add_schedule: 2,

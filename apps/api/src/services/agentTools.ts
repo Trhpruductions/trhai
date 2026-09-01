@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.js";
 import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
 import { describeDifference, shiftDate } from "./dateMath.js";
-import { classifyRequest, deriveTitle, generateProject, planProject, slugify } from "@ascend/shared";
+import {
+  classifyRequest, deriveTitle, findScriptFault, generateProject, parseVideoScript, planProject,
+  slugify, videoScriptPrompt, type VideoScript
+} from "@ascend/shared";
+import { renderVideo } from "./videoRender.js";
 import { authorPrompt, findAppFault, parseAuthoredFiles, type AuthoredFile } from "./appAuthor.js";
 import { verifyBuiltProject } from "./buildVerification.js";
 import { describeConfirmationNeeded, requiresConfirmation } from "./toolPermissions.js";
@@ -646,6 +650,28 @@ export const toolDefinitions: ToolDefinition[] = [
           }
         },
         required: ["command"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "make_video",
+      description:
+        "Build a short motion-graphics video entirely on this machine - scripted, narrated, "
+        + "rendered and encoded locally, no cloud rendering - and write it to the workspace. Not "
+        + "triple-A generative video: this produces a scripted, narrated presentation-style video, "
+        + "which is what this machine's own GPU can actually render and encode in real time. Use "
+        + "this when the user wants a video made, not just described.",
+      parameters: {
+        type: "object",
+        properties: {
+          description: {
+            type: "string",
+            description: "What the video should cover and say, in the user's own words."
+          }
+        },
+        required: ["description"]
       }
     }
   }
@@ -1378,6 +1404,85 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         content: "Built \"" + spec.title + "\" in the workspace at " + folder + "/ with "
           + written.length + " files, and verified it: " + verifiedDetail(verification.output)
           + "\n\n" + runLine
+      };
+    }
+
+    case "make_video": {
+      const description = requireString(call.arguments.description);
+      if (!description) return { ok: false, content: "make_video needs a description." };
+
+      if (!context.authorApp) {
+        return {
+          ok: false,
+          content: "Writing a video script needs the local model, and no model is available. "
+            + "Start the model and ask again."
+        };
+      }
+
+      const { sessionId } = context;
+      const attempts = 3;
+      let script: VideoScript | null = null;
+      let lastFault = "";
+
+      for (let attempt = 1; attempt <= attempts && !script; attempt += 1) {
+        const scriptEvent = beginEvent(sessionId, "create",
+          `Writing the video script${attempt > 1 ? ` (attempt ${attempt})` : ""}`);
+
+        const authored = await context.authorApp(videoScriptPrompt(description));
+        if (!authored.ok) {
+          lastFault = authored.reason;
+          endEvent(sessionId, scriptEvent, "failed", lastFault);
+          continue;
+        }
+
+        const parsed = parseVideoScript(authored.text);
+        if (!parsed.ok) {
+          lastFault = parsed.reason;
+          endEvent(sessionId, scriptEvent, "failed", lastFault);
+          continue;
+        }
+
+        const fault = findScriptFault(parsed.script);
+        if (fault) {
+          lastFault = fault;
+          endEvent(sessionId, scriptEvent, "failed", lastFault);
+          continue;
+        }
+
+        script = parsed.script;
+        endEvent(sessionId, scriptEvent, "ok", `${parsed.script.scenes.length} scenes`);
+      }
+
+      if (!script) {
+        return {
+          ok: false,
+          content: `I could not write a usable script for that video. ${attempts} attempts were `
+            + `made and the last failed because ${lastFault}. Nothing was rendered.`
+        };
+      }
+
+      const folder = slugify(script.title, "video", 60);
+      const renderEvent = beginEvent(sessionId, "create", `Rendering "${script.title}"`);
+      const rendered = await renderVideo(script, {
+        folder,
+        onProgress: (message) => recordEvent(sessionId, "create", message, "ok")
+      });
+
+      if (!rendered.ok) {
+        endEvent(sessionId, renderEvent, "failed", rendered.reason);
+        return {
+          ok: false,
+          content: `The script was written but the render failed: ${rendered.reason} Nothing was reported as built.`
+        };
+      }
+
+      endEvent(sessionId, renderEvent, "ok", `${rendered.frames} frames, ${rendered.seconds}s`, rendered.path);
+      noteProjectTouched(context.sessionId, folder);
+
+      return {
+        ok: true,
+        content: `Rendered "${script.title}" to the workspace at ${rendered.path} - ${rendered.seconds}s, `
+          + `${rendered.frames} frames, ${script.scenes.length} scene${script.scenes.length === 1 ? "" : "s"}.`
       };
     }
 
