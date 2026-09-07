@@ -715,7 +715,7 @@ const scaffoldingTools = new Set(["build_app", "plan_app"]);
  * the port" is an ordinary thing to ask.
  */
 const machineChangingTools = new Set([
-  "write_file", "edit_file", "build_app", "plan_app", "run_command", "run_script"
+  "write_file", "edit_file", "build_app", "make_video", "plan_app", "run_command", "run_script"
 ]);
 
 /**

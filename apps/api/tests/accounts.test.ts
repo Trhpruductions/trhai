@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
+import { readProtectedJsonFile } from "../src/services/protectedJson.js";
 
 // Paths are read at module load, so they must be set before importing.
 //
@@ -92,8 +93,11 @@ test("never stores the password in plaintext", () => {
 
   const onDisk = readFileSync(accountsFile, "utf8");
   assert.ok(!onDisk.includes(secret), "password must not appear on disk");
-  assert.match(onDisk, /"salt"/);
-  assert.match(onDisk, /"hash"/);
+  assert.doesNotMatch(onDisk, /"hash"/, "credential internals must stay inside ciphertext");
+
+  const stored = readProtectedJsonFile(accountsFile) as { accounts?: Array<{ salt?: unknown; hash?: unknown }> };
+  assert.equal(typeof stored.accounts?.[0]?.salt, "string");
+  assert.equal(typeof stored.accounts?.[0]?.hash, "string");
 });
 
 test("resolves a token to its account and rejects an unknown one", () => {

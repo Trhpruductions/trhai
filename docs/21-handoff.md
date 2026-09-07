@@ -21,6 +21,12 @@ them is wrong even if it works.
 5. **Never claim work that did not happen.** This codebase is built around that
    rule — see `contradictedClaims.ts`, `fabricatedOutput.ts`, `actionIntent.ts`.
    A reply saying a file was saved when it was not is the worst bug class here.
+6. **App-owned data is key-protected at rest.** Persistent API stores write
+  encrypted JSON envelopes through `protectedJson.ts`. `TRHAI_DATA_KEY` may
+  provide the key; otherwise the API creates a machine-local key outside the
+  repo. Existing plaintext JSON can still be read and migrates on the next save.
+  If an encrypted file cannot be authenticated with the current key, the helper
+  locks that file against overwrite so a wrong key cannot silently wipe data.
 
 ---
 
@@ -61,7 +67,7 @@ them is wrong even if it works.
 
 ---
 
-## Task 1 — Video studio (largest piece; nothing is built yet)
+## Task 1 — Video studio (implemented; real smoke passed)
 
 The user asked for video "like a triple-A studio". **Local generative
 text-to-video is not achievable on this hardware** and should not be attempted:
@@ -69,8 +75,15 @@ those models want 8–24 GB of *free* VRAM, this machine has roughly 2 GB free
 while the assistant is loaded, and the PyTorch/CUDA stack breaks constraints 1
 and 3. Say that plainly if asked. Do not quietly build a poor version of it.
 
-What **is** achievable, and what to build: a **motion-graphics studio** that
+What **is** achievable, and what is built now: a **motion-graphics studio** that
 scripts, narrates, renders and encodes — entirely locally, at true 1080p.
+
+Status as of 2026-09-01: the pipeline exists in
+`packages/shared/src/videoScript.ts`, `apps/api/src/services/frameRenderer.ts`,
+and `apps/api/src/services/videoRender.ts`; `make_video` is registered in the
+agent tool loop, permissioned as level 2, and reported through
+`/v1/capabilities` as `videoRendering`. The user-facing capability reply also
+names the local motion-graphics tool.
 
 ### Pipeline
 
@@ -134,6 +147,10 @@ user request
   success is claimed. Stub the encoder; do not require a GPU.
 - **Do not** put a real render in the suite: it needs Electron, a GPU and ~30s.
   Add it as a script the user runs (`npm run smoke:video`), like `smoke:web-stack`.
+
+Real smoke result on 2026-09-01: `npm run smoke:video` passed in 25.1s and
+rendered 59 frames / 4.9s / 119011 bytes to a temporary MP4 through the real
+local stack.
 
 ---
 

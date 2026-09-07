@@ -53,11 +53,18 @@ test("the capabilities route reports code execution as available, because it is"
   try {
     const response = await fetch(`${server.baseUrl}/v1/capabilities`);
     const payload = await response.json() as {
-      data?: { filesystem?: boolean; web?: boolean; codeExecution?: boolean; integrations?: string[] };
+      data?: {
+        filesystem?: boolean;
+        web?: boolean;
+        codeExecution?: boolean;
+        videoRendering?: boolean;
+        integrations?: string[];
+      };
     };
 
     assert.equal(payload.data?.filesystem, true);
     assert.equal(payload.data?.web, true);
+    assert.equal(payload.data?.videoRendering, true);
     // False because machine control is off, not because no such tool exists —
     // one does now. The answer is unchanged; the reason for it is not.
     assert.equal(payload.data?.codeExecution, true);

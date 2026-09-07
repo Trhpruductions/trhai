@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
+import { readProtectedJsonFile } from "../src/services/protectedJson.js";
 
 // Defensive: this file starts a real server via createApp(), which touches
 // every persisted store server.js wires up. See accounts.test.ts for what
@@ -72,7 +73,10 @@ test("only hashes are stored, never the codes themselves", () => {
     assert.ok(!onDisk.includes(code), "a plaintext code reached disk");
     assert.ok(!onDisk.includes(normalizeRecoveryCode(code)), "a normalized code reached disk");
   }
-  assert.match(onDisk, /recoveryCodeHashes/);
+  assert.doesNotMatch(onDisk, /recoveryCodeHashes/, "recovery hash metadata must stay inside ciphertext");
+
+  const stored = readProtectedJsonFile(accountsFile) as { accounts?: Array<{ recoveryCodeHashes?: unknown[] }> };
+  assert.equal(stored.accounts?.[0]?.recoveryCodeHashes?.length, recoveryCodeCount);
 });
 
 test("a code resets the password and signs the user in", () => {

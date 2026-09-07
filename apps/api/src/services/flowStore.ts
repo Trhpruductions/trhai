@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { parseFlow, type Flow } from "@ascend/shared";
 import { dataFile } from "./dataDirectory.js";
+import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
 // The saved automation flow, kept where the scheduler can reach it.
 //
@@ -30,7 +31,7 @@ function loadFromDisk(): void {
   try {
     // Parsed through the same validator the browser uses, so a hand-edited
     // or truncated file is refused rather than half-loaded.
-    flow = parseFlow(JSON.parse(readFileSync(flowFilePath, "utf8")));
+    flow = parseFlow(readProtectedJsonFile(flowFilePath));
   } catch {
     // A corrupt file must never take the API down.
   }
@@ -42,7 +43,8 @@ function saveToDisk(): void {
   const tempPath = `${flowFilePath}.tmp`;
   try {
     mkdirSync(path.dirname(flowFilePath), { recursive: true });
-    writeFileSync(tempPath, JSON.stringify(flow, null, 2), "utf8");
+    assertProtectedJsonWritable(flowFilePath);
+    writeProtectedJsonFile(tempPath, flow);
     renameSync(tempPath, flowFilePath);
   } catch (error) {
     console.error(`flow could not be saved: ${error instanceof Error ? error.message : String(error)}`);

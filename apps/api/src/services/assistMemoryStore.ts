@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { extractMemoryCandidates, suppressDuplicateMemories, type MemoryCandidate } from "./memoryExtraction.js";
 import { dataFile } from "./dataDirectory.js";
+import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
 // Memory for the `/v1/assist` endpoint.
 //
@@ -87,7 +88,7 @@ function loadFromDisk(): void {
   if (!persistenceEnabled || !existsSync(memoryFilePath)) return;
 
   try {
-    const parsed = JSON.parse(readFileSync(memoryFilePath, "utf8")) as Partial<PersistedShape>;
+    const parsed = readProtectedJsonFile(memoryFilePath) as Partial<PersistedShape>;
     if (!Array.isArray(parsed.sessions)) return;
 
     for (const session of parsed.sessions) {
@@ -150,7 +151,8 @@ function saveToDisk(): void {
   for (let attempt = 1; attempt <= persistAttempts; attempt += 1) {
     try {
       mkdirSync(path.dirname(memoryFilePath), { recursive: true });
-      writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
+      assertProtectedJsonWritable(memoryFilePath);
+      writeProtectedJsonFile(tempPath, payload);
       renameSync(tempPath, memoryFilePath);
       lastPersistError = null;
       return;

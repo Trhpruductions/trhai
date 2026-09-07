@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { increment, observe } from "./metrics.js";
 import { dataFile } from "./dataDirectory.js";
+import { readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
 // Running commands on this machine.
 //
@@ -181,7 +182,7 @@ function loadAccessState(): void {
 
   try {
     if (!existsSync(accessFilePath())) return;
-    const parsed = JSON.parse(readFileSync(accessFilePath(), "utf8")) as Partial<{
+    const parsed = readProtectedJsonFile(accessFilePath()) as Partial<{
       enabled: boolean; decidedAt: string; expiresAt: number;
       // The older shape, from when access was only ever a timed grant.
       armedUntil: number; armedAt: string;
@@ -216,7 +217,7 @@ function saveAccessState(): void {
   try {
     mkdirSync(path.dirname(accessFilePath()), { recursive: true });
     if (accessState) {
-      writeFileSync(accessFilePath(), JSON.stringify(accessState), "utf8");
+      writeProtectedJsonFile(accessFilePath(), accessState);
     } else if (existsSync(accessFilePath())) {
       rmSync(accessFilePath(), { force: true });
     }

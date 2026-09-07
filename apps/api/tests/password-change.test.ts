@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
+import { readProtectedJsonFile } from "../src/services/protectedJson.js";
 
 // Defensive: this file starts a real server via createApp(), which touches
 // every persisted store server.js wires up. See accounts.test.ts for what
@@ -116,12 +117,12 @@ test("revokes every other session so a stolen token stops working", () => {
 
 test("stores a fresh salt so the new hash is unrelated to the old", () => {
   const created = freshAccount("salt@example.com");
-  const before = JSON.parse(readFileSync(accountsFile, "utf8"));
+  const before = readProtectedJsonFile(accountsFile) as { accounts: Array<{ salt: string; hash: string }> };
   const saltBefore = before.accounts[0].salt;
 
   changePassword({ token: created.token, currentPassword: original, newPassword: replacement });
 
-  const after = JSON.parse(readFileSync(accountsFile, "utf8"));
+  const after = readProtectedJsonFile(accountsFile) as { accounts: Array<{ salt: string; hash: string }> };
   assert.notEqual(after.accounts[0].salt, saltBefore);
   assert.notEqual(after.accounts[0].hash, before.accounts[0].hash);
 });

@@ -63,3 +63,19 @@ test("no store resolves its data path against the working directory", () => {
 
   assert.deepEqual(offenders, [], `these resolve data against cwd: ${offenders.join(", ")}`);
 });
+
+test("app-owned data stores write through protected JSON", () => {
+  const services = path.join(apiDir, "src", "services");
+  const offenders: string[] = [];
+
+  for (const file of readdirSync(services).filter((name) => name.endsWith(".ts"))) {
+    const source = readFileSync(path.join(services, file), "utf8");
+    if (!/dataFile\(/.test(source)) continue;
+    if (file === "dataDirectory.ts" || file === "protectedJson.ts") continue;
+
+    const withoutComments = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    if (/writeFileSync\([^\n]+JSON\.stringify/.test(withoutComments)) offenders.push(file);
+  }
+
+  assert.deepEqual(offenders, [], `these app data stores bypass protected JSON: ${offenders.join(", ")}`);
+});

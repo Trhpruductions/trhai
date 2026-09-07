@@ -1,5 +1,6 @@
 import { availableTools } from "./agentTools.js";
 import { commandsArmed } from "./commandRunner.js";
+import { lockedProtectedFiles } from "./protectedJson.js";
 import { permissionLabels, permissionLevelOf, requiresConfirmation, type PermissionLevel } from "./toolPermissions.js";
 
 // What this build can actually do, read from the registry rather than
@@ -30,6 +31,8 @@ export type SystemCapabilities = {
   memory: boolean;
   documents: boolean;
   applicationBuilding: boolean;
+  /** Whether the local motion-graphics video pipeline is registered. */
+  videoRendering: boolean;
   /**
    * `web` is fetch_url: a page read, given its exact URL — not search, and
    * there is no tool that finds a URL for you. Stated as a real field rather
@@ -53,6 +56,25 @@ export type SystemCapabilities = {
    * empty list here is that fact, not an oversight.
    */
   integrations: string[];
+  /**
+   * Stored data that could not be decrypted with the current key, by file.
+   *
+   * Empty is the ordinary case and means everything opened. A non-empty list is
+   * serious and is the one thing here that describes a fault rather than a
+   * feature: those stores started empty and refuse to be written over, so the
+   * assistant has lost access to what they held and cannot save anything new
+   * into them.
+   *
+   * Reported because the alternative is silence. Every store catches the read
+   * error and carries on - which is right, an unreadable file must not stop the
+   * API from starting - and the visible result is an assistant that has
+   * forgotten your memories and will not remember anything new, with nothing
+   * anywhere saying why. Almost always this means TRHAI_DATA_KEY changed or the
+   * machine key file was lost; the data is still on disk and still recoverable
+   * with the original key, which is exactly why the files are locked rather
+   * than overwritten.
+   */
+  lockedData: string[];
 };
 
 function hasAll(names: string[], ...required: string[]): boolean {
@@ -95,6 +117,8 @@ export function getSystemCapabilities(model: string | null): SystemCapabilities 
     memory: hasAll(names, "search_memory", "remember"),
     documents: hasAll(names, "search_documents", "write_document"),
     applicationBuilding: hasAll(names, "build_app"),
+    videoRendering: hasAll(names, "make_video"),
+    lockedData: lockedProtectedFiles(),
     // Reading a page given its URL, via fetch_url — not search.
     web: hasAll(names, "fetch_url"),
     // True only while machine control is on, since `offered` already excludes

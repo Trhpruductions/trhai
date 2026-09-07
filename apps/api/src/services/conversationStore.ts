@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
+import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
 // Conversation storage, keyed the same way as memory: `user:<id>` when signed in,
 // the anonymous session id otherwise. That is what makes a conversation follow an
@@ -57,7 +58,7 @@ function loadFromDisk(): void {
   if (!persistenceEnabled || !existsSync(conversationFilePath)) return;
 
   try {
-    const parsed = JSON.parse(readFileSync(conversationFilePath, "utf8")) as {
+    const parsed = readProtectedJsonFile(conversationFilePath) as {
       conversations?: Array<{ key?: unknown; turns?: unknown }>;
     };
 
@@ -80,7 +81,8 @@ function saveToDisk(): void {
     };
     mkdirSync(path.dirname(conversationFilePath), { recursive: true });
     const tempPath = `${conversationFilePath}.tmp`;
-    writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
+    assertProtectedJsonWritable(conversationFilePath);
+    writeProtectedJsonFile(tempPath, payload);
     renameSync(tempPath, conversationFilePath);
   } catch {
     // Durability loss must not fail the request.

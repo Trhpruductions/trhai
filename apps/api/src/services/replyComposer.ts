@@ -54,6 +54,18 @@ export type MemoryWriteOutcome = {
    * moment ago in the very message it is answering.
    */
   savedBodies?: string[];
+  /**
+   * Why the write did not reach disk, when it did not.
+   *
+   * `saved` counts what was taken into memory, which is not the same as what
+   * survived. assistMemoryStore has recorded this failure for a while and
+   * nothing ever read it, so a save that was blocked - most often by encrypted
+   * data that could not be authenticated with the current key - still answered
+   * "Saved." That is the false-success this whole codebase is built against,
+   * and it is worse here than most: the user is told their fact is kept, and it
+   * is gone at the next restart.
+   */
+  persistError?: string | null;
 };
 
 export type ComposerInput = {
@@ -376,6 +388,7 @@ export function buildCapabilityReply(localModel?: string): string {
     "",
     "What I can actually do:",
     "- Build a working app from a description. \"Build a task tracker where projects have many tasks\" produces a real REST API with storage, validation and tests.",
+    "- Render a short motion-graphics video locally. It scripts, narrates, renders and encodes on this machine, with no cloud renderer or API key.",
     "- Remember what you tell me. Just say it — I pick the facts out myself.",
     "- Answer from your documents. Add them under Knowledge and I'll quote the relevant passage back with its source.",
     "- Run flows you build under Automation, and keep your schedule under Calendar.",
@@ -560,6 +573,19 @@ export function composeReply(input: ComposerInput): ComposedReply {
     const write = input.memoryWrite;
 
     // Only a confirmed write earns the confirmation.
+    // Taken into memory but not written down. Say so, and say what to do.
+    if (write && write.saved > 0 && write.persistError) {
+      return {
+        text: "I have that for this session, but it did not save to disk, so it will be "
+          + "gone when the app restarts. The stored data could not be opened with the "
+          + "current key - check TRHAI_DATA_KEY, or the machine key file if you were not "
+          + "using one. Nothing was overwritten, so the original data is still there.",
+        strategy: "not-saved",
+        groundedOn: [],
+        groundedOnHistory: 0
+      };
+    }
+
     if (write && write.saved > 0) {
       return {
         // Points at what exists. It used to send people to "the Memory panel",

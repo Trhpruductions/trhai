@@ -666,6 +666,7 @@ test("both capability replies still describe what the app does", () => {
     assert.match(reply, /Remember what you tell me/i);
     assert.match(reply, /Knowledge/);
     assert.match(reply, /Build a working app/i);
+    assert.match(reply, /motion-graphics video locally/i);
     assert.doesNotMatch(reply, /start with "remember/i);
   }
 });
@@ -678,6 +679,7 @@ test("the capability reply lists real tool names read from the registry", () => 
   // describe a different set of tools to each other.
   assert.match(reply, /search_memory/);
   assert.match(reply, /build_app/);
+  assert.match(reply, /make_video/);
   assert.match(reply, /forget/);
   assert.match(reply, /fetch_url/);
   // Both of these were once honest disclaimers and are now false. fetch_url is
@@ -1140,4 +1142,58 @@ test("a real request is not mistaken for a continuation", () => {
     mode: "general", message: "build me a task tracker", memories: [], history: []
   });
   assert.doesNotMatch(reply.text, /nothing is in progress/i);
+});
+
+// A save that was taken into memory but never reached disk.
+//
+// `saved` counts what the store accepted, not what survived. assistMemoryStore
+// has recorded a persist failure for a long time and nothing ever read it, so a
+// blocked write still answered "Saved." — and the fact was gone at the next
+// restart. That is the false-success this codebase exists to prevent.
+
+test("a save that did not reach disk is not reported as saved", () => {
+  const reply = composeReply({
+    mode: "general",
+    message: "remember that the deploy server is rack-4",
+    memories: [],
+    history: [],
+    memoryWrite: {
+      available: true,
+      saved: 1,
+      savedBodies: ["the deploy server is rack-4"],
+      persistError: "Refusing to overwrite encrypted data that could not be authenticated."
+    }
+  });
+
+  assert.equal(reply.strategy, "not-saved");
+  assert.doesNotMatch(reply.text, /^Saved\./, "it must not claim the save succeeded");
+  assert.match(reply.text, /did not save to disk/i, "and must say what actually happened");
+  assert.match(reply.text, /TRHAI_DATA_KEY|key/i, "and point at the cause");
+  // The data is recoverable; saying otherwise would send someone to rebuild it.
+  assert.match(reply.text, /nothing was overwritten/i);
+});
+
+test("an ordinary successful save still reads as saved", () => {
+  const reply = composeReply({
+    mode: "general",
+    message: "remember that the deploy server is rack-4",
+    memories: [],
+    history: [],
+    memoryWrite: { available: true, saved: 1, savedBodies: ["x"], persistError: null }
+  });
+
+  assert.match(reply.text, /^Saved\./);
+  assert.doesNotMatch(reply.text, /did not save/i);
+});
+
+test("a persist error with nothing saved does not become a false success", () => {
+  const reply = composeReply({
+    mode: "general",
+    message: "remember that",
+    memories: [],
+    history: [],
+    memoryWrite: { available: true, saved: 0, persistError: "disk full" }
+  });
+
+  assert.doesNotMatch(reply.text, /^Saved\./);
 });

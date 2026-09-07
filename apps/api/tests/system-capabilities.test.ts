@@ -69,12 +69,13 @@ test("the model is reported exactly as given, including absence", () => {
   assert.equal(getSystemCapabilities(null).model, null);
 });
 
-test("filesystem, memory, documents and app-building are true because the tools for them exist", () => {
+test("filesystem, memory, documents, app-building and video are true because the tools for them exist", () => {
   const capabilities = getSystemCapabilities(null);
   assert.equal(capabilities.filesystem, true);
   assert.equal(capabilities.memory, true);
   assert.equal(capabilities.documents, true);
   assert.equal(capabilities.applicationBuilding, true);
+  assert.equal(capabilities.videoRendering, true);
 });
 
 test("web access is reported available, because fetch_url is genuinely registered", () => {

@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
+import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
 // What the assistant is part-way through, so "do it" has something to resume.
 //
@@ -90,7 +91,7 @@ function loadFromDisk(): void {
   if (!persistenceEnabled || !existsSync(taskFilePath)) return;
 
   try {
-    const parsed = JSON.parse(readFileSync(taskFilePath, "utf8")) as {
+    const parsed = readProtectedJsonFile(taskFilePath) as {
       tasks?: Array<{ key?: unknown; task?: unknown }>;
     };
 
@@ -112,7 +113,8 @@ function saveToDisk(): void {
     };
     mkdirSync(path.dirname(taskFilePath), { recursive: true });
     const tempPath = `${taskFilePath}.tmp`;
-    writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
+    assertProtectedJsonWritable(taskFilePath);
+    writeProtectedJsonFile(tempPath, payload);
     renameSync(tempPath, taskFilePath);
   } catch {
     // Durability loss must not fail the request.
