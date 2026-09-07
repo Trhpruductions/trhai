@@ -43,6 +43,22 @@ jobs:
       # resolves a different tree is not verifying what was pushed.
       - run: npm ci
 
+      # Build first, and that order is load-bearing rather than tidy.
+      #
+      # Typecheck needs artifacts a build produces: packages/shared compiles to
+      # dist/ and its package.json points main and types there, and trhai-web's
+      # tsconfig includes .next/types, where Next generates LayoutProps. On a
+      # developer machine both are lying around from earlier builds, so
+      # `npm run typecheck` passes and nobody notices the dependency. On a clean
+      # checkout it fails with 13 errors - six "Cannot find module
+      # '@ascend/shared'", one "Cannot find name 'LayoutProps'", and the
+      # implicit-any errors that follow once those types are missing.
+      #
+      # That is exactly what this workflow caught on its first run, and it is
+      # not reproducible locally without deleting the artifacts by hand.
+      - name: Build
+        run: npm run build
+
       - name: Lint
         run: npm run lint
 
@@ -51,12 +67,6 @@ jobs:
 
       - name: Tests
         run: npm test
-
-      # The build is not redundant with typecheck. A CSS syntax error takes the
-      # Next build down while leaving lint, types and every test untouched -
-      # which is exactly how a broken build reached master here once already.
-      - name: Build
-        run: npm run build
 
       # Nothing else covers these. The launcher and its helpers are PowerShell,
       # so lint, typecheck and the test suite all skip them entirely, and a
