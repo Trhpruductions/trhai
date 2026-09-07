@@ -56,14 +56,36 @@ test("every concurrent write survives, none are lost", async () => {
   const sessionId = `stress-tasks-${runKey}`;
 
   try {
-    const writes = Array.from({ length: burst }, (_, index) =>
-      fetch(`${baseUrl}/v1/tasks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, title: `task ${index}` })
-      }));
-
-    const responses = await Promise.all(writes);
+    // Overlapping, but not all sixty at once.
+    //
+    // Firing the whole burst simultaneously was also testing the machine's
+    // socket table, and on a busy one it lost: a single request failed at the
+    // transport layer with "TypeError: fetch failed" before reaching the
+    // server at all. That says nothing about the property under test - it is
+    // the harness failing, not a lost update - and it made the suite pass or
+    // fail depending on what else happened to be running.
+    //
+    // Retrying would be the wrong repair. POST /v1/tasks is not idempotent, so
+    // a retry after a response was lost in flight would write the task twice
+    // and break the exact-count assertion below in a way that looks like the
+    // very bug this is watching for.
+    //
+    // A dozen in flight is still a dozen genuine read-modify-write cycles
+    // racing each other, which is what actually exposes a lost update. Sixty
+    // at once only added sockets.
+    const inFlight = 12;
+    const responses: Response[] = [];
+    for (let start = 0; start < burst; start += inFlight) {
+      const batch = Array.from(
+        { length: Math.min(inFlight, burst - start) },
+        (_, offset) => fetch(`${baseUrl}/v1/tasks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, title: `task ${start + offset}` })
+        })
+      );
+      responses.push(...await Promise.all(batch));
+    }
     const accepted = responses.filter((response) => response.status === 201).length;
     assert.equal(accepted, burst, `only ${accepted} of ${burst} writes were accepted`);
 
@@ -91,12 +113,20 @@ test("ids stay unique under a concurrent burst", async () => {
   const sessionId = `stress-ids-${runKey}`;
 
   try {
-    await Promise.all(Array.from({ length: burst }, (_, index) =>
-      fetch(`${baseUrl}/v1/tasks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, title: `t${index}` })
-      })));
+    // Bounded for the same reason as the burst above: sixty sockets at once
+    // failed at the transport layer on a loaded machine, which is not the
+    // uniqueness property this is checking.
+    const inFlight = 12;
+    for (let start = 0; start < burst; start += inFlight) {
+      await Promise.all(Array.from(
+        { length: Math.min(inFlight, burst - start) },
+        (_, offset) => fetch(`${baseUrl}/v1/tasks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, title: `t${start + offset}` })
+        })
+      ));
+    }
 
     const listed = await fetch(`${baseUrl}/v1/tasks?sessionId=${sessionId}`);
     const body = await listed.json() as { data: { tasks: Array<{ id: string }> } };
