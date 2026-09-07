@@ -162,6 +162,25 @@ void main() {
     col += mix(uColor, vec3(1.0), 0.6) * limb * limb * (1.2 + 0.9 * amp);
     /* A specular glint, small and offset, so the surface has a direction. */
     col += vec3(1.0) * pow(max(0.0, dot(normal, lightDir)), 42.0) * 1.4;
+
+    /* ---- globe grid ------------------------------------------------
+       Meridians and parallels across the sphere's own surface, so the
+       core reads as a world under glass rather than a ball of plasma -
+       the reference's wireframe-globe language, added rather than
+       substituted for the plasma work above it. Evaluated on the real
+       surface normal, so the lines curve with the sphere instead of
+       being flat rings painted over a disc.
+
+       The meridians turn with spin, the same value that already speeds
+       up the rings when the machine is genuinely working - a globe that
+       spun on its own timer while idle would be exactly the decoration
+       this shader otherwise refuses. */
+    float longitude = atan(normal.x, normal.z);
+    float latitude = asin(clamp(normal.y, -1.0, 1.0));
+    float meridians = smoothstep(0.940, 0.998, abs(cos(longitude * 9.0 - spin * 0.25)));
+    float parallels = smoothstep(0.945, 0.998, abs(cos(latitude * 10.0)));
+    float grid = max(meridians, parallels);
+    col += mix(uColor, uAccent, 0.5) * grid * mix(0.28, 1.0, z) * (0.30 + 0.45 * energy);
   }
 
   /* ---- the iris --------------------------------------------------------

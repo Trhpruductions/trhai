@@ -3,7 +3,7 @@ import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-const workspaceRoot = path.resolve(__dirname, '../..');
+const workspaceRoot = path.resolve(import.meta.dirname, '../..');
 
 function sendJson(res: import('node:http').ServerResponse, status: number, payload: unknown) {
   res.statusCode = status;
@@ -78,7 +78,7 @@ export default defineConfig({
     alias: {
       // Point at source rather than dist so the web app never depends on the
       // shared package having been built first.
-      '@ascend/shared': path.resolve(__dirname, '../../packages/shared/src/index.ts')
+      '@ascend/shared': path.resolve(import.meta.dirname, '../../packages/shared/src/index.ts')
     }
   },
   server: {

@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
 import type { ScorableMemory } from "./memoryRelevance.js";
 import { dataFile } from "./dataDirectory.js";
+import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
 // Knowledge base for `/v1/assist`.
 //
@@ -74,7 +75,7 @@ function loadFromDisk(): void {
   if (!persistenceEnabled || !existsSync(knowledgeFilePath)) return;
 
   try {
-    const parsed = JSON.parse(readFileSync(knowledgeFilePath, "utf8")) as Partial<PersistedShape>;
+    const parsed = readProtectedJsonFile(knowledgeFilePath) as Partial<PersistedShape>;
     if (!Array.isArray(parsed.sessions)) return;
 
     for (const session of parsed.sessions) {
@@ -98,7 +99,8 @@ function saveToDisk(): void {
     mkdirSync(path.dirname(knowledgeFilePath), { recursive: true });
     // Temp file then rename, so a crash mid-write cannot truncate the store.
     const tempPath = `${knowledgeFilePath}.tmp`;
-    writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
+    assertProtectedJsonWritable(knowledgeFilePath);
+    writeProtectedJsonFile(tempPath, payload);
     renameSync(tempPath, knowledgeFilePath);
   } catch {
     // Losing durability is bad; taking the request down with it is worse.

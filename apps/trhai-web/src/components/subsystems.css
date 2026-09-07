@@ -23,6 +23,7 @@
   border: 1px solid var(--line-subtle);
   border-radius: 6px;
   background: rgba(10, 15, 22, 0.72);
+  -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   display: flex;
   flex-direction: column;

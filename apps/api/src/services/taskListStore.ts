@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
+import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
 // A to-do list for `/v1/tasks` — TRHAI's "Tasks" screen, not to be confused
 // with taskStore.ts's StoredTask, which is a different thing under a
@@ -56,7 +57,7 @@ function loadFromDisk(): void {
   if (!persistenceEnabled || !existsSync(taskListFilePath)) return;
 
   try {
-    const parsed = JSON.parse(readFileSync(taskListFilePath, "utf8")) as Partial<PersistedShape>;
+    const parsed = readProtectedJsonFile(taskListFilePath) as Partial<PersistedShape>;
     if (!Array.isArray(parsed.sessions)) return;
 
     for (const session of parsed.sessions) {
@@ -80,7 +81,8 @@ function saveToDisk(): void {
     mkdirSync(path.dirname(taskListFilePath), { recursive: true });
     // Temp file then rename, so a crash mid-write cannot truncate the store.
     const tempPath = `${taskListFilePath}.tmp`;
-    writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
+    assertProtectedJsonWritable(taskListFilePath);
+    writeProtectedJsonFile(tempPath, payload);
     renameSync(tempPath, taskListFilePath);
   } catch {
     // Losing durability is bad; taking the request down with it is worse.

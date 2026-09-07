@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
+import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
 // Machine preferences.
 //
@@ -53,7 +54,7 @@ function load(): void {
   if (!persistenceEnabled || !existsSync(preferencesFile)) return;
 
   try {
-    current = parsePreferences(JSON.parse(readFileSync(preferencesFile, "utf8")));
+    current = parsePreferences(readProtectedJsonFile(preferencesFile));
   } catch {
     // A corrupt file must never stop the API starting; the default is fine.
     current = { ...defaultPreferences };
@@ -67,7 +68,8 @@ function save(): void {
     mkdirSync(path.dirname(preferencesFile), { recursive: true });
     // Temp file then rename, so a crash mid-write cannot truncate the file.
     const tempPath = `${preferencesFile}.tmp`;
-    writeFileSync(tempPath, JSON.stringify(current, null, 2), "utf8");
+    assertProtectedJsonWritable(preferencesFile);
+    writeProtectedJsonFile(tempPath, current);
     renameSync(tempPath, preferencesFile);
   } catch {
     // Losing durability is bad; failing the request is worse.

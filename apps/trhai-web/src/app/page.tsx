@@ -74,6 +74,7 @@ type Telemetry = {
 };
 type Identity = { username: string; hostname: string; platform: string };
 type ScheduleView = { id: string; enabled: boolean };
+type CapabilityInfo = { tools: unknown[]; videoRendering?: boolean };
 
 /**
  * An account name as a person would be addressed.
@@ -272,6 +273,7 @@ export default function DashboardPage() {
   // stays a hole rather than being interpolated over.
   const [history, setHistory] = useState<Series>(emptySeries);
   const [tools, setTools] = useState<number | null>(null);
+  const [capabilities, setCapabilities] = useState<CapabilityInfo | null>(null);
   const [memories, setMemories] = useState<{ total: number; pinned: number } | null>(null);
   const [documents, setDocuments] = useState<number | null>(null);
   const [schedules, setSchedules] = useState<ScheduleView[] | null>(null);
@@ -404,7 +406,7 @@ export default function DashboardPage() {
     ] = await Promise.all([
       apiGet<ModelInfo>("/v1/assist/model"),
       apiGet<Telemetry>("/v1/system-telemetry"),
-      apiGet<{ tools: unknown[] }>("/v1/capabilities"),
+      apiGet<CapabilityInfo>("/v1/capabilities"),
       apiGet<{ memories: Array<{ pinned?: boolean }> }>(`/v1/assist/memory?sessionId=${id}`),
       apiGet<{ schedules: ScheduleView[]; persistenceError?: string | null }>("/v1/schedules"),
       apiGet<{ entries: Array<{ directory: boolean; bytes: number }> }>("/v1/files")
@@ -443,7 +445,10 @@ export default function DashboardPage() {
     const reading = telemetryResult.ok ? telemetryResult.data : null;
     setTelemetry(reading);
     setHistory((prior) => pushSample(prior, reading, historyLength));
-    if (capabilityResult.ok) setTools(capabilityResult.data.tools.length);
+    if (capabilityResult.ok) {
+      setTools(capabilityResult.data.tools.length);
+      setCapabilities(capabilityResult.data);
+    }
     if (memoryResult.ok) {
       setMemories({
         total: memoryResult.data.memories.length,
@@ -769,6 +774,12 @@ export default function DashboardPage() {
       online: workspace === null ? null : true
     },
     {
+      name: "Video render",
+      detail: capabilities === null ? null : capabilities.videoRendering ? "make_video local" : "not registered",
+      online: capabilities === null ? null : capabilities.videoRendering === true,
+      reason: "The local video renderer is not registered."
+    },
+    {
       name: "Automation",
       detail: flowName,
       online: flowName === null ? false : true,
@@ -801,6 +812,11 @@ export default function DashboardPage() {
       label: "Scheduler",
       state: schedules === null ? "checking" : schedulePersistError === null ? "running" : "not saving",
       ok: schedules === null ? null : schedulePersistError === null
+    },
+    {
+      label: "Video render",
+      state: capabilities === null ? "checking" : capabilities.videoRendering ? "ready" : "absent",
+      ok: capabilities === null ? null : capabilities.videoRendering === true
     }
   ];
 
@@ -1103,7 +1119,7 @@ export default function DashboardPage() {
             <div className="cc-core-wrap">
               <CoreGL
                 state={core}
-                size={bare ? 500 : 380}
+                size={bare ? 560 : 460}
                 amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
                 load={machineLoad}
               />
@@ -1347,9 +1363,23 @@ export default function DashboardPage() {
       <footer className="cc-states mono">
 
         <div className="cc-states-stages">
-          {stages.map((name) => (
-            <span key={name} className={`cc-stage-word${stage === name ? " on" : ""}`}>{name}</span>
-          ))}
+          {stages.map((name, index) => {
+            const activeIndex = stages.findIndex((candidate) => candidate === stage);
+            const passed = activeIndex >= 0 && index < activeIndex;
+            const active = name === stage;
+            return (
+              <span key={name} className="cc-stage-step">
+                <span
+                  className={`cc-stage-dot${active ? " on" : ""}${passed ? " passed" : ""}`}
+                  aria-hidden="true"
+                />
+                <span className={`cc-stage-word${active ? " on" : ""}${passed ? " passed" : ""}`}>{name}</span>
+                {index < stages.length - 1 && (
+                  <span className={`cc-stage-link${passed ? " passed" : ""}`} aria-hidden="true" />
+                )}
+              </span>
+            );
+          })}
         </div>
         <span className="cc-states-note faint">
           {answerCredit(lastReply?.strategy, lastReply?.model)

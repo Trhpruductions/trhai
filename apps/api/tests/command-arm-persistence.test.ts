@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { readProtectedJsonFile } from "../src/services/protectedJson.js";
 
 // Machine access is on by default and the decision persists.
 //
@@ -34,7 +35,9 @@ test("turning it off sticks, and is written down", () => {
   assert.equal(runner.commandsArmed(), false);
   assert.equal(existsSync(accessFile), true);
 
-  const stored = JSON.parse(readFileSync(accessFile, "utf8")) as { enabled: boolean };
+  const raw = readFileSync(accessFile, "utf8");
+  assert.doesNotMatch(raw, /"enabled":false|"enabled": false/);
+  const stored = readProtectedJsonFile(accessFile) as { enabled: boolean };
   assert.equal(stored.enabled, false);
 });
 

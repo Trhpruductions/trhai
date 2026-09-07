@@ -133,10 +133,23 @@ body::before {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(80ch 56ch at 20% -8%, rgba(53, 199, 255, 0.08), transparent 70%),
-    radial-gradient(60ch 44ch at 100% 0%, rgba(90, 140, 255, 0.05), transparent 70%);
+    /* A slow second light, offset from the first so the two drift past each
+       other rather than breathing in lockstep - the difference between a
+       room with one lamp and a room with weather in it. */
+    radial-gradient(90ch 64ch at 18% -10%, rgba(53, 199, 255, 0.10), transparent 68%),
+    radial-gradient(70ch 50ch at 102% -4%, rgba(120, 110, 255, 0.07), transparent 70%),
+    radial-gradient(64ch 60ch at 50% 108%, rgba(53, 199, 255, 0.06), transparent 72%);
+  animation: cc-atmosphere-drift 46s ease-in-out infinite;
 }
 
+@keyframes cc-atmosphere-drift {
+  0%, 100% { opacity: 0.85; transform: translate3d(0, 0, 0) scale(1); }
+  50% { opacity: 1; transform: translate3d(0, -1.4%, 0) scale(1.03); }
+}
+
+/* A field of distant points, at the edge of visibility - depth behind the
+   grid rather than another instrument. Two densities so it does not read as
+   one repeating tile the moment you look for the seam. */
 body::after {
   content: "";
   position: fixed;
@@ -146,13 +159,57 @@ body::after {
   background:
     linear-gradient(rgba(130, 210, 255, 0.026) 1px, transparent 1px) 0 0 / 100% 44px,
     linear-gradient(90deg, rgba(130, 210, 255, 0.026) 1px, transparent 1px) 0 0 / 44px 100%,
+    radial-gradient(1.6px 1.6px at 12% 22%, rgba(200, 235, 255, 0.55), transparent 60%) 0 0 / 220px 220px,
+    radial-gradient(1.2px 1.2px at 68% 62%, rgba(200, 235, 255, 0.4), transparent 60%) 0 0 / 260px 260px,
+    radial-gradient(1.4px 1.4px at 42% 84%, rgba(200, 235, 255, 0.35), transparent 60%) 0 0 / 300px 300px,
     radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before { animation: none; }
 }
 
 #trhai-root {
   position: relative;
   z-index: 1;
   height: 100%;
+}
+
+/* A warm horizon glow along the bottom edge — the one thing the cool cyan
+ * scene has none of, and the reason a screen that is otherwise all one hue
+ * can still read as flat no matter how much depth is added to it above.
+ * Distant, out-of-focus light low in the frame is what a real horizon looks
+ * like at night; a HUD that is cyan everywhere looks like a HUD.
+ *
+ * Fixed and behind everything in the root's own stacking context, same as
+ * body::before/::after - it costs one composited layer, never repaints per
+ * frame, and sits nowhere near the glass panels that make animation next to
+ * them expensive (see the note on the arcs in dash.css). */
+#trhai-root::before {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 26vh;
+  min-height: 180px;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(38ch 16ch at 12% 100%, rgba(255, 140, 70, 0.10), transparent 70%),
+    radial-gradient(30ch 14ch at 38% 100%, rgba(255, 200, 120, 0.07), transparent 70%),
+    radial-gradient(34ch 15ch at 66% 100%, rgba(120, 200, 255, 0.09), transparent 70%),
+    radial-gradient(30ch 14ch at 90% 100%, rgba(255, 150, 90, 0.08), transparent 70%);
+  animation: cc-horizon-drift 60s ease-in-out infinite;
+}
+
+@keyframes cc-horizon-drift {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #trhai-root::before { animation: none; }
 }
 
 h1, h2, h3, h4 {
@@ -183,9 +240,15 @@ button, input, select, textarea {
   color: var(--text);
 }
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+/* Firefox and Chrome 121+ read these directly; the ::-webkit-scrollbar rules
+   below are the same styling for the browsers that do not, so gated behind
+   a feature query rather than left to look unsupported with no fallback in
+   sight three lines down. */
+@supports (scrollbar-width: thin) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
 }
 
 *::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -308,12 +371,29 @@ button, input, select, textarea {
   background:
     linear-gradient(180deg, rgba(96, 214, 255, 0.10), rgba(96, 214, 255, 0.02) 38%, transparent 70%),
     linear-gradient(180deg, rgba(9, 22, 38, 0.62), rgba(6, 14, 26, 0.72));
-  backdrop-filter: blur(14px) saturate(135%);
   -webkit-backdrop-filter: blur(14px) saturate(135%);
+  backdrop-filter: blur(14px) saturate(135%);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 9px;
+  transition: border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* A readout panel is not a button, so this is a slight lift rather than a
+   press state - enough to say "this is instrumentation, not wallpaper"
+   without inviting a click nothing here responds to. */
+@media (hover: hover) {
+  .hud-panel:hover {
+    border-color: var(--line-strong);
+    box-shadow: 0 0 0 1px rgba(96, 214, 255, 0.08), 0 8px 24px rgba(0, 0, 0, 0.28);
+    transform: translateY(-1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-panel { transition: none; }
+  .hud-panel:hover { transform: none; }
 }
 
 /* Corner brackets: the detail that reads "instrument panel" rather than

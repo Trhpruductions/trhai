@@ -234,7 +234,7 @@ export const systemPrompt = [
  */
 const mutatingTools = new Set([
   "remember", "forget", "write_document", "update_document", "delete_document",
-  "pin_memory", "write_file", "build_app"
+  "pin_memory", "write_file", "build_app", "make_video"
 ]);
 
 /**
@@ -245,7 +245,7 @@ const mutatingTools = new Set([
  * the loop stays out of their way rather than logging a second, vaguer entry
  * beside each one.
  */
-const selfLoggingTools = new Set(["build_app", "run_command"]);
+const selfLoggingTools = new Set(["build_app", "make_video", "run_command"]);
 
 /** Which kind of work a tool represents, for the activity list's dot colour. */
 export function executionKindForTool(tool: string): ExecutionKind {

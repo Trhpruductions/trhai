@@ -7,7 +7,6 @@
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client", "node"],
-    "baseUrl": ".",
     "paths": {
       "@ascend/shared": ["../../packages/shared/src/index.ts"]
     },

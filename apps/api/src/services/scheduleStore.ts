@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
+import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
 // Scheduled work, and the arithmetic that decides when it is due.
 //
@@ -206,7 +207,7 @@ function loadFromDisk(): void {
   if (!persistenceEnabled || !existsSync(scheduleFilePath)) return;
 
   try {
-    const parsed = JSON.parse(readFileSync(scheduleFilePath, "utf8")) as Partial<PersistedShape>;
+    const parsed = readProtectedJsonFile(scheduleFilePath) as Partial<PersistedShape>;
     if (Array.isArray(parsed.schedules)) {
       schedules = parsed.schedules.filter(isSchedule).map(withAction);
     }
@@ -228,7 +229,8 @@ function saveToDisk(): void {
   for (let attempt = 1; attempt <= persistAttempts; attempt += 1) {
     try {
       mkdirSync(path.dirname(scheduleFilePath), { recursive: true });
-      writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
+      assertProtectedJsonWritable(scheduleFilePath);
+      writeProtectedJsonFile(tempPath, payload);
       renameSync(tempPath, scheduleFilePath);
       lastPersistError = null;
       return;

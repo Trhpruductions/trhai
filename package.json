@@ -6,11 +6,11 @@
     "node": ">=20.0.0"
   },
   "workspaces": [
+    "packages/*",
     "apps/api",
     "apps/desktop",
     "apps/web",
-    "apps/trhai-web",
-    "packages/*"
+    "apps/trhai-web"
   ],
   "scripts": {
     "dev": "npm run dev --workspace @ascend/api",
@@ -27,6 +27,7 @@
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "health:api": "curl -fsS http://localhost:4000/health",
-    "smoke:web-stack": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/smoke-web-stack.ps1"
+    "smoke:web-stack": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/smoke-web-stack.ps1",
+    "smoke:video": "tsx scripts/smoke-video.ts"
   }
 }

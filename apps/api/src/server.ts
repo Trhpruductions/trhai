@@ -11,6 +11,7 @@ import {
   forgetMemory,
   getMemoryAudit,
   listSessionMemories,
+  memoryPersistenceError,
   recordMemoriesFromMessage,
   recordSingleMemory,
   relabelMemory,
@@ -188,7 +189,9 @@ function buildAssistInput(
     memoryWrite: {
       available: sessionId !== null,
       saved: savedMemories.length,
-      savedBodies: savedMemories.map((memory) => memory.body)
+      savedBodies: savedMemories.map((memory) => memory.body),
+          // Recorded by the store for a long time and read by nothing until now.
+          persistError: memoryPersistenceError()
     },
     knowledge: sessionId ? retrieveKnowledgePassages(sessionId) : [],
     // The write path for the assistant's own "remember" tool. Omitted without
@@ -384,7 +387,9 @@ export function createApp() {
         memoryWrite: {
           available: sessionId !== null,
           saved: savedMemories.length,
-          savedBodies: savedMemories.map((memory) => memory.body)
+          savedBodies: savedMemories.map((memory) => memory.body),
+          // Recorded by the store for a long time and read by nothing until now.
+          persistError: memoryPersistenceError()
         },
         knowledge: sessionId ? retrieveKnowledgePassages(sessionId) : [],
         // The write path for the assistant's own "remember" tool. Omitted
