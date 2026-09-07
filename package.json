@@ -6,11 +6,11 @@
     "node": ">=20.0.0"
   },
   "workspaces": [
+    "packages/*",
     "apps/api",
     "apps/desktop",
     "apps/web",
-    "apps/trhai-web",
-    "packages/*"
+    "apps/trhai-web"
   ],
   "scripts": {
     "dev": "npm run dev --workspace @ascend/api",
