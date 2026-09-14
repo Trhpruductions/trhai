@@ -3,6 +3,7 @@ import path from "node:path";
 import type { ScorableMemory } from "./memoryRelevance.js";
 import { dataFile } from "./dataDirectory.js";
 import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
+import { recordPersistFailure, recordPersistSuccess } from "./persistenceHealth.js";
 
 // Knowledge base for `/v1/assist`.
 //
@@ -102,7 +103,12 @@ function saveToDisk(): void {
     assertProtectedJsonWritable(knowledgeFilePath);
     writeProtectedJsonFile(tempPath, payload);
     renameSync(tempPath, knowledgeFilePath);
-  } catch {
+    recordPersistSuccess("knowledge");
+  } catch (error) {
+    // Reported rather than swallowed. The catch itself is right - losing
+    // durability must not fail the request - but a bare one meant nothing
+    // it was told survived a restart and nothing anywhere said so.
+    recordPersistFailure("knowledge", error);
     // Losing durability is bad; taking the request down with it is worse.
   }
 }

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
 import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
+import { recordPersistFailure, recordPersistSuccess } from "./persistenceHealth.js";
 
 // Machine preferences.
 //
@@ -71,7 +72,12 @@ function save(): void {
     assertProtectedJsonWritable(preferencesFile);
     writeProtectedJsonFile(tempPath, current);
     renameSync(tempPath, preferencesFile);
-  } catch {
+    recordPersistSuccess("preferences");
+  } catch (error) {
+    // Reported rather than swallowed. The catch itself is right - losing
+    // durability must not fail the request - but a bare one meant nothing
+    // it was told survived a restart and nothing anywhere said so.
+    recordPersistFailure("preferences", error);
     // Losing durability is bad; failing the request is worse.
   }
 }

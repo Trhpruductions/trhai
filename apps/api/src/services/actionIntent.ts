@@ -171,6 +171,36 @@ function startsWithExplanatory(text: string): boolean {
  * perfectly good thing to build from. It is specifically a question opener with
  * no file, path or command anywhere in it.
  */
+/**
+ * Whether there is actually something to calculate.
+ *
+ * Decides whether the calculate tool is offered at all, in the same way
+ * isExplanatoryQuestion decides whether build_app is. The tool's own
+ * description says "use this for any sum - do not do arithmetic yourself",
+ * which is right for a 7B model asked for 12.5 * 3 + 7 and wrong for
+ * everything that merely contains a number. Offered unconditionally, it was
+ * grabbed for "what comes next: 2, 6, 12, 20, 30, ?" and answered 80, and for
+ * a syllogism about bloops and razzies - three calculate calls and the answer
+ * "20". The same model, asked the same questions with no calculator in reach,
+ * gets both right.
+ *
+ * So: a digit next to an operator, or a digit in the company of an arithmetic
+ * word. A list of numbers separated by commas is a pattern to reason about,
+ * not a sum, and does not qualify.
+ */
+export function looksArithmetic(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  if (!/\d/.test(text)) return false;
+
+  // 12 + 7, 3*4, 10/2, 2^8, 15% of 80 (the "of" form is below), (12.5 * 3)
+  const operatorBetweenNumbers = /\d\s*[+\-*/×÷^]\s*\d/;
+  // "what is 15 percent of 80", "add 12 and 30", "the sum of 4 and 9"
+  const arithmeticWords =
+    /\b(?:plus|minus|times|multiplied|divided|percent|per cent|% of|sum of|total of|add|subtract|multiply|divide|squared|cubed|square root|to the power|calculate|compute|how much is)\b/;
+
+  return operatorBetweenNumbers.test(text) || arithmeticWords.test(text);
+}
+
 export function isExplanatoryQuestion(message: string): boolean {
   const text = (message ?? "").trim().toLowerCase();
   if (!text) return false;

@@ -764,15 +764,19 @@ export function verifiedDetail(output: string): string {
 
 export function availableTools(
   armed: boolean,
-  options: { scaffolding?: boolean; changes?: boolean } = {}
+  options: { scaffolding?: boolean; changes?: boolean; arithmetic?: boolean } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
   const allowChanges = options.changes ?? true;
+  // See looksArithmetic. Offered to everything, calculate was grabbed for
+  // pattern questions and syllogisms and answered them with its output.
+  const allowArithmetic = options.arithmetic ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
     if (!armed && name === "run_command") return false;
     if (!allowScaffolding && scaffoldingTools.has(name)) return false;
+    if (!allowArithmetic && name === "calculate") return false;
     if (!allowChanges && machineChangingTools.has(name)) return false;
     return true;
   });

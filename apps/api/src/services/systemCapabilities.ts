@@ -1,6 +1,7 @@
 import { availableTools } from "./agentTools.js";
 import { commandsArmed } from "./commandRunner.js";
 import { lockedProtectedFiles } from "./protectedJson.js";
+import { persistenceFailures } from "./persistenceHealth.js";
 import { permissionLabels, permissionLevelOf, requiresConfirmation, type PermissionLevel } from "./toolPermissions.js";
 
 // What this build can actually do, read from the registry rather than
@@ -75,6 +76,20 @@ export type SystemCapabilities = {
    * than overwritten.
    */
   lockedData: string[];
+  /**
+   * Stores that cannot currently write, and why.
+   *
+   * Empty is the ordinary case. A non-empty list means the app is still
+   * answering normally while nothing it is told survives a restart - a disk
+   * that filled up, a file held open by something else, a permission change on
+   * the data directory.
+   *
+   * Distinct from lockedData, which is specifically a key that no longer opens
+   * existing data. This is the ordinary I/O version of the same problem, and it
+   * was silent in five stores until now: each caught its write error, correctly
+   * refused to fail the request over it, and recorded nothing.
+   */
+  failingStores: Array<{ store: string; error: string; at: string }>;
 };
 
 function hasAll(names: string[], ...required: string[]): boolean {
@@ -119,6 +134,7 @@ export function getSystemCapabilities(model: string | null): SystemCapabilities 
     applicationBuilding: hasAll(names, "build_app"),
     videoRendering: hasAll(names, "make_video"),
     lockedData: lockedProtectedFiles(),
+    failingStores: persistenceFailures(),
     // Reading a page given its URL, via fetch_url — not search.
     web: hasAll(names, "fetch_url"),
     // True only while machine control is on, since `offered` already excludes

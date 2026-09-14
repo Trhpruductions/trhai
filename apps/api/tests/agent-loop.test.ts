@@ -1986,3 +1986,53 @@ test("a read that also asks for a change keeps the write tools", async () => {
     server.close();
   }
 });
+
+
+test("a pattern question is not offered the calculator", async () => {
+  // Offered unconditionally, calculate was grabbed for "2, 6, 12, 20, 30, ?"
+  // and the reply was 80. The same model with no calculator in reach says 42.
+  const { server, baseUrl, received } = await fakeModel([answer("42 - each is n times n+1.")]);
+  try {
+    await runAgent(configFor(baseUrl), "What comes next: 2, 6, 12, 20, 30, ?", context);
+    const offered = ((received[0]?.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
+    assert.ok(offered.length > 0, "other tools must still be offered");
+    assert.ok(!offered.includes("calculate"), "calculate must not be offered for a pattern question");
+  } finally {
+    server.close();
+  }
+});
+
+test("a real sum still gets the calculator", async () => {
+  const { server, baseUrl, received } = await fakeModel([answer("It is 44.5.")]);
+  try {
+    await runAgent(configFor(baseUrl), "what is 12.5 * 3 + 7", context);
+    const offered = ((received[0]?.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
+    assert.ok(offered.includes("calculate"), "a genuine sum must keep the calculator");
+  } finally {
+    server.close();
+  }
+});
+
+
+test("a tool the turn did not offer is refused even when the model calls it", async () => {
+  // The gate on the offer was not enough. With calculate withheld for a
+  // pattern question, the model returned a calculate tool_call anyway - from
+  // habit, not from the list - and the loop ran it and answered 36. The
+  // dispatcher now checks the offer, and the model is told to answer without.
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("calculate", { expression: "30 + 6" }),
+    answer("42 - each term is n times n plus one.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "What comes next: 2, 6, 12, 20, 30, ?", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.toolsUsed, [], "calculate must not have executed");
+    assert.match(result.text, /42/, "the answer comes from reasoning, not the calculator");
+    // The model was told why, as a tool message, rather than left hanging.
+    const secondRequest = JSON.stringify(received[1] ?? {});
+    assert.match(secondRequest, /was not available for this request/);
+  } finally {
+    server.close();
+  }
+});

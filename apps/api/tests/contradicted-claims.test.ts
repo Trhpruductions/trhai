@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   claimsUnperformedMutation, claimsUnusedTool, contradictsToolRecord, correctionFor,
-  noChangeWasMade, promisesUnperformedMutation
+  narratesRetrievalOnly, noChangeWasMade, promisesUnperformedMutation
 } from "../src/services/contradictedClaims.js";
 
 // The mirror of fabricated success, seen live: two read_file calls returned ok,
@@ -255,4 +255,50 @@ test("ordinary past-tense prose is not a tool claim", () => {
   ]) {
     assert.equal(claimsUnusedTool(fine, []), false, `should allow: ${fine}`);
   }
+});
+
+
+// The answer was fetched and then not given.
+
+const ranDate = [{ name: "current_datetime", ok: true }];
+
+test("narrating a retrieval with no result is caught", () => {
+  // Verbatim, and the entire reply to "what's today's date?".
+  assert.equal(narratesRetrievalOnly("I have retrieved the current date and time on the user's machine.", ranDate), true);
+  assert.equal(narratesRetrievalOnly("I've looked up the information.", ranDate), true);
+  assert.equal(narratesRetrievalOnly("We fetched the results for you.", ranDate), true);
+});
+
+test("a reply that actually carries the answer is left alone", () => {
+  for (const fine of [
+    "It is 12 September 2026, 3:04 PM.",
+    "I retrieved the contents: the file defines a greet function and exports it.",
+    "I checked, and the server is up.",
+    "I looked up the date - today is Friday the 12th of September.",
+    "I got the results. There are three matching files, listed below:\n- a.ts\n- b.ts"
+  ]) {
+    assert.equal(narratesRetrievalOnly(fine, ranDate), false, `should allow: ${fine}`);
+  }
+});
+
+test("it stays quiet when no tool ran - that is claimsUnusedTool's job", () => {
+  assert.equal(narratesRetrievalOnly("I have retrieved the current date and time.", []), false);
+});
+
+
+// Denying a result that a successful tool just returned.
+
+test("saying the date is not recorded after current_datetime returned it is a contradiction", () => {
+  // Verbatim: two successful current_datetime calls, then this.
+  const ran = [{ name: "current_datetime", ok: true }, { name: "current_datetime", ok: true }];
+  assert.equal(contradictsToolRecord("Today's date is not recorded.", ran), true);
+  assert.equal(contradictsToolRecord("I could not determine the current date.", ran), true);
+  assert.equal(contradictsToolRecord("There is no information about that.", ran), true);
+});
+
+test("an honest empty search is not a contradiction", () => {
+  // search_memory reports ok:false when nothing matches, so "not recorded" is
+  // simply true there and the all-succeeded precondition keeps this quiet.
+  const empty = [{ name: "search_memory", ok: false }];
+  assert.equal(contradictsToolRecord("That is not recorded anywhere I can see.", empty), false);
 });

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
 import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
+import { recordPersistFailure, recordPersistSuccess } from "./persistenceHealth.js";
 
 // Conversation storage, keyed the same way as memory: `user:<id>` when signed in,
 // the anonymous session id otherwise. That is what makes a conversation follow an
@@ -84,7 +85,12 @@ function saveToDisk(): void {
     assertProtectedJsonWritable(conversationFilePath);
     writeProtectedJsonFile(tempPath, payload);
     renameSync(tempPath, conversationFilePath);
-  } catch {
+    recordPersistSuccess("conversations");
+  } catch (error) {
+    // Reported rather than swallowed. The catch itself is right - losing
+    // durability must not fail the request - but a bare one meant nothing
+    // it was told survived a restart and nothing anywhere said so.
+    recordPersistFailure("conversations", error);
     // Durability loss must not fail the request.
   }
 }
