@@ -1,3 +1,5 @@
+import { normalizeSpelling } from "./spelling.js";
+
 // Request analysis for the assistant reply engine.
 //
 // There is no language model in this stack, so "understanding" here means a
@@ -228,8 +230,40 @@ export function leadAfterQualifier(message: string): string | null {
   return rest ? firstWord(rest) : null;
 }
 
+/** Openings that make a sentence a request for an answer, wherever it sits. */
+const askingLeads = [
+  "tell me", "explain", "describe", "summarize", "summarise", "what", "why", "how",
+  "which", "who", "where", "when", "list", "show me", "give me", "walk me through"
+];
+
+/**
+ * Whether any sentence after the first opens as a request.
+ *
+ * Sentences are split on ". ", "! " and "? " - a deliberately plain rule, so
+ * a decimal or a version number does not count as a boundary.
+ */
+function laterSentenceAsks(text: string): boolean {
+  const sentences: string[] = [];
+  let current = "";
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    current += character;
+    const next = text[index + 1];
+    if ((character === "." || character === "!" || character === "?") && (next === " " || next === undefined)) {
+      sentences.push(current.trim());
+      current = "";
+    }
+  }
+  if (current.trim()) sentences.push(current.trim());
+
+  return sentences.slice(1).some((sentence) => {
+    const lower = sentence.toLowerCase().replace(/^(?:just|please|now|then|and|so)\s+/, "");
+    return askingLeads.some((lead) => lower === lead || lower.startsWith(`${lead} `) || lower.startsWith(`${lead},`));
+  });
+}
+
 export function analyzeRequest(message: unknown): RequestAnalysis {
-  const text = typeof message === "string" ? message.trim() : "";
+  const text = typeof message === "string" ? normalizeSpelling(message.trim()) : "";
   const topics = extractTopics(text);
 
   if (!text) {
@@ -312,6 +346,14 @@ const looksImperative =
     if (questionType === "none") {
       questionType = "identity";
     }
+  } else if (laterSentenceAsks(text)) {
+    // "Do NOT create or edit any files. Just tell me in one sentence what a
+    // package.json is for." The first word is "do", which is no command verb,
+    // and there is no "?", so this was a statement and the composer said
+    // "Got it." to a request for an explanation. Only the first sentence had
+    // been looked at. A message is a statement only if every sentence is.
+    shape = "question";
+    questionType = "identity";
   } else {
     shape = "statement";
   }

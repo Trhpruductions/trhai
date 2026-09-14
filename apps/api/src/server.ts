@@ -9,6 +9,7 @@ import { appendTurn, clearConversation, listTurns } from "./services/conversatio
 import {
   forgetAllMemories,
   forgetMemory,
+  listForgottenFacts,
   getMemoryAudit,
   listSessionMemories,
   memoryPersistenceError,
@@ -201,6 +202,9 @@ function buildAssistInput(
       ? (fact: string) => recordSingleMemory(sessionId, fact).status
       : undefined,
     forgetMemory: sessionId ? (id: string) => forgetMemory(sessionId, id) : undefined,
+    forgottenFacts: sessionId ? listForgottenFacts(sessionId) : [],
+    listMemories: sessionId ? () => listSessionMemories(sessionId) : undefined,
+    forgetAllMemories: sessionId ? () => forgetAllMemories(sessionId) : undefined,
     documents: sessionId
       ? listDocuments(sessionId).map((document) => ({
         id: document.id,
@@ -399,6 +403,9 @@ export function createApp() {
           ? (fact: string) => recordSingleMemory(sessionId, fact).status
           : undefined,
         forgetMemory: sessionId ? (id: string) => forgetMemory(sessionId, id) : undefined,
+        forgottenFacts: sessionId ? listForgottenFacts(sessionId) : [],
+        listMemories: sessionId ? () => listSessionMemories(sessionId) : undefined,
+        forgetAllMemories: sessionId ? () => forgetAllMemories(sessionId) : undefined,
         documents: sessionId
           ? listDocuments(sessionId).map((document) => ({
             id: document.id,

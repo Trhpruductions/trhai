@@ -10,6 +10,7 @@
 // boilerplate.
 
 import { analyzeRequest, isContinuationRequest, type RequestAnalysis } from "./requestAnalysis.js";
+import { statesFact } from "./factWording.js";
 import { classifyIntent } from "./actionIntent.js";
 import { selectRelevantMemories, type ScorableMemory, type ScoredMemory } from "./memoryRelevance.js";
 import { buildTaskPlan } from "./taskPlanning.js";
@@ -81,6 +82,16 @@ export type ComposerInput = {
   memoryWrite?: MemoryWriteOutcome;
   /** Passages from the session's knowledge documents, already chunked. */
   knowledge?: ComposerKnowledge[];
+  /**
+   * Facts the user has asked to forget this session and not stated since.
+   *
+   * The transcript is searched when nothing saved answers, and it still holds
+   * the sentence a forgotten memory was made from. "forget my api port"
+   * deleted the memory; "what is my api port?" then quoted "my api port is
+   * 9090" straight back out of the conversation. Forgotten means not quoted
+   * from anywhere.
+   */
+  forgottenFacts?: string[];
 };
 
 /** A knowledge passage the reply may quote, carrying the document it came from. */
@@ -151,9 +162,13 @@ function resolveQuery(message: string, history: ConversationTurn[]): string {
  * evidence — grounding an answer on them would let a guess from one turn harden
  * into a cited fact on the next.
  */
-function searchableHistory(history: ConversationTurn[]): ComposerMemory[] {
+function searchableHistory(history: ConversationTurn[], forgotten: string[] = []): ComposerMemory[] {
   return history
     .filter((turn) => turn.role === "user" && turn.content.trim().length > 0)
+    // A fact the user asked to forget is not quoted back from the turn that
+    // stated it, nor from an earlier turn that gave the same thing an older
+    // value. See ComposerInput.forgottenFacts.
+    .filter((turn) => !forgotten.some((fact) => statesFact(turn.content, fact)))
     // Only what the user asserted. A question holds no answer, and neither does
     // a request for work — "In one sentence, what is TypeScript?" was answered
     // by quoting the earlier "Explain what a REST API is in two sentences",
@@ -249,8 +264,37 @@ export function isMultiPartQuestion(message: string): boolean {
  * skipped; anything sentence after it that reads as a request or a question
  * counts as a second instruction.
  */
+/**
+ * The request that follows a remembered fact, on its own: "remember X, then
+ * list everything you have saved" -> "list everything you have saved".
+ *
+ * Null when there is none. What follows the fact is what the rest of the
+ * turn should be about; handing over the whole sentence re-invites the save
+ * that has already happened.
+ */
+export function trailingRequest(message: string): string | null {
+  const sentences = message
+    .split(/(?<=[.!?])\s+|[,;]\s*(?:and\s+)?then\s+|\s+and\s+then\s+/i)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  if (sentences.length < 2) return null;
+
+  const requests = sentences.slice(1)
+    .map((sentence) => sentence.replace(/^(then|also|and|now|next|plus)\b[,\s]*/i, "").trim())
+    .filter((sentence) => {
+      const analysis = analyzeRequest(sentence);
+      return analysis.shape === "question" || analysis.hasRequestMarker;
+    });
+  return requests.length > 0 ? requests.join(" ") : null;
+}
+
 export function rememberHasTrailingRequest(message: string): boolean {
-  const sentences = message.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
+  // Split where memoryExtraction splits, so a ", then ..." clause that the
+  // extraction left out of the fact is seen here as the request it is.
+  const sentences = message
+    .split(/(?<=[.!?])\s+|[,;]\s*(?:and\s+)?then\s+|\s+and\s+then\s+/i)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
   if (sentences.length < 2) return false;
 
   return sentences.slice(1).some((sentence) => {
@@ -306,8 +350,14 @@ const acknowledgementPattern = /^(ok|okay|k|sure|right|got\s+it|fine|yep|yes|no|
 const capabilityPattern = new RegExp([
   // "what can you do", "what do you do", "who are you" — direct question
   // order, optionally opening with a greeting.
+  // Every branch ends at a sentence boundary, an adverb or two allowed.
+  // The optional tails used to be satisfied by nothing, so "what do you
+  // know about me?" and "what can you tell me about my port?" were both
+  // read as "what can you do?" - the first answered with a tool inventory
+  // instead of the user's own saved facts.
   String.raw`^(?:so\s+)?(?:hi|hey|hello)?[\s,]*(?:what|who)\s+`
-    + String.raw`(?:can\s+you(?:\s+do|\s+for\s+me)?|do\s+you(?:\s+do|\s+for\s+me)?|are\s+you(?=[?.!,]|\s*$))\b`,
+    + String.raw`(?:can\s+you(?:\s+do)?(?:\s+for\s+me)?|do\s+you(?:\s+do)?(?:\s+for\s+me)?|are\s+you)`
+    + String.raw`(?:\s+(?:today|now|here|right\s+now|exactly|actually|really|then))*(?=[?.!,]|\s*$)`,
   String.raw`^what(?:'s| is)\s+this\b`,
   String.raw`^help$`,
   // "what you can do", "what you're able to do" — embedded-clause order,
@@ -493,7 +543,7 @@ export function composeReply(input: ComposerInput): ComposedReply {
     }
 
     // Nothing saved matches, but the answer may simply have been said earlier.
-    const fromHistory = selectRelevantMemories(query, searchableHistory(history), 2);
+    const fromHistory = selectRelevantMemories(query, searchableHistory(history, input.forgottenFacts ?? []), 2);
     if (fromHistory.length > 0) {
       const quoted = fromHistory.map((entry) => `- "${entry.memory.body}"`).join("\n");
       return {
@@ -561,6 +611,18 @@ export function composeReply(input: ComposerInput): ComposedReply {
   }
 
   if (analysis.vague && !refining) {
+    // "delete it" with nothing pending was answered with the build
+    // questionnaire - stack, deadline, audience - for a two-word request
+    // that had nothing to do with building. Name what could be deleted.
+    if (/^(?:delete|remove|forget|erase|drop|clear|kill|undo)\s+(?:it|that|this|them|those|the last one)\b/i.test(message.trim())) {
+      return {
+        text: "Nothing is pending to delete. Say what to delete: a saved memory (\"forget my api port\"), "
+          + "a note (\"delete the Deploy Steps note\"), or a file by its path.",
+        strategy: "clarify",
+        groundedOn: [],
+        groundedOnHistory: 0
+      };
+    }
     return {
       text: "I need a bit more to work with. Tell me what you're trying to end up with, and any constraint that matters (stack, deadline, audience), and I'll turn it into a concrete plan.",
       strategy: "clarify",

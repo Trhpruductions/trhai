@@ -65,6 +65,7 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   current_datetime: 1,
   days_between: 1,
   shift_date: 1,
+  shift_time: 1,
   // plan_app only describes what would be built; build_app is what builds it.
   plan_app: 1,
   // The one exception to "reads nothing but what is already stored": it
