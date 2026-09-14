@@ -14,6 +14,8 @@
 // act on. Not certainty about what the user wants — only enough to know that
 // answering with prose alone would be a failure.
 
+import { normalizeSpelling } from "./spelling.js";
+
 export type ActionKind =
   /** Reading, listing or searching files. */
   | "read"
@@ -152,6 +154,20 @@ export function clarificationFor(kind: ActionKind): string {
   }
 }
 
+const negations = [" do not ", " don't ", " dont ", " never ", " without ", " no need to ", " not to ", " avoid ", " stop "];
+
+function negatedBefore(text: string, verb: string): boolean {
+  const at = text.startsWith(verb) ? 0 : text.indexOf(` ${verb}`) + 1;
+  if (at < 0) return false;
+  let before = text.slice(Math.max(0, at - 40), at);
+  for (const stop of [",", ";", ".", "!", "?"]) {
+    const last = before.lastIndexOf(stop);
+    if (last !== -1) before = before.slice(last + 1);
+  }
+  const padded = ` ${before} `;
+  return negations.some((negation) => padded.includes(negation));
+}
+
 function startsWithExplanatory(text: string): boolean {
   return explanatoryOpeners.some((opener) => text.startsWith(`${opener} `) || text === opener);
 }
@@ -201,6 +217,37 @@ export function looksArithmetic(message: string): boolean {
   return operatorBetweenNumbers.test(text) || arithmeticWords.test(text);
 }
 
+/**
+ * Whether a request is about dates - days, weeks, months, deadlines - so the
+ * date tools are worth offering.
+ *
+ * Same reasoning as looksArithmetic. days_between and shift_date were offered
+ * to everything, and "if a train leaves at 3pm and the trip takes 2 hours 30
+ * minutes, when does it arrive?" got two failed shift_date calls (it moves by
+ * whole days) and then "I'm sorry, but I can't assist with that." The same
+ * model with no date tool in reach says 5:30pm.
+ */
+export function looksLikeDateMath(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  const dateWords =
+    /\b(?:days?|weeks?|months?|years?|dates?|deadline|due|ago|from now|from today|until|till|tomorrow|yesterday|weekday|weekend|calendar|anniversary|birthday)\b/;
+  const monthAndDay = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d/;
+  const isoDate = /\b\d{4}-\d{2}-\d{2}\b/;
+  return dateWords.test(text) || monthAndDay.test(text) || isoDate.test(text);
+}
+
+/**
+ * Whether a request names a clock time, so shift_time is worth offering.
+ *
+ * "3pm", "3:15 PM", "15:00", "noon", "midnight". The model gets "3pm plus 2
+ * hours 30 minutes" wrong on its own (it said 3:30 PM), and right with the
+ * arithmetic done for it.
+ */
+export function looksLikeClockMath(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  return /\b\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b|\b\d{1,2}:\d{2}\b|\bnoon\b|\bmidnight\b|\bo'clock\b/.test(text);
+}
+
 export function isExplanatoryQuestion(message: string): boolean {
   const text = (message ?? "").trim().toLowerCase();
   if (!text) return false;
@@ -226,7 +273,7 @@ const asksForContents =
   /\b(?:what(?:'s|s| is| are)?\s+(?:in|inside)|contains?|contain|says?|written in|inside)\b/i;
 
 export function classifyIntent(message: string): IntentVerdict {
-  const text = (message ?? "").trim().toLowerCase();
+  const text = normalizeSpelling((message ?? "").trim().toLowerCase());
 
   if (!text) {
     return { action: false, hasTarget: false, reason: "empty message", expects: [] };
@@ -259,6 +306,20 @@ export function classifyIntent(message: string): IntentVerdict {
     const matched = group.words.find((word) =>
       text.startsWith(word) || text.includes(` ${word}`));
     if (!matched) continue;
+
+    // An order that has been negated is not an order.
+    //
+    // "Do NOT create or edit any files. Just tell me what a package.json is
+    // for" matched "create" and "edit", was classified as a write, and when
+    // the model - correctly - called no tool, the enforcement below forced a
+    // retry and then reported "I could not perform the requested action". The
+    // user asked for one sentence of explanation and got a failure notice for
+    // work they had explicitly declined.
+    //
+    // The window is the clause the verb sits in: back to the previous comma or
+    // stop, at most forty characters. "Don't just plan, build the app" keeps
+    // its build, because the negation lives in the clause before the comma.
+    if (negatedBefore(text, matched)) continue;
 
     if (group.kind === "execute" && conversationalRun.test(text)) continue;
 

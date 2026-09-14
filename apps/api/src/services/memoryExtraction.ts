@@ -88,7 +88,11 @@ const maxCandidatesPerMessage = 3;
 
 function splitSentences(message: string): string[] {
   return message
-    .split(/(?<=[.!?])\s+|\n+/)
+    // A trailing instruction is not part of the fact. "remember that the
+    // server room code is 4471, then list everything you have saved" was
+    // stored whole, second clause included - and the clause itself was
+    // never acted on, because the fact had swallowed it.
+    .split(/(?<=[.!?])\s+|\n+|[,;]\s*(?:and\s+)?then\s+|\s+and\s+then\s+/i)
     .map((sentence) => sentence.trim())
     .filter(Boolean);
 }

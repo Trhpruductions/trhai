@@ -2036,3 +2036,47 @@ test("a tool the turn did not offer is refused even when the model calls it", as
     server.close();
   }
 });
+
+test("a pending confirmation is surfaced even when the model just chats", async () => {
+  // "forget my api port" held forget for confirmation, and the reply was
+  // "Understood. What can I assist you with today?" - no mention of anything
+  // pending, so nothing for the user to say yes to. The earlier guard only
+  // fired when the reply claimed the change had happened; this is the quieter
+  // failure where it says nothing at all.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("forget", { fact: "my api port is 8080" }),
+    answer("Understood. What can I assist you with today?")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "forget my api port", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.ok(result.awaitingConfirmation, "the offer must still be pending");
+    assert.match(result.text, /needs your confirmation|say yes/i, "the user must be told to confirm");
+    assert.match(result.text, /Understood/, "the model's own words are kept, the notice is added");
+  } finally {
+    server.close();
+  }
+});
+
+test("a refused first attempt does not leak under the confirmation it led to", async () => {
+  // Live: the model tried forget with an empty fact, was told "nothing to act
+  // on", tried again with the fact, and that second call was held. The reply
+  // correctly asked for confirmation - and then printed the first refusal
+  // underneath it, because failed mutation attempts are appended when nothing
+  // succeeded. The refusal of the very tool now pending is stale, not news.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("forget", { fact: "" }),
+    toolCall("forget", { fact: "my api port is 8080" }),
+    answer("Say yes and I will remove it.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "forget my api port", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.ok(result.awaitingConfirmation, "the second call must be pending");
+    assert.doesNotMatch(result.text, /nothing to act on/i, "the stale refusal must not be shown");
+  } finally {
+    server.close();
+  }
+});

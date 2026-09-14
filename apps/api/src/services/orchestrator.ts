@@ -2,7 +2,7 @@ import { ModelRouter, type ComposerKnowledge, type MemoryWriteOutcome } from "./
 import { checkAvailability, orderedCandidates, readLocalModelConfig } from "./localModel.js";
 import { isCodeWork } from "./machinePaths.js";
 import { pickAuthorModel } from "./appAuthor.js";
-import { buildCapabilityReply } from "./replyComposer.js";
+import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
 import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
@@ -11,12 +11,17 @@ import { classifyIntent } from "./actionIntent.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
 import {
+  clearPendingConfirmation,
   consumePendingConfirmation,
   describePendingAction,
   getPendingConfirmation,
   isAffirmative,
-  recordPendingConfirmation
+  isDecline,
+  recordPendingConfirmation,
+  type PendingConfirmation
 } from "./pendingConfirmation.js";
+import { isLastAskRequest, isListMemoriesRequest, parseForgetRequest, parsePinRequest } from "./memoryRequests.js";
+import { matchMemories } from "./factWording.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
@@ -38,6 +43,16 @@ export type OrchestratorInput = {
   saveMemory?: (fact: string) => "saved" | "duplicate" | "empty";
   /** Removes a saved memory by id, for the "forget" tool. */
   forgetMemory?: (id: string) => boolean;
+  /** Facts the user asked to forget this session; see ComposerInput.forgottenFacts. */
+  forgottenFacts?: string[];
+  /**
+   * Every memory in the session, for the forget flow. memoryContext is the
+   * newest few, chosen for the model's prompt; a request to forget something
+   * older than those must still find it.
+   */
+  listMemories?: () => Array<{ id: string; body: string; pinned?: boolean }>;
+  /** Clears the session's memory, for "forget everything". Returns how many went. */
+  forgetAllMemories?: () => number;
   /** Documents in this session, for the document tools. */
   documents?: Array<{ id: string; title: string; body: string }>;
   /** Saves a new document, for the "write_document" tool. */
@@ -148,6 +163,29 @@ export async function runAssistantOrchestrator(
     updateTask(input.sessionId, { status: "executing" });
   }
 
+  // Forgetting is done here, deterministically, and never by the model.
+  //
+  // It used to reach the agent loop like any other request, and the loop is
+  // the wrong place for it. Caught live: "forget that my printer is on the
+  // second floor" went to the model, which called forget with an empty fact,
+  // was told to fill it in, and answered with a call to every one of the
+  // twenty tools on offer, in the order they were listed. The loop ran them:
+  // it built an app called "Forget", rendered a video and installed a global
+  // npm package through run_command - on a request to delete one sentence.
+  // Nothing about that request needs a model. The memories are a list, the
+  // request names one, and the only decision is the user's.
+  const forgetting = resolveForget(input, approving, effectiveMessage);
+  if (forgetting) return forgetting;
+
+  const pinning = resolvePin(input, approving, effectiveMessage);
+  if (pinning) return pinning;
+
+  const listing = resolveListMemories(input, approving, effectiveMessage);
+  if (listing) return listing;
+
+  const recap = resolveLastAsk(input, approving, effectiveMessage);
+  if (recap) return recap;
+
   // Working out what was asked. Set here because this is the line that does
   // it, not a step announced before it starts.
   enterStage(input.sessionId, "understanding");
@@ -158,7 +196,8 @@ export async function runAssistantOrchestrator(
     memoryContext: input.memoryContext,
     history: input.history,
     memoryWrite: input.memoryWrite,
-    knowledge: input.knowledge
+    knowledge: input.knowledge,
+    forgottenFacts: input.forgottenFacts
   });
 
   // "What can you do?" must describe what is actually wired up right now, so the
@@ -271,12 +310,28 @@ export async function runAssistantOrchestrator(
       return planIntent.kind === "write" && planIntent.hasTarget;
     })();
 
+    // A remembered fact with a trailing request: the trailing clause is what
+    // the model is asked, with the fact marked as already stored. Handed the
+    // whole sentence, the model called remember a second time on one run and
+    // answered "No changes were made." on the next - the save it was reading
+    // about had already happened without it. And when the trailing clause
+    // is itself a list of what is saved, no model is needed at all.
+    const trailing = isPartialAnswer && modelReply.strategy === "acknowledge"
+      ? trailingRequest(input.userMessage)
+      : null;
+    if (trailing && input.sessionId && isListMemoriesRequest(trailing)) {
+      const listed = resolveListMemories(input, null, trailing);
+      if (listed) {
+        return { ...listed, assistantMessage: `Saved.\n\n${listed.assistantMessage}`, strategy: "acknowledge" };
+      }
+    }
+
     const question = isPlan && modelReply.buildRequest
       ? modelReply.planTaskType === "create" && !planWritesANamedFile
         ? `${modelReply.buildRequest}\n\nCall build_app with this. Not plan_app — the user wants it `
           + `actually built, not described. Do not stop at explaining what it would contain.`
         : modelReply.buildRequest
-      : undefined;
+      : trailing ?? undefined;
 
     // This branch is where real work happens — it is the one that reaches the
     // agent and its tools. Recording here rather than on every turn keeps the
@@ -355,6 +410,206 @@ export async function runAssistantOrchestrator(
   }
 
   return toResult(modelReply);
+}
+
+/** A reply written here, by neither a model nor the composer. */
+function deterministicResult(
+  request: string,
+  text: string,
+  strategy: string,
+  pending?: { tool: string; verb: string; target: string }
+): OrchestratorResult {
+  return {
+    model: "memory",
+    assistantMessage: text,
+    inputTokens: estimateTokens(request),
+    outputTokens: estimateTokens(text),
+    strategy,
+    toolsUsed: [],
+    groundedOn: [],
+    groundedOnHistory: 0,
+    ...(pending ? { pendingConfirmation: pending } : {})
+  };
+}
+
+/** Every memory the session has, or the prompt's few when the caller gave no list. */
+function allMemories(input: OrchestratorInput): Array<{ id: string; body: string; pinned?: boolean }> {
+  const listed = input.listMemories?.();
+  if (listed) return listed;
+  return (input.memoryContext ?? [])
+    .filter((entry): entry is typeof entry & { id: string } => typeof entry.id === "string")
+    .map((entry) => ({ id: entry.id, body: entry.body, pinned: entry.pinned }));
+}
+
+/**
+ * "what do you know about me", "list everything you have saved" - the list,
+ * read straight from the store.
+ *
+ * This went to the model, which either called list_memories and then also
+ * remember (on a request to list), or called nothing and answered "I don't
+ * have any specific information about you" with the facts sitting in the
+ * session. A list is not a judgement call.
+ */
+function resolveListMemories(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  if (approving || !input.sessionId || !isListMemoriesRequest(effectiveMessage)) return null;
+
+  const memories = allMemories(input);
+  if (memories.length === 0) {
+    return deterministicResult(effectiveMessage,
+      "Nothing is saved yet. Tell me something to remember and I will keep it.", "list");
+  }
+  const lines = memories.map((memory) => `- ${memory.pinned ? "[important] " : ""}${memory.body}`).join("\n");
+  return deterministicResult(effectiveMessage, `Saved so far (${memories.length}):\n${lines}`, "list");
+}
+
+/**
+ * "what did I just ask you?" - answered from the transcript.
+ *
+ * The composer's recall path matched it against memory and quoted the server
+ * room code back; the question was about the previous turn.
+ */
+function resolveLastAsk(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  if (approving || !isLastAskRequest(effectiveMessage)) return null;
+
+  const current = effectiveMessage.trim();
+  // The client may send the current message as the last turn of the history.
+  const previous = [...(input.history ?? [])]
+    .reverse()
+    .find((turn) => turn.role === "user" && turn.content.trim().length > 0 && turn.content.trim() !== current);
+
+  return deterministicResult(effectiveMessage, previous
+    ? `You asked: "${previous.content.trim()}"`
+    : "That is the first thing you have asked me in this conversation.", "recap");
+}
+
+/** At most this many saved memories are listed back when a name matches none. */
+const listedWhenUnmatched = 8;
+
+/**
+ * The forget flow, all of it: the request that names a memory, the answer
+ * that declines, and the approval that deletes.
+ *
+ * Null when this turn is not about forgetting, which is nearly always. The
+ * offer is recorded with the memory's stored wording and matched again on
+ * approval rather than trusted as an id - the list may have changed between
+ * the question and the answer.
+ */
+function resolveForget(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  const sessionId = input.sessionId;
+  if (!sessionId) return null;
+  const reply = (text: string, strategy = "forget", pending?: { tool: string; verb: string; target: string }) =>
+    deterministicResult(effectiveMessage, text, strategy, pending);
+  const offer = (pending: Omit<PendingConfirmation, "askedAt">, text: string) => {
+    recordPendingConfirmation(sessionId, pending);
+    return reply(text, "confirm", { tool: pending.tool, ...describePendingAction({ ...pending, askedAt: Date.now() }) });
+  };
+
+  if (approving?.tool === "forget") {
+    if (approving.arguments?.all === true) {
+      const count = input.forgetAllMemories?.() ?? 0;
+      return reply(count > 0
+        ? `Deleted every saved memory: ${count} of them. Nothing is saved now.`
+        : "Nothing was saved, so nothing was deleted.");
+    }
+    const fact = typeof approving.arguments?.fact === "string" ? approving.arguments.fact : "";
+    const match = matchMemories(fact, allMemories(input));
+    if (match.kind !== "one") {
+      return reply(`Nothing saved matches "${fact}" any more, so nothing was deleted.`);
+    }
+    const removed = input.forgetMemory?.(match.memory.id) ?? false;
+    return reply(removed
+      ? `Deleted from memory: ${match.memory.body}`
+      : "The delete did not go through, so nothing was removed.");
+  }
+  if (approving) return null;
+
+  // "no" to a standing offer withdraws it. Left standing, the offer would
+  // wait for the window to expire, and a "yes" meant for something else
+  // could land on it in the meantime.
+  if (isDecline(effectiveMessage) && getPendingConfirmation(sessionId)?.tool === "forget") {
+    clearPendingConfirmation(sessionId);
+    return reply("Kept. Nothing was deleted.");
+  }
+
+  const parsed = parseForgetRequest(effectiveMessage);
+  if (!parsed) return null;
+
+  const memories = allMemories(input);
+  if (memories.length === 0) return reply("Nothing is saved, so there is nothing to forget.");
+
+  if (parsed.kind === "all") {
+    return offer(
+      { tool: "forget", arguments: { all: true }, request: effectiveMessage },
+      `This would delete every saved memory - ${memories.length} of them. Say yes to delete them all, or no to keep them.`
+    );
+  }
+
+  const match = matchMemories(parsed.target, memories);
+  if (match.kind === "one") {
+    return offer(
+      { tool: "forget", arguments: { fact: match.memory.body }, request: effectiveMessage },
+      `This would delete the saved memory "${match.memory.body}". Say yes to delete it, or no to keep it.`
+    );
+  }
+  if (match.kind === "several") {
+    const listed = match.candidates.map((memory) => `- ${memory.body}`).join("\n");
+    return reply(`Several saved memories match "${parsed.target}":\n${listed}\n\nSay which one to forget, in its own words.`);
+  }
+
+  const shown = memories.slice(0, listedWhenUnmatched).map((memory) => `- ${memory.body}`).join("\n");
+  const more = memories.length > listedWhenUnmatched ? `\n- and ${memories.length - listedWhenUnmatched} more` : "";
+  return reply(`Nothing saved matches "${parsed.target}", so nothing was deleted. What is saved:\n${shown}${more}`);
+}
+
+/**
+ * Marking a memory as important, decided here for the same reason as
+ * forgetting - and because it never reached the model at all: "mark the
+ * server room code as important" reads as a statement, so the composer
+ * answered "Got it." and nothing was marked.
+ */
+function resolvePin(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  if (approving || !input.sessionId || !input.pinMemory) return null;
+  const parsed = parsePinRequest(effectiveMessage);
+  if (!parsed) return null;
+
+  const reply = (text: string) => deterministicResult(effectiveMessage, text, "pin");
+  const memories = allMemories(input);
+  const match = matchMemories(parsed.target, memories);
+
+  if (match.kind === "several") {
+    const listed = match.candidates.map((memory) => `- ${memory.body}`).join("\n");
+    return reply(`Several saved memories match "${parsed.target}":\n${listed}\n\nSay which one, in its own words.`);
+  }
+  if (match.kind === "none") {
+    // A sentence that merely sounds like a pin request is left to the rest
+    // of the pipeline; see PinRequest.explicit.
+    if (!parsed.explicit) return null;
+    if (memories.length === 0) return reply("Nothing is saved yet, so there is nothing to mark.");
+    const shown = memories.slice(0, listedWhenUnmatched).map((memory) => `- ${memory.body}`).join("\n");
+    return reply(`Nothing saved matches "${parsed.target}", so nothing was marked. What is saved:\n${shown}`);
+  }
+
+  const changed = input.pinMemory(match.memory.id, parsed.pinned);
+  if (!changed) return reply("That could not be changed, so nothing was marked.");
+  return reply(parsed.pinned
+    ? `Marked as important: ${match.memory.body}`
+    : `No longer marked as important: ${match.memory.body}`);
 }
 
 function toResult(modelReply: Awaited<ReturnType<ModelRouter["generate"]>>): OrchestratorResult {

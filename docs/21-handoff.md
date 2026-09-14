@@ -43,7 +43,7 @@ them is wrong even if it works.
 | Node | v24.4.0 local; `package.json` declares `>=20`; CI pins 22 |
 | Piper / whisper | both work; `ggml-base.en` |
 
-### Three negative results — do not repeat this work
+### Negative results — do not repeat this work
 
 - **Gating a tool out of the offer is not enough; enforce it at dispatch.**
   With `calculate` withheld for "what comes next: 2, 6, 12, 20, 30, ?", the
@@ -53,6 +53,41 @@ them is wrong even if it works.
   new per-turn gate gets that enforcement for free; do not add a gate that
   only shapes the `tools` array.
 
+- **Do not let the model run a memory deletion.** "forget that my printer is
+  on the second floor" reached the model, which called `forget` with an empty
+  fact, was told to fill it in, and answered with a call to every one of the
+  twenty tools on offer, in listing order. The loop ran them: it built an app
+  called "Forget", rendered a video and installed a global npm package through
+  `run_command`, on a request to delete one sentence. Forgetting is now
+  deterministic in `orchestrator.ts` (`resolveForget` + `forgetRequest.ts`):
+  the request names a memory, the offer is held in `pendingConfirmation`, and
+  "yes" deletes it - no model, no tools. Two caps in `agentLoop.ts` bound the
+  failure class for everything else: a reply asking for more than
+  `maxCallsPerRound` tools runs none of them, and only the first change
+  (permission level 2+) in a reply is made - the rest wait for its result.
+- **Deleting the memory is not the whole of forgetting it.** With the memory
+  gone, "what is my api port?" was answered from the transcript ("You mentioned
+  this earlier in our conversation: my api port is 9090"). The store now keeps
+  what each session asked to forget (`listForgottenFacts`), and the composer
+  drops those turns from its transcript search until the fact is stated again.
+- **A tool refusal is read as the next instruction.** "forget was called with
+  nothing to act on. Say exactly what it should apply to" made the model *state*
+  the fact - through `remember` - in reply to a request to delete it. Refusals
+  name the tool and the argument and say to call the same tool again.
+- **Memory housekeeping never goes to the model.** Forget, pin/unpin, "what
+  do you know about me", and "what did I just ask you" are all answered from
+  the store or the transcript in `orchestrator.ts` (`resolveForget`,
+  `resolvePin`, `resolveListMemories`, `resolveLastAsk`; parsers in
+  `memoryRequests.ts`). Each was a live failure through the model: "mark the
+  server room code as important" got "Got it." and nothing marked; "what do
+  you know about me?" was read as a capability question, then answered "I
+  don't have any specific information about you" with the facts in the
+  session. "remember X, then list ..." now stores only X and answers the
+  trailing clause (`trailingRequest` in `replyComposer.ts`).
+- **Clock arithmetic is a tool.** qwen answered "3pm plus 2 hours 30 minutes"
+  with 3:30 PM, and the date tools were the wrong shape (whole days). `shift_time`
+  in `clockMath.ts` does it; it and the date tools are offered only when the
+  request names a clock time / a date (`looksLikeClockMath`, `looksLikeDateMath`).
 - **ffmpeg cannot rasterize SVG here.** The `svg_pipe` *demuxer* is listed, which
   is misleading: this build has no SVG *decoder* (no librsvg). Piping SVG frames
   fails with `no decoder found for: svg`. Do not design around SVG input.

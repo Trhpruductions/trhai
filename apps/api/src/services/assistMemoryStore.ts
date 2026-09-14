@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { extractMemoryCandidates, suppressDuplicateMemories, type MemoryCandidate } from "./memoryExtraction.js";
+import { statesFact, subjectOf } from "./factWording.js";
 import { dataFile } from "./dataDirectory.js";
 import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
@@ -71,6 +72,8 @@ type PersistedShape = {
   version: 1;
   sessions: Array<{ key: string; memories: StoredMemory[] }>;
   audit: MemoryAuditEntry[];
+  /** What each session has asked to forget; see forgottenBySession. Absent in older files. */
+  forgotten?: Array<{ key: string; facts: string[] }>;
 };
 
 function isStoredMemory(value: unknown): value is StoredMemory {
@@ -100,6 +103,14 @@ function loadFromDisk(): void {
         pinned: Boolean(entry.pinned)
       }));
       if (memories.length) memoriesBySession.set(session.key, memories);
+    }
+
+    if (Array.isArray(parsed.forgotten)) {
+      for (const entry of parsed.forgotten) {
+        if (!entry || typeof entry.key !== "string" || !Array.isArray(entry.facts)) continue;
+        const facts = entry.facts.filter((fact): fact is string => typeof fact === "string" && fact.trim().length > 0);
+        if (facts.length) forgottenBySession.set(entry.key, facts.slice(-maxForgottenPerSession));
+      }
     }
 
     if (Array.isArray(parsed.audit)) {
@@ -143,7 +154,8 @@ function saveToDisk(): void {
   const payload: PersistedShape = {
     version: 1,
     sessions: [...memoriesBySession.entries()].map(([key, memories]) => ({ key, memories })),
-    audit: auditLog
+    audit: auditLog,
+    forgotten: [...forgottenBySession.entries()].map(([key, facts]) => ({ key, facts }))
   };
   const tempPath = `${memoryFilePath}.tmp`;
 
@@ -211,6 +223,7 @@ function evictOldestSessionIfNeeded(): void {
       return;
     }
     memoriesBySession.delete(oldestKey);
+    forgottenBySession.delete(oldestKey);
   }
 }
 
@@ -220,9 +233,35 @@ function evictOldestSessionIfNeeded(): void {
  */
 export function recordMemoriesFromMessage(sessionKey: string, message: string): StoredMemory[] {
   loadFromDisk();
-  const candidates = extractMemoryCandidates(message);
+
+  // A correction is a fact with a lead-in, and it replaces what it corrects.
+  //
+  // "remember that my api port is 8080", then "actually correction: my api
+  // port is 9090", then "what is my api port?" answered 8080. The correction
+  // matched no extraction rule - it does not open with "remember" and is not
+  // a preference or a convention - so it was absorbed with "Got it." and
+  // never written. The user had corrected the assistant in plain words and
+  // been ignored for it. With the lead-in stripped it is read as an explicit
+  // fact, and any stored memory sharing its subject ("my api port") is
+  // superseded rather than kept alongside as a contradiction.
+  const corrected = correctionRemainder(message);
+  const candidates = extractMemoryCandidates(corrected === null ? message : `remember that ${corrected}`);
   if (candidates.length === 0) {
     return [];
+  }
+
+  if (corrected !== null) {
+    const subjects = candidates
+      .map((candidate) => subjectOf(candidate.body))
+      .filter((subject): subject is string => subject !== null);
+    const current = memoriesBySession.get(sessionKey) ?? [];
+    const superseded = current.filter((entry) => subjects.includes(subjectOf(entry.body) ?? ""));
+    if (superseded.length > 0) {
+      memoriesBySession.set(sessionKey, current.filter((entry) => !superseded.includes(entry)));
+      for (const old of superseded) {
+        recordAudit(sessionKey, old.id, "forgotten", `Replaced by a correction: ${old.body}`);
+      }
+    }
   }
 
   const existing = memoriesBySession.get(sessionKey) ?? [];
@@ -244,6 +283,7 @@ export function recordMemoriesFromMessage(sessionKey: string, message: string): 
   }));
 
   memoriesBySession.set(sessionKey, applyCap([...existing, ...stored]));
+  unforget(sessionKey, stored.map((entry) => entry.body));
   evictOldestSessionIfNeeded();
 
   for (const entry of stored) {
@@ -252,6 +292,29 @@ export function recordMemoriesFromMessage(sessionKey: string, message: string): 
 
   saveToDisk();
   return stored;
+}
+
+const correctionLeads = [
+  "actually correction:", "actually correction,", "correction:", "correction,", "correction -",
+  "actually,", "actually:", "actually ", "no,", "no -", "no:", "that's wrong,", "that's wrong:",
+  "thats wrong,", "that is wrong,", "update:", "update -", "scratch that,", "scratch that:",
+  "scratch that -", "i meant "
+];
+
+/** The fact after a correction lead-in, or null when the message is not one. */
+function correctionRemainder(message: string): string | null {
+  const lower = message.trim().toLowerCase();
+  for (const lead of correctionLeads) {
+    if (lower.startsWith(lead)) {
+      const rest = message.trim().slice(lead.length).trim().replace(/^[:,\-]+\s*/, "").trim();
+      // Only a remainder that states something is a correction. "no, keep
+      // it" - the answer to an offer to delete a memory - opens with the
+      // same "no," and was saved as the memory "keep it". A fact gives a
+      // subject a value; an answer does not.
+      return rest.length > 0 && subjectOf(rest) !== null ? rest : null;
+    }
+  }
+  return null;
 }
 
 /** Why a single explicit save wrote nothing, or that it wrote something. */
@@ -299,6 +362,7 @@ export function recordSingleMemory(sessionKey: string, fact: string): SaveOutcom
   };
 
   memoriesBySession.set(sessionKey, applyCap([...existing, stored]));
+  unforget(sessionKey, [stored.body]);
   evictOldestSessionIfNeeded();
   recordAudit(sessionKey, stored.id, "recorded", `Recorded via ${stored.rule}: ${stored.title}`);
   saveToDisk();
@@ -394,6 +458,47 @@ export function relabelMemory(sessionKey: string, memoryId: string, title: strin
   return target;
 }
 
+/**
+ * What each session has asked to forget, oldest first.
+ *
+ * Kept because deleting the memory was not the whole of forgetting it. The
+ * composer answers from the transcript when nothing saved matches, and the
+ * transcript still holds the sentence the memory was made from - so "forget
+ * my api port" deleted the memory, and "what is my api port?" quoted "my api
+ * port is 9090" straight back out of the conversation. A fact the user has
+ * asked to forget is not quoted from anywhere until they state it again.
+ */
+const forgottenBySession = new Map<string, string[]>();
+const maxForgottenPerSession = 50;
+
+function recordForgotten(sessionKey: string, bodies: string[]): void {
+  const current = forgottenBySession.get(sessionKey) ?? [];
+  const next = [...current, ...bodies.map((body) => body.trim()).filter((body) => body.length > 0)];
+  forgottenBySession.set(sessionKey, next.slice(-maxForgottenPerSession));
+}
+
+/** Stating a fact again is the end of having asked to forget it. */
+function unforget(sessionKey: string, bodies: string[]): void {
+  const current = forgottenBySession.get(sessionKey);
+  if (!current || current.length === 0) return;
+
+  const restated = (forgotten: string): boolean => bodies.some((body) => {
+    if (statesFact(body, forgotten)) return true;
+    const subject = subjectOf(body);
+    return subject !== null && subject === subjectOf(forgotten);
+  });
+  const remaining = current.filter((forgotten) => !restated(forgotten));
+
+  if (remaining.length === 0) forgottenBySession.delete(sessionKey);
+  else forgottenBySession.set(sessionKey, remaining);
+}
+
+/** The facts this session has asked to forget and not stated since. */
+export function listForgottenFacts(sessionKey: string): string[] {
+  loadFromDisk();
+  return [...(forgottenBySession.get(sessionKey) ?? [])];
+}
+
 /** Deletion takes effect immediately, so the next retrieval cannot return it. */
 export function forgetMemory(sessionKey: string, memoryId: string): boolean {
   loadFromDisk();
@@ -408,6 +513,7 @@ export function forgetMemory(sessionKey: string, memoryId: string): boolean {
   }
 
   const [removed] = entries.splice(index, 1);
+  recordForgotten(sessionKey, [removed.body]);
   recordAudit(sessionKey, memoryId, "forgotten", removed.title);
   saveToDisk();
   return true;
@@ -421,6 +527,7 @@ export function forgetAllMemories(sessionKey: string): number {
     return 0;
   }
 
+  recordForgotten(sessionKey, (entries ?? []).map((entry) => entry.body));
   memoriesBySession.set(sessionKey, []);
   recordAudit(sessionKey, null, "cleared", `Cleared ${count} memories`);
   saveToDisk();
@@ -436,8 +543,10 @@ export function resetAssistMemory(sessionKey?: string): void {
   auditLog.length = 0;
   if (sessionKey) {
     memoriesBySession.delete(sessionKey);
+    forgottenBySession.delete(sessionKey);
   } else {
     memoriesBySession.clear();
+    forgottenBySession.clear();
   }
   saveToDisk();
 }
@@ -445,6 +554,7 @@ export function resetAssistMemory(sessionKey?: string): void {
 /** Test seam: drop in-process state and re-read the file, simulating a restart. */
 export function reloadAssistMemoryFromDisk(): void {
   memoriesBySession.clear();
+  forgottenBySession.clear();
   auditLog.length = 0;
   loaded = false;
   loadFromDisk();

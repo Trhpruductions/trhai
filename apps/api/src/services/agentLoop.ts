@@ -10,9 +10,7 @@ import {
   correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import {
-  classifyIntent, clarificationFor, isExplanatoryQuestion, looksArithmetic, type ActionKind
-} from "./actionIntent.js";
+import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, type ActionKind } from "./actionIntent.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
@@ -126,6 +124,20 @@ export type AgentResult =
 export const maxToolRounds = 4;
 
 /**
+ * The most tool calls one reply may ask for.
+ *
+ * A model that asks for every tool at once is not planning, it is
+ * enumerating. Caught live: told that forget needed its fact filled in, the
+ * model answered with a call to each of the twenty tools on offer, in the
+ * order they were listed - and the loop ran them. It built an app called
+ * "Forget", rendered a video and installed a global npm package through
+ * run_command, on a request to delete one memory. No round needs more than a
+ * few calls; a batch bigger than this is refused whole, because which few
+ * were first was an accident of the listing order, not a decision.
+ */
+export const maxCallsPerRound = 4;
+
+/**
  * How many times the exact same call — same tool, same arguments — may
  * actually run before the loop refuses to repeat it.
  *
@@ -141,6 +153,13 @@ export const maxToolRounds = 4;
  * finally cut it off. This is the earlier, cheaper stop.
  */
 const maxIdenticalAttempts = 2;
+
+/** Whether a reply already asks the user to confirm something. */
+function mentionsConfirmation(text: string): boolean {
+  const lower = text.toLowerCase();
+  return ["confirm", "say yes", "go ahead", "approve", "shall i", "do you want me to"]
+    .some((phrase) => lower.includes(phrase));
+}
 
 /**
  * A key that is the same for two calls that mean the same thing regardless
@@ -806,7 +825,7 @@ export async function runAgent(
   // carried both - "I could not write that app... Nothing was written."
   // immediately followed by "Built \"Celsius\" in the workspace". The user is
   // left to guess which half is true, and the app did in fact build.
-  const mutationAttempts: Array<{ content: string; ok: boolean }> = [];
+  const mutationAttempts: Array<{ name: string; content: string; ok: boolean }> = [];
 
   // How many times each exact call has actually been run, across every round
   // of this one request — not per round, since the failure this guards
@@ -875,7 +894,11 @@ export async function runAgent(
         // written its files by the time a reply exists.
         scaffolding: !askedAQuestion && !namedAFileToWrite,
         // A calculator is only in reach when there is a sum to do.
-        arithmetic: looksArithmetic(question)
+        arithmetic: looksArithmetic(question),
+        // And the date tools only when the request is about dates.
+        dates: looksLikeDateMath(question),
+        // And clock arithmetic only when a clock time is named.
+        clock: looksLikeClockMath(question)
       })
       : [];
     const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));
@@ -1145,8 +1168,15 @@ export async function runAgent(
       // Successes if there were any, otherwise the failures - so a retry that
       // worked is not reported alongside the attempt that did not, and a build
       // that never worked still says so.
-      const succeeded = mutationAttempts.filter((attempt) => attempt.ok);
-      const mutationResults = (succeeded.length > 0 ? succeeded : mutationAttempts)
+      // A failed attempt of a tool that is now awaiting confirmation is stale:
+      // the model tried forget with nothing, was told so, and tried again
+      // with the fact - and the second call is what is pending. Appending the
+      // first refusal printed "forget was called with nothing to act on"
+      // underneath a correct request for confirmation.
+      const relevant = mutationAttempts.filter((attempt) =>
+        !(awaitingConfirmation && attempt.name === awaitingConfirmation.tool && !attempt.ok));
+      const succeeded = relevant.filter((attempt) => attempt.ok);
+      const mutationResults = (succeeded.length > 0 ? succeeded : relevant)
         .map((attempt) => attempt.content);
 
       // A promise counts the same as a claim here. "I will now write the file"
@@ -1219,7 +1249,14 @@ export async function runAgent(
       const cleanedText = builtAnApp ? withoutFabricatedLiveClaims(withoutInvention) : withoutInvention;
       return {
         ok: true,
-        text: withMutationResults(cleanedText, mutationResults),
+        // A held call the reply does not mention is a decision the user cannot
+        // make. "forget my api port" held forget for confirmation and the
+        // reply was "Understood. What can I assist you with today?" - nothing
+        // about a confirmation, so nothing to say yes to. The notice is added
+        // whenever a confirmation is pending and the reply has not asked.
+        text: awaitingConfirmation && !mentionsConfirmation(cleanedText)
+          ? `${withMutationResults(cleanedText, mutationResults)}\n\n${pendingConfirmationNotice(awaitingConfirmation.tool)}`
+          : withMutationResults(cleanedText, mutationResults),
         model: typeof response.model === "string" ? response.model : config.model,
         toolsUsed,
         ...(awaitingConfirmation ? { awaitingConfirmation } : {}),
@@ -1256,7 +1293,38 @@ export async function runAgent(
       return 0;
     });
 
+    // See maxCallsPerRound. Refused whole, and told to the model as the one
+    // tool result for the batch, so it answers the next round with a choice.
+    if (orderedCalls.length > maxCallsPerRound) {
+      toolActivity.markBlocked();
+      messages.push({
+        role: "tool",
+        content: `You asked for ${orderedCalls.length} tools in one reply, and none of them were run. `
+          + "Call one tool, read its result, then decide the next."
+      });
+      continue;
+    }
+
+    // One change per reply. The model cannot know a second change is right
+    // before the first has a result - the same live turn that asked for
+    // twenty tools asked for eight changes among them. Reads may batch;
+    // changes queue, each behind the result of the one before.
+    let changedThisRound = false;
+
     for (const call of orderedCalls) {
+      if (changesSomething(call.name) && offeredNames.has(call.name)) {
+        if (changedThisRound) {
+          toolActivity.markBlocked();
+          messages.push({
+            role: "tool",
+            content: `${call.name} was not run: one change per reply. Read the result of the change `
+              + `already made, then call ${call.name} again if it is still needed.`
+          });
+          continue;
+        }
+        changedThisRound = true;
+      }
+
       // Not offered this turn, not run. See offeredNames above. Told to the
       // model as a tool message so it answers without the tool, rather than
       // silently dropped - a dropped call leaves it waiting for a result that
@@ -1390,7 +1458,7 @@ export async function runAgent(
       // would do and ask them to confirm" — verbatim underneath the reply,
       // where the user read internal plumbing addressed to someone else.
       if (mutatingTools.has(call.name) && !result.needsConfirmation) {
-        mutationAttempts.push({ content: result.content, ok: result.ok });
+        mutationAttempts.push({ name: call.name, content: result.content, ok: result.ok });
       }
     }
   }

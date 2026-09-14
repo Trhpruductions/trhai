@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { normalizeSpelling } from "./spelling.js";
+import { matchMemories, type FactMatch } from "./factWording.js";
 import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.js";
 import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
 import { describeDifference, shiftDate } from "./dateMath.js";
+import { shiftClock } from "./clockMath.js";
 import {
   classifyRequest, deriveTitle, findScriptFault, generateProject, parseVideoScript, planProject,
   slugify, videoScriptPrompt, type VideoScript
@@ -428,6 +431,25 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "shift_time",
+      description:
+        "The clock time a number of hours and minutes after or before a given time. Use this for "
+        + "arrival times, how long something runs, or 'what time is it 90 minutes from 3pm' - do "
+        + "not add hours and minutes yourself, you will get it wrong. Negative values go backwards.",
+      parameters: {
+        type: "object",
+        properties: {
+          time: { type: "string", description: "The starting clock time: 3pm, 3:15 PM, 15:00, noon, midnight." },
+          hours: { type: "number", description: "Hours to add; negative to subtract. 0 if none." },
+          minutes: { type: "number", description: "Minutes to add; negative to subtract. 0 if none." }
+        },
+        required: ["time"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "shift_date",
       description:
         "The date a given number of days before or after another date. Use a negative number to "
@@ -736,7 +758,11 @@ const machineChangingTools = new Set([
 function titledFromRequest<T extends { title: string }>(spec: T, request?: string): T {
   if (!request?.trim()) return spec;
 
-  const fromRequest = deriveTitle(request);
+  // Spelling is corrected here and nowhere else in this path: the transcript
+  // keeps the user's words, but "buld me a smal app that trakcs my gym
+  // visits" produced a folder called buld-me-a-smal-app, which is also the
+  // page heading and the browser tab.
+  const fromRequest = deriveTitle(normalizeSpelling(request));
   if (!fromRequest) return spec;
 
   // "App", "Tool", "Project" - a name that names nothing. Keep the model's.
@@ -762,21 +788,30 @@ export function verifiedDetail(output: string): string {
   return output === "no output" ? "its own checks passed, without printing anything" : output;
 }
 
+/** Offered only when the request is about dates; see looksLikeDateMath. */
+const dateTools = new Set(["days_between", "shift_date"]);
+/** Offered only when the request names a clock time; see looksLikeClockMath. */
+const clockTools = new Set(["shift_time"]);
+
 export function availableTools(
   armed: boolean,
-  options: { scaffolding?: boolean; changes?: boolean; arithmetic?: boolean } = {}
+  options: { scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
   const allowChanges = options.changes ?? true;
   // See looksArithmetic. Offered to everything, calculate was grabbed for
   // pattern questions and syllogisms and answered them with its output.
   const allowArithmetic = options.arithmetic ?? true;
+  const allowDates = options.dates ?? true;
+  const allowClock = options.clock ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
     if (!armed && name === "run_command") return false;
     if (!allowScaffolding && scaffoldingTools.has(name)) return false;
     if (!allowArithmetic && name === "calculate") return false;
+    if (!allowDates && dateTools.has(name)) return false;
+    if (!allowClock && clockTools.has(name)) return false;
     if (!allowChanges && machineChangingTools.has(name)) return false;
     return true;
   });
@@ -833,11 +868,20 @@ function describeMissingDocument(context: ToolContext, title: string): string {
 }
 
 /** The same exact-then-partial rule, for a saved fact. */
-function findMemory(context: ToolContext, fact: string) {
-  const wanted = fact.trim().toLowerCase();
+/**
+ * The saved memory the model is naming. See matchMemories: the model repeats
+ * text back and paraphrases it, so this is matched by wording, never trusted
+ * as an id - an id it invented would delete the wrong memory.
+ */
+function findMemory(context: ToolContext, fact: string): FactMatch<ScorableMemory> {
+  return matchMemories(fact, context.memories);
+}
 
-  return context.memories.find((memory) => memory.body.trim().toLowerCase() === wanted)
-    ?? context.memories.find((memory) => memory.body.toLowerCase().includes(wanted));
+/** The refusal for a name that fits more than one memory: nothing done, and the choice listed. */
+function describeSeveral(tool: string, fact: string, candidates: ScorableMemory[], outcome: string): string {
+  const listed = candidates.map((memory) => `- ${memory.body}`).join("\n");
+  return `Several saved memories match "${fact}":\n${listed}\nNothing was ${outcome}. `
+    + `Call ${tool} again with the full wording of the one you mean.`;
 }
 
 export async function runTool(call: ToolCall, context: ToolContext): Promise<ToolResult> {
@@ -888,6 +932,32 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
 
   if (isRegistered && requiresConfirmation(call.name)
     && !preAuthorised && !context.confirmedActions?.has(call.name)) {
+    // A call with nothing in it is not held for confirmation; it is refused so
+    // the model tries again with a target. "forget my api port" arrived as
+    // forget with an empty fact, was held, and the user - had they said yes -
+    // would have confirmed a call that could only fail. Validated first, the
+    // model is told what is missing and the confirmation is asked for the
+    // call that would actually run.
+    const values = Object.values(call.arguments ?? {});
+    const allBlank = values.length === 0
+      || values.every((value) => typeof value !== "string" || value.trim() === "");
+    if (allBlank) {
+      // The wording names the tool and the argument, and says to call the
+      // same tool again. The first version said "Say exactly what it should
+      // apply to", and the model read that as an instruction to state the
+      // fact: asked to forget that the printer is on the second floor, it
+      // called remember with that sentence and reported it saved. A refusal
+      // is read as the next instruction, so it has to be one.
+      const required = toolDefinitions.find((definition) => definition.function.name === call.name)
+        ?.function.parameters.required ?? [];
+      const missing = required.length > 0 ? required.join(" and ") : "its arguments";
+      return {
+        ok: false,
+        content: `${call.name} was called with ${missing} empty, so nothing was done. `
+          + `Call ${call.name} again with ${missing} filled in from the user's request. `
+          + "Do not switch to a different tool."
+      };
+    }
     return { ok: false, content: describeConfirmationNeeded(call.name), needsConfirmation: true };
   }
 
@@ -972,11 +1042,15 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // Matched against the stored wording rather than trusted as an id: the
       // model is repeating text back, and an id it invented would delete the
       // wrong memory. An unmatched request deletes nothing and says so.
-      const target = findMemory(context, fact);
+      const match = findMemory(context, fact);
 
-      if (!target) {
+      if (match.kind === "several") {
+        return { ok: false, content: describeSeveral(call.name, fact, match.candidates, "deleted") };
+      }
+      if (match.kind === "none") {
         return { ok: false, content: `Nothing saved matches "${fact}", so nothing was deleted.` };
       }
+      const target = match.memory;
 
       const removed = context.forgetMemory(target.id);
       return removed
@@ -1130,10 +1204,14 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // Absent means pin. Unpinning is the rarer request and is always stated.
       const pinned = call.arguments.pinned !== false;
 
-      const target = findMemory(context, fact);
-      if (!target) {
+      const match = findMemory(context, fact);
+      if (match.kind === "several") {
+        return { ok: false, content: describeSeveral(call.name, fact, match.candidates, "marked") };
+      }
+      if (match.kind === "none") {
         return { ok: false, content: `Nothing saved matches "${fact}", so nothing was marked.` };
       }
+      const target = match.memory;
 
       const changed = context.pinMemory(target.id, pinned);
       if (!changed) {
@@ -1181,6 +1259,15 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       };
     }
 
+    case "shift_time": {
+      const time = requireString(call.arguments.time);
+      if (!time) return { ok: false, content: "shift_time needs a starting clock time, like 3pm or 15:00." };
+      const hours = call.arguments.hours === undefined || call.arguments.hours === "" ? 0 : Number(call.arguments.hours);
+      const minutes = call.arguments.minutes === undefined || call.arguments.minutes === "" ? 0 : Number(call.arguments.minutes);
+      const result = shiftClock(time, hours, minutes);
+      return result.ok ? { ok: true, content: result.value } : { ok: false, content: result.reason };
+    }
+
     case "days_between": {
       const from = requireString(call.arguments.from);
       const to = requireString(call.arguments.to);
@@ -1199,6 +1286,15 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       const days = typeof call.arguments.days === "number"
         ? call.arguments.days
         : Number(call.arguments.days);
+      // Says what the tool is for, so a model that reached for it with "2
+      // hours 30 minutes" answers the question itself instead of giving up.
+      if (!Number.isFinite(days)) {
+        return {
+          ok: false,
+          content: "shift_date moves a date by a whole number of days, and days was not a number. "
+            + "For hours and minutes, work the time out yourself and answer."
+        };
+      }
 
       const result = shiftDate(from, days, (context.now ?? (() => new Date()))());
       return result.ok

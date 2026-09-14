@@ -50,6 +50,8 @@ export type ModelPrompt = {
   memoryWrite?: MemoryWriteOutcome;
   /** Knowledge passages available to ground an answer. */
   knowledge?: ComposerKnowledge[];
+  /** Facts the user asked to forget this session; see ComposerInput.forgottenFacts. */
+  forgottenFacts?: string[];
 };
 
 export class ModelRouter {
@@ -62,7 +64,8 @@ export class ModelRouter {
       memories: toComposerMemories(prompt.memoryContext ?? []),
       history: prompt.history ?? [],
       memoryWrite: prompt.memoryWrite,
-      knowledge: prompt.knowledge ?? []
+      knowledge: prompt.knowledge ?? [],
+      forgottenFacts: prompt.forgottenFacts ?? []
     });
 
     return {

@@ -91,6 +91,20 @@ export function isAffirmative(message: unknown): boolean {
 }
 
 /**
+ * Whether a message is the user turning down what was just offered.
+ *
+ * As narrow as the affirmative, and for the mirror-image reason: reading a
+ * refusal into an unrelated sentence would drop an offer the user still
+ * meant to answer.
+ */
+const declinePattern =
+  /^(no|nope|nah|cancel|keep it|keep them|leave it|leave them|never ?mind|don't|do not|stop|not now)\b/i;
+
+export function isDecline(message: unknown): boolean {
+  return typeof message === "string" && declinePattern.test(message.trim());
+}
+
+/**
  * The action, in the words a person would use to describe it.
  *
  * A dialog that says "Run forget" is asking someone to approve a function
@@ -112,7 +126,9 @@ export function describePendingAction(pending: PendingConfirmation): {
 
   switch (pending.tool) {
     case "forget":
-      return { verb: "Forget this saved memory", target: argument("fact") };
+      return pending.arguments?.all === true
+        ? { verb: "Forget every saved memory", target: "all of them" }
+        : { verb: "Forget this saved memory", target: argument("fact") };
     case "delete_document":
       return { verb: "Delete this document", target: argument("title") };
     default:
