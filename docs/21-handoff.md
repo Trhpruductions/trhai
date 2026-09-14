@@ -38,12 +38,20 @@ them is wrong even if it works.
 | ffmpeg | **8.0.1 full build**, on PATH |
 | Hardware encoders | `h264_nvenc`, `av1_nvenc`, `h264_amf` |
 | ffmpeg filters | `xfade`, `zoompan`, `drawtext`, `gblur`, `overlay` |
-| Ollama models | `qwen2.5-coder:7b`, `llama3.1:8b`, `llama3.2:latest` |
+| Ollama models | `qwen2.5-coder:7b` (pinned in `.env`, answers chat and authors apps), `vexora:latest`, `qwen2.5:3b` - **this list changes; check `curl 127.0.0.1:11434/api/tags` before assuming** |
 | Ollama store | `D:\Ollama\models` (env `OLLAMA_MODELS`) — **C: has only ~9 GB free** |
 | Node | v24.4.0 local; `package.json` declares `>=20`; CI pins 22 |
 | Piper / whisper | both work; `ggml-base.en` |
 
-### Two negative results — do not repeat this work
+### Three negative results — do not repeat this work
+
+- **Gating a tool out of the offer is not enough; enforce it at dispatch.**
+  With `calculate` withheld for "what comes next: 2, 6, 12, 20, 30, ?", the
+  model returned a `calculate` tool_call anyway - from habit, not from the
+  list - and the loop ran it and answered 36. The dispatcher now refuses any
+  call not in the turn's offered set (`offeredNames` in `agentLoop.ts`). Any
+  new per-turn gate gets that enforcement for free; do not add a gate that
+  only shapes the `tools` array.
 
 - **ffmpeg cannot rasterize SVG here.** The `svg_pipe` *demuxer* is listed, which
   is misleading: this build has no SVG *decoder* (no librsvg). Piping SVG frames

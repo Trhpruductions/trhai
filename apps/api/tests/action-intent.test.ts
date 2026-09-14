@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyIntent, clarificationFor, isExplanatoryQuestion } from "../src/services/actionIntent.js";
+import { classifyIntent, clarificationFor, isExplanatoryQuestion, looksArithmetic } from "../src/services/actionIntent.js";
 
 // The classifier that decides whether prose alone would be a failure.
 //
@@ -233,5 +233,27 @@ test("a request to build something is not a question", () => {
     "make a snake game"
   ]) {
     assert.equal(isExplanatoryQuestion(request), false, `must stay buildable: ${request}`);
+  }
+});
+
+
+// Whether there is actually something to calculate.
+
+test("a real sum looks arithmetic", () => {
+  for (const sum of ["what is 2+2", "12.5 * 3 + 7", "what is 15 percent of 80", "add 12 and 30", "how much is 400 divided by 8"]) {
+    assert.equal(looksArithmetic(sum), true, `should offer the calculator for: ${sum}`);
+  }
+});
+
+test("a pattern or a syllogism does not", () => {
+  // Both were answered by the calculator when it was offered unconditionally:
+  // the sequence got 80 and the syllogism got 20. Neither is a sum.
+  for (const notASum of [
+    "What comes next: 2, 6, 12, 20, 30, ?",
+    "If all bloops are razzies and all razzies are lazzies, are all bloops lazzies?",
+    "what's today's date?",
+    "read the file at C:/work/notes.txt"
+  ]) {
+    assert.equal(looksArithmetic(notASum), false, `should not offer the calculator for: ${notASum}`);
   }
 });

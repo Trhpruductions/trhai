@@ -7,10 +7,11 @@ import { beginEvent, endEvent, type ExecutionKind } from "./executionLog.js";
 import { stripFabricatedToolOutput } from "./fabricatedOutput.js";
 import {
   answerDirectly, claimsUnperformedMutation, claimsUnusedTool, contradictsToolRecord,
-  correctionFor, noChangeWasMade, pendingConfirmationNotice, promisesUnperformedMutation
+  correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
+  promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
 import {
-  classifyIntent, clarificationFor, isExplanatoryQuestion, type ActionKind
+  classifyIntent, clarificationFor, isExplanatoryQuestion, looksArithmetic, type ActionKind
 } from "./actionIntent.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -751,6 +752,7 @@ export async function runAgent(
   let correctedContradiction = false;
   let correctedMutationClaim = false;
   let correctedToolCredit = false;
+  let correctedRetrieval = false;
 
   // Fixed for the turn: what was asked does not change as the loop runs.
   const askedAQuestion = isExplanatoryQuestion(question);
@@ -851,6 +853,33 @@ export async function runAgent(
     // something the model was not going to conclude on.
     const offerTools = round < maxToolRounds + correctionRounds && !fetchUrlFailed;
 
+    // What this turn actually offers, decided once and used twice: sent to
+    // the model, and enforced when the model answers.
+    //
+    // Gating the offer alone was not enough. A model emits tool calls from
+    // habit as much as from the list in front of it: with calculate withheld
+    // for "what comes next: 2, 6, 12, 20, 30, ?", qwen still returned a
+    // calculate tool_call, and the loop - which only ever checked that a tool
+    // existed, not that it had been offered - ran it and answered 36. Every
+    // other gate had the same hole: scaffolding, the read-only turn, the
+    // unattended run. The dispatcher below now refuses anything not in this
+    // set, which closes all of them at once.
+    const offeredTools = offerTools
+      ? availableTools(commandsArmed() && !unattended, {
+        // A request to look does not get the tools that change things. Asked
+        // to read one file, the model read it and then wrote three - see
+        // machineChangingTools in agentTools.
+        changes: intent.kind !== "read",
+        // A question does not get to scaffold a project. Decided from the
+        // request rather than from the reply, because a build has already
+        // written its files by the time a reply exists.
+        scaffolding: !askedAQuestion && !namedAFileToWrite,
+        // A calculator is only in reach when there is a sum to do.
+        arithmetic: looksArithmetic(question)
+      })
+      : [];
+    const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));
+
     let response: ChatResponse;
     try {
       const raw = await withTimeout(config.timeoutMs, (signal) =>
@@ -867,20 +896,7 @@ export async function runAgent(
             // Withheld while disarmed rather than offered and refused: a
             // model that can see run_command will reason about it and try to
             // talk its way into it; one that never sees it cannot.
-            ...(offerTools
-              ? {
-                tools: availableTools(commandsArmed() && !unattended, {
-                  // A request to look does not get the tools that change
-                  // things. Asked to read one file, the model read it and then
-                  // wrote three - see machineChangingTools in agentTools.
-                  changes: intent.kind !== "read",
-                  // A question does not get to scaffold a project. Decided from
-                  // the request rather than from the reply, because a build has
-                  // already written its files by the time a reply exists.
-                  scaffolding: !askedAQuestion && !namedAFileToWrite
-                })
-              }
-              : {})
+            ...(offerTools ? { tools: offeredTools } : {})
           }),
           signal
         }), cancel);
@@ -1096,6 +1112,20 @@ export async function runAgent(
         continue;
       }
 
+      // The answer was fetched and then not given.
+      //
+      // "What's today's date?" ran current_datetime and answered "I have
+      // retrieved the current date and time on the user's machine." The date
+      // itself never appeared. Corrected once, like the credit case above:
+      // the model has the value in its context and only needs telling to say
+      // it, so there is nothing for the app to substitute.
+      if (!correctedRetrieval && narratesRetrievalOnly(text, toolsUsed)) {
+        correctedRetrieval = true;
+        spendCorrection();
+        messages.push({ role: "user", content: stateTheResult });
+        continue;
+      }
+
       // A change the model says it made, and did not.
       //
       // Seen live: asked to read a file and edit it, it called read_file, never
@@ -1227,6 +1257,20 @@ export async function runAgent(
     });
 
     for (const call of orderedCalls) {
+      // Not offered this turn, not run. See offeredNames above. Told to the
+      // model as a tool message so it answers without the tool, rather than
+      // silently dropped - a dropped call leaves it waiting for a result that
+      // is never coming.
+      if (!offeredNames.has(call.name)) {
+        toolActivity.markBlocked();
+        messages.push({
+          role: "tool",
+          content: `${call.name} was not available for this request and was not run. `
+            + "Answer the user directly, without it."
+        });
+        continue;
+      }
+
       onToolStart?.(call.name);
       // The stage follows the work: a search moves it to gathering, a build to
       // building. Set here, as the call begins, rather than predicted from the

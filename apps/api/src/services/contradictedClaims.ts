@@ -34,7 +34,14 @@ const claimsToolFailed = new RegExp(
     "(?:i|we) (?:could ?n[o']t|can ?n[o']t|was unable to|am unable to) (?:read|open|access|list|edit|write)",
     "(?:access|permission) (?:was )?denied",
     "(?:i )?(?:do ?n[o']t|does ?n[o']t) have the (?:necessary )?(?:permission|access|rights)",
-    "no permission to (?:read|open|access|list|edit|write)"
+    "no permission to (?:read|open|access|list|edit|write)",
+    // Denying a result that a successful tool just returned. Seen live: two
+    // successful current_datetime calls, then "Today's date is not recorded."
+    // Safe under the all-succeeded precondition above, because a lookup that
+    // finds nothing reports ok:false and never reaches this check.
+    "(?:is|are|was|were) not (?:recorded|available|known|stored|on record|on file)",
+    "(?:there is|there's|i have|we have) no (?:record|information|data|way) (?:of|about|to)",
+    "(?:could not|couldn't|cannot|can't) (?:find|determine|retrieve|locate) (?:the |your |that )?(?:current |latest |requested )?(?:date|time|information|result|value|answer)"
   ].join("|"),
   "i"
 );
@@ -241,6 +248,47 @@ export function claimsUnusedTool(text: string, toolsUsed: ToolOutcomeLike[]): bo
 export const answerDirectly =
   "You did not call any tool, and there is no tool by that name. Do not say you used one. "
   + "Answer the user's question directly, in your own words, using what you already know.";
+
+/**
+ * A reply that says it fetched the answer and then does not give it.
+ *
+ * Asked "what's today's date?", the model called current_datetime - twice -
+ * and answered, in full: "I have retrieved the current date and time on the
+ * user's machine." No date. The tool ran, so claimsUnusedTool is right to stay
+ * quiet; this is the next failure along, where the result reached the model
+ * and the model described having it instead of saying it.
+ *
+ * Deliberately narrow, because the false positive here replaces a real answer
+ * with a nag. It needs all three: a first-person retrieval verb, a generic
+ * object ("the date", "the information", "the result") rather than the thing
+ * itself, and nothing substantive after - one short sentence and stop. "I
+ * checked, and the server is up" names no generic object and is an answer.
+ * "I retrieved the contents: function greet..." runs on past the noun and is
+ * an answer. "It is 12 September 2026" does not narrate at all.
+ */
+// A literal, not new RegExp(string). Built from a string this needs "\\b" and
+// "\\s", and those double backslashes did not survive the tooling that wrote
+// the first version: what landed on disk was "\b" - a backspace character -
+// and "\s", which in a string is just "s". The pattern then required a
+// backspace after the noun and matched nothing, including the verbatim reply
+// it was written for. In a literal the single backslash is the correct form.
+const narratesRetrieval =
+  // The tail after the noun may be short filler - "on the user's machine",
+  // "for you" - and nothing more. No digits: a digit is a value, and "I looked
+  // up the date - today is the 12th of September" is an answer, not narration.
+  // That exact sentence was being caught before digits were excluded.
+  /^(?:i|we)(?:'ve| have)? (?:just |now |successfully )?(?:retrieved|fetched|obtained|looked up|gathered|pulled|got|checked) (?:the |your )?(?:current |latest |requested |following )?(?:date and time|date|time|information|info|data|result|results|details|contents|value|weather|status)\b[^.!?:\n0-9]{0,30}[.!]?\s*$/i;
+
+export function narratesRetrievalOnly(text: string, toolsUsed: ToolOutcomeLike[]): boolean {
+  if (!toolsUsed.some((used) => used.ok)) return false;
+  return narratesRetrieval.test(text.trim());
+}
+
+/** What to tell the model when it reports having the answer instead of the answer. */
+export const stateTheResult =
+  "You called a tool and it returned a result, but your reply only says that you "
+  + "retrieved it. Give the user the result itself - the actual value the tool returned - "
+  + "not a description of having obtained it.";
 
 /** What to say when the model insists on a change it never made. */
 export function noChangeWasMade(toolsUsed: ToolOutcomeLike[]): string {

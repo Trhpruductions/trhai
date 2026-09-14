@@ -257,7 +257,17 @@ export function analyzeRequest(message: unknown): RequestAnalysis {
   // own right, and treating its second half as the real request would let a
   // genuine statement that happens to contain a comma be read as an order.
   const qualified = leadAfterQualifier(text);
-  const endsWithQuestionMark = text.endsWith("?");
+  // A question mark ending any sentence, not only the last character.
+  //
+  // This was text.endsWith("?"), and it dropped every question that had
+  // anything after it. "Are all bloops lazzies? Answer yes or no and why." was
+  // classified as a statement - the "?" is followed by an instruction, so the
+  // text ends in "." - and the composer answered a syllogism with "Got it."
+  // Same fate for "Is the server up? Thanks." and "Which one? Either is fine."
+  //
+  // Whitespace-or-end after the "?" keeps URLs out: "?page=2" is followed by a
+  // letter, not a break, and must not turn a pasted link into a question.
+  const endsWithQuestionMark = /\?(?:\s|$)/.test(text);
   const isRecall = recallPatterns.some((pattern) => pattern.test(text));
 
   let questionType: QuestionType = "none";

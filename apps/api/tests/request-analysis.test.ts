@@ -162,3 +162,25 @@ test("the narrative check needs a real subject, not just any second word", () =>
   assert.equal(narrativeAfterQuestionWord("when i"), false);
   assert.equal(narrativeAfterQuestionWord("the server was down"), false);
 });
+
+
+// A question mark ending any sentence, not only the last character.
+
+test("a question followed by an instruction is still a question", () => {
+  // Verbatim. This was classified as a statement because the text ends in
+  // "why.", and the composer answered a syllogism with "Got it."
+  const analysis = analyzeRequest(
+    "If all bloops are razzies and all razzies are lazzies, are all bloops lazzies? Answer yes or no and why."
+  );
+  assert.equal(analysis.shape, "question");
+});
+
+test("a question with a trailing pleasantry is still a question", () => {
+  assert.equal(analyzeRequest("Is the server up? Thanks.").shape, "question");
+  assert.equal(analyzeRequest("Which one? Either is fine.").shape, "question");
+});
+
+test("a query string in a pasted URL is not a question", () => {
+  // "?" followed by a letter, not a break.
+  assert.notEqual(analyzeRequest("see https://example.com/page?tab=2 for the details").shape, "question");
+});
