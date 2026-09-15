@@ -128,3 +128,24 @@ test("only the first change in a reply is made; the rest wait for its result", a
     server.close();
   }
 });
+
+test("a change asked for twice with the same arguments runs once", async () => {
+  // Asked for one daily check, the model called add_schedule in four
+  // consecutive rounds. Here: the same write_file twice, two rounds.
+  const { server, baseUrl, received } = await fakeModel([
+    calls(["write_file", { path: "once.txt", content: "one" }]),
+    calls(["write_file", { path: "once.txt", content: "one" }]),
+    answer("Wrote once.txt.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "Create once.txt containing one.", context);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(result.toolsUsed.map((used) => used.name), ["write_file"], "the repeat is not run");
+    const third = received[2]?.messages as Array<{ role: string; content: string }> | undefined;
+    const toolMessages = (third ?? []).filter((message) => message.role === "tool").map((message) => message.content).join("\n");
+    assert.match(toolMessages, /already called with these exact arguments/);
+  } finally {
+    server.close();
+  }
+});

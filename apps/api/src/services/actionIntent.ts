@@ -248,6 +248,31 @@ export function looksLikeClockMath(message: string): boolean {
   return /\b\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b|\b\d{1,2}:\d{2}\b|\bnoon\b|\bmidnight\b|\bo'clock\b/.test(text);
 }
 
+/**
+ * Whether a request names a web address or asks for the web at all, so
+ * fetch_url is worth offering.
+ *
+ * Offered to everything, fetch_url was called with a file path - "read
+ * C:/.../notes.txt" became fetch_url("C:/.../notes.txt"), refused as not
+ * http, and the file was never read.
+ */
+export function mentionsWeb(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  return /https?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|org|net|io|dev|co|gov|edu|uk|ai|app|me|info|xyz)\b|\b(?:url|website|web ?page|web ?site|webpage|link|online|internet|browse|fetch)\b/
+    .test(text);
+}
+
+/**
+ * Whether a request has anything to do with the time or the date, so
+ * current_datetime is worth offering. The date is in the system prompt in
+ * any case; this stops the clock being read twice on a question about ports.
+ */
+export function mentionsTime(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  return /\b(?:today|tonight|now|current(?:ly)?|date|time|day|days|week|month|year|clock|o'clock|am|pm|morning|afternoon|evening|tomorrow|yesterday|ago|when|schedule|remind|deadline|due|late|early|hour|minute)\b/
+    .test(text);
+}
+
 export function isExplanatoryQuestion(message: string): boolean {
   const text = (message ?? "").trim().toLowerCase();
   if (!text) return false;

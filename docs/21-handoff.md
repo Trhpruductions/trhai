@@ -88,6 +88,59 @@ them is wrong even if it works.
   with 3:30 PM, and the date tools were the wrong shape (whole days). `shift_time`
   in `clockMath.ts` does it; it and the date tools are offered only when the
   request names a clock time / a date (`looksLikeClockMath`, `looksLikeDateMath`).
+- **A tool that replaces a whole document is a tool that loses it.** Asked to
+  add one line to a note, the model did not read the note and sent a body it
+  made up; the user's text was gone. `update_document` now takes `append`, or
+  `old_text`/`new_text`, and a whole replacement only with
+  `replace_everything: true` (refused otherwise, with the current text handed
+  back). `write_document` refuses a title that already exists.
+- **A repeated change is not a second change.** One request produced four
+  `add_schedule` calls across four rounds and four schedules. The loop now
+  refuses a change with the same tool and arguments twice in a turn, and
+  `add_schedule`/`build_app`/`make_video` once per turn; `add_schedule` also
+  refuses a duplicate (same cadence and same name or prompt).
+- **A request is a request whatever it opens with.** "now add a line...",
+  "every weekday at 8am ask me...", "convert 5 miles to km" and "send an email
+  to..." were all statements ("Got it."). `requestAnalysis.ts` steps over a
+  leading connective, treats a cadence opener as a command, and knows the
+  ordinary imperatives; recall phrases still win ("remind me what we decided").
+  Email, messages, calls and purchases get a plain "I can't" from the composer.
+- **Tools are offered by what the request is about.** `fetch_url` was called
+  on a file path, `build_app` on "add a line to it", `current_datetime` twice
+  on a question about ports. Offers now follow `mentionsWeb`, `mentionsTime`,
+  and scaffolding only for a generate request or one naming no action.
+- **A killed smoke test orphans the app's server.** `buildVerification.ts` now
+  kills the whole tree (`taskkill /T` on Windows); a leaked `node server.js`
+  had held a workspace folder open for hours.
+- **"it" is resolved mechanically, at the orchestrator.** "read notes.txt"
+  then "now add a line saying omega to the end of it": the model was told the
+  path in the prompt and still called read_file on `D:\Vexora
+otes.txt`,
+  then `D:\Vexora\workspace
+otes.txt`, or fell back to write_document.
+  `activeProject.ts` tracks the last file each session touched
+  (`noteFileTouched`/`resolveFilePronoun`), the orchestrator resolves the
+  pronoun before the composer's plan check, and `context.impliedFile` lets the
+  file tools correct a same-name-wrong-place path (`impliedFileFor`). Also:
+  the composer's create plan appended "Do not stop at explaining what it would
+  contain" to the request, and "contain" made `classifyIntent` read it as a
+  request for a file's contents - so the tools that write were withheld from a
+  request to write. Plan instructions are now gated on the resolved text.
+- **`edit_file` takes `append`.** Adding a line was tried as a replacement
+  three times (old_text "beta
+", "omega
+", "") and failed each time.
+- **An invented tool call is a reply in disguise.** `{"name":"send_message",
+  "arguments":{"text":"..."}}` reached the user verbatim; `unwrapPseudoReply`
+  in `agentLoop.ts` takes the sentence out. A text-written tool call on the
+  final round is "kept searching", not "empty reply" - the latter switched
+  models and the second model did the work again.
+- **Trace with `ASSIST_DEBUG=1`.** The loop logs each round's calls, text,
+  dispatch decisions and tool results as `[agent]` lines. Three failures in
+  this round were misdiagnosed from replies alone before the trace existed.
+- **`add_schedule` supports `weekdays_only`** (cadence `weekdaysOnly`); a
+  duplicate schedule is reported as already done (`ok: true`), because refused
+  as a duplicate the model reworded the prompt until one got past the check.
 - **ffmpeg cannot rasterize SVG here.** The `svg_pipe` *demuxer* is listed, which
   is misleading: this build has no SVG *decoder* (no librsvg). Piping SVG frames
   fails with `no decoder found for: svg`. Do not design around SVG input.

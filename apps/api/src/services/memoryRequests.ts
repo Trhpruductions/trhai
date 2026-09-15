@@ -151,3 +151,15 @@ export function isLastAskRequest(message: unknown): boolean {
   const text = plain(message);
   return text !== null && lastAskPatterns.some((pattern) => pattern.test(text));
 }
+
+/** "what schedules do I have", "list my schedules", "show my reminders". */
+const listSchedulesPatterns = [
+  /^(?:what|which) (?:schedules|reminders|scheduled (?:tasks|jobs|runs)|recurring (?:tasks|jobs)) (?:do i have|are (?:set|there|active|scheduled|running)|have i (?:set|got|made))$/,
+  /^(?:list|show(?: me)?|display) (?:my |the |all (?:of )?(?:my |the )?)?(?:active |current )?(?:schedules|reminders|scheduled (?:tasks|jobs|runs)|recurring (?:tasks|jobs))$/,
+  /^(?:do i have|are there|is there) any (?:schedules|reminders|scheduled (?:tasks|jobs))$/
+];
+
+export function isListSchedulesRequest(message: unknown): boolean {
+  const text = plain(message);
+  return text !== null && listSchedulesPatterns.some((pattern) => pattern.test(text));
+}

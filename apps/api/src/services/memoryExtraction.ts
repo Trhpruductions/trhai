@@ -78,6 +78,23 @@ const extractionRules: ExtractionRule[] = [
     kind: "constraint",
     confidence: 0.75,
     pattern: /^((?:the\s+)?(?:deadline|budget|limit|quota)\s+is\s+.+)$/i
+  },
+  {
+    // "my name is Hank", "my email is x@y" - the user introducing themselves,
+    // said without "remember" and worth keeping across sessions. The list of
+    // attributes is closed on purpose: "my day was long" is not a fact about
+    // the user, and "my api port is 8080" without "remember" stays a thing
+    // said in passing, answerable from the transcript.
+    name: "profile",
+    kind: "fact",
+    confidence: 0.8,
+    pattern: /^(my\s+(?:name|first name|last name|surname|nickname|email|e-mail|phone(?:\s+number)?|address|birthday|date of birth|time ?zone|company|employer|team|manager|boss|role|job(?:\s+title)?|title|city|country|location|website|github|handle|username|pronouns)\s+(?:is|are)\s+.+)$/i
+  },
+  {
+    name: "introduction",
+    kind: "fact",
+    confidence: 0.75,
+    pattern: /^((?:call me|i go by)\s+[a-z][a-z'.-]{0,40})$/i
   }
 ];
 

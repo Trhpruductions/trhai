@@ -10,11 +10,11 @@ import {
   correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, type ActionKind } from "./actionIntent.js";
+import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, type ActionKind } from "./actionIntent.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
-import { activeProject } from "./activeProject.js";
+import { activeProject, resolveFilePronoun } from "./activeProject.js";
 
 // Re-exported so nothing that already imports it from here has to move.
 export type { ToolActivity };
@@ -137,6 +137,14 @@ export const maxToolRounds = 4;
  */
 export const maxCallsPerRound = 4;
 
+/** A reply that says, in some words, that the change was not made. */
+const admitsNothingChanged_ =
+  /\b(?:could not|couldn't|cannot|can't|unable|not able|failed|no file|does not exist|doesn't exist|not found|nothing was (?:changed|written|edited)|was not (?:changed|written|edited)|did not (?:change|write|edit)|no such file|permission|not allowed|outside the workspace)\b/i;
+
+export function admitsNothingChanged(text: string): boolean {
+  return admitsNothingChanged_.test(text);
+}
+
 /**
  * How many times the exact same call — same tool, same arguments — may
  * actually run before the loop refuses to repeat it.
@@ -183,6 +191,7 @@ function callSignature(call: ToolCall): string {
  */
 export const systemPrompt = [
   "You are Vexora, an assistant that runs entirely on this user's own machine.",
+  "Speak to the user as \"you\". Never refer to them as \"the user\".",
   "",
   "There are two kinds of question, and they are answered differently.",
   "",
@@ -254,7 +263,11 @@ export const systemPrompt = [
  */
 const mutatingTools = new Set([
   "remember", "forget", "write_document", "update_document", "delete_document",
-  "pin_memory", "write_file", "build_app", "make_video"
+  "pin_memory", "write_file", "build_app", "make_video",
+  // "I added the schedule for you." said nothing about when. The tool's
+  // own line - Scheduled "Build Check": Every weekday at 8:00 AM - is what
+  // the user needs to check it against what they asked.
+  "add_schedule"
 ]);
 
 /**
@@ -562,6 +575,43 @@ function extractJsonObjects(text: string): unknown[] {
   return found;
 }
 
+/**
+ * A reply the model wrapped in a tool call that does not exist.
+ *
+ * Seen live, as the whole of the user-facing reply:
+ *
+ *   {"name": "send_message", "arguments": {"text": "I've already created a
+ *   schedule this turn. If you'd like to create another one, please let me
+ *   know."}}
+ *
+ * The model had been refused a repeat and reached for a "respond" tool of
+ * its own invention. There is no such tool, so the parser did not treat it as
+ * a call, and the JSON went to the user verbatim. The sentence inside is the
+ * reply; this takes it out.
+ */
+export function unwrapPseudoReply(text: string): string {
+  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return text;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return text;
+  }
+  if (!parsed || typeof parsed !== "object") return text;
+  const record = parsed as { name?: unknown; arguments?: unknown; parameters?: unknown };
+  if (typeof record.name !== "string") return text;
+  const args = (record.arguments ?? record.parameters) as Record<string, unknown> | undefined;
+  if (!args || typeof args !== "object") return text;
+
+  for (const key of ["text", "message", "content", "reply", "response", "answer", "output"]) {
+    const value = args[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return text;
+}
+
 export function parseTextToolCalls(text: string, known = advertisedToolNames()): ToolCall[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
@@ -738,6 +788,16 @@ export async function runAgent(
   // model cannot fail to call a tool it does not need, and this costs one line
   // of prompt against a whole class of failure. It is still measured, from the
   // same clock the tool reads.
+  // "it" spelled out before anything reads the request. "read notes.txt",
+  // then "now add a line saying omega to the end of it": the classifier saw
+  // no file, so this was not a write, build_app stayed on offer, and the
+  // model built an app called "Now Add A Line Saying". See activeProject.ts.
+  const spelledOut = resolveFilePronoun(question, context.sessionId);
+  if (spelledOut) {
+    question = spelledOut.request;
+    context = { ...context, impliedFile: spelledOut.file };
+  }
+
   const now = (context.now ?? (() => new Date()))();
   const today = now.toLocaleString(undefined, {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
@@ -754,6 +814,16 @@ export async function runAgent(
         // existed on this machine, then asked the user for a full path to a
         // project it could have found by name. See projectContext.ts.
         + `\n\n${describeWorkspace(summariseWorkspace(), activeProject(context.sessionId))}`
+        // Said outright when it is true. With access on, the model still opened
+        // every read of a path outside the workspace with "I can't read files
+        // outside the workspace - switch command access on", and only the
+        // forced retry got the file read. It was reasoning from the prompt's
+        // description of the switch, not from its state.
+        + (commandsArmed() && !unattended
+          ? "\n\nMachine access is ON right now. read_file, write_file, edit_file and run_command "
+            + "work on any path on this machine, not only the workspace. A full path like C:/Users/... "
+            + "or D:/... is fine to pass as given - do not refuse it and do not ask for access."
+          : "")
     },
     { role: "user", content: question }
   ];
@@ -767,11 +837,15 @@ export async function runAgent(
   // the request would put the same unreliability that causes the bug in charge
   // of detecting it.
   const intent = classifyIntent(question);
+  if (process.env.ASSIST_DEBUG) {
+    console.log(`[agent] question=${JSON.stringify(question.slice(0, 400))} intent=${JSON.stringify(intent)} impliedFile=${JSON.stringify(context.impliedFile ?? null)}`);
+  }
   let forcedRetry = false;
   let correctedContradiction = false;
   let correctedMutationClaim = false;
   let correctedToolCredit = false;
   let correctedRetrieval = false;
+  let correctedUnwrittenOrder = false;
 
   // Fixed for the turn: what was asked does not change as the loop runs.
   const askedAQuestion = isExplanatoryQuestion(question);
@@ -827,6 +901,17 @@ export async function runAgent(
   // left to guess which half is true, and the app did in fact build.
   const mutationAttempts: Array<{ name: string; content: string; ok: boolean }> = [];
 
+  // Every change already asked for this turn, by tool and arguments. A
+  // repeat with the same arguments is not run again: its result stands.
+  // Asked for one daily build check, the model called add_schedule in four
+  // consecutive rounds and four schedules were saved; a note was saved twice
+  // the same way.
+  const changesAsked = new Set<string>();
+  // Tools that make one thing per request, whatever the arguments: a second
+  // schedule, app or video in the same turn is never what was asked for.
+  const oncePerTurn = new Set(["add_schedule", "build_app", "make_video"]);
+  const madeThisTurn = new Set<string>();
+
   // How many times each exact call has actually been run, across every round
   // of this one request — not per round, since the failure this guards
   // against is the model retrying the same call in a *later* round after the
@@ -864,7 +949,10 @@ export async function runAgent(
   // Bounded without needing a limit of its own: each correction is guarded by a
   // one-shot flag, so this can rise by at most three over the whole turn.
   let correctionRounds = 0;
-  const spendCorrection = () => { correctionRounds += 1; };
+  const spendCorrection = () => {
+    correctionRounds += 1;
+    if (process.env.ASSIST_DEBUG) console.log(`[agent]   correction ${correctionRounds} spent`);
+  };
 
   for (let round = 0; round <= maxToolRounds + correctionRounds; round += 1) {
     // On the last round, or the round after fetch_url failed, tools are
@@ -892,13 +980,24 @@ export async function runAgent(
         // A question does not get to scaffold a project. Decided from the
         // request rather than from the reply, because a build has already
         // written its files by the time a reply exists.
-        scaffolding: !askedAQuestion && !namedAFileToWrite,
+        //
+        // And only for a request to make something, or one that names no
+        // action at all ("I need a task tracker"). "now add a line saying
+        // omega to the end of it" names an action - a write - and still had
+        // build_app in reach: the model built an app called "Now Add A Line
+        // Saying" instead of editing the file.
+        scaffolding: !askedAQuestion && !namedAFileToWrite
+          && (intent.kind === undefined || intent.kind === "generate"),
         // A calculator is only in reach when there is a sum to do.
         arithmetic: looksArithmetic(question),
         // And the date tools only when the request is about dates.
         dates: looksLikeDateMath(question),
         // And clock arithmetic only when a clock time is named.
-        clock: looksLikeClockMath(question)
+        clock: looksLikeClockMath(question),
+        // The web only when the request mentions it; the clock only when the
+        // request is about time at all.
+        web: mentionsWeb(question),
+        time: mentionsTime(question)
       })
       : [];
     const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));
@@ -989,7 +1088,7 @@ export async function runAgent(
 
     // Tool-call JSON is never shown as an answer, whether or not it was
     // understood: it is the model's working, not its reply.
-    const text = parseTextToolCalls(rawText).length > 0 ? "" : rawText;
+    const text = parseTextToolCalls(rawText).length > 0 ? "" : unwrapPseudoReply(rawText);
 
     // Both encodings. A model that used the interface and a model that wrote
     // the same calls into its prose are asking for the same thing, and after
@@ -997,6 +1096,11 @@ export async function runAgent(
     const requested = parseToolCalls(response);
     const written = requested.length === 0 && rawText ? parseTextToolCalls(rawText) : [];
     const calls = offerTools ? [...requested, ...written] : [];
+    // A trace of each round, on request. Reading a reply and guessing which
+    // branch produced it is how the last three failures were misdiagnosed.
+    if (process.env.ASSIST_DEBUG) {
+      console.log(`[agent] round ${round} model=${config.model} calls=${JSON.stringify(calls.map((call) => ({ name: call.name, arguments: call.arguments })))} text=${JSON.stringify(rawText.slice(0, 300))}`);
+    }
     if (firstTurnToolCalls === null) firstTurnToolCalls = calls.length;
 
     if (calls.length === 0) {
@@ -1005,7 +1109,12 @@ export async function runAgent(
         // is still asking for tools on the final round has not gone quiet — it
         // has failed to conclude, and saying "empty reply" would send whoever
         // reads this looking at the wrong thing.
-        return requested.length > 0
+        // Either encoding counts. A call written into the text on the round
+        // tools are withheld was read as an empty reply - "modelUnusable" -
+        // and the caller moved on to the next installed model, which then
+        // did the same work again: a second, differently-timed schedule for
+        // one request.
+        return requested.length > 0 || written.length > 0
           ? { ok: false, reason: "The assistant kept searching without reaching an answer.", toolsUsed }
           // Marked unusable so the caller moves on to the next installed
           // model. An empty reply is not a considered refusal, it is the
@@ -1058,7 +1167,11 @@ export async function runAgent(
       // only be reached from "none" - a tool that executed, one awaiting
       // approval, and one refused before running are each a different thing
       // that did happen.
-      if (intent.action && toolActivity.untouched) {
+      // nothingRan rather than untouched: a call refused for not being on
+      // offer is not the work being done either, and "I'm sorry, but I
+      // can't complete that request" after one was still an order not acted
+      // on. The terminal message below stays true - no tool was executed.
+      if (intent.action && toolActivity.nothingRan) {
         // Nothing to act on. One specific question beats another generation
         // arriving at the same place - and the question is worded for the kind
         // of work, because asking "which file?" of someone running npm test
@@ -1097,6 +1210,45 @@ export async function runAgent(
           model: typeof response.model === "string" ? response.model : config.model,
           toolsUsed,
           actionAudit: auditFor("no-tool-failure")
+        };
+      }
+
+      // An order to change a file, answered without changing one.
+      //
+      // Not a claim, so the mutation guard below never fires. Asked to add a
+      // line to the end of a file it had just read, the model read the file
+      // again and answered with the contents plus the line - "alpha\nbeta\n
+      // omega" - as though showing the result were making it; another time
+      // just "omega". Nothing was written either time, and nothing said so.
+      // A reply that admits the failure is left alone: replacing "there is no
+      // file at that path" with a generic denial would lose the reason.
+      // A claim of a change is left to the mutation guard below, whose
+      // correction names the lie; this one is for a reply that merely does
+      // not do the work.
+      // A held confirmation is a decision waiting on the user, not a failure
+      // to act, and is left to the notice below.
+      if (intent.kind === "write" && intent.hasTarget && !awaitingConfirmation
+        && !toolsUsed.some((used) => used.ok && changesSomething(used.name))
+        && !admitsNothingChanged(text)
+        && !claimsUnperformedMutation(text, false) && !promisesUnperformedMutation(text, false)) {
+        if (!correctedUnwrittenOrder) {
+          correctedUnwrittenOrder = true;
+          spendCorrection();
+          const target = context.impliedFile ? ` The file is ${context.impliedFile}.` : "";
+          messages.push({
+            role: "user",
+            content: "You did not change the file - no tool that writes ran successfully. Showing the "
+              + "result is not making it. Call edit_file now: pass append to add lines at the end, "
+              + `or old_text and new_text to change a passage.${target} Do not read the file again.`
+          });
+          continue;
+        }
+        return {
+          ok: true,
+          text: noChangeWasMade(toolsUsed),
+          model: typeof response.model === "string" ? response.model : config.model,
+          toolsUsed,
+          actionAudit: auditFor(toolsUsed.length > 0 ? "tool-called" : "prose")
         };
       }
 
@@ -1312,7 +1464,29 @@ export async function runAgent(
     let changedThisRound = false;
 
     for (const call of orderedCalls) {
+      if (process.env.ASSIST_DEBUG) console.log(`[agent]   consider ${call.name} offered=${offeredNames.has(call.name)}`);
       if (changesSomething(call.name) && offeredNames.has(call.name)) {
+        const signature = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
+        if (changesAsked.has(signature)) {
+          toolActivity.markBlocked();
+          messages.push({
+            role: "tool",
+            content: `${call.name} was already called with these exact arguments this turn and was not run `
+              + "again. Its earlier result stands. Answer the user with it."
+          });
+          continue;
+        }
+        if (oncePerTurn.has(call.name) && madeThisTurn.has(call.name)) {
+          toolActivity.markBlocked();
+          messages.push({
+            role: "tool",
+            content: `${call.name} already ran this turn and was not run again: one per request. `
+              + "The work is done. Reply to the user now in plain sentences - no tool call, no JSON - "
+              + "saying what was made."
+          });
+          continue;
+        }
+        changesAsked.add(signature);
         if (changedThisRound) {
           toolActivity.markBlocked();
           messages.push({
@@ -1331,14 +1505,26 @@ export async function runAgent(
       // is never coming.
       if (!offeredNames.has(call.name)) {
         toolActivity.markBlocked();
+        // Names what is available, and for an order, which tool the order
+        // wants. Told only "not available", the model apologised - "I'm
+        // sorry, but I can't complete that request" - with edit_file sitting
+        // right there in the list.
+        const wanted = intent.action
+          ? intent.expects.filter((name) => offeredNames.has(name))
+          : [];
+        const instead = wanted.length > 0
+          ? `Use ${wanted.join(" or ")} instead, with the path given.`
+          : offeredNames.size > 0
+            ? `The tools available for this request are: ${[...offeredNames].join(", ")}. Use one of them, or answer directly.`
+            : "Answer the user directly, without it.";
         messages.push({
           role: "tool",
-          content: `${call.name} was not available for this request and was not run. `
-            + "Answer the user directly, without it."
+          content: `${call.name} was not available for this request and was not run. ${instead}`
         });
         continue;
       }
 
+      if (process.env.ASSIST_DEBUG) console.log(`[agent]   dispatch ${call.name}`);
       onToolStart?.(call.name);
       // The stage follows the work: a search moves it to gathering, a build to
       // building. Set here, as the call begins, rather than predicted from the
@@ -1447,11 +1633,17 @@ export async function runAgent(
       } else {
         // Already marked executed above. A tool that ran and failed still ran.
         toolsUsed.push({ name: call.name, ok: result.ok });
+        // Counted only when it worked: a refused first attempt must not block
+        // the corrected second one.
+        if (result.ok && oncePerTurn.has(call.name)) madeThisTurn.add(call.name);
       }
       if (call.name === "fetch_url" && !result.ok) fetchUrlFailed = true;
       // The failure text goes back unchanged. "Nothing matches X" is what stops
       // the model inventing an answer; softening it here would undo that.
       messages.push({ role: "tool", content: result.content });
+      if (process.env.ASSIST_DEBUG) {
+        console.log(`[agent]   ${call.name} -> ${result.ok ? "ok" : "failed"}: ${JSON.stringify(result.content.slice(0, 200))}`);
+      }
 
       // A refusal is not a mutation result. Appending it printed an
       // instruction written for the model — "Tell the user plainly what it

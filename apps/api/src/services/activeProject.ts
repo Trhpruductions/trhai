@@ -96,3 +96,73 @@ export function withinActiveProject(sessionId: string | undefined, candidate: st
   const project = activeProject(sessionId);
   return project ? `${project}/${candidate}` : null;
 }
+
+/**
+ * The file each session last read, wrote or edited.
+ *
+ * Same reasoning as the project above, one level down. "read notes.txt",
+ * then "now add a line saying omega to the end of it" - "it" names nothing
+ * the classifier can see, so the request was not a write, build_app was
+ * still on offer, and the model built an app called "Now Add A Line
+ * Saying". The file the previous turn touched is what "it" means, and
+ * resolving that is mechanical.
+ */
+const lastFile = new Map<string, string>();
+
+export function noteFileTouched(sessionId: string | undefined, candidate: string): void {
+  if (!sessionId || !candidate?.trim()) return;
+  lastFile.delete(sessionId);
+  lastFile.set(sessionId, candidate.trim());
+  while (lastFile.size > maxTrackedProjects) {
+    const oldest = lastFile.keys().next();
+    if (oldest.done) break;
+    lastFile.delete(oldest.value);
+  }
+}
+
+/** The file this session last touched, or null. */
+export function lastFileTouched(sessionId: string | undefined): string | null {
+  return sessionId ? lastFile.get(sessionId) ?? null : null;
+}
+
+/** Test seam. */
+export function resetTouchedFiles(): void {
+  lastFile.clear();
+}
+
+/** A file verb with a pronoun where its object should be, and no file named. */
+const filePronoun =
+  /\b(?:to|in|into|of|from|at|on|inside)\s+(?:it|that|this|the\s+(?:same\s+)?(?:file|one))\b|\b(?:edit|change|update|fix|append\s+to|read|open|delete|remove|rewrite|save|overwrite|rename|show|print|cat)\s+(?:it|that|this)\b|\bthe\s+end\s+of\s+it\b|\bthe\s+top\s+of\s+it\b/i;
+const namesAPath = /[a-z]:[\\/]|(?:^|\s)\/[^\s]+\.[a-z0-9]{1,6}\b|\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i;
+
+/**
+ * The request with "it" spelled out, or null when there is nothing to spell.
+ *
+ * Appended rather than substituted: the user's sentence stays as typed, and
+ * the classifier sees a named file in the same text.
+ */
+export function resolveFilePronoun(
+  request: string,
+  sessionId: string | undefined
+): { request: string; file: string } | null {
+  const file = lastFileTouched(sessionId);
+  if (!file) return null;
+  if (namesAPath.test(request)) return null;
+  if (!filePronoun.test(request)) return null;
+  return { request: `${request}\n\n("it" is ${file}, the file from the previous turn.)`, file };
+}
+
+/**
+ * The path a file tool should actually use, when the turn is about one file.
+ *
+ * Telling the model the path was not enough: handed "C:/.../iq4/notes.txt" it
+ * called read_file on "D:\\Vexora\\notes.txt", then on "D:\\Vexora\\workspace
+ * \\notes.txt" - the right name in the wrong place, twice. Same name, same
+ * file: a call naming the implied file's basename, anywhere, means that file.
+ */
+export function impliedFileFor(implied: string | undefined, candidate: string): string {
+  if (!implied || !candidate?.trim()) return candidate;
+  const wanted = path.basename(implied).toLowerCase();
+  const given = path.basename(candidate.trim().replace(/[\\/]+$/, "")).toLowerCase();
+  return wanted === given ? implied : candidate;
+}

@@ -88,8 +88,47 @@ const commandVerbs = new Set([
   // https://example.com and tell me what it says" got "Got it — I'll keep
   // that in mind" and fetch_url was never called. The verb is the tool's own
   // name — about as natural a phrasing as exists — and it was still missing.
-  "fetch", "visit", "browse"
+  "fetch", "visit", "browse",
+  // Caught live: "convert 5 miles to kilometers" and "send an email to
+  // bob@example.com saying hi" both got "Got it." - neither verb was here,
+  // so both were statements. A request is a request whatever it opens with;
+  // these are the ordinary imperatives that were still missing.
+  "convert", "translate", "compute", "estimate", "solve", "evaluate", "simplify", "sort", "rank",
+  "recommend", "suggest", "send", "email", "text", "message", "post", "upload", "download",
+  "launch", "start", "stop", "restart", "kill", "play", "print", "book", "order", "buy",
+  "schedule", "remind", "notify", "alert", "ping", "clear", "reset", "rename", "move", "copy",
+  "append", "insert", "replace", "edit", "change", "turn", "switch", "enable", "disable", "mark",
+  "flag", "tag", "count", "measure", "rewrite", "improve", "shorten", "expand", "format", "parse",
+  "validate", "describe", "define", "outline", "prepare", "help"
 ]);
+
+/**
+ * The first word after a leading connective, or null when there is none.
+ *
+ * "now add a line saying omega to the end of it" opens with "now", which is
+ * no verb, and was read as a statement - "Got it." - with the file untouched.
+ * The connective carries no meaning; the verb after it is the request.
+ */
+const leadingConnective = /^(?:now|then|also|next|ok|okay|alright|so|and|just|first|finally|lastly|after that)[,\s]+/i;
+
+export function leadAfterConnective(message: string): string | null {
+  const trimmed = message.trim();
+  const stripped = trimmed.replace(leadingConnective, "");
+  return stripped === trimmed || !stripped ? null : firstWord(stripped);
+}
+
+/**
+ * Requests that open with when rather than what.
+ *
+ * "every weekday at 8am ask me whether the build passed" has its verb in the
+ * middle, and was read as a statement and filed away - no schedule was made.
+ */
+export function looksLikeScheduleRequest(message: unknown): boolean {
+  return typeof message === "string" && scheduleLead.test(message.trim());
+}
+
+const scheduleLead =
+  /^(?:every|each|daily|weekly|hourly|monthly|nightly|on (?:mon|tues|wednes|thurs|fri|satur|sun)days?\b|(?:at|by) \d{1,2}(?::\d{2})?\s*(?:am|pm)?\b|tomorrow(?: at| morning| night)?\b|tonight\b|in \d+ (?:minutes?|hours?|days?|weeks?)\b|remind me\b)/i;
 
 const questionLeads: Array<{ pattern: RegExp; type: QuestionType }> = [
   { pattern: /^(what|which)\b/i, type: "identity" },
@@ -122,7 +161,9 @@ export function isContinuationRequest(message: unknown): boolean {
 
 /** Phrases that ask about stored knowledge even without a question mark. */
 const recallPatterns = [
-  /^(remind me|tell me|what did we|what do we|what are our|what is our|what's our)\b/i,
+  // "remind me what we decided" recalls; "remind me at 8am to check the
+  // build" schedules. Only the first is a question about stored knowledge.
+  /^(remind me (?:what|which|how|when|where|who|why|of|about)|tell me|what did we|what do we|what are our|what is our|what's our)\b/i,
   /\b(do you remember|what did i say|what do i prefer)\b/i
 ];
 
@@ -333,10 +374,27 @@ export function analyzeRequest(message: unknown): RequestAnalysis {
 
   // A leading command verb wins over a question word only when there is no "?".
   // "List the options" is a command; "What should I list?" is a question.
+const connected = leadAfterConnective(text);
 const looksImperative =
-  (commandVerbs.has(lead) || (qualified !== null && commandVerbs.has(qualified)) || isContinuationRequest(text))
+  (commandVerbs.has(lead)
+    || (qualified !== null && commandVerbs.has(qualified))
+    || (connected !== null && commandVerbs.has(connected))
+    || isContinuationRequest(text)
+    || scheduleLead.test(text))
   && !endsWithQuestionMark
-  && questionType === "none";
+  && questionType === "none"
+  // A recall phrase is a question about stored knowledge even when it opens
+  // with a verb: "remind me what we decided" is not an order to remind.
+  && !isRecall;
+  // The verb the request actually opens with, once a qualifier or a
+  // connective has been stepped over.
+  const verb = commandVerbs.has(lead)
+    ? lead
+    : qualified !== null && commandVerbs.has(qualified)
+      ? qualified
+      : connected !== null && commandVerbs.has(connected)
+        ? connected
+        : lead;
 
   let shape: RequestShape;
   if (looksImperative) {
@@ -364,7 +422,7 @@ const looksImperative =
     topics,
     // Short requests with almost no content words cannot be acted on well.
     vague: topics.length < vagueWordThreshold,
-    action: shape === "command" ? lead : null,
+    action: shape === "command" ? verb : null,
     hasRequestMarker: looksImperative || requestMarkers.some((pattern) => pattern.test(text))
   };
 }

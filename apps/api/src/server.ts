@@ -205,6 +205,12 @@ function buildAssistInput(
     forgottenFacts: sessionId ? listForgottenFacts(sessionId) : [],
     listMemories: sessionId ? () => listSessionMemories(sessionId) : undefined,
     forgetAllMemories: sessionId ? () => forgetAllMemories(sessionId) : undefined,
+    listSchedules: () => listSchedules().map((schedule) => ({
+      name: schedule.name,
+      cadenceLabel: describeCadence(schedule.cadence),
+      actionLabel: describeAction(schedule.action),
+      enabled: schedule.enabled
+    })),
     documents: sessionId
       ? listDocuments(sessionId).map((document) => ({
         id: document.id,
@@ -406,6 +412,12 @@ export function createApp() {
         forgottenFacts: sessionId ? listForgottenFacts(sessionId) : [],
         listMemories: sessionId ? () => listSessionMemories(sessionId) : undefined,
         forgetAllMemories: sessionId ? () => forgetAllMemories(sessionId) : undefined,
+        listSchedules: () => listSchedules().map((schedule) => ({
+          name: schedule.name,
+          cadenceLabel: describeCadence(schedule.cadence),
+          actionLabel: describeAction(schedule.action),
+          enabled: schedule.enabled
+        })),
         documents: sessionId
           ? listDocuments(sessionId).map((document) => ({
             id: document.id,

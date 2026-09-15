@@ -6,7 +6,7 @@ import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
 import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
-import { isContinuationRequest } from "./requestAnalysis.js";
+import { isContinuationRequest, looksLikeScheduleRequest } from "./requestAnalysis.js";
 import { classifyIntent } from "./actionIntent.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
@@ -20,8 +20,11 @@ import {
   recordPendingConfirmation,
   type PendingConfirmation
 } from "./pendingConfirmation.js";
-import { isLastAskRequest, isListMemoriesRequest, parseForgetRequest, parsePinRequest } from "./memoryRequests.js";
+import {
+  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, parseForgetRequest, parsePinRequest
+} from "./memoryRequests.js";
 import { matchMemories } from "./factWording.js";
+import { resolveFilePronoun } from "./activeProject.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
@@ -45,6 +48,8 @@ export type OrchestratorInput = {
   forgetMemory?: (id: string) => boolean;
   /** Facts the user asked to forget this session; see ComposerInput.forgottenFacts. */
   forgottenFacts?: string[];
+  /** The file "it" means this turn; see resolveFilePronoun. Set by the orchestrator. */
+  impliedFile?: string;
   /**
    * Every memory in the session, for the forget flow. memoryContext is the
    * newest few, chosen for the model's prompt; a request to forget something
@@ -53,6 +58,8 @@ export type OrchestratorInput = {
   listMemories?: () => Array<{ id: string; body: string; pinned?: boolean }>;
   /** Clears the session's memory, for "forget everything". Returns how many went. */
   forgetAllMemories?: () => number;
+  /** The machine's schedules, described, for "what schedules do I have". */
+  listSchedules?: () => Array<{ name: string; cadenceLabel: string; actionLabel: string; enabled: boolean }>;
   /** Documents in this session, for the document tools. */
   documents?: Array<{ id: string; title: string; body: string }>;
   /** Saves a new document, for the "write_document" tool. */
@@ -186,6 +193,9 @@ export async function runAssistantOrchestrator(
   const recap = resolveLastAsk(input, approving, effectiveMessage);
   if (recap) return recap;
 
+  const schedules = resolveListSchedules(input, approving, effectiveMessage);
+  if (schedules) return schedules;
+
   // Working out what was asked. Set here because this is the line that does
   // it, not a step announced before it starts.
   enterStage(input.sessionId, "understanding");
@@ -305,10 +315,24 @@ export async function runAssistantOrchestrator(
     // The same classifier both sites already consult decides it, so they can
     // no longer disagree. classifyIntent tests generate before write, so
     // "build me a todo app" is untouched and keeps its instruction.
-    const planWritesANamedFile = (() => {
-      const planIntent = classifyIntent(modelReply.buildRequest ?? "");
-      return planIntent.kind === "write" && planIntent.hasTarget;
-    })();
+    //
+    // "it" spelled out first, before this check and before the classifier
+    // that decides how a failure is reported. Resolved only in the loop, "now
+    // add a line saying omega to the end of it" was still no action to this
+    // function: the composer's create plan got the build_app instruction
+    // appended - "Do not stop at explaining what it would contain" - and the
+    // word "contain" in that sentence made the loop's classifier read the
+    // whole thing as a request for a file's contents, so the tools that
+    // write were withheld from a request to write. See resolveFilePronoun.
+    const implied = resolveFilePronoun(effectiveMessage, input.sessionId);
+    const planIntent = classifyIntent(implied?.request ?? modelReply.buildRequest ?? "");
+    const planWritesANamedFile = planIntent.kind === "write" && planIntent.hasTarget;
+    // The build_app instruction goes only with a request for an app. The
+    // composer's "create" plan fires on the word "build" anywhere, so "every
+    // weekday at 8am ask me whether the build passed" - a schedule - reached
+    // the model with "Call build_app with this" appended.
+    const planWantsAnApp = planIntent.kind === "generate"
+      || (planIntent.kind === undefined && !looksLikeScheduleRequest(modelReply.buildRequest ?? ""));
 
     // A remembered fact with a trailing request: the trailing clause is what
     // the model is asked, with the fact marked as already stored. Handed the
@@ -326,12 +350,14 @@ export async function runAssistantOrchestrator(
       }
     }
 
-    const question = isPlan && modelReply.buildRequest
-      ? modelReply.planTaskType === "create" && !planWritesANamedFile
-        ? `${modelReply.buildRequest}\n\nCall build_app with this. Not plan_app — the user wants it `
-          + `actually built, not described. Do not stop at explaining what it would contain.`
-        : modelReply.buildRequest
-      : trailing ?? undefined;
+    const question = implied
+      ? implied.request
+      : isPlan && modelReply.buildRequest
+        ? modelReply.planTaskType === "create" && !planWritesANamedFile && planWantsAnApp
+          ? `${modelReply.buildRequest}\n\nCall build_app with this. Not plan_app — the user wants it `
+            + `actually built, not described. Do not stop at explaining what it would contain.`
+          : modelReply.buildRequest
+        : trailing ?? undefined;
 
     // This branch is where real work happens — it is the one that reaches the
     // agent and its tools. Recording here rather than on every turn keeps the
@@ -346,7 +372,7 @@ export async function runAssistantOrchestrator(
     }
 
     const generated = await answerWithLocalModel(
-      { ...input, userMessage: effectiveMessage },
+      { ...input, userMessage: effectiveMessage, ...(implied ? { impliedFile: implied.file } : {}) },
       known,
       question,
       // Authorised for this turn only, and only for the exact tool the user
@@ -384,6 +410,33 @@ export async function runAssistantOrchestrator(
     // exactly what a later approval will consume.
     const nowPending = input.sessionId ? getPendingConfirmation(input.sessionId) : null;
     const described = nowPending ? describePendingAction(nowPending) : null;
+
+    // An order the model could not carry out is reported as that. The
+    // fallback below is the composer's reply, and for a "plan" it is a
+    // generic four-step template - "1. Write down what done looks like for
+    // now add a line saying omega to the end of it" was returned, verbatim,
+    // for a request to append one line to a file.
+    //
+    // A create plan is the exception: with no model at all, the deterministic
+    // generator still builds it from the "Build this" control, so the plan is
+    // a real deliverable there rather than a template.
+    const failedIntent = classifyIntent(implied?.request ?? effectiveMessage);
+    const deterministicBuild = isPlan && modelReply.planTaskType === "create" && Boolean(modelReply.buildRequest)
+      && failedIntent.kind !== "write";
+    if (!generated && !deterministicBuild && failedIntent.action) {
+      const text = "I could not complete that. The local model did not manage to carry it out - "
+        + "nothing was changed. Try again, or say the file or command in full.";
+      return {
+        model: "memory",
+        assistantMessage: text,
+        inputTokens: modelReply.inputTokens,
+        outputTokens: estimateTokens(text),
+        strategy: "failed",
+        toolsUsed: [],
+        groundedOn: [],
+        groundedOnHistory: 0
+      };
+    }
 
     if (generated) {
       return {
@@ -464,6 +517,32 @@ function resolveListMemories(
   }
   const lines = memories.map((memory) => `- ${memory.pinned ? "[important] " : ""}${memory.body}`).join("\n");
   return deterministicResult(effectiveMessage, `Saved so far (${memories.length}):\n${lines}`, "list");
+}
+
+/**
+ * "what schedules do I have" - the list, read from the store.
+ *
+ * This was answered from the transcript ("You mentioned this earlier: every
+ * weekday at 8am ask me...") - the request that made the schedule, quoted
+ * back as if it were the answer.
+ */
+function resolveListSchedules(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  if (approving || !input.listSchedules || !isListSchedulesRequest(effectiveMessage)) return null;
+
+  const schedules = input.listSchedules();
+  if (schedules.length === 0) {
+    return deterministicResult(effectiveMessage,
+      "No schedules are set. Say when and what - \"every weekday at 8am ask me whether the build passed\" - and I will add one.",
+      "list");
+  }
+  const lines = schedules
+    .map((schedule) => `- ${schedule.name}: ${schedule.cadenceLabel}. ${schedule.actionLabel}${schedule.enabled ? "" : " (paused)"}`)
+    .join("\n");
+  return deterministicResult(effectiveMessage, `Schedules (${schedules.length}):\n${lines}`, "list");
 }
 
 /**
@@ -736,6 +815,7 @@ async function answerWithLocalModel(
     confirmedActions,
     unattended: input.unattended,
     sessionId: input.sessionId,
+    impliedFile: input.impliedFile,
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history,

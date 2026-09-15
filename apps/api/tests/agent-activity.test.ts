@@ -94,7 +94,10 @@ test("onToolStart fires for each tool call, in order, before the result is known
   const seen: string[] = [];
 
   try {
-    const result = await runAgent(config, "what is 2 + 2", context, fetch, (tool) => seen.push(tool));
+    // Both tools have to be on offer for this question: the calculator for
+    // the sum, the clock for the date. A tool the request does not call for
+    // is not offered, and a call for it is refused before onToolStart.
+    const result = await runAgent(config, "what is 2 + 2, and what is the date today?", context, fetch, (tool) => seen.push(tool));
 
     assert.equal(result.ok, true);
     assert.deepEqual(seen, ["current_datetime", "calculate"]);

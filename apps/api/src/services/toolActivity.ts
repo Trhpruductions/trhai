@@ -27,6 +27,12 @@ export type ToolActivityState = {
   /** True only when nothing has been requested at all. */
   readonly untouched: boolean;
   /**
+   * True when nothing ran: nothing requested, or every request refused
+   * before it could run. A held confirmation is not "nothing ran" - the
+   * user is about to decide - and neither is an execution.
+   */
+  readonly nothingRan: boolean;
+  /**
    * Call immediately BEFORE dispatch, never after.
    *
    * A tool that throws has still run - it may have written half a file before
@@ -54,6 +60,7 @@ export function createToolActivity(): ToolActivityState {
   return {
     get value() { return state; },
     get untouched() { return state === "none"; },
+    get nothingRan() { return state === "none" || state === "blocked"; },
     markExecuted() { state = "executed"; },
     markAwaitingConfirmation() { state = "awaiting-confirmation"; },
     markBlocked() { if (state === "none") state = "blocked"; }

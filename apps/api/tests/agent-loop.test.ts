@@ -646,9 +646,11 @@ const editContext: ToolContext = {
 };
 
 test("updating a document replaces the one that exists", async () => {
+  // Whole replacement has to be asked for by name; see the append and
+  // passage tests in intelligence-round5.
   const updates: Array<[string, string]> = [];
   const result = await runTool(
-    { name: "update_document", arguments: { title: "Runbook", content: "New procedure." } },
+    { name: "update_document", arguments: { title: "Runbook", content: "New procedure.", replace_everything: true } },
     { ...editContext, updateDocument: (id, body) => { updates.push([id, body]); return true; } }
   );
 
@@ -2032,6 +2034,78 @@ test("a tool the turn did not offer is refused even when the model calls it", as
     // The model was told why, as a tool message, rather than left hanging.
     const secondRequest = JSON.stringify(received[1] ?? {});
     assert.match(secondRequest, /was not available for this request/);
+  } finally {
+    server.close();
+  }
+});
+
+test("an order answered with an un-offered tool is pointed at the right one and pushed once", async () => {
+  // "now add a line saying omega to the end of it", with build_app withheld:
+  // the model called build_app anyway, was told "not available", and
+  // answered "I'm sorry, but I can't complete that request." - and the loop
+  // returned that, because a blocked call was not counted as nothing having
+  // run. Now: the refusal names the tool the order wants, and a reply with
+  // still nothing run is pushed once more toward it.
+  writeFileSync(path.join(testWorkspace, "omega.txt"), "alpha\nbeta\n", "utf8");
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("build_app", { description: "a line saying omega" }),
+    answer("I'm sorry, but I can't complete that request."),
+    toolCall("edit_file", { path: "omega.txt", append: "omega" }),
+    answer("Added omega to the end of omega.txt.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "add a line saying omega to the end of omega.txt", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const refusal = JSON.stringify(received[1] ?? {});
+    assert.match(refusal, /build_app was not available for this request/);
+    assert.match(refusal, /Use edit_file or write_file instead/);
+    const push = JSON.stringify(received[2] ?? {});
+    assert.match(push, /You did not call a tool/);
+    assert.deepEqual(result.toolsUsed.map((used) => used.name), ["edit_file"]);
+    assert.equal(readFileSync(path.join(testWorkspace, "omega.txt"), "utf8"), "alpha\nbeta\nomega\n");
+  } finally {
+    server.close();
+  }
+});
+
+test("an order to change a file that showed the result instead is pushed, then reported", async () => {
+  // Asked to add a line to the end of a file it had just read, the model
+  // read it again and answered "alpha\nbeta\nomega" - the contents plus the
+  // line, as though showing the result were making it. Nothing was written
+  // and nothing said so.
+  const target = path.join(testWorkspace, "shown.txt");
+  writeFileSync(target, "alpha\nbeta\n", "utf8");
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("read_file", { path: target }),
+    answer("alpha\nbeta\nomega"),
+    answer("alpha\nbeta\nomega")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), `add a line saying omega to the end of ${target}`, context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const push = JSON.stringify(received.at(-1));
+    assert.match(push, /You did not change the file/);
+    assert.match(push, /Call edit_file now/);
+    assert.match(result.text, /nothing was written/i);
+    assert.equal(readFileSync(target, "utf8"), "alpha\nbeta\n", "the file is untouched and the reply says so");
+  } finally {
+    server.close();
+  }
+});
+
+test("an honest failure to change a file is left alone", async () => {
+  const target = path.join(testWorkspace, "honest.txt");
+  const { server, baseUrl } = await fakeModel([
+    toolCall("read_file", { path: target }),
+    answer(`There is no file at ${target}, so nothing was changed.`)
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), `add a line saying omega to the end of ${target}`, context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.match(result.text, /no file at/);
   } finally {
     server.close();
   }
