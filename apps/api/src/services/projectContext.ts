@@ -73,7 +73,12 @@ export function describeWorkspace(summary: ProjectSummary, working?: string | nu
   const lines = [
     `The workspace is at ${summary.root}. Every path you pass to list_files, read_file,`,
     "write_file or edit_file is relative to it unless it is already absolute. Never invent",
-    "a path outside it and never guess at one like D:/projects or C:/Users."
+    // No example of a bad path here. The old wording named "D:/projects" as
+    // one never to guess, and the model then read D:/projects/app/server.js,
+    // D:/projects/notes-text-field/server.js and D:/projects/word-counter-app/
+    // server.js in three consecutive rounds - the one directory it had been
+    // shown, copied from the sentence forbidding it.
+    "a path; use only paths the user gave you, this list, or a tool result."
   ];
 
   if (summary.projects.length > 0) {
@@ -188,6 +193,9 @@ export function explainMiss(reason: string, missing: string): string {
   const found = suggestPaths(missing);
   if (found.length === 0) return reason;
 
-  return `${reason} That name does exist here: ${found.join(", ")}. `
-    + "Read one of those instead of guessing another directory.";
+  // Given as the exact argument to pass, relative to the workspace. Told
+  // "That name does exist here: notes-text-field/server.js", the model
+  // prefixed a directory of its own and missed again.
+  return `${reason} That name does exist here. Pass one of these exactly as written, as the path argument: `
+    + found.map((candidate) => `"${candidate}"`).join(", ") + ". Do not add a directory in front of it.";
 }

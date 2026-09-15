@@ -105,7 +105,7 @@ export type ComposedReply = {
   /** What the composer decided to do — surfaced for telemetry and tests. */
   strategy:
     | "answer" | "no-answer" | "plan" | "clarify" | "acknowledge" | "clarify-build"
-    | "not-saved" | "smalltalk" | "capability";
+    | "not-saved" | "smalltalk" | "capability" | "cannot";
   /**
    * For a build request, the text the plan should actually be built from — the
    * original request merged with any clarifying answer. Absent when the turn was
@@ -247,7 +247,11 @@ const questionWords = /\b(what|which|when|where|who|whose|whom|why|how)\b/gi;
  */
 export function isMultiPartQuestion(message: string): boolean {
   const matches = message.match(questionWords);
-  return (matches?.length ?? 0) > 1;
+  if ((matches?.length ?? 0) > 1) return true;
+  // One question word, two things asked: "what's my favorite color and my
+  // dog's name?" The "and" joins two possessive noun phrases, which is the
+  // shape of two questions sharing a verb.
+  return /\b(?:my|our|the|your)\s+[\w' -]{1,40}?\s+and\s+(?:my|our|the|your)\s+[\w' -]{1,40}\??$/i.test(message.trim());
 }
 
 /**
@@ -454,6 +458,26 @@ export function buildCapabilityReply(localModel?: string): string {
   ].join("\n");
 }
 
+/** Requests for the services this app does not have, with the honest answer to each. */
+const unsupportedActions: Array<{ pattern: RegExp; reply: string }> = [
+  {
+    pattern: /^(?:please |can you |could you |would you )?(?:send|write and send|draft and send|shoot|forward|fire off) (?:an? |the |this |that |my )?(?:e-?mail|mail)\b|^(?:please )?e-?mail (?:\S+ )?(?:to|at|about)\b|^(?:please )?e-?mail \S+@\S+/i,
+    reply: "I can't send email. Nothing here is connected to a mail account - I run on this machine only. I can draft the message for you to send."
+  },
+  {
+    pattern: /^(?:please |can you |could you |would you )?(?:send|shoot|fire off) (?:an? |the |this |that |my )?(?:text|sms|message|dm|whatsapp|telegram|slack message|discord message)\b|^(?:please )?(?:text|dm|whatsapp|slack|imessage) \S+ (?:that|saying|about|to say|and)\b/i,
+    reply: "I can't send messages to people. Nothing here is connected to a messaging service. I can write the message for you to send."
+  },
+  {
+    pattern: /^(?:please |can you |could you |would you )?(?:call|phone|ring|dial|facetime) (?!me\b|it\b|this\b|that\b)\S+/i,
+    reply: "I can't make calls. There is no phone or calling service connected here."
+  },
+  {
+    pattern: /^(?:please |can you |could you |would you )?(?:buy|purchase|pay for|order (?:me |us )?(?:a|an|some|\d+)\b|book (?:me |us )?(?:a|an|the|some) (?:table|flight|hotel|room|ticket|tickets|appointment|trip|car|seat|cab|taxi|uber))/i,
+    reply: "I can't buy or book anything. Nothing here is connected to a payment method or a store."
+  }
+];
+
 export function composeReply(input: ComposerInput): ComposedReply {
   const message = input.message.trim();
   const analysis = analyzeRequest(message);
@@ -462,6 +486,12 @@ export function composeReply(input: ComposerInput): ComposedReply {
   // Handled before anything else: these are short and topic-free, so every later
   // branch reads them as a vague work request and answers "tell me your stack
   // and deadline", which is a strange reply to "thanks".
+  // "???" has no words in it. It reached the model, which answered with the
+  // date and time on this machine.
+  if (!/[a-z0-9]/i.test(message)) {
+    return { text: "I didn't catch that. What would you like me to do?", strategy: "clarify", groundedOn: [], groundedOnHistory: 0 };
+  }
+
   if (capabilityPattern.test(message)) {
     return { text: buildCapabilityReply(), strategy: "capability", groundedOn: [], groundedOnHistory: 0 };
   }
@@ -481,6 +511,16 @@ export function composeReply(input: ComposerInput): ComposedReply {
 
   if (acknowledgementPattern.test(message)) {
     return { text: "Noted — say the word when you want something done.", strategy: "smalltalk", groundedOn: [], groundedOnHistory: 0 };
+  }
+
+  // Things this app cannot do, said plainly and at once. "send an email to
+  // bob@example.com saying hi" was answered "Got it." - read as a statement
+  // - and even as a request it would have gone to a model with no mail tool,
+  // to improvise with. There is no email, messaging, phone or payment here,
+  // and there will not be: the app is local and connects to nothing.
+  const unsupported = unsupportedActions.find((entry) => entry.pattern.test(message));
+  if (unsupported) {
+    return { text: unsupported.reply, strategy: "cannot", groundedOn: [], groundedOnHistory: 0 };
   }
 
   // Was the previous turn a build clarification? If so this message is the
@@ -550,7 +590,11 @@ export function composeReply(input: ComposerInput): ComposedReply {
         text: `You mentioned this earlier in our conversation:\n\n${quoted}`,
         strategy: "answer",
         groundedOn: [],
-        groundedOnHistory: fromHistory.length
+        groundedOnHistory: fromHistory.length,
+        // "what's my favorite color and my dog's name?" quoted the colour
+        // turn alone. Flagged like a memory answer that covers half, so the
+        // model can answer the rest with this handed over.
+        partial: isMultiPartQuestion(query) && fromHistory.length < 2
       };
     }
 

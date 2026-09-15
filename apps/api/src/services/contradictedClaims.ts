@@ -113,11 +113,19 @@ const claimsMutationDone = new RegExp(
     `\\b(?:i(?:'ve| have)?|we(?:'ve| have)?) (?:just )?(?:now )?(?:${plainlyMutating})\\b`,
     // Same, but only when it is a file being acted on.
     `\\b(?:i(?:'ve| have)?|we(?:'ve| have)?) (?:just )?(?:now )?(?:${conditionallyMutating})\\b[^.!?]{0,60}\\b(?:${codeObject})\\b`,
-    // "the file has been updated"
-    `\\bhas been (?:${plainlyMutating})\\b`,
-    `\\bhave been (?:${plainlyMutating})\\b`,
-    // "it is now saved"
-    `\\b(?:is|was|are|were) (?:now )?(?:${plainlyMutating})\\b`,
+    // "the file has been updated" - but not "nothing has been updated",
+    // which is the honest denial this guard exists to protect.
+    `(?<!\\bnothing |\\bnone |\\bno file |\\bnobody )\\bhas been (?:${plainlyMutating})\\b`,
+    `(?<!\\bnothing |\\bnone |\\bno files )\\bhave been (?:${plainlyMutating})\\b`,
+    // "it has been added as the last two lines" - seen live after three
+    // failed edit_file calls. The conditional verbs count here when they
+    // are followed by where in the file the change went.
+    `\\b(?:has|have) been (?:${conditionallyMutating})\\b[^.!?]{0,40}\\b(?:line|lines|end|top|bottom|start|beginning|${codeObject})\\b`,
+    // "it is now saved" - but not "nothing was changed": seen live, "There is
+    // no file at that path, so nothing was changed" was read as a claim of a
+    // change, corrected, and replaced with a generic denial that lost the
+    // reason.
+    `(?<!\\bnothing |\\bnone |\\bno file |\\bnobody )\\b(?:is|was|are|were) (?:now )?(?:${plainlyMutating})\\b`,
     // "the updated file is now available in the workspace" - seen live, and
     // missed by every pattern above because nothing in it is a mutation verb
     // in the past tense.

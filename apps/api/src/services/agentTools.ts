@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
 import { normalizeSpelling } from "./spelling.js";
 import { matchMemories, type FactMatch } from "./factWording.js";
 import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.js";
@@ -6,8 +8,8 @@ import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
 import { describeDifference, shiftDate } from "./dateMath.js";
 import { shiftClock } from "./clockMath.js";
 import {
-  classifyRequest, deriveTitle, findScriptFault, generateProject, parseVideoScript, planProject,
-  slugify, videoScriptPrompt, type VideoScript
+  amendProject, changesFrom, classifyRequest, deriveTitle, findScriptFault, generateProject, originalRequestFrom,
+  parseVideoScript, planProject, slugify, titleFrom, videoScriptPrompt, withChanges, type VideoScript
 } from "@ascend/shared";
 import { renderVideo } from "./videoRender.js";
 import { authorPrompt, findAppFault, parseAuthoredFiles, type AuthoredFile } from "./appAuthor.js";
@@ -26,7 +28,7 @@ import { fetchWebPage } from "./webFetch.js";
 import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
 import { resolveForAccess } from "./machinePaths.js";
 import { explainMiss } from "./projectContext.js";
-import { noteProjectTouched, withinActiveProject } from "./activeProject.js";
+import { activeProject, impliedFileFor, noteFileTouched, noteProjectTouched, withinActiveProject } from "./activeProject.js";
 import { applyEdit, describeEdit } from "./fileEdit.js";
 import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
 import { enterStage } from "./reasoningStage.js";
@@ -144,6 +146,13 @@ export type ToolContext = {
    * and falls back to the description when it does not.
    */
   request?: string;
+  /**
+   * The file this turn is about, when the request said "it" and the previous
+   * turn had touched one. See resolveFilePronoun in activeProject.ts. The file
+   * tools use it to correct a call that names the file by its name in the
+   * wrong place, and write_document refuses to make a document of it.
+   */
+  impliedFile?: string;
   /**
    * Tool names the user has explicitly authorised for this turn.
    *
@@ -348,16 +357,22 @@ export const toolDefinitions: ToolDefinition[] = [
     function: {
       name: "update_document",
       description:
-        "Replace the contents of a knowledge-base document that already exists. Use this to "
-        + "correct or extend one rather than writing a second document with the same title. Not "
-        + "for a file on disk — a name like test.txt is a workspace file; use write_file for that.",
+        "Change a knowledge-base document that already exists. To add to it, pass append. To "
+        + "change one passage, read the document first and pass old_text and new_text. Only when "
+        + "the user asked for it to be rewritten, pass content with replace_everything: true - "
+        + "that discards the current text. Not for a file on disk — a name like test.txt is a "
+        + "workspace file; use write_file for that.",
       parameters: {
         type: "object",
         properties: {
           title: { type: "string", description: "The document to change, as listed." },
-          content: { type: "string", description: "The full new text. It replaces what was there." }
+          append: { type: "string", description: "Text to add at the end, keeping everything already there." },
+          old_text: { type: "string", description: "The exact passage to change, as it currently reads." },
+          new_text: { type: "string", description: "What old_text becomes." },
+          content: { type: "string", description: "A full replacement. Needs replace_everything: true." },
+          replace_everything: { type: "boolean", description: "true to discard the current text and use content instead." }
         },
-        required: ["title", "content"]
+        required: ["title"]
       }
     }
   },
@@ -506,9 +521,32 @@ export const toolDefinitions: ToolDefinition[] = [
             description:
               "A workspace subfolder, or a full path to a folder anywhere on this machine. "
               + "Omit for the whole workspace."
+          },
+          recursive: {
+            type: "boolean",
+            description: "true to list inside the folders as well. Default: the folder's own entries only."
           }
         },
         required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_files",
+      description:
+        "Find which files contain some text, with the matching lines. Use this to find where a "
+        + "function, word or setting is defined or used, anywhere on this machine. Searches "
+        + "recursively, skipping node_modules and .git.",
+      parameters: {
+        type: "object",
+        properties: {
+          directory: { type: "string", description: "The folder to search, as a workspace path or a full path." },
+          pattern: { type: "string", description: "The text to look for. Plain text, matched case-insensitively." },
+          extension: { type: "string", description: "Only files with this extension, like ts or js. Optional." }
+        },
+        required: ["directory", "pattern"]
       }
     }
   },
@@ -561,10 +599,11 @@ export const toolDefinitions: ToolDefinition[] = [
     function: {
       name: "edit_file",
       description:
-        "Change part of an existing file by replacing exact text, leaving the rest untouched. "
-        + "Prefer this over write_file for any file that already exists: write_file replaces the "
-        + "whole file, so anything you do not repeat is deleted. Read the file first and copy the "
-        + "lines to change verbatim, including indentation. The text must appear exactly once.",
+        "Change part of an existing file, leaving the rest untouched. To add lines at the end, pass "
+        + "append. To change a passage, read the file first and pass old_text (copied verbatim, "
+        + "including indentation; it must appear exactly once) and new_text. Prefer this over "
+        + "write_file for any file that already exists: write_file replaces the whole file, so "
+        + "anything you do not repeat is deleted.",
       parameters: {
         type: "object",
         properties: {
@@ -572,13 +611,14 @@ export const toolDefinitions: ToolDefinition[] = [
             type: "string",
             description: "A workspace path, or a full path to a file anywhere on this machine."
           },
+          append: { type: "string", description: "Text to add at the end of the file, on its own line." },
           old_text: {
             type: "string",
             description: "The exact text to replace, copied from the file including indentation."
           },
-          new_text: { type: "string", description: "What to put in its place." }
+          new_text: { type: "string", description: "What to put in place of old_text." }
         },
-        required: ["path", "old_text", "new_text"]
+        required: ["path"]
       }
     }
   },
@@ -613,6 +653,7 @@ export const toolDefinitions: ToolDefinition[] = [
           name: { type: "string", description: "A short name for the schedule." },
           prompt: { type: "string", description: "What to ask the assistant when it fires." },
           daily_at: { type: "string", description: "A 24-hour time like 09:00 to run once a day." },
+          weekdays_only: { type: "boolean", description: "With daily_at: true to skip Saturday and Sunday (\"every weekday\", \"on workdays\")." },
           every_minutes: { type: "string", description: "Run every N minutes instead of daily." }
         },
         required: ["name", "prompt"]
@@ -678,6 +719,25 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "change_app",
+      description:
+        "Change an app that build_app built: add or remove a field, or add a feature (dashboard, "
+        + "calendar, board, search, status, priority, due dates). The app is rebuilt from its own "
+        + "description plus the change, in the same folder, keeping its data. Use this for \"add a "
+        + "notes field\", \"add a dashboard\" - never build_app, which would make a second app.",
+      parameters: {
+        type: "object",
+        properties: {
+          change: { type: "string", description: "What to add, remove or change, in the user's words." },
+          project: { type: "string", description: "The app's folder in the workspace. Omit for the app worked on most recently." }
+        },
+        required: ["change"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "make_video",
       description:
         "Build a short motion-graphics video entirely on this machine - scripted, narrated, "
@@ -737,7 +797,7 @@ const scaffoldingTools = new Set(["build_app", "plan_app"]);
  * the port" is an ordinary thing to ask.
  */
 const machineChangingTools = new Set([
-  "write_file", "edit_file", "build_app", "make_video", "plan_app", "run_command", "run_script"
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "plan_app", "run_command", "run_script"
 ]);
 
 /**
@@ -790,12 +850,39 @@ export function verifiedDetail(output: string): string {
 
 /** Offered only when the request is about dates; see looksLikeDateMath. */
 const dateTools = new Set(["days_between", "shift_date"]);
+/**
+ * Withheld from a plain question. run_command is deliberately not here: "is
+ * anything listening on port 4000?" and "what version of node is installed?"
+ * are questions the machine answers, and withholding it left them unanswered.
+ * A question does not write files, documents or apps, though.
+ */
+const writingTools = new Set([
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "plan_app",
+  "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule"
+]);
+
+/**
+ * Offered only when the user asks for something to be kept. "run its smoke
+ * test" failed and the model then called remember with "The 'test' script is
+ * missing from the package.json file" - a note to itself, saved as the
+ * user's fact. Explicit "remember that ..." is handled before the model, so
+ * this is only ever for the compound turns.
+ */
+const memoryWritingTools = new Set(["remember"]);
+
 /** Offered only when the request names a clock time; see looksLikeClockMath. */
 const clockTools = new Set(["shift_time"]);
+/** Offered only when the request mentions the web; see mentionsWeb. */
+const webTools = new Set(["fetch_url"]);
+/** Offered only when the request mentions the time or the date; see mentionsTime. */
+const timeTools = new Set(["current_datetime"]);
 
 export function availableTools(
   armed: boolean,
-  options: { scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean } = {}
+  options: {
+    scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
+    web?: boolean; time?: boolean; writes?: boolean; memory?: boolean;
+  } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
   const allowChanges = options.changes ?? true;
@@ -804,6 +891,10 @@ export function availableTools(
   const allowArithmetic = options.arithmetic ?? true;
   const allowDates = options.dates ?? true;
   const allowClock = options.clock ?? true;
+  const allowWeb = options.web ?? true;
+  const allowTime = options.time ?? true;
+  const allowWrites = options.writes ?? true;
+  const allowMemory = options.memory ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -812,7 +903,11 @@ export function availableTools(
     if (!allowArithmetic && name === "calculate") return false;
     if (!allowDates && dateTools.has(name)) return false;
     if (!allowClock && clockTools.has(name)) return false;
+    if (!allowWeb && webTools.has(name)) return false;
+    if (!allowTime && timeTools.has(name)) return false;
     if (!allowChanges && machineChangingTools.has(name)) return false;
+    if (!allowWrites && writingTools.has(name)) return false;
+    if (!allowMemory && memoryWritingTools.has(name)) return false;
     return true;
   });
 }
@@ -845,6 +940,125 @@ function findDocument(context: ToolContext, title: string) {
 
   return documents.find((document) => document.title.trim().toLowerCase() === wanted)
     ?? documents.find((document) => document.title.toLowerCase().includes(wanted));
+}
+
+const searchSkipped = new Set(["node_modules", ".git", "dist", ".next", "build", "coverage", ".cache"]);
+const searchMaxMatches = 60;
+const searchMaxFiles = 4000;
+const searchMaxFileBytes = 512_000;
+
+/** A recursive, case-insensitive plain-text search; see the search_files tool. */
+function searchFiles(
+  root: string,
+  pattern: string,
+  extension: string | null
+): { kind: "missing" } | { kind: "ok"; matches: Array<{ file: string; line: number; text: string }>; truncated: boolean } {
+  let stat;
+  try {
+    stat = statSync(root);
+  } catch {
+    return { kind: "missing" };
+  }
+  if (!stat.isDirectory()) return { kind: "missing" };
+
+  const needle = pattern.toLowerCase();
+  const matches: Array<{ file: string; line: number; text: string }> = [];
+  let visited = 0;
+  let truncated = false;
+
+  const walk = (directory: string): void => {
+    if (truncated || visited > searchMaxFiles) return;
+    let entries: string[];
+    try {
+      entries = readdirSync(directory);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (truncated) return;
+      if (searchSkipped.has(entry)) continue;
+      const full = path.join(directory, entry);
+      let entryStat;
+      try {
+        entryStat = statSync(full);
+      } catch {
+        continue;
+      }
+      if (entryStat.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!entryStat.isFile() || entryStat.size > searchMaxFileBytes) continue;
+      if (extension && !entry.toLowerCase().endsWith(`.${extension}`)) continue;
+      visited += 1;
+      let text: string;
+      try {
+        text = readFileSync(full, "utf8");
+      } catch {
+        continue;
+      }
+      if (text.includes("\u0000")) continue;
+      const lines = text.split(/\r?\n/);
+      for (let index = 0; index < lines.length; index += 1) {
+        if (!lines[index].toLowerCase().includes(needle)) continue;
+        matches.push({ file: full, line: index + 1, text: lines[index].trim().slice(0, 200) });
+        if (matches.length >= searchMaxMatches) {
+          truncated = true;
+          return;
+        }
+      }
+    }
+  };
+  walk(root);
+  return { kind: "ok", matches, truncated };
+}
+
+/**
+ * What an app was built from, kept in the folder in a file of its own.
+ *
+ * The README carries the same request for people, and the model rewrote it
+ * three times in the turn after the build - "Tracks the health and growth
+ * of your houseplants" - so change_app then found no description to rebuild
+ * from. This file is not a file the model is offered anything about.
+ */
+const appManifestName = ".vexora-app.json";
+
+type AppManifest = { request: string; title: string; changes: string[] };
+
+function readAppManifest(project: string): AppManifest | null {
+  const read = readWorkspaceFile(`${project}/${appManifestName}`);
+  if (!read.ok) return null;
+  try {
+    const parsed = JSON.parse(read.content) as Partial<AppManifest>;
+    if (typeof parsed.request !== "string" || !parsed.request.trim()) return null;
+    return {
+      request: parsed.request,
+      title: typeof parsed.title === "string" ? parsed.title : "",
+      changes: Array.isArray(parsed.changes) ? parsed.changes.filter((entry): entry is string => typeof entry === "string") : []
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeAppManifest(project: string, manifest: AppManifest): void {
+  writeWorkspaceFile(`${project}/${appManifestName}`, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+/**
+ * A knowledge document whose title is this file name without its extension.
+ *
+ * The other direction of the file/document confusion. "add 'then clear the
+ * cache' to the end of my Deploy Steps note" went to edit_file on "Deploy
+ * Steps.txt", which does not exist, and the model asked the user to check
+ * the filename - with a document called "Deploy Steps" sitting in the
+ * knowledge base the whole time.
+ */
+function documentNamedLike(context: ToolContext, target: string): { title: string } | null {
+  const stem = target.trim().replace(/^.*[\\/]/, "").replace(/\.[a-z0-9]{1,6}$/i, "").trim().toLowerCase();
+  if (!stem) return null;
+  const found = (context.documents ?? []).find((document) => document.title.trim().toLowerCase() === stem);
+  return found ? { title: found.title } : null;
 }
 
 /** A refusal that lists what does exist, so the model can correct itself. */
@@ -1111,9 +1325,34 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
             + "write_file to change it, or read_file to see what it currently contains."
         };
       }
+      // The same mistake for a file outside the workspace, when this turn is
+      // about one: "add a line to the end of it" ended as a knowledge
+      // document called notes.txt with the new line in it, and the file
+      // itself untouched.
+      if (context.impliedFile && impliedFileFor(context.impliedFile, title) === context.impliedFile) {
+        return {
+          ok: false,
+          content: `"${title}" is the file ${context.impliedFile}, not a knowledge document. `
+            + "Use edit_file with append to add to it, or write_file to replace it."
+        };
+      }
 
       if (!context.saveDocument) {
         return { ok: false, content: "There is nowhere to save documents, so nothing was written." };
+      }
+
+      // A title that exists is changed, never doubled. A session ended up
+      // with two documents called "Deploy Steps" - one from the save, one
+      // from a repeat of it - and every later read quoted both.
+      const wanted = title.trim().toLowerCase();
+      const existing = (context.documents ?? []).find((document) => document.title.trim().toLowerCase() === wanted);
+      if (existing) {
+        return {
+          ok: false,
+          content: `A document called "${existing.title}" already exists, so nothing was written. To add to it `
+            + "call update_document with append; to change part of it pass old_text and new_text; or save "
+            + "under a different title."
+        };
       }
 
       const saved = context.saveDocument(title, content);
@@ -1154,25 +1393,71 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
 
     case "update_document": {
       const title = requireString(call.arguments.title);
-      const content = requireString(call.arguments.content);
-      if (!title || !content) {
-        return { ok: false, content: "update_document needs both a title and the new content." };
-      }
+      if (!title) return { ok: false, content: "update_document needs the document's title." };
       if (!context.updateDocument) {
         return { ok: false, content: "There is nowhere to save documents, so nothing was changed." };
-      }
-
-      const found = findDocument(context, title);
-      if (!found) {
-        return { ok: false, content: describeMissingDocument(context, title) };
       }
 
       // Deliberately does not create on a miss. A model that misremembers a
       // title would otherwise silently make a second document instead of
       // editing the one the user meant.
-      const updated = context.updateDocument(found.id, content);
+      const found = findDocument(context, title);
+      if (!found) {
+        return { ok: false, content: describeMissingDocument(context, title) };
+      }
+
+      // Three ways to change a document, and whole replacement is the one
+      // that has to be asked for by name. This tool used to take only the
+      // full new text: asked to add "then clear the cache" to the end of a
+      // note, the model did not read the note first and sent a body it made
+      // up - "1. Build the project 2. Run tests 3. Deploy to server 4. Then
+      // clear the cache" - and the user's actual steps were gone. Appending
+      // and passage edits cannot lose what is there; a replacement without
+      // the flag is refused with the current text, so the model can do the
+      // append it meant.
+      const addition = requireString(call.arguments.append);
+      const oldText = requireString(call.arguments.old_text);
+      const newText = typeof call.arguments.new_text === "string" ? call.arguments.new_text : null;
+      const content = requireString(call.arguments.content);
+      const replaceEverything = call.arguments.replace_everything === true;
+
+      let next: string;
+      let did: string;
+      if (addition) {
+        const current = found.body.trimEnd();
+        next = current ? `${current}\n${addition}` : addition;
+        did = `Added to the end of "${found.title}".`;
+      } else if (oldText !== null) {
+        if (newText === null) return { ok: false, content: "update_document needs new_text alongside old_text." };
+        if (!found.body.includes(oldText)) {
+          return {
+            ok: false,
+            content: `"${found.title}" does not contain that old_text, so nothing was changed. Its current text is:\n${found.body}`
+          };
+        }
+        next = found.body.replace(oldText, newText);
+        did = `Changed a passage in "${found.title}".`;
+      } else if (content) {
+        if (!replaceEverything && found.body.trim().length > 0) {
+          return {
+            ok: false,
+            content: `Nothing was changed: content would replace the whole of "${found.title}", whose current text is:\n`
+              + `${found.body}\n\nTo add to it, call update_document with append. To change part of it, pass old_text `
+              + "and new_text. To discard all of it and start over, pass replace_everything: true."
+          };
+        }
+        next = content;
+        did = `Replaced the contents of "${found.title}".`;
+      } else {
+        return {
+          ok: false,
+          content: "update_document needs append, or old_text with new_text, or content with replace_everything: true."
+        };
+      }
+
+      const updated = context.updateDocument(found.id, next);
       return updated
-        ? { ok: true, content: `Replaced the contents of "${found.title}".` }
+        ? { ok: true, content: did }
         : { ok: false, content: `"${found.title}" could not be changed, so nothing was written.` };
     }
 
@@ -1300,6 +1585,86 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       return result.ok
         ? { ok: true, content: result.value }
         : { ok: false, content: result.reason };
+    }
+
+    case "change_app": {
+      const change = requireString(call.arguments.change);
+      if (!change) return { ok: false, content: "change_app needs the change, in words." };
+      const project = requireString(call.arguments.project)?.replace(/[\\/]+$/, "") ?? activeProject(context.sessionId);
+      if (!project) {
+        return {
+          ok: false,
+          content: "change_app needs to know which app: none has been built or worked on in this session. "
+            + "Pass project with its folder name in the workspace."
+        };
+      }
+
+      // The manifest first; the README's first paragraph for apps built
+      // before the manifest existed.
+      const manifest = readAppManifest(project);
+      const readme = readWorkspaceFile(`${project}/README.md`);
+      const original = manifest?.request ?? (readme.ok ? originalRequestFrom(readme.content) : null);
+      if (!original) {
+        return {
+          ok: false,
+          content: `${project} was not built by build_app - nothing in it carries the description it was built from - `
+            + "so it cannot be rebuilt from one. Change its files with edit_file instead."
+        };
+      }
+      const earlier = manifest?.changes ?? (readme.ok ? changesFrom(readme.content) : []);
+      const title = (manifest?.title || (readme.ok ? titleFrom(readme.content) : null)) ?? undefined;
+
+      const amended = amendProject(original, earlier, change, title);
+      if (!amended) {
+        return {
+          ok: false,
+          content: `I could not map "${change}" onto the app's plan, so nothing was changed. change_app can add or `
+            + "remove a field (\"add a notes text field\", \"remove the species field\") or add a feature (dashboard, "
+            + "calendar, board, search, status, priority, due dates). For anything else, change the files with edit_file."
+        };
+      }
+
+      const { sessionId } = context;
+      recordEvent(sessionId, "plan", `Changing "${amended.spec.title}"`, "ok", amended.changes.join("; "));
+
+      // The README carries the whole change list, so the next change starts
+      // from all of them. data/ is not among the generated files and is left
+      // exactly as it is: the records are the user's.
+      const files = generateProject(amended.spec).map((file) =>
+        file.path === "README.md" ? { ...file, content: withChanges(file.content, [...earlier, change]) } : file);
+      const writing = beginEvent(sessionId, "write", `Rewriting ${files.length} files`);
+      let count = 0;
+      for (const file of files) {
+        const result = writeWorkspaceFile(`${project}/${file.path}`, file.content);
+        if (!result.ok) {
+          endEvent(sessionId, writing, "failed", `${result.reason} ${count} of ${files.length} files were written.`);
+          return { ok: false, content: `Could not finish the change: ${result.reason} The app may be half-written; run change_app again.` };
+        }
+        count += 1;
+      }
+      endEvent(sessionId, writing, "ok", `${count} files`, `${project}/`);
+      writeAppManifest(project, { request: original, title: amended.spec.title, changes: [...earlier, change] });
+      noteProjectTouched(sessionId, `${project}/server.js`);
+
+      enterStage(sessionId, "verifying");
+      const verifying = beginEvent(sessionId, "verify", "Running its own checks");
+      const verification = await verifyBuiltProject(project);
+      endEvent(
+        sessionId,
+        verifying,
+        !verification.ran ? "skipped" : verification.passed ? "ok" : "failed",
+        verification.ran ? verification.output : verification.reason
+      );
+
+      const did = amended.changes.join("; ");
+      const runLine = `The user can run it with: cd ${project} && npm start (do not start it here).`;
+      if (!verification.ran) {
+        return { ok: true, content: `Changed "${amended.spec.title}" (${project}/): ${did}. Could not verify it automatically: ${verification.reason}\n\n${runLine}` };
+      }
+      if (!verification.passed) {
+        return { ok: false, content: `Changed "${amended.spec.title}" (${project}/): ${did} - but its own checks FAILED:\n${verification.output}` };
+      }
+      return { ok: true, content: `Changed "${amended.spec.title}" (${project}/): ${did}. Verified: ${verification.output}\n\n${runLine}` };
     }
 
     case "build_app": {
@@ -1466,7 +1831,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // implying the app needs fetching something before it will start. On a
       // machine that is offline, or where npm is having a bad day, it would
       // fail and make a working app look broken.
-      const runLine = "Run it with: cd " + folder + " && npm start";
+      const runLine = "The user can run it with: cd " + folder + " && npm start (do not start it here).";
 
       // Three outcomes, kept distinct. "Could not check" is not "passed", and
       // reporting it as either would be the kind of quiet rounding-up this
@@ -1498,6 +1863,11 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
 
       // A build you just asked for is the project you are working in.
       noteProjectTouched(context.sessionId, folder);
+      // What it was built from, for change_app. The user's own words when
+      // they were given; the model's description otherwise.
+      if (archetype !== "authored") {
+        writeAppManifest(folder, { request: askedFor || description, title: spec.title, changes: [] });
+      }
 
       return {
         ok: true,
@@ -1612,23 +1982,70 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         return { ok: false, content: inWorkspace ? "The workspace is empty." : `${directory} is empty.` };
       }
 
-      const files = entries.filter((entry) => !entry.directory);
+      // The folder's own entries, folders first, unless the deep listing was
+      // asked for. Asked for the top-level folders of a repository, the old
+      // recursive, newest-first listing answered with apps/api/data/tasks.json
+      // and its neighbours - two hundred files from wherever the last write
+      // happened, and not one folder name.
+      const deep = call.arguments.recursive === true || call.arguments.recursive === "true";
+      // Workspace listings are relative to the workspace root, not to the
+      // folder asked about, so the asked-about folder's own prefix is what
+      // depth is counted from.
+      const prefix = inWorkspace && directory !== "." ? directory.replace(/^[.\\/]+/, "").replace(/[\\/]+$/, "") : "";
+      const relativeTo = (entryPath: string) =>
+        prefix && (entryPath.startsWith(`${prefix}/`) || entryPath.startsWith(`${prefix}\\`)) ? entryPath.slice(prefix.length + 1) : entryPath;
+      const depthOf = (entryPath: string) => relativeTo(entryPath).split(/[\\/]/).length;
+      const byName = (left: { path: string }, right: { path: string }) => left.path.localeCompare(right.path);
+      const top = entries.filter((entry) => depthOf(entry.path) === 1);
+      // Alphabetical at the top level, the way a directory listing reads;
+      // the deep listing keeps newest first, which is what it is for.
+      const chosen = deep || top.length === 0 ? entries : [...top].sort(byName);
+      const folders = chosen.filter((entry) => entry.directory);
+      const files = chosen.filter((entry) => !entry.directory);
       const shown = files.slice(0, 200);
-      const listing = shown.map((entry) => `- ${entry.path} (${entry.bytes} bytes)`).join("\n");
+      const folderLines = folders.map((entry) => {
+        const inside = entries.filter((child) => child.path.startsWith(`${entry.path}/`) || child.path.startsWith(`${entry.path}\\`)).length;
+        return `- ${entry.path}/${inside > 0 ? ` (${inside} entries)` : ""}`;
+      });
+      const fileLines = shown.map((entry) => `- ${entry.path} (${entry.bytes} bytes)`);
+      const listing = [...folderLines, ...fileLines].join("\n");
 
       // Says when it is showing part of a folder. A truncated listing that
       // looks complete is how "that file does not exist" gets said about a
       // file that does.
-      return {
-        ok: true,
-        content: files.length > shown.length
-          ? `${listing}\n\n[showing ${shown.length} of ${files.length} files, newest first]`
-          : listing
-      };
+      const note = files.length > shown.length
+        ? `\n\n[showing ${shown.length} of ${files.length} files, newest first]`
+        : !deep && entries.length > chosen.length
+          ? "\n\n[top level only; pass recursive: true to list inside the folders]"
+          : "";
+      return { ok: true, content: `${listing}${note}` };
+    }
+
+    case "search_files": {
+      const directory = requireString(call.arguments.directory);
+      const pattern = requireString(call.arguments.pattern);
+      if (!directory || !pattern) return { ok: false, content: "search_files needs a directory and a pattern." };
+      const extension = requireString(call.arguments.extension)?.replace(/^\./, "").toLowerCase() ?? null;
+
+      const verdict = resolveForAccess(directory, {
+        granted: commandsArmed() && !context.unattended,
+        intent: "read",
+        insideWorkspace: resolveInWorkspace
+      });
+      if (!verdict.ok) return { ok: false, content: verdict.reason };
+
+      const found = searchFiles(verdict.path, pattern, extension);
+      if (found.kind === "missing") return { ok: false, content: `There is no folder at "${directory}".` };
+      if (found.matches.length === 0) {
+        return { ok: false, content: `Nothing under ${directory} contains "${pattern}"${extension ? ` in .${extension} files` : ""}.` };
+      }
+      const lines = found.matches.map((match) => `${match.file}:${match.line}: ${match.text}`);
+      const note = found.truncated ? `\n[first ${found.matches.length} matches shown]` : "";
+      return { ok: true, content: lines.join("\n") + note };
     }
 
     case "read_file": {
-      const target = requireString(call.arguments.path);
+      const target = impliedFileFor(context.impliedFile, requireString(call.arguments.path) ?? "") || null;
       if (!target) return { ok: false, content: "read_file needs a path." };
 
       // A URL is not a file, and saying so is the whole fix.
@@ -1689,7 +2106,10 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         }
       }
 
-      if (result.ok) noteProjectTouched(context.sessionId, target);
+      if (result.ok) {
+        noteProjectTouched(context.sessionId, target);
+        noteFileTouched(context.sessionId, target);
+      }
       // A miss that names what does exist. "There is no file at
       // calculator/public/server.js" is true and a dead end: the model guessed
       // a subdirectory, was told no, said it would try the main directory, and
@@ -1707,7 +2127,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "write_file": {
-      const target = requireString(call.arguments.path);
+      const target = impliedFileFor(context.impliedFile, requireString(call.arguments.path) ?? "") || null;
       const content = typeof call.arguments.content === "string" ? call.arguments.content : null;
       if (!target || content === null) {
         return { ok: false, content: "write_file needs both a path and content." };
@@ -1730,6 +2150,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // that could have been anywhere on the disk.
       const inWorkspace = resolveInWorkspace(target);
       noteProjectTouched(context.sessionId, target);
+      noteFileTouched(context.sessionId, target);
       return {
         ok: true,
         content: inWorkspace === result.path
@@ -1739,11 +2160,19 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "edit_file": {
-      const target = requireString(call.arguments.path);
+      const target = impliedFileFor(context.impliedFile, requireString(call.arguments.path) ?? "") || null;
+      // Leading newlines dropped: the addition always starts on its own line,
+      // and a model that passes "\nomega" to be safe was adding a blank line.
+      const additionRaw = typeof call.arguments.append === "string" ? call.arguments.append.replace(/^(?:\r?\n)+/, "") : "";
+      const addition = additionRaw.length > 0 ? additionRaw : null;
       const oldText = typeof call.arguments.old_text === "string" ? call.arguments.old_text : null;
       const newText = typeof call.arguments.new_text === "string" ? call.arguments.new_text : null;
-      if (!target || oldText === null || newText === null) {
-        return { ok: false, content: "edit_file needs a path, old_text and new_text." };
+      // Appending is its own operation. "add a line saying omega to the end
+      // of it" was tried as a replacement - old_text "beta\n", "omega\n",
+      // "" - and failed every time, because there is no passage to replace
+      // when the change is an addition.
+      if (!target || (addition === null && (oldText === null || newText === null))) {
+        return { ok: false, content: "edit_file needs a path, and either append or old_text with new_text." };
       }
 
       // Read and write are checked separately with the same rule, so an edit
@@ -1763,7 +2192,16 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       if (!writeVerdict.ok) return { ok: false, content: `${writeVerdict.reason} Nothing was changed.` };
 
       const current = readFileAt(readVerdict.path);
-      if (!current.ok) return { ok: false, content: `${current.reason} Nothing was changed.` };
+      if (!current.ok) {
+        const document = documentNamedLike(context, target);
+        return {
+          ok: false,
+          content: document
+            ? `${current.reason} There is a knowledge document called "${document.title}", though - `
+              + "use update_document for it. Nothing was changed."
+            : `${current.reason} Nothing was changed.`
+        };
+      }
 
       // A file too long to have been read whole must not be edited: the copy
       // in hand is missing its end, and writing it back would delete the part
@@ -1776,14 +2214,29 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         };
       }
 
-      const edited = applyEdit(current.content, oldText, newText);
+      if (addition !== null) {
+        const base = current.content.length === 0 || current.content.endsWith("\n")
+          ? current.content
+          : `${current.content}\n`;
+        const appended = `${base}${addition.endsWith("\n") ? addition : `${addition}\n`}`;
+        const written = writeFileAt(writeVerdict.path, appended);
+        if (!written.ok) return { ok: false, content: `${written.reason} Nothing was changed.` };
+
+        noteProjectTouched(context.sessionId, target);
+        noteFileTouched(context.sessionId, target);
+        const lines = addition.replace(/\n$/, "").split("\n").length;
+        return { ok: true, content: `Added ${lines} line${lines === 1 ? "" : "s"} to the end of ${written.path}.` };
+      }
+
+      const edited = applyEdit(current.content, oldText as string, newText as string);
       if (!edited.ok) return { ok: false, content: `${edited.reason} Nothing was changed.` };
 
       const written = writeFileAt(writeVerdict.path, edited.content);
       if (!written.ok) return { ok: false, content: `${written.reason} Nothing was changed.` };
 
       noteProjectTouched(context.sessionId, target);
-      return { ok: true, content: `Edited ${written.path} — ${describeEdit(oldText, newText)}.` };
+      noteFileTouched(context.sessionId, target);
+      return { ok: true, content: `Edited ${written.path} — ${describeEdit(oldText as string, newText as string)}.` };
     }
 
     case "list_schedules": {
@@ -1821,7 +2274,10 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         if (!at || hours > 23 || minutes > 59) {
           return { ok: false, content: `"${dailyAt}" is not a 24-hour time like 09:00.` };
         }
-        cadence = { kind: "daily", minuteOfDay: hours * 60 + minutes };
+        const weekdaysOnly = call.arguments.weekdays_only === true || call.arguments.weekdays_only === "true";
+        cadence = weekdaysOnly
+          ? { kind: "daily", minuteOfDay: hours * 60 + minutes, weekdaysOnly: true }
+          : { kind: "daily", minuteOfDay: hours * 60 + minutes };
       } else if (Number.isFinite(every) && every > 0) {
         cadence = { kind: "interval", minutes: Math.round(every) };
       }
@@ -1830,6 +2286,25 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         return {
           ok: false,
           content: "add_schedule needs either daily_at (a time like 09:00) or every_minutes."
+        };
+      }
+
+      // The same schedule is not made twice. Asked for one daily check, the
+      // model called add_schedule four times across four rounds - varying the
+      // prompt each time - and four "Build Check" schedules were saved.
+      const duplicate = listSchedules().find((schedule) =>
+        describeCadence(schedule.cadence) === describeCadence(cadence)
+        && (schedule.name.trim().toLowerCase() === name.trim().toLowerCase()
+          || schedule.prompt.trim().toLowerCase() === prompt.trim().toLowerCase()));
+      if (duplicate) {
+        // Reported as done, not refused: the schedule the user asked for
+        // exists, which is the state they wanted. Refused, the model treated
+        // it as an obstacle and called add_schedule four more times with the
+        // prompt reworded each time until one got past the check.
+        return {
+          ok: true,
+          content: `Already scheduled - "${duplicate.name}": ${describeCadence(duplicate.cadence)}. `
+            + "Nothing new was added; that one covers it."
         };
       }
 
@@ -1861,6 +2336,11 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     case "fetch_url": {
       const url = requireString(call.arguments.url);
       if (!url) return { ok: false, content: "fetch_url needs a url." };
+      // A path on this machine is not a web address. "read C:/.../notes.txt"
+      // arrived here and was refused as "not http" - true, and useless.
+      if (/^(?:[a-z]:[\\/]|\\\\|\/(?!\/)|~[\\/]|\.{1,2}[\\/])/i.test(url) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
+        return { ok: false, content: `"${url}" is a file path on this machine, not a web address. Use read_file for it.` };
+      }
 
       const fetchPage = context.fetchPage ?? fetchWebPage;
       const result = await fetchPage(url);
@@ -1898,9 +2378,12 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // install looks like an install in the trace rather than a generic
       // "command", which is what makes the sequence legible.
       const lower = command.toLowerCase();
-      const kind = /(install|add|npm i|pip install)/.test(lower) ? "install"
-        : /(test|jest|vitest|pytest)/.test(lower) ? "test"
-        : /(start|serve|run dev|launch)/.test(lower) ? "launch"
+      // These carried literal backspace characters where \b was meant - an
+      // escaping collapse in the commit that added them - so no command was
+      // ever an install, a test or a launch in the trace.
+      const kind = /\b(install|add|npm i\b|pip install)/.test(lower) ? "install"
+        : /\b(test|jest|vitest|pytest)\b/.test(lower) ? "test"
+        : /\b(start|serve|run dev|launch)\b/.test(lower) ? "launch"
         : "command";
 
       const step = beginEvent(context.sessionId, kind, command);

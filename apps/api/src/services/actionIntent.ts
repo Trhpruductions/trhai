@@ -81,7 +81,17 @@ const actionVerbs: Array<{ kind: ActionKind; words: string[]; expects: string[] 
     words: ["edit", "change", "modify", "update", "fix", "rename", "move",
       "delete", "remove", "write", "create", "add", "append", "replace",
       "refactor", "patch"],
-    expects: ["edit_file", "write_file"]
+    expects: ["edit_file", "write_file", "change_app"]
+  },
+  {
+    // A page on the web, named by its address. "fetch https://example.com
+    // and tell me its heading" got "I'm sorry, but I can't fetch URLs.
+    // That's not something I'm allowed to do" - no tool called, nothing to
+    // push the model with, because a URL was no target to this classifier.
+    kind: "read",
+    words: ["fetch", "visit", "browse", "summarize http", "summarise http", "open http", "read http", "look at http",
+      "what does http", "what is at http", "what's at http", "what's on http", "check http", "load http"],
+    expects: ["fetch_url"]
   },
   {
     kind: "read",
@@ -107,6 +117,7 @@ const conversationalRun = /\brun (?:me through|by me|into|through|out of|a bit|l
 
 /** A drive path, a POSIX path, or a bare filename with an extension. */
 const targetPatterns = [
+  /\bhttps?:\/\/[^\s]+/i,
   /[a-z]:[\\/][^\s]+/i,
   /(?:^|\s)\/[^\s]+\.[a-z0-9]{1,6}\b/i,
   /\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i
@@ -246,6 +257,31 @@ export function looksLikeDateMath(message: string): boolean {
 export function looksLikeClockMath(message: string): boolean {
   const text = (message ?? "").toLowerCase();
   return /\b\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b|\b\d{1,2}:\d{2}\b|\bnoon\b|\bmidnight\b|\bo'clock\b/.test(text);
+}
+
+/**
+ * Whether a request names a web address or asks for the web at all, so
+ * fetch_url is worth offering.
+ *
+ * Offered to everything, fetch_url was called with a file path - "read
+ * C:/.../notes.txt" became fetch_url("C:/.../notes.txt"), refused as not
+ * http, and the file was never read.
+ */
+export function mentionsWeb(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  return /https?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|org|net|io|dev|co|gov|edu|uk|ai|app|me|info|xyz)\b|\b(?:url|website|web ?page|web ?site|webpage|link|online|internet|browse|fetch)\b/
+    .test(text);
+}
+
+/**
+ * Whether a request has anything to do with the time or the date, so
+ * current_datetime is worth offering. The date is in the system prompt in
+ * any case; this stops the clock being read twice on a question about ports.
+ */
+export function mentionsTime(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  return /\b(?:today|tonight|now|current(?:ly)?|date|time|day|days|week|month|year|clock|o'clock|am|pm|morning|afternoon|evening|tomorrow|yesterday|ago|when|schedule|remind|deadline|due|late|early|hour|minute)\b/
+    .test(text);
 }
 
 export function isExplanatoryQuestion(message: string): boolean {

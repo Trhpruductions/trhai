@@ -64,6 +64,7 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   calculate: 1,
   current_datetime: 1,
   days_between: 1,
+  search_files: 1,
   shift_date: 1,
   shift_time: 1,
   // plan_app only describes what would be built; build_app is what builds it.
@@ -86,6 +87,8 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // it changes the text it was given and cannot silently drop the rest of a file.
   edit_file: 2,
   build_app: 2,
+  // Rewrites an app build_app wrote, in its own folder; data untouched.
+  change_app: 2,
   // Renders to disk and nothing beyond it - the same bound as build_app.
   make_video: 2,
   // Creating a schedule changes what this machine will do later, unattended.

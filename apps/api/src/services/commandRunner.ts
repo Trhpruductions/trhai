@@ -327,6 +327,31 @@ export function truncateOutput(text: string): string {
  * A non-zero exit is returned, not thrown. "It failed and here is stderr" is
  * an answer; an exception that loses the output is not.
  */
+/**
+ * `cd D:\app && npm test` from a C: working directory, as cmd.exe runs it,
+ * changes D:'s current directory and stays on C: - so `npm test` ran in the
+ * home folder and reported "Missing script: test" for a project that has
+ * one. `cd /d` switches drive and directory both; every drive-lettered cd
+ * gets it.
+ */
+export function crossDrive(command: string): string {
+  return command.replace(/(^|&&|\|\||;|\|)(\s*)cd\s+(?!\/d\b)("?[a-zA-Z]:[\\/])/g, "$1$2cd /d $3");
+}
+
+/**
+ * A PowerShell cmdlet handed to cmd.exe, wrapped so it runs. `Get-PSDrive D`
+ * arrived bare - the model dropped the `powershell -Command` it had been
+ * shown - and cmd printed the line back. A Verb-Noun opening is PowerShell's
+ * own shape and nothing cmd knows.
+ */
+export function forShell(command: string): string {
+  const trimmed = command.trim();
+  if (/^(?:Get|Set|New|Remove|Start|Stop|Restart|Test|Invoke|Select|Where|Format|Measure|Write|Read|Import|Export|Add|Clear|Copy|Move|Rename|Resolve|Out|ConvertTo|ConvertFrom|Enable|Disable|Wait|Show|Update|Install|Uninstall|Find|Register|Unregister)-[A-Z][A-Za-z]+\b/.test(trimmed)) {
+    return `powershell -NoProfile -Command "${trimmed.replace(/"/g, "\\\"")}"`;
+  }
+  return crossDrive(trimmed);
+}
+
 export async function runCommand(
   command: string,
   options: { cwd?: string; now?: Date } = {}
@@ -337,7 +362,7 @@ export async function runCommand(
 
   const isWindows = process.platform === "win32";
   const shell = isWindows ? "cmd.exe" : "/bin/sh";
-  const args = isWindows ? ["/d", "/s", "/c", command] : ["-c", command];
+  const args = isWindows ? ["/d", "/s", "/c", forShell(command)] : ["-c", command];
 
   return new Promise<CommandRun>((resolve) => {
     let stdout = "";

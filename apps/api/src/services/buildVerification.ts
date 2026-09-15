@@ -79,7 +79,10 @@ export async function verifyBuiltProject(
         // 3000 — fine in isolation, and a collision with anything already
         // listening there, reported as the built app being broken.
         env: { ...process.env, SMOKE_PORT: String(port), PORT: String(port) },
-        stdio: ["ignore", "pipe", "pipe"]
+        stdio: ["ignore", "pipe", "pipe"],
+        // Its own process group off Windows, so killTree can reach the
+        // server it starts.
+        detached: process.platform !== "win32"
       });
     } catch (error) {
       finish({ ran: false, reason: error instanceof Error ? error.message : "could not start the check" });
@@ -95,7 +98,7 @@ export async function verifyBuiltProject(
     // hangs and never answers /health, so one bad build cannot stall the
     // agent loop indefinitely.
     const timer = setTimeout(() => {
-      child.kill();
+      killTree(child);
       finish({
         ran: false,
         reason: "the check did not finish within " + Math.round(timeoutMs / 1000) + "s"
@@ -116,6 +119,33 @@ export async function verifyBuiltProject(
       finish({ ran: true, passed: code === 0, output: summary });
     });
   });
+}
+
+/**
+ * Stop the smoke test and everything it started.
+ *
+ * smoke.js spawns the app's server.js and kills it in a finally block - which
+ * never runs when smoke.js itself is killed here on timeout. That left a
+ * `node server.js` from a probe build running for hours, holding its folder
+ * open (the folder could not be deleted) and a port. On Windows only
+ * taskkill /T reaches the children; elsewhere the group signal does.
+ */
+function killTree(child: ReturnType<typeof spawn>): void {
+  if (!child.pid) return;
+  if (process.platform === "win32") {
+    try {
+      spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
+        .on("error", () => child.kill());
+    } catch {
+      child.kill();
+    }
+    return;
+  }
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    child.kill("SIGKILL");
+  }
 }
 
 /** The checks and their results, without the per-request noise. */

@@ -16,7 +16,14 @@ import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonF
 // UTC would make a daily schedule drift across a daylight-saving boundary.
 
 export type Cadence =
-  | { kind: "daily"; minuteOfDay: number }
+  /**
+   * Once a day at a time of day. `weekdaysOnly` skips Saturday and Sunday:
+   * "every weekday at 8am ask me whether the build passed" was saved as
+   * every day, and the reply said so, which is honest and not what was
+   * asked. Absent on schedules written before the flag existed, which means
+   * every day, as they always did.
+   */
+  | { kind: "daily"; minuteOfDay: number; weekdaysOnly?: boolean }
   | { kind: "interval"; minutes: number };
 
 export type ScheduleRunStatus = "ok" | "failed" | "missed" | "interrupted";
@@ -85,12 +92,13 @@ const minutesPerDay = 24 * 60;
 
 export function isCadence(value: unknown): value is Cadence {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as { kind?: unknown; minuteOfDay?: unknown; minutes?: unknown };
+  const candidate = value as { kind?: unknown; minuteOfDay?: unknown; minutes?: unknown; weekdaysOnly?: unknown };
   if (candidate.kind === "daily") {
     return typeof candidate.minuteOfDay === "number"
       && Number.isInteger(candidate.minuteOfDay)
       && candidate.minuteOfDay >= 0
-      && candidate.minuteOfDay < minutesPerDay;
+      && candidate.minuteOfDay < minutesPerDay
+      && (candidate.weekdaysOnly === undefined || typeof candidate.weekdaysOnly === "boolean");
   }
   if (candidate.kind === "interval") {
     // A floor of one minute: anything faster is a busy loop wearing a
@@ -115,7 +123,8 @@ export function describeCadence(cadence: Cadence): string {
   const minutes = cadence.minuteOfDay % 60;
   const suffix = hours24 < 12 ? "AM" : "PM";
   const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
-  return `Every day at ${hours12}:${String(minutes).padStart(2, "0")} ${suffix}`;
+  const when = `${hours12}:${String(minutes).padStart(2, "0")} ${suffix}`;
+  return cadence.weekdaysOnly ? `Every weekday at ${when}` : `Every day at ${when}`;
 }
 
 /**
@@ -136,6 +145,13 @@ export function nextDueAfter(cadence: Cadence, from: Date): Date {
     // rather than adding 86,400,000ms is what keeps this correct across a
     // daylight-saving change, where a local day is not 24 hours long.
     candidate.setDate(candidate.getDate() + 1);
+  }
+  // Saturday (6) and Sunday (0) are stepped over, one day at a time and
+  // through the same API, for the same reason.
+  if (cadence.weekdaysOnly) {
+    while (candidate.getDay() === 0 || candidate.getDay() === 6) {
+      candidate.setDate(candidate.getDate() + 1);
+    }
   }
   return candidate;
 }

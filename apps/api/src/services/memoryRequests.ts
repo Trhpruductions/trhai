@@ -151,3 +151,38 @@ export function isLastAskRequest(message: unknown): boolean {
   const text = plain(message);
   return text !== null && lastAskPatterns.some((pattern) => pattern.test(text));
 }
+
+/** "what schedules do I have", "list my schedules", "show my reminders". */
+const listSchedulesPatterns = [
+  /^(?:what|which) (?:schedules|reminders|scheduled (?:tasks|jobs|runs)|recurring (?:tasks|jobs)) (?:do i have|are (?:set|there|active|scheduled|running)|have i (?:set|got|made))$/,
+  /^(?:list|show(?: me)?|display) (?:my |the |all (?:of )?(?:my |the )?)?(?:active |current )?(?:schedules|reminders|scheduled (?:tasks|jobs|runs)|recurring (?:tasks|jobs))$/,
+  /^(?:do i have|are there|is there) any (?:schedules|reminders|scheduled (?:tasks|jobs))$/
+];
+
+export function isListSchedulesRequest(message: unknown): boolean {
+  const text = plain(message);
+  return text !== null && listSchedulesPatterns.some((pattern) => pattern.test(text));
+}
+
+const ordinals: Record<string, number> = {
+  first: 1, "1st": 1, second: 2, "2nd": 2, third: 3, "3rd": 3, fourth: 4, "4th": 4, fifth: 5, "5th": 5,
+  sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10
+};
+
+/**
+ * "what was the second thing I told you?" - which earlier turn is meant.
+ *
+ * Returns the 1-based position from the start of the conversation, or -1 for
+ * the last one. Null when the message is not this question.
+ */
+export function parseNthThingRequest(message: unknown): number | null {
+  const text = plain(message);
+  if (!text) return null;
+  const found = text.match(
+    /^what (?:was|is|were) the (first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|1st|2nd|3rd|4th|5th|last|latest|previous) (?:thing|message|question|request|fact) (?:i|that i) (?:told|asked|said|sent|typed|gave)(?: you| to you)?(?: about)?$/
+  );
+  if (!found) return null;
+  const word = found[1];
+  if (word === "last" || word === "latest" || word === "previous") return -1;
+  return ordinals[word] ?? null;
+}
