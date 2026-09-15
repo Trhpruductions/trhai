@@ -81,7 +81,17 @@ const actionVerbs: Array<{ kind: ActionKind; words: string[]; expects: string[] 
     words: ["edit", "change", "modify", "update", "fix", "rename", "move",
       "delete", "remove", "write", "create", "add", "append", "replace",
       "refactor", "patch"],
-    expects: ["edit_file", "write_file"]
+    expects: ["edit_file", "write_file", "change_app"]
+  },
+  {
+    // A page on the web, named by its address. "fetch https://example.com
+    // and tell me its heading" got "I'm sorry, but I can't fetch URLs.
+    // That's not something I'm allowed to do" - no tool called, nothing to
+    // push the model with, because a URL was no target to this classifier.
+    kind: "read",
+    words: ["fetch", "visit", "browse", "summarize http", "summarise http", "open http", "read http", "look at http",
+      "what does http", "what is at http", "what's at http", "what's on http", "check http", "load http"],
+    expects: ["fetch_url"]
   },
   {
     kind: "read",
@@ -107,6 +117,7 @@ const conversationalRun = /\brun (?:me through|by me|into|through|out of|a bit|l
 
 /** A drive path, a POSIX path, or a bare filename with an extension. */
 const targetPatterns = [
+  /\bhttps?:\/\/[^\s]+/i,
   /[a-z]:[\\/][^\s]+/i,
   /(?:^|\s)\/[^\s]+\.[a-z0-9]{1,6}\b/i,
   /\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i

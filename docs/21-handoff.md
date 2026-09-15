@@ -141,6 +141,41 @@ otes.txt`, or fell back to write_document.
 - **`add_schedule` supports `weekdays_only`** (cadence `weekdaysOnly`); a
   duplicate schedule is reported as already done (`ok: true`), because refused
   as a duplicate the model reworded the prompt until one got past the check.
+- **An app is changed by rebuilding it from its spec, never by the model
+  editing generated code.** "add a 'notes' text field to the plants" right
+  after a build made a second app called "Notes Text Field". `change_app`
+  (`packages/shared/src/projectChange.ts` + the tool in `agentTools.ts`)
+  reads `.vexora-app.json` in the app folder (request, title, changes),
+  applies the change to the plan (field add/remove, feature add) and
+  regenerates the same folder with `data/` untouched. The README is for
+  people and the model overwrote it three times in one turn - do not store
+  anything the app depends on there. `build_app` did not even record the
+  active project (a bare folder name was not "inside a project"); fixed in
+  `projectForPath`. Requests that say "it"/"its"/"the app"/"add X" with a
+  project active are spelled out by `resolveProjectReference`.
+- **A question gets no tool that writes.** "which file defines
+  classifyIntent?" led read_file to miss and write_file to CREATE
+  `classifyIntent.js` in the source tree. `availableTools({ writes: false })`
+  withholds the writers from a question; `run_command` stays, because "is
+  anything listening on port 4000?" is answered by the machine. `remember`
+  is offered only when the request asks to remember (`asksToRemember`); the
+  model had saved a note to itself as the user's fact.
+- **cmd.exe does not change drive on `cd D:\...`.** `cd D:\app && npm test`
+  from C: ran in the home folder ("Missing script: test"). `crossDrive` in
+  `commandRunner.ts` inserts `/d`; `forShell` wraps a bare PowerShell cmdlet
+  (`Get-PSDrive D`) in `powershell -NoProfile -Command`. `wmic` is gone on
+  this Windows; the prompt says so. Generated apps now have `npm test`.
+- **`search_files` exists** because `findstr` with forward slashes printed
+  nothing and the model went to `search_memory` for code. `list_files` lists
+  a folder's own entries (folders first, alphabetical) unless
+  `recursive: true`; the old newest-first deep listing answered "list the
+  top-level folders in D:/trhai" with `apps/api/data/tasks.json`.
+- **A narrated command is pushed to be run** (`narratesACommand`), except
+  after a build, where "you can run it with npm start" is for the user; the
+  loop refuses `npm start`/`node server.js` and any write into the app in
+  the turn that built it. A bare `run_command <command>` line is parsed as
+  the call; a prompt example path (`D:/projects`) was removed because the
+  model read three files under it.
 - **ffmpeg cannot rasterize SVG here.** The `svg_pipe` *demuxer* is listed, which
   is misleading: this build has no SVG *decoder* (no librsvg). Piping SVG frames
   fails with `no decoder found for: svg`. Do not design around SVG input.

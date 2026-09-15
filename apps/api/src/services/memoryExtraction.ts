@@ -95,6 +95,23 @@ const extractionRules: ExtractionRule[] = [
     kind: "fact",
     confidence: 0.75,
     pattern: /^((?:call me|i go by)\s+[a-z][a-z'.-]{0,40})$/i
+  },
+  {
+    // "my favorite color is green", "my favourite editor is vim". A
+    // favourite is a preference stated as a fact; it was said in passing and
+    // lost the moment the transcript stopped matching.
+    name: "favourite",
+    kind: "preference",
+    confidence: 0.8,
+    pattern: /^(my\s+favou?rite\s+[a-z][a-z ]{0,30}?\s+(?:is|are)\s+.+)$/i
+  },
+  {
+    // "my dog is called Rex", "my wife's name is Ana", "my cat is named Tom".
+    // Someone the user names is worth knowing by name next time.
+    name: "named-relation",
+    kind: "fact",
+    confidence: 0.8,
+    pattern: /^((?:and\s+)?my\s+[a-z][a-z ]{0,30}?(?:'s\s+name\s+is|\s+is\s+(?:called|named))\s+.+)$/i
   }
 ];
 
@@ -153,7 +170,7 @@ export function extractMemoryCandidates(message: unknown): MemoryCandidate[] {
         continue;
       }
 
-      const body = stripTrailingPunctuation(match[1] ?? "");
+      const body = stripTrailingPunctuation((match[1] ?? "").replace(/^and\s+/i, ""));
       if (body.length < minBodyLength) {
         continue;
       }

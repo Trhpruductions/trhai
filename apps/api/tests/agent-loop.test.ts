@@ -1965,8 +1965,11 @@ test("a request to read is not given the tools that change things", async () => 
       assert.ok(!names.includes(changing), `${changing} must not be offered for a read`);
     }
     // Memory acts on the conversation, not the machine: "read notes.txt and
-    // remember the port" is an ordinary thing to ask.
-    assert.ok(names.includes("remember"), "memory must survive a read request");
+    // remember the port" is an ordinary thing to ask - and remember is
+    // offered exactly when the request asks for something kept. This one
+    // does not, so search_memory stands in for the point.
+    assert.ok(names.includes("search_memory"), "memory must survive a read request");
+    assert.ok(!names.includes("remember"), "remember is only offered when asked for");
   } finally {
     server.close();
   }
@@ -2059,7 +2062,7 @@ test("an order answered with an un-offered tool is pointed at the right one and 
     if (!result.ok) return;
     const refusal = JSON.stringify(received[1] ?? {});
     assert.match(refusal, /build_app was not available for this request/);
-    assert.match(refusal, /Use edit_file or write_file instead/);
+    assert.match(refusal, /Use edit_file or write_file or change_app instead/);
     const push = JSON.stringify(received[2] ?? {});
     assert.match(push, /You did not call a tool/);
     assert.deepEqual(result.toolsUsed.map((used) => used.name), ["edit_file"]);

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
 import { normalizeSpelling } from "./spelling.js";
 import { matchMemories, type FactMatch } from "./factWording.js";
 import { selectRelevantMemories, type ScorableMemory } from "./memoryRelevance.js";
@@ -6,8 +8,8 @@ import { evaluateArithmetic, formatNumber } from "./arithmetic.js";
 import { describeDifference, shiftDate } from "./dateMath.js";
 import { shiftClock } from "./clockMath.js";
 import {
-  classifyRequest, deriveTitle, findScriptFault, generateProject, parseVideoScript, planProject,
-  slugify, videoScriptPrompt, type VideoScript
+  amendProject, changesFrom, classifyRequest, deriveTitle, findScriptFault, generateProject, originalRequestFrom,
+  parseVideoScript, planProject, slugify, titleFrom, videoScriptPrompt, withChanges, type VideoScript
 } from "@ascend/shared";
 import { renderVideo } from "./videoRender.js";
 import { authorPrompt, findAppFault, parseAuthoredFiles, type AuthoredFile } from "./appAuthor.js";
@@ -26,7 +28,7 @@ import { fetchWebPage } from "./webFetch.js";
 import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
 import { resolveForAccess } from "./machinePaths.js";
 import { explainMiss } from "./projectContext.js";
-import { impliedFileFor, noteFileTouched, noteProjectTouched, withinActiveProject } from "./activeProject.js";
+import { activeProject, impliedFileFor, noteFileTouched, noteProjectTouched, withinActiveProject } from "./activeProject.js";
 import { applyEdit, describeEdit } from "./fileEdit.js";
 import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
 import { enterStage } from "./reasoningStage.js";
@@ -519,9 +521,32 @@ export const toolDefinitions: ToolDefinition[] = [
             description:
               "A workspace subfolder, or a full path to a folder anywhere on this machine. "
               + "Omit for the whole workspace."
+          },
+          recursive: {
+            type: "boolean",
+            description: "true to list inside the folders as well. Default: the folder's own entries only."
           }
         },
         required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_files",
+      description:
+        "Find which files contain some text, with the matching lines. Use this to find where a "
+        + "function, word or setting is defined or used, anywhere on this machine. Searches "
+        + "recursively, skipping node_modules and .git.",
+      parameters: {
+        type: "object",
+        properties: {
+          directory: { type: "string", description: "The folder to search, as a workspace path or a full path." },
+          pattern: { type: "string", description: "The text to look for. Plain text, matched case-insensitively." },
+          extension: { type: "string", description: "Only files with this extension, like ts or js. Optional." }
+        },
+        required: ["directory", "pattern"]
       }
     }
   },
@@ -694,6 +719,25 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "change_app",
+      description:
+        "Change an app that build_app built: add or remove a field, or add a feature (dashboard, "
+        + "calendar, board, search, status, priority, due dates). The app is rebuilt from its own "
+        + "description plus the change, in the same folder, keeping its data. Use this for \"add a "
+        + "notes field\", \"add a dashboard\" - never build_app, which would make a second app.",
+      parameters: {
+        type: "object",
+        properties: {
+          change: { type: "string", description: "What to add, remove or change, in the user's words." },
+          project: { type: "string", description: "The app's folder in the workspace. Omit for the app worked on most recently." }
+        },
+        required: ["change"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "make_video",
       description:
         "Build a short motion-graphics video entirely on this machine - scripted, narrated, "
@@ -753,7 +797,7 @@ const scaffoldingTools = new Set(["build_app", "plan_app"]);
  * the port" is an ordinary thing to ask.
  */
 const machineChangingTools = new Set([
-  "write_file", "edit_file", "build_app", "make_video", "plan_app", "run_command", "run_script"
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "plan_app", "run_command", "run_script"
 ]);
 
 /**
@@ -806,6 +850,26 @@ export function verifiedDetail(output: string): string {
 
 /** Offered only when the request is about dates; see looksLikeDateMath. */
 const dateTools = new Set(["days_between", "shift_date"]);
+/**
+ * Withheld from a plain question. run_command is deliberately not here: "is
+ * anything listening on port 4000?" and "what version of node is installed?"
+ * are questions the machine answers, and withholding it left them unanswered.
+ * A question does not write files, documents or apps, though.
+ */
+const writingTools = new Set([
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "plan_app",
+  "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule"
+]);
+
+/**
+ * Offered only when the user asks for something to be kept. "run its smoke
+ * test" failed and the model then called remember with "The 'test' script is
+ * missing from the package.json file" - a note to itself, saved as the
+ * user's fact. Explicit "remember that ..." is handled before the model, so
+ * this is only ever for the compound turns.
+ */
+const memoryWritingTools = new Set(["remember"]);
+
 /** Offered only when the request names a clock time; see looksLikeClockMath. */
 const clockTools = new Set(["shift_time"]);
 /** Offered only when the request mentions the web; see mentionsWeb. */
@@ -817,7 +881,7 @@ export function availableTools(
   armed: boolean,
   options: {
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
-    web?: boolean; time?: boolean;
+    web?: boolean; time?: boolean; writes?: boolean; memory?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -829,6 +893,8 @@ export function availableTools(
   const allowClock = options.clock ?? true;
   const allowWeb = options.web ?? true;
   const allowTime = options.time ?? true;
+  const allowWrites = options.writes ?? true;
+  const allowMemory = options.memory ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -840,6 +906,8 @@ export function availableTools(
     if (!allowWeb && webTools.has(name)) return false;
     if (!allowTime && timeTools.has(name)) return false;
     if (!allowChanges && machineChangingTools.has(name)) return false;
+    if (!allowWrites && writingTools.has(name)) return false;
+    if (!allowMemory && memoryWritingTools.has(name)) return false;
     return true;
   });
 }
@@ -872,6 +940,109 @@ function findDocument(context: ToolContext, title: string) {
 
   return documents.find((document) => document.title.trim().toLowerCase() === wanted)
     ?? documents.find((document) => document.title.toLowerCase().includes(wanted));
+}
+
+const searchSkipped = new Set(["node_modules", ".git", "dist", ".next", "build", "coverage", ".cache"]);
+const searchMaxMatches = 60;
+const searchMaxFiles = 4000;
+const searchMaxFileBytes = 512_000;
+
+/** A recursive, case-insensitive plain-text search; see the search_files tool. */
+function searchFiles(
+  root: string,
+  pattern: string,
+  extension: string | null
+): { kind: "missing" } | { kind: "ok"; matches: Array<{ file: string; line: number; text: string }>; truncated: boolean } {
+  let stat;
+  try {
+    stat = statSync(root);
+  } catch {
+    return { kind: "missing" };
+  }
+  if (!stat.isDirectory()) return { kind: "missing" };
+
+  const needle = pattern.toLowerCase();
+  const matches: Array<{ file: string; line: number; text: string }> = [];
+  let visited = 0;
+  let truncated = false;
+
+  const walk = (directory: string): void => {
+    if (truncated || visited > searchMaxFiles) return;
+    let entries: string[];
+    try {
+      entries = readdirSync(directory);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (truncated) return;
+      if (searchSkipped.has(entry)) continue;
+      const full = path.join(directory, entry);
+      let entryStat;
+      try {
+        entryStat = statSync(full);
+      } catch {
+        continue;
+      }
+      if (entryStat.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!entryStat.isFile() || entryStat.size > searchMaxFileBytes) continue;
+      if (extension && !entry.toLowerCase().endsWith(`.${extension}`)) continue;
+      visited += 1;
+      let text: string;
+      try {
+        text = readFileSync(full, "utf8");
+      } catch {
+        continue;
+      }
+      if (text.includes("\u0000")) continue;
+      const lines = text.split(/\r?\n/);
+      for (let index = 0; index < lines.length; index += 1) {
+        if (!lines[index].toLowerCase().includes(needle)) continue;
+        matches.push({ file: full, line: index + 1, text: lines[index].trim().slice(0, 200) });
+        if (matches.length >= searchMaxMatches) {
+          truncated = true;
+          return;
+        }
+      }
+    }
+  };
+  walk(root);
+  return { kind: "ok", matches, truncated };
+}
+
+/**
+ * What an app was built from, kept in the folder in a file of its own.
+ *
+ * The README carries the same request for people, and the model rewrote it
+ * three times in the turn after the build - "Tracks the health and growth
+ * of your houseplants" - so change_app then found no description to rebuild
+ * from. This file is not a file the model is offered anything about.
+ */
+const appManifestName = ".vexora-app.json";
+
+type AppManifest = { request: string; title: string; changes: string[] };
+
+function readAppManifest(project: string): AppManifest | null {
+  const read = readWorkspaceFile(`${project}/${appManifestName}`);
+  if (!read.ok) return null;
+  try {
+    const parsed = JSON.parse(read.content) as Partial<AppManifest>;
+    if (typeof parsed.request !== "string" || !parsed.request.trim()) return null;
+    return {
+      request: parsed.request,
+      title: typeof parsed.title === "string" ? parsed.title : "",
+      changes: Array.isArray(parsed.changes) ? parsed.changes.filter((entry): entry is string => typeof entry === "string") : []
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeAppManifest(project: string, manifest: AppManifest): void {
+  writeWorkspaceFile(`${project}/${appManifestName}`, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 /**
@@ -1416,6 +1587,86 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         : { ok: false, content: result.reason };
     }
 
+    case "change_app": {
+      const change = requireString(call.arguments.change);
+      if (!change) return { ok: false, content: "change_app needs the change, in words." };
+      const project = requireString(call.arguments.project)?.replace(/[\\/]+$/, "") ?? activeProject(context.sessionId);
+      if (!project) {
+        return {
+          ok: false,
+          content: "change_app needs to know which app: none has been built or worked on in this session. "
+            + "Pass project with its folder name in the workspace."
+        };
+      }
+
+      // The manifest first; the README's first paragraph for apps built
+      // before the manifest existed.
+      const manifest = readAppManifest(project);
+      const readme = readWorkspaceFile(`${project}/README.md`);
+      const original = manifest?.request ?? (readme.ok ? originalRequestFrom(readme.content) : null);
+      if (!original) {
+        return {
+          ok: false,
+          content: `${project} was not built by build_app - nothing in it carries the description it was built from - `
+            + "so it cannot be rebuilt from one. Change its files with edit_file instead."
+        };
+      }
+      const earlier = manifest?.changes ?? (readme.ok ? changesFrom(readme.content) : []);
+      const title = (manifest?.title || (readme.ok ? titleFrom(readme.content) : null)) ?? undefined;
+
+      const amended = amendProject(original, earlier, change, title);
+      if (!amended) {
+        return {
+          ok: false,
+          content: `I could not map "${change}" onto the app's plan, so nothing was changed. change_app can add or `
+            + "remove a field (\"add a notes text field\", \"remove the species field\") or add a feature (dashboard, "
+            + "calendar, board, search, status, priority, due dates). For anything else, change the files with edit_file."
+        };
+      }
+
+      const { sessionId } = context;
+      recordEvent(sessionId, "plan", `Changing "${amended.spec.title}"`, "ok", amended.changes.join("; "));
+
+      // The README carries the whole change list, so the next change starts
+      // from all of them. data/ is not among the generated files and is left
+      // exactly as it is: the records are the user's.
+      const files = generateProject(amended.spec).map((file) =>
+        file.path === "README.md" ? { ...file, content: withChanges(file.content, [...earlier, change]) } : file);
+      const writing = beginEvent(sessionId, "write", `Rewriting ${files.length} files`);
+      let count = 0;
+      for (const file of files) {
+        const result = writeWorkspaceFile(`${project}/${file.path}`, file.content);
+        if (!result.ok) {
+          endEvent(sessionId, writing, "failed", `${result.reason} ${count} of ${files.length} files were written.`);
+          return { ok: false, content: `Could not finish the change: ${result.reason} The app may be half-written; run change_app again.` };
+        }
+        count += 1;
+      }
+      endEvent(sessionId, writing, "ok", `${count} files`, `${project}/`);
+      writeAppManifest(project, { request: original, title: amended.spec.title, changes: [...earlier, change] });
+      noteProjectTouched(sessionId, `${project}/server.js`);
+
+      enterStage(sessionId, "verifying");
+      const verifying = beginEvent(sessionId, "verify", "Running its own checks");
+      const verification = await verifyBuiltProject(project);
+      endEvent(
+        sessionId,
+        verifying,
+        !verification.ran ? "skipped" : verification.passed ? "ok" : "failed",
+        verification.ran ? verification.output : verification.reason
+      );
+
+      const did = amended.changes.join("; ");
+      const runLine = `The user can run it with: cd ${project} && npm start (do not start it here).`;
+      if (!verification.ran) {
+        return { ok: true, content: `Changed "${amended.spec.title}" (${project}/): ${did}. Could not verify it automatically: ${verification.reason}\n\n${runLine}` };
+      }
+      if (!verification.passed) {
+        return { ok: false, content: `Changed "${amended.spec.title}" (${project}/): ${did} - but its own checks FAILED:\n${verification.output}` };
+      }
+      return { ok: true, content: `Changed "${amended.spec.title}" (${project}/): ${did}. Verified: ${verification.output}\n\n${runLine}` };
+    }
+
     case "build_app": {
       const description = requireString(call.arguments.description);
       if (!description) return { ok: false, content: "build_app needs a description." };
@@ -1580,7 +1831,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // implying the app needs fetching something before it will start. On a
       // machine that is offline, or where npm is having a bad day, it would
       // fail and make a working app look broken.
-      const runLine = "Run it with: cd " + folder + " && npm start";
+      const runLine = "The user can run it with: cd " + folder + " && npm start (do not start it here).";
 
       // Three outcomes, kept distinct. "Could not check" is not "passed", and
       // reporting it as either would be the kind of quiet rounding-up this
@@ -1612,6 +1863,11 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
 
       // A build you just asked for is the project you are working in.
       noteProjectTouched(context.sessionId, folder);
+      // What it was built from, for change_app. The user's own words when
+      // they were given; the model's description otherwise.
+      if (archetype !== "authored") {
+        writeAppManifest(folder, { request: askedFor || description, title: spec.title, changes: [] });
+      }
 
       return {
         ok: true,
@@ -1726,19 +1982,66 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         return { ok: false, content: inWorkspace ? "The workspace is empty." : `${directory} is empty.` };
       }
 
-      const files = entries.filter((entry) => !entry.directory);
+      // The folder's own entries, folders first, unless the deep listing was
+      // asked for. Asked for the top-level folders of a repository, the old
+      // recursive, newest-first listing answered with apps/api/data/tasks.json
+      // and its neighbours - two hundred files from wherever the last write
+      // happened, and not one folder name.
+      const deep = call.arguments.recursive === true || call.arguments.recursive === "true";
+      // Workspace listings are relative to the workspace root, not to the
+      // folder asked about, so the asked-about folder's own prefix is what
+      // depth is counted from.
+      const prefix = inWorkspace && directory !== "." ? directory.replace(/^[.\\/]+/, "").replace(/[\\/]+$/, "") : "";
+      const relativeTo = (entryPath: string) =>
+        prefix && (entryPath.startsWith(`${prefix}/`) || entryPath.startsWith(`${prefix}\\`)) ? entryPath.slice(prefix.length + 1) : entryPath;
+      const depthOf = (entryPath: string) => relativeTo(entryPath).split(/[\\/]/).length;
+      const byName = (left: { path: string }, right: { path: string }) => left.path.localeCompare(right.path);
+      const top = entries.filter((entry) => depthOf(entry.path) === 1);
+      // Alphabetical at the top level, the way a directory listing reads;
+      // the deep listing keeps newest first, which is what it is for.
+      const chosen = deep || top.length === 0 ? entries : [...top].sort(byName);
+      const folders = chosen.filter((entry) => entry.directory);
+      const files = chosen.filter((entry) => !entry.directory);
       const shown = files.slice(0, 200);
-      const listing = shown.map((entry) => `- ${entry.path} (${entry.bytes} bytes)`).join("\n");
+      const folderLines = folders.map((entry) => {
+        const inside = entries.filter((child) => child.path.startsWith(`${entry.path}/`) || child.path.startsWith(`${entry.path}\\`)).length;
+        return `- ${entry.path}/${inside > 0 ? ` (${inside} entries)` : ""}`;
+      });
+      const fileLines = shown.map((entry) => `- ${entry.path} (${entry.bytes} bytes)`);
+      const listing = [...folderLines, ...fileLines].join("\n");
 
       // Says when it is showing part of a folder. A truncated listing that
       // looks complete is how "that file does not exist" gets said about a
       // file that does.
-      return {
-        ok: true,
-        content: files.length > shown.length
-          ? `${listing}\n\n[showing ${shown.length} of ${files.length} files, newest first]`
-          : listing
-      };
+      const note = files.length > shown.length
+        ? `\n\n[showing ${shown.length} of ${files.length} files, newest first]`
+        : !deep && entries.length > chosen.length
+          ? "\n\n[top level only; pass recursive: true to list inside the folders]"
+          : "";
+      return { ok: true, content: `${listing}${note}` };
+    }
+
+    case "search_files": {
+      const directory = requireString(call.arguments.directory);
+      const pattern = requireString(call.arguments.pattern);
+      if (!directory || !pattern) return { ok: false, content: "search_files needs a directory and a pattern." };
+      const extension = requireString(call.arguments.extension)?.replace(/^\./, "").toLowerCase() ?? null;
+
+      const verdict = resolveForAccess(directory, {
+        granted: commandsArmed() && !context.unattended,
+        intent: "read",
+        insideWorkspace: resolveInWorkspace
+      });
+      if (!verdict.ok) return { ok: false, content: verdict.reason };
+
+      const found = searchFiles(verdict.path, pattern, extension);
+      if (found.kind === "missing") return { ok: false, content: `There is no folder at "${directory}".` };
+      if (found.matches.length === 0) {
+        return { ok: false, content: `Nothing under ${directory} contains "${pattern}"${extension ? ` in .${extension} files` : ""}.` };
+      }
+      const lines = found.matches.map((match) => `${match.file}:${match.line}: ${match.text}`);
+      const note = found.truncated ? `\n[first ${found.matches.length} matches shown]` : "";
+      return { ok: true, content: lines.join("\n") + note };
     }
 
     case "read_file": {
@@ -2075,9 +2378,12 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // install looks like an install in the trace rather than a generic
       // "command", which is what makes the sequence legible.
       const lower = command.toLowerCase();
-      const kind = /(install|add|npm i|pip install)/.test(lower) ? "install"
-        : /(test|jest|vitest|pytest)/.test(lower) ? "test"
-        : /(start|serve|run dev|launch)/.test(lower) ? "launch"
+      // These carried literal backspace characters where \b was meant - an
+      // escaping collapse in the commit that added them - so no command was
+      // ever an install, a test or a launch in the trace.
+      const kind = /\b(install|add|npm i\b|pip install)/.test(lower) ? "install"
+        : /\b(test|jest|vitest|pytest)\b/.test(lower) ? "test"
+        : /\b(start|serve|run dev|launch)\b/.test(lower) ? "launch"
         : "command";
 
       const step = beginEvent(context.sessionId, kind, command);

@@ -247,7 +247,11 @@ const questionWords = /\b(what|which|when|where|who|whose|whom|why|how)\b/gi;
  */
 export function isMultiPartQuestion(message: string): boolean {
   const matches = message.match(questionWords);
-  return (matches?.length ?? 0) > 1;
+  if ((matches?.length ?? 0) > 1) return true;
+  // One question word, two things asked: "what's my favorite color and my
+  // dog's name?" The "and" joins two possessive noun phrases, which is the
+  // shape of two questions sharing a verb.
+  return /\b(?:my|our|the|your)\s+[\w' -]{1,40}?\s+and\s+(?:my|our|the|your)\s+[\w' -]{1,40}\??$/i.test(message.trim());
 }
 
 /**
@@ -586,7 +590,11 @@ export function composeReply(input: ComposerInput): ComposedReply {
         text: `You mentioned this earlier in our conversation:\n\n${quoted}`,
         strategy: "answer",
         groundedOn: [],
-        groundedOnHistory: fromHistory.length
+        groundedOnHistory: fromHistory.length,
+        // "what's my favorite color and my dog's name?" quoted the colour
+        // turn alone. Flagged like a memory answer that covers half, so the
+        // model can answer the rest with this handed over.
+        partial: isMultiPartQuestion(query) && fromHistory.length < 2
       };
     }
 

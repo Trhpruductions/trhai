@@ -29,12 +29,17 @@ test("the description names the workspace root", () => {
   assert.ok(text.includes(root), "the model cannot use a path it is never given");
 });
 
-test("it warns off the paths the model actually invented", () => {
-  // Named outright rather than described, because these are the two it reached
-  // for unprompted and a general "do not guess" did not stop it.
+test("it names no example path for the model to copy", () => {
+  // This used to name D:/projects and C:/Users as paths never to guess, on
+  // the grounds that a general "do not guess" had not stopped it. Named, the
+  // model then read D:/projects/app/server.js, D:/projects/notes-text-field/
+  // server.js and D:/projects/word-counter-app/server.js in three consecutive
+  // rounds - the one directory it had been shown, copied out of the sentence
+  // forbidding it. The rule is now stated positively, with no path in it.
   const text = describeWorkspace(summariseWorkspace());
-  assert.match(text, /D:\/projects/);
-  assert.match(text, /C:\/Users/);
+  assert.doesNotMatch(text, /D:\/projects/);
+  assert.doesNotMatch(text, /C:\/Users/);
+  assert.match(text, /use only paths the user gave you, this list, or a tool result/);
 });
 
 test("projects are listed by name", () => {

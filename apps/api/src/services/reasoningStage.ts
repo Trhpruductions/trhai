@@ -122,7 +122,7 @@ export function resetStages(): void {
  * mapping is about the work, and the work is what the name describes.
  */
 export function stageForTool(tool: string): Stage {
-  if (tool === "build_app" || tool === "write_file" || tool === "write_document") return "building";
+  if (tool === "build_app" || tool === "change_app" || tool === "write_file" || tool === "write_document") return "building";
   if (tool === "run_command") return "building";
   if (tool.startsWith("search_") || tool.startsWith("list_") || tool.startsWith("read_")
     || tool === "fetch_url") {

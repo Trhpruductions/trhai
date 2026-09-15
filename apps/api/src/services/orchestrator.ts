@@ -21,10 +21,10 @@ import {
   type PendingConfirmation
 } from "./pendingConfirmation.js";
 import {
-  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, parseForgetRequest, parsePinRequest
+  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, parseForgetRequest, parseNthThingRequest, parsePinRequest
 } from "./memoryRequests.js";
 import { matchMemories } from "./factWording.js";
-import { resolveFilePronoun } from "./activeProject.js";
+import { resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
@@ -324,7 +324,11 @@ export async function runAssistantOrchestrator(
     // word "contain" in that sentence made the loop's classifier read the
     // whole thing as a request for a file's contents, so the tools that
     // write were withheld from a request to write. See resolveFilePronoun.
-    const implied = resolveFilePronoun(effectiveMessage, input.sessionId);
+    const impliedFile = resolveFilePronoun(effectiveMessage, input.sessionId);
+    // The project, when no file was meant: "add a notes field to the plants",
+    // "run its smoke test", "what files did that create?".
+    const impliedProject = impliedFile ? null : resolveProjectReference(effectiveMessage, input.sessionId);
+    const implied = impliedFile ?? impliedProject;
     const planIntent = classifyIntent(implied?.request ?? modelReply.buildRequest ?? "");
     const planWritesANamedFile = planIntent.kind === "write" && planIntent.hasTarget;
     // The build_app instruction goes only with a request for an app. The
@@ -372,7 +376,7 @@ export async function runAssistantOrchestrator(
     }
 
     const generated = await answerWithLocalModel(
-      { ...input, userMessage: effectiveMessage, ...(implied ? { impliedFile: implied.file } : {}) },
+      { ...input, userMessage: effectiveMessage, ...(impliedFile ? { impliedFile: impliedFile.file } : {}) },
       known,
       question,
       // Authorised for this turn only, and only for the exact tool the user
@@ -556,9 +560,28 @@ function resolveLastAsk(
   approving: PendingConfirmation | null,
   effectiveMessage: string
 ): OrchestratorResult | null {
-  if (approving || !isLastAskRequest(effectiveMessage)) return null;
+  if (approving) return null;
 
   const current = effectiveMessage.trim();
+  const userTurns = (input.history ?? [])
+    .filter((turn) => turn.role === "user" && turn.content.trim().length > 0 && turn.content.trim() !== current)
+    .map((turn) => turn.content.trim());
+
+  // "what was the second thing I told you?" - counted from the start of the
+  // conversation. The model answered "I don't have any saved memories of
+  // things you told me" with the transcript in front of it.
+  const nth = parseNthThingRequest(effectiveMessage);
+  if (nth !== null) {
+    const picked = nth === -1 ? userTurns[userTurns.length - 1] : userTurns[nth - 1];
+    if (!picked) {
+      return deterministicResult(effectiveMessage, userTurns.length === 0
+        ? "You have not told me anything yet in this conversation."
+        : `You have said ${userTurns.length} thing${userTurns.length === 1 ? "" : "s"} so far in this conversation, not that many.`, "recap");
+    }
+    return deterministicResult(effectiveMessage, `You said: "${picked}"`, "recap");
+  }
+
+  if (!isLastAskRequest(effectiveMessage)) return null;
   // The client may send the current message as the last turn of the history.
   const previous = [...(input.history ?? [])]
     .reverse()

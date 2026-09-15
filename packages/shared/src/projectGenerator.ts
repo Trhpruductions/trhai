@@ -1358,7 +1358,10 @@ function packageFile(spec: ProjectSpec): string {
     engines: { node: ">=18.0.0" },
     scripts: {
       start: "node server.js",
-      smoke: "node smoke.js"
+      smoke: "node smoke.js",
+      // "run its smoke test" became `npm test` twice, and "Missing script:
+      // test" twice. The smoke test is the test.
+      test: "node smoke.js"
     }
   }, null, 2) + "\n";
 }
@@ -1565,7 +1568,10 @@ function calculatorPackageFile(spec: ProjectSpec): string {
     engines: { node: ">=18.0.0" },
     scripts: {
       start: "node server.js",
-      smoke: "node smoke.js"
+      smoke: "node smoke.js",
+      // "run its smoke test" became `npm test` twice, and "Missing script:
+      // test" twice. The smoke test is the test.
+      test: "node smoke.js"
     }
   }, null, 2) + "\n";
 }

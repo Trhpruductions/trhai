@@ -11,10 +11,11 @@ import {
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
 import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, type ActionKind } from "./actionIntent.js";
+import { analyzeRequest } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
-import { activeProject, resolveFilePronoun } from "./activeProject.js";
+import { activeProject, resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
 
 // Re-exported so nothing that already imports it from here has to move.
 export type { ToolActivity };
@@ -137,6 +138,28 @@ export const maxToolRounds = 4;
  */
 export const maxCallsPerRound = 4;
 
+/**
+ * A reply that names a command to run, in a code block or as a bare
+ * `run_command ...` line, rather than running it.
+ */
+export function narratesACommand(text: string): boolean {
+  const trimmed = text.trim();
+  // Starting a server is never something to run here; it is what the user
+  // does with the result.
+  if (/```[^`]*\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:start|dev|serve)\b|```[^`]*\bnode\s+(?:\S*[\\/])?(?:server|index|app)\.(?:m?js|cjs)\b/i.test(trimmed)) return false;
+  if (/^run_command\s+\S/i.test(trimmed)) return true;
+  // The code fence may sit a blank line below the sentence, so the span
+  // between the verb and the fence allows newlines.
+  return /\b(?:i(?:'ll| will| would| can| am going to)|let me|let's|we can|you can|to (?:check|see|find|get)[^.\n]{0,60})\b[^`\n]{0,80}\b(?:run|execute|use)\b[^`]{0,120}```[\s\S]*?```/i.test(trimmed)
+    || /^(?:run|execute)(?: the following| this)?(?: command)?:?\s*```[\s\S]*?```/im.test(trimmed);
+}
+
+/** Whether the request asks for something to be kept in memory. */
+export function asksToRemember(text: string): boolean {
+  return /\b(?:remember|memori[sz]e|keep in mind|note that|make a note|save (?:this|that|it|the fact)|don'?t forget|store (?:this|that|it))\b/i
+    .test(text);
+}
+
 /** A reply that says, in some words, that the change was not made. */
 const admitsNothingChanged_ =
   /\b(?:could not|couldn't|cannot|can't|unable|not able|failed|no file|does not exist|doesn't exist|not found|nothing was (?:changed|written|edited)|was not (?:changed|written|edited)|did not (?:change|write|edit)|no such file|permission|not allowed|outside the workspace)\b/i;
@@ -207,12 +230,20 @@ export const systemPrompt = [
   "- remember, forget, write_document to change what is stored.",
   "- build_app when they want something built. It writes a working app to disk.",
   "  Do not describe what you would build and stop; build it, then say where it is.",
+  "- change_app to add or remove a field, or add a feature, on an app built here. \"add a",
+  "  notes field to the plants\" is change_app, never a second build_app.",
   "- list_files, read_file, write_file for the workspace where those apps live.",
   "- run_command runs a real command on this machine and returns its real output. It only",
   "  appears when the user has switched command access on. Use it for anything outside the",
   "  workspace: installing, building, running tests, opening an app, inspecting the system.",
   "  Say what you are about to run. A non-zero exit code means it FAILED - report that, do",
   "  not describe a failed command as done.",
+  `  This machine runs ${process.platform === "win32" ? "Windows: commands run in cmd.exe, so use dir, findstr, type, netstat, or"
+    + " powershell -Command \"...\" for anything else (disk space: powershell -Command \"Get-PSDrive D\")."
+    + " Not ls, df, grep, cat or wmic." : "a POSIX shell: ls, grep, df and the rest work as usual."}`,
+  "- search_files to find where something is defined or used in files on disk: it returns",
+  "  file:line for every match. Never search_memory or search_documents for code: those hold",
+  "  what the user told you and their notes, not the files on this machine.",
   "- A name with a file extension - test.txt, notes.md, server.js - is a workspace FILE: use",
   "  list_files, read_file, write_file. write_document, update_document, read_document and",
   "  delete_document are only for the knowledge base, titled in plain language with no extension.",
@@ -263,7 +294,7 @@ export const systemPrompt = [
  */
 const mutatingTools = new Set([
   "remember", "forget", "write_document", "update_document", "delete_document",
-  "pin_memory", "write_file", "build_app", "make_video",
+  "pin_memory", "write_file", "build_app", "change_app", "make_video",
   // "I added the schedule for you." said nothing about when. The tool's
   // own line - Scheduled "Build Check": Every weekday at 8:00 AM - is what
   // the user needs to check it against what they asked.
@@ -278,7 +309,7 @@ const mutatingTools = new Set([
  * the loop stays out of their way rather than logging a second, vaguer entry
  * beside each one.
  */
-const selfLoggingTools = new Set(["build_app", "make_video", "run_command"]);
+const selfLoggingTools = new Set(["build_app", "change_app", "make_video", "run_command"]);
 
 /** Which kind of work a tool represents, for the activity list's dot colour. */
 export function executionKindForTool(tool: string): ExecutionKind {
@@ -410,7 +441,41 @@ export function looksLikeRawToolCalls(text: string): boolean {
  * JSON branch applies — this reads a request the model made, not a mention of
  * a function's name in the middle of an explanation.
  */
+/**
+ * Whether a line after "run_command" is a command and not a sentence.
+ * "run_command is the tool that would do it, but it is not on." is prose.
+ */
+function looksLikeAShellCommand(rest: string): boolean {
+  if (/[.!?]$/.test(rest)) return false;
+  return /^(?:npm|npx|pnpm|yarn|node|git|python|py|pip|powershell|pwsh|cmd|dir|findstr|netstat|type|echo|cd|ls|cat|grep|curl|wget|docker|tsc|eslint|systeminfo|tasklist|taskkill|where|which|whoami|hostname|ipconfig|ping|del|mkdir|rmdir|copy|move|ren|set|start|explorer|code|dotnet|cargo|go|java|mvn|gradle|make|tree|wsl|bash|sh)\b/i.test(rest);
+}
+
 function parseBareCall(line: string, known: string[]): ToolCall | null {
+  // `fetch_url {"url":"https://news.ycombinator.com/"}}` - the name, a space,
+  // and the arguments as JSON, with a stray brace. Seen live as the whole of
+  // the user-facing reply. The name is the tool's own, the object its
+  // arguments; one trailing brace too many is forgiven.
+  // `run_command powershell -Command "Get-PSDrive D"` - the tool's name and
+  // then the command itself, as one line. Seen live as the whole reply.
+  const bareRun = /^run_command\s+([^{\s][^\n]*)$/i.exec(line.trim());
+  if (bareRun && known.includes("run_command") && looksLikeAShellCommand(bareRun[1].trim())) {
+    return { name: "run_command", arguments: { command: bareRun[1].trim() } };
+  }
+
+  const named = /^([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{[\s\S]*\})\s*$/.exec(line.trim());
+  if (named && known.includes(named[1])) {
+    for (const candidate of [named[2], named[2].replace(/\}\s*$/, "")]) {
+      try {
+        const parsed = JSON.parse(candidate) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          return { name: named[1], arguments: parsed as Record<string, unknown> };
+        }
+      } catch {
+        // Try the next candidate.
+      }
+    }
+  }
+
   const match = /^([a-zA-Z_][a-zA-Z0-9_]*)\(([^()]*)\)$/.exec(line.trim());
   if (!match) return null;
 
@@ -796,6 +861,9 @@ export async function runAgent(
   if (spelledOut) {
     question = spelledOut.request;
     context = { ...context, impliedFile: spelledOut.file };
+  } else {
+    const project = resolveProjectReference(question, context.sessionId);
+    if (project) question = project.request;
   }
 
   const now = (context.now ?? (() => new Date()))();
@@ -846,9 +914,18 @@ export async function runAgent(
   let correctedToolCredit = false;
   let correctedRetrieval = false;
   let correctedUnwrittenOrder = false;
+  let correctedNarratedCommand = false;
 
   // Fixed for the turn: what was asked does not change as the loop runs.
   const askedAQuestion = isExplanatoryQuestion(question);
+  // A question that names no action gets nothing that changes the machine.
+  // "in D:/trhai/apps/api/src/services, which file defines the function
+  // classifyIntent?" - a question with a path in it, so not "explanatory"
+  // by the narrow test above - had read_file miss and then write_file CREATE
+  // classifyIntent.js in the source tree, three times, with placeholder code.
+  // "what's my favorite color and my dog's name?" called update_document.
+  // A question is answered; it is not a licence to write.
+  const onlyAsks = !intent.action && analyzeRequest(question).shape === "question";
 
   // A request that names the file it wants written is not a request to
   // scaffold a project.
@@ -900,6 +977,9 @@ export async function runAgent(
   // immediately followed by "Built \"Celsius\" in the workspace". The user is
   // left to guess which half is true, and the app did in fact build.
   const mutationAttempts: Array<{ name: string; content: string; ok: boolean }> = [];
+  // Successful results of tools that only read, for the round-limit fallback
+  // at the bottom of this function.
+  const readResults: string[] = [];
 
   // Every change already asked for this turn, by tool and arguments. A
   // repeat with the same arguments is not run again: its result stands.
@@ -909,7 +989,7 @@ export async function runAgent(
   const changesAsked = new Set<string>();
   // Tools that make one thing per request, whatever the arguments: a second
   // schedule, app or video in the same turn is never what was asked for.
-  const oncePerTurn = new Set(["add_schedule", "build_app", "make_video"]);
+  const oncePerTurn = new Set(["add_schedule", "build_app", "change_app", "make_video"]);
   const madeThisTurn = new Set<string>();
 
   // How many times each exact call has actually been run, across every round
@@ -977,6 +1057,10 @@ export async function runAgent(
         // to read one file, the model read it and then wrote three - see
         // machineChangingTools in agentTools.
         changes: intent.kind !== "read",
+        // A question keeps run_command - the machine answers "is anything
+        // listening on port 4000?" - and loses everything that writes.
+        writes: !onlyAsks,
+        memory: asksToRemember(question),
         // A question does not get to scaffold a project. Decided from the
         // request rather than from the reply, because a build has already
         // written its files by the time a reply exists.
@@ -1211,6 +1295,27 @@ export async function runAgent(
           toolsUsed,
           actionAudit: auditFor("no-tool-failure")
         };
+      }
+
+      // A command described instead of run. "is anything listening on port
+      // 4000?" was answered "I'll run the following command: netstat -an |
+      // findstr :4000 - this will show you..." with no tool called; "how much
+      // free space is on drive D?" with the bare line `run_command powershell
+      // -Command "Get-PSDrive D"`. Both had run_command in reach.
+      // Not after a build or change: "You can run it with: cd app && npm
+      // start" is the instruction the user needs, not a command the model
+      // should have run - and pushed, the model ran `dir` instead.
+      if (offeredNames.has("run_command") && !correctedNarratedCommand && narratesACommand(text)
+        && !madeThisTurn.has("build_app") && !madeThisTurn.has("change_app")
+        && !toolsUsed.some((used) => used.name === "run_command")) {
+        correctedNarratedCommand = true;
+        spendCorrection();
+        messages.push({
+          role: "user",
+          content: "You described a command instead of running it. Call run_command with that exact command "
+            + "now, then answer from its output. Do not show the command to the user as something for them to run."
+        });
+        continue;
       }
 
       // An order to change a file, answered without changing one.
@@ -1466,7 +1571,10 @@ export async function runAgent(
     for (const call of orderedCalls) {
       if (process.env.ASSIST_DEBUG) console.log(`[agent]   consider ${call.name} offered=${offeredNames.has(call.name)}`);
       if (changesSomething(call.name) && offeredNames.has(call.name)) {
-        const signature = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
+        // Without "reason": `npm run test` was run three times in a row, each
+        // with a differently worded reason, and each counted as new.
+        const { reason: _reason, ...argumentsThatMatter } = (call.arguments ?? {}) as Record<string, unknown>;
+        const signature = `${call.name}:${JSON.stringify(argumentsThatMatter)}`;
         if (changesAsked.has(signature)) {
           toolActivity.markBlocked();
           messages.push({
@@ -1497,6 +1605,39 @@ export async function runAgent(
           continue;
         }
         changedThisRound = true;
+      }
+
+      // An app built or changed this turn is complete; its files are not
+      // rewritten in the same breath. After one build the model overwrote
+      // the generated README three times with prose of its own, and the
+      // record of what the app was built from went with it.
+      if ((call.name === "write_file" || call.name === "edit_file")
+        && (madeThisTurn.has("build_app") || madeThisTurn.has("change_app"))) {
+        toolActivity.markBlocked();
+        messages.push({
+          role: "tool",
+          content: `${call.name} was not run: the app was just generated and its files are complete. Do not `
+            + "rewrite them. Tell the user it is built and where it is; changes come later, through change_app."
+        });
+        continue;
+      }
+
+      // An app built or changed this turn is not started here. After every
+      // build the model ran `cd <app> && npm start`: from the wrong directory
+      // it failed, and the model then ran `echo 'Command failed'` to "report"
+      // it; from the right one it would have hung until the timeout, since a
+      // server does not exit. The build's own checks already ran it.
+      if (call.name === "run_command" && madeThisTurn.has("build_app") || call.name === "run_command" && madeThisTurn.has("change_app")) {
+        const command = typeof call.arguments?.command === "string" ? call.arguments.command : "";
+        if (/\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:start|dev|serve)\b|\bnode\s+(?:\S*[\\/])?(?:server|index|app)\.(?:m?js|cjs)\b/i.test(command)) {
+          toolActivity.markBlocked();
+          messages.push({
+            role: "tool",
+            content: "Not run: the app is built and its own checks already ran it, and starting its server here "
+              + "would run until killed. Tell the user it is built and how to start it themselves."
+          });
+          continue;
+        }
       }
 
       // Not offered this turn, not run. See offeredNames above. Told to the
@@ -1652,8 +1793,26 @@ export async function runAgent(
       if (mutatingTools.has(call.name) && !result.needsConfirmation) {
         mutationAttempts.push({ name: call.name, content: result.content, ok: result.ok });
       }
+      if (result.ok && !changesSomething(call.name)) readResults.push(result.content);
     }
   }
 
+  // Out of rounds. With nothing in hand that is a failure; with results in
+  // hand it is an answer the model did not get round to writing. Asked
+  // whether anything was listening on port 4000, the model ran netstat, got
+  // the answer, then wandered off reading invented paths until the rounds
+  // ran out - and the user got the composer's "I don't have anything saved
+  // that answers that". The netstat output was the answer.
+  const useful = readResults.filter((result) => result.trim().length > 0);
+  if (useful.length > 0) {
+    const shown = useful.slice(-2).map((result) => result.length > 1500 ? `${result.slice(0, 1500)}\n[...]` : result);
+    return {
+      ok: true,
+      text: `I did not get as far as a written answer, but this is what I found:\n\n${shown.join("\n\n")}`,
+      model: config.model,
+      toolsUsed,
+      actionAudit: auditFor("tool-called")
+    };
+  }
   return { ok: false, reason: "The assistant kept searching without reaching an answer.", toolsUsed };
 }
