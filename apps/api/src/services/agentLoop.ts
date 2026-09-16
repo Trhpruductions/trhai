@@ -10,7 +10,7 @@ import {
   correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, type ActionKind } from "./actionIntent.js";
+import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, wantsRendering, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -1084,7 +1084,9 @@ export async function runAgent(
         // The web only when the request mentions it or asks for a lookup; the
         // clock only when the request is about time at all.
         web: mentionsWeb(question) || wantsWebSearch(question),
-        time: mentionsTime(question)
+        time: mentionsTime(question),
+        // A visual is offered only when the request asks to see one.
+        render: wantsRendering(question)
       })
       : [];
     const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));

@@ -310,6 +310,32 @@ export function wantsWebSearch(message: string): boolean {
 }
 
 /**
+ * Whether the request asks to see a visual — a UI mockup or a diagram — so
+ * render_mockup is worth offering. "show me a mockup of a login screen",
+ * "diagram how the build works", "wireframe a dashboard".
+ *
+ * Scoped to visual intent: it does not fire on "show me my files" (that is a
+ * listing) or "show me the weather" (that is a lookup), because the nouns it
+ * looks for are screens, layouts and diagrams, not data.
+ */
+export function wantsRendering(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  if (!text) return false;
+
+  // Strong, unambiguous verbs and nouns for producing a visual.
+  if (/\b(?:mock\s?up|wireframe|wire-frame|blueprint)\b/.test(text)) return true;
+  if (/\b(?:render|sketch|draw|diagram|visuali[sz]e)\b/.test(text)) return true;
+
+  // "show me a design / screen / layout ...", "design a login screen".
+  const visualNoun =
+    "(?:mock\\s?up|design|screen|page|layout|wireframe|diagram|ui|interface|dashboard|prototype|concept|form|homepage|landing\\s+page|site|website)";
+  if (new RegExp(`\\bshow\\s+(?:me\\s+|us\\s+)?(?:a|an|the|my)?\\s*${visualNoun}\\b`).test(text)) return true;
+  if (new RegExp(`\\bdesign\\s+(?:me\\s+)?(?:a|an|the)?\\s*\\w*\\s*${visualNoun}\\b`).test(text)) return true;
+
+  return false;
+}
+
+/**
  * Whether a request has anything to do with the time or the date, so
  * current_datetime is worth offering. The date is in the system prompt in
  * any case; this stops the clock being read twice on a question about ports.

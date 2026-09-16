@@ -98,6 +98,9 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   stop_app: 1,
   // Renders to disk and nothing beyond it - the same bound as build_app.
   make_video: 2,
+  // Writes one self-contained HTML file to the workspace and shows it. A change
+  // to disk, bounded to a rendering; level 2, the same as writing a file.
+  render_mockup: 2,
   // Creating a schedule changes what this machine will do later, unattended.
   // That is a change, not a read - level 2, the same as writing a file.
   add_schedule: 2,
