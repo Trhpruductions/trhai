@@ -74,6 +74,9 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // own definition — it changes nothing on this machine — but see
   // webFetch.ts for why that exception is safe to make at all.
   fetch_url: 1,
+  // Reads public search-result pages; writes nothing, changes nothing. Reaches
+  // the internet like fetch_url, and is bounded the same careful way.
+  web_search: 1,
   list_schedules: 1,
 
   // 2 — creates or changes something. Bounded by the workspace on its own, or
