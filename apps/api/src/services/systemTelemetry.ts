@@ -34,6 +34,8 @@ export type SystemTelemetry = {
     /** Degrees Celsius. Null when the card did not report one. */
     temperatureC: number | null;
     clockMhz: number | null;
+    /** Board power draw in watts. Null when the card did not report one. */
+    powerWatts: number | null;
   };
   /**
    * Third-party services in use. Always empty: everything this build does
@@ -151,12 +153,14 @@ export function parseGpuLine(line: string): {
   temperatureC: number | null;
   /** Core clock in MHz, or null when not reported. */
   clockMhz: number | null;
+  /** Board power draw in watts, or null when not reported. */
+  powerWatts: number | null;
 } | null {
   // name, utilisation %, memory used MiB, memory total MiB
   const parts = line.split(",").map((part) => part.trim());
   if (parts.length < 4) return null;
 
-  const [name, utilisation, used, total, temperature, clock] = parts;
+  const [name, utilisation, used, total, temperature, clock, power] = parts;
   const percent = Number.parseFloat(utilisation);
   const usedMib = Number.parseFloat(used);
   const totalMib = Number.parseFloat(total);
@@ -179,6 +183,7 @@ export function parseGpuLine(line: string): {
   // reading, because nothing on screen would look more real.
   const celsius = Number.parseFloat(temperature ?? "");
   const mhz = Number.parseFloat(clock ?? "");
+  const watts = Number.parseFloat(power ?? "");
 
   return {
     name,
@@ -186,7 +191,8 @@ export function parseGpuLine(line: string): {
     detail: `${Math.round(percent)}% busy${vram ? ` · ${vram.detail}` : ""}`,
     vram,
     temperatureC: Number.isFinite(celsius) ? celsius : null,
-    clockMhz: Number.isFinite(mhz) ? mhz : null
+    clockMhz: Number.isFinite(mhz) ? mhz : null,
+    powerWatts: Number.isFinite(watts) ? watts : null
   };
 }
 
@@ -208,14 +214,15 @@ export async function readGpu(): Promise<SystemTelemetry["gpu"]> {
     unavailable: reason,
     vram: null,
     temperatureC: null,
-    clockMhz: null
+    clockMhz: null,
+    powerWatts: null
   });
 
   const output = await new Promise<string | null>((resolve) => {
     execFile(
       "nvidia-smi",
       [
-        "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,clocks.current.graphics",
+        "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,clocks.current.graphics,power.draw",
         "--format=csv,noheader,nounits"
       ],
       { timeout: gpuTimeoutMs, windowsHide: true },
@@ -240,7 +247,8 @@ export async function readGpu(): Promise<SystemTelemetry["gpu"]> {
     unavailable: null,
     vram: parsed.vram,
     temperatureC: parsed.temperatureC,
-    clockMhz: parsed.clockMhz
+    clockMhz: parsed.clockMhz,
+    powerWatts: parsed.powerWatts
   };
 }
 
