@@ -125,6 +125,25 @@ export type AgentResult =
 export const maxToolRounds = 4;
 
 /**
+ * How many times a turn may reach the web before it must answer from what it
+ * has.
+ *
+ * The intended shape of a lookup is small: web_search to find a page, then
+ * fetch_url to read it — two reaches, then an answer. A weaker model does not
+ * stop there. Watched live: asked who Canada's prime minister is, qwen ran
+ * web_search (ok) and fetch_url on the right Wikipedia page (ok) — it already
+ * had the answer — then echoed a sentence through run_command, invented
+ * https://example.com/prime-minister-canada, fetched that (404), and gave up.
+ * Once this many web gathers have succeeded, fetch_url and web_search are no
+ * longer offered: the machine's other tools stay, but the model cannot keep
+ * fetching or search for a URL it will then make up. It answers from what it
+ * gathered, which by then it has. A single successful read withholds nothing —
+ * only the second closes the door — so the ordinary search-then-read still runs
+ * in full.
+ */
+export const maxWebGathers = 2;
+
+/**
  * The most tool calls one reply may ask for.
  *
  * A model that asks for every tool at once is not planning, it is
@@ -213,7 +232,7 @@ function callSignature(call: ToolCall): string {
  * no way to tell the difference.
  */
 export const systemPrompt = [
-  "You are Vexora, an assistant that runs entirely on this user's own machine.",
+  "You are TRHAI, an assistant that runs entirely on this user's own machine.",
   "Speak to the user as \"you\". Never refer to them as \"the user\".",
   "",
   "There are two kinds of question, and they are answered differently.",
@@ -1018,6 +1037,12 @@ export async function runAgent(
   // has no such reasonable next step.
   let fetchUrlFailed = false;
 
+  // Successful reaches to the web this turn (web_search or fetch_url). Once it
+  // hits maxWebGathers the web tools stop being offered, so a model that has
+  // already found and read what it needs answers instead of fetching more or
+  // inventing a URL to fetch. See maxWebGathers.
+  let webGathersDone = 0;
+
   // Rounds spent being told the reply was wrong, rather than spent working.
   //
   // The three corrections below each push a message and go round again, and
@@ -1081,9 +1106,11 @@ export async function runAgent(
         dates: looksLikeDateMath(question),
         // And clock arithmetic only when a clock time is named.
         clock: looksLikeClockMath(question),
-        // The web only when the request mentions it or asks for a lookup; the
-        // clock only when the request is about time at all.
-        web: mentionsWeb(question) || wantsWebSearch(question),
+        // The web only when the request mentions it or asks for a lookup, and
+        // only until the turn has gathered from the web enough times (see
+        // maxWebGathers) — after that it answers from what it has rather than
+        // fetching more. The clock only when the request is about time at all.
+        web: (mentionsWeb(question) || wantsWebSearch(question)) && webGathersDone < maxWebGathers,
         time: mentionsTime(question),
         // A visual is offered only when the request asks to see one.
         render: wantsRendering(question)
@@ -1784,6 +1811,9 @@ export async function runAgent(
         if (result.ok && oncePerTurn.has(call.name)) madeThisTurn.add(call.name);
       }
       if (call.name === "fetch_url" && !result.ok) fetchUrlFailed = true;
+      // A reach to the web that worked counts toward the gather budget; once it
+      // is spent the web tools are no longer offered (see maxWebGathers).
+      if ((call.name === "fetch_url" || call.name === "web_search") && result.ok) webGathersDone += 1;
       // The failure text goes back unchanged. "Nothing matches X" is what stops
       // the model inventing an answer; softening it here would undo that.
       messages.push({ role: "tool", content: result.content });

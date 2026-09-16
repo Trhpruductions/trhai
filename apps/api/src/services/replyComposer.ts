@@ -363,6 +363,16 @@ const capabilityPattern = new RegExp([
     + String.raw`(?:can\s+you(?:\s+do)?(?:\s+for\s+me)?|do\s+you(?:\s+do)?(?:\s+for\s+me)?|are\s+you)`
     + String.raw`(?:\s+(?:today|now|here|right\s+now|exactly|actually|really|then))*(?=[?.!,]|\s*$)`,
   String.raw`^what(?:'s| is)\s+this\b`,
+  // Naming the assistant itself — "what is TRHAI", "who is TRHAI", "what's
+  // trh ai" — is an identity question, answered the same way as "who are you".
+  // Without this it fell through to the model, which (knowing only the name in
+  // its prompt) answered "I don't know what TRHAI is" to a question about
+  // itself.
+  String.raw`^(?:so\s+)?(?:hi|hey|hello)?[\s,]*(?:what|who)(?:'s|\s+is|\s+are)\s+(?:trh\s?ai|trhai|vexora)\b`,
+  // "tell me about yourself", "introduce yourself" — the same question in the
+  // imperative. "introduce yourself" only, so "introduce you to the team" does
+  // not match.
+  String.raw`\b(?:tell\s+me\s+about\s+(?:yourself|you)|introduce\s+yourself)\b`,
   String.raw`^help$`,
   // "what you can do", "what you're able to do" — embedded-clause order,
   // unanchored: this is normally one clause inside a longer request rather
@@ -430,8 +440,8 @@ export function buildCapabilityReply(localModel?: string): string {
   // promising one that was never installed, and a user who reads either and
   // then sees the opposite stops believing the rest of this reply.
   const opening = localModel
-    ? `I run locally. General questions go to ${localModel} on this machine — nothing leaves it, and there is no API key involved.`
-    : "I run locally, with no language model behind me — so I can't answer general questions from world knowledge, and I won't pretend to.";
+    ? `I'm TRHAI, an assistant that runs entirely on this machine. General questions go to ${localModel} here — nothing leaves it, and there is no API key involved.`
+    : "I'm TRHAI, an assistant that runs entirely on this machine, with no language model behind me — so I can't answer general questions from world knowledge, and I won't pretend to.";
 
   const closing = localModel
     ? "What I answer from memory or your documents is quoted with its source. Anything else is written by the model."

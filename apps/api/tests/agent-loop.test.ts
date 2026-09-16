@@ -1492,6 +1492,85 @@ test("a successful fetch_url does not withhold anything — only a failure does"
   }
 });
 
+test("web tools stop after two successful gathers, so the model answers rather than inventing a URL", async () => {
+  // The live spiral: web_search (ok), fetch_url the right page (ok) — the
+  // answer is in hand — then fetch_url an invented URL, then give up. Once two
+  // web gathers have succeeded the web tools are withheld, so the third fetch
+  // is never offered and never runs; the model answers from what it gathered.
+  let fetchCalls = 0;
+  const webContext: ToolContext = {
+    ...context,
+    searchWeb: async () => ({
+      ok: true,
+      query: "prime minister of canada",
+      results: [{ title: "PM of Canada - Wikipedia", url: "https://en.wikipedia.org/wiki/PM", snippet: "The current PM is ..." }]
+    }),
+    fetchPage: async () => {
+      fetchCalls += 1;
+      return { ok: true, url: "https://en.wikipedia.org/wiki/PM", title: "PM", text: "The Prime Minister of Canada is the head of government.", truncated: false };
+    }
+  };
+
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("web_search", { query: "prime minister of canada" }),
+    toolCall("fetch_url", { url: "https://en.wikipedia.org/wiki/PM" }),
+    toolCall("fetch_url", { url: "https://example.com/invented-page" }),
+    answer("The Prime Minister of Canada leads the government.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "search the web for who the prime minister of canada is", webContext);
+    assert.equal(result.ok, true, result.ok ? "" : result.reason);
+    if (!result.ok) return;
+
+    // The invented third fetch never ran: only the first, real page was read.
+    assert.equal(fetchCalls, 1, "the second (invented) fetch_url must not run");
+
+    // By the third model round the web tools are gone, though others remain.
+    const thirdRequest = received[2] as { tools?: Array<{ function: { name: string } }> };
+    const offeredNames = (thirdRequest.tools ?? []).map((tool) => tool.function.name);
+    assert.ok(!offeredNames.includes("fetch_url"), "fetch_url is withheld after the budget is spent");
+    assert.ok(!offeredNames.includes("web_search"), "web_search is withheld after the budget is spent");
+    assert.ok(offeredNames.length > 0, "non-web tools are still offered");
+
+    // web_search and the one real fetch_url are the only web calls that ran.
+    assert.equal(result.toolsUsed.filter((used) => used.name === "fetch_url").length, 1);
+    assert.ok(result.toolsUsed.some((used) => used.name === "web_search"));
+  } finally {
+    server.close();
+  }
+});
+
+test("a single successful fetch_url still withholds no web tools — only the second gather does", async () => {
+  // The budget must not fire early: one search-and-read is the ordinary shape,
+  // and after just one gather the next round is still free to reach the web.
+  let searchCalls = 0;
+  const webContext: ToolContext = {
+    ...context,
+    searchWeb: async () => {
+      searchCalls += 1;
+      return { ok: true, query: "typescript", results: [{ title: "TS", url: "https://ts.dev", snippet: "TypeScript" }] };
+    }
+  };
+
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("web_search", { query: "typescript latest" }),
+    toolCall("web_search", { query: "typescript newest release" }),
+    answer("The latest TypeScript is documented on the site.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "search the web for the latest typescript", webContext);
+    assert.equal(result.ok, true);
+    // The second web_search was still offered and ran: one gather does not close the door.
+    assert.equal(searchCalls, 2);
+    const secondRequest = received[1] as { tools?: Array<{ function: { name: string } }> };
+    assert.ok((secondRequest.tools ?? []).some((tool) => tool.function.name === "web_search"));
+  } finally {
+    server.close();
+  }
+});
+
 test("two attempts at the same call are both allowed to actually run", async () => {
   // The guard only refuses the third attempt onward — a single rephrased
   // retry, which is ordinary and reasonable, must never be blocked.
