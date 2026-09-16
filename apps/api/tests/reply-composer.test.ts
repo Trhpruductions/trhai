@@ -51,6 +51,16 @@ test("memory- and calculator-tool verbs are commands, not statements", () => {
   assert.equal(analyzeRequest("Recall what I told you about the deploy schedule").shape, "command");
 });
 
+test("render verbs are commands, not statements", () => {
+  // Caught live: "mock up a login screen for a banking app" got "Got it." and
+  // render_mockup was never reached — the leading verb was not a command verb.
+  assert.equal(analyzeRequest("mock up a login screen for a banking app").shape, "command");
+  assert.equal(analyzeRequest("render a diagram of the build pipeline").shape, "command");
+  assert.equal(analyzeRequest("sketch a settings page").shape, "command");
+  assert.equal(analyzeRequest("wireframe a dashboard").shape, "command");
+  assert.equal(analyzeRequest("draw the architecture").shape, "command");
+});
+
 test("treats a recall phrase without a question mark as a question", () => {
   assert.equal(analyzeRequest("Remind me what our database standard is").shape, "question");
   assert.equal(analyzeRequest("What did we decide about deploys").shape, "question");

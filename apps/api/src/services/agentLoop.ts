@@ -1011,7 +1011,7 @@ export async function runAgent(
   const changesAsked = new Set<string>();
   // Tools that make one thing per request, whatever the arguments: a second
   // schedule, app or video in the same turn is never what was asked for.
-  const oncePerTurn = new Set(["add_schedule", "build_app", "change_app", "make_video"]);
+  const oncePerTurn = new Set(["add_schedule", "build_app", "change_app", "make_video", "render_mockup"]);
   const madeThisTurn = new Set<string>();
 
   // How many times each exact call has actually been run, across every round

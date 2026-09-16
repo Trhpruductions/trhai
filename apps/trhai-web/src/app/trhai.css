@@ -187,7 +187,10 @@
 .trh-status-word em { font-style: normal; color: var(--c-cyan-bright); text-shadow: 0 0 10px rgba(56, 208, 255, 0.6); }
 .trh-status-sub { display: block; font-size: 10.5px; letter-spacing: 0.34em; color: var(--c-faint); margin-top: 3px; }
 
-.trh-core { position: relative; width: min(52vh, 460px); height: min(52vh, 460px); display: grid; place-items: center; margin: 6px 0 2px; }
+/* Lifted a little so the live core nests inside the key art's glowing sphere,
+   which sits above centre — measured, not guessed, and in vh so it holds as the
+   viewport changes on whatever machine this runs on. */
+.trh-core { position: relative; width: min(52vh, 460px); height: min(52vh, 460px); display: grid; place-items: center; margin: 6px 0 2px; transform: translateY(-3vh); }
 /* Definite sizes only. A percentage height here fed back through the
    ParticleField's own resize measurement and grew the canvas without bound
    (to ~690,000px), which painted a grey wash over the whole centre column. */
