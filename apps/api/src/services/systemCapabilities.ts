@@ -35,8 +35,9 @@ export type SystemCapabilities = {
   /** Whether the local motion-graphics video pipeline is registered. */
   videoRendering: boolean;
   /**
-   * `web` is fetch_url: a page read, given its exact URL — not search, and
-   * there is no tool that finds a URL for you. Stated as a real field rather
+   * `web` is reaching the internet at all: fetch_url reads a page given its
+   * exact URL, and web_search now finds pages for a query (scraping a no-key
+   * engine — still no account, still no API key). Stated as a real field rather
    * than left implicit, so a capability report can say "unavailable" outright
    * instead of staying silent about something a user might otherwise assume.
    */
@@ -135,8 +136,9 @@ export function getSystemCapabilities(model: string | null): SystemCapabilities 
     videoRendering: hasAll(names, "make_video"),
     lockedData: lockedProtectedFiles(),
     failingStores: persistenceFailures(),
-    // Reading a page given its URL, via fetch_url — not search.
-    web: hasAll(names, "fetch_url"),
+    // Reaching the internet at all: reading a page via fetch_url, or finding
+    // pages via web_search. Either one present means the web is in reach.
+    web: names.includes("fetch_url") || names.includes("web_search"),
     // True only while machine control is on, since `offered` already excludes
     // run_command otherwise. It was hard-false when no such tool existed;
     // leaving it false now that one does would be the same misreport in the

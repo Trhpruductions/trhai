@@ -151,7 +151,7 @@ export function extractReadableText(html: string): { title: string; text: string
   return { title, text };
 }
 
-function decodeEntities(value: string): string {
+export function decodeEntities(value: string): string {
   return value
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
@@ -163,20 +163,53 @@ function decodeEntities(value: string): string {
     .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
 }
 
+export type RawFetchOutcome =
+  | { ok: true; url: string; contentType: string; body: string }
+  | { ok: false; reason: string };
+
 /**
- * Fetch `rawUrl` and return its readable text.
+ * A non-GET request, and an optional User-Agent override.
+ *
+ * The search endpoints answer only to a form POST, and only serve results to a
+ * browser-like agent — a text-browser-style page for a text-browser-style
+ * caller. fetch_url keeps the honest default; search overrides it, the same as
+ * a real browser identifies itself when it asks those endpoints for the same
+ * no-JavaScript page.
+ */
+export type RawFetchOptions = { method?: string; body?: string; contentType?: string; userAgent?: string };
+
+/** How the request identifies itself. One string, so every route uses the same. */
+const userAgent = "Vexora/1.0 (local assistant, fetching a page on the user's behalf)";
+
+/**
+ * Fetch `rawUrl` and return its raw body text, with every network-facing
+ * defence applied but no readable-text extraction.
+ *
+ * This is the primitive the rest of this module is built on: fetchWebPage
+ * layers text extraction over it, and webSearch parses a results page's HTML
+ * out of it. Keeping the SSRF, redirect, size and timeout handling in one
+ * place is deliberate — it is the one code path in this app that leaves the
+ * machine, and a second copy of it would be a second thing to get wrong.
+ *
+ * `options` carries a non-GET request — the search endpoints answer only to a
+ * form POST. A redirect is always followed as a bodyless GET, the way a
+ * browser turns a POST that redirects into a GET of the destination.
  *
  * Redirects are followed manually, one hop at a time, with the same safety
  * check applied to every hop — `fetch`'s own automatic redirect handling
  * would only ever validate the URL the caller started with, and a page
  * fully within the rules can still redirect somewhere that is not.
  */
-export async function fetchWebPage(
+export async function fetchRawPage(
   rawUrl: string,
   fetchImpl: typeof fetch = fetch,
-  lookup: typeof dnsLookup = dnsLookup
-): Promise<FetchOutcome> {
+  lookup: typeof dnsLookup = dnsLookup,
+  options: RawFetchOptions = {}
+): Promise<RawFetchOutcome> {
   let current = rawUrl;
+  let requestMethod = (options.method ?? "GET").toUpperCase();
+  let requestBody = options.body;
+  let requestContentType = options.contentType;
 
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
     const shape = checkUrlShape(current);
@@ -188,12 +221,17 @@ export async function fetchWebPage(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), fetchTimeoutMs);
 
+    const headers: Record<string, string> = { "User-Agent": options.userAgent ?? userAgent };
+    if (requestBody !== undefined && requestContentType) headers["Content-Type"] = requestContentType;
+
     let response: Response;
     try {
       response = await fetchImpl(shape.url.toString(), {
+        method: requestMethod,
         redirect: "manual",
         signal: controller.signal,
-        headers: { "User-Agent": "Vexora/1.0 (local assistant, fetching a page on the user's behalf)" }
+        headers,
+        ...(requestBody !== undefined ? { body: requestBody } : {})
       });
     } catch (error) {
       const detail = error instanceof Error && error.name === "AbortError"
@@ -208,6 +246,10 @@ export async function fetchWebPage(
       const location = response.headers.get("location");
       if (!location) return { ok: false, reason: `The page redirected with no destination given.` };
       current = new URL(location, shape.url).toString();
+      // Whatever the first hop was, its destination is fetched as a plain GET.
+      requestMethod = "GET";
+      requestBody = undefined;
+      requestContentType = undefined;
       continue;
     }
 
@@ -237,19 +279,34 @@ export async function fetchWebPage(
     }
 
     const body = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
-    const { title, text } = extractReadableText(body);
-
-    if (!text) return { ok: false, reason: "That page had no readable text." };
-
-    const truncated = text.length > maxExtractedCharacters;
-    return {
-      ok: true,
-      url: shape.url.toString(),
-      title: title || shape.url.hostname,
-      text: truncated ? `${text.slice(0, maxExtractedCharacters)}…` : text,
-      truncated
-    };
+    return { ok: true, url: shape.url.toString(), contentType, body };
   }
 
   return { ok: false, reason: "That page redirected too many times." };
+}
+
+/**
+ * Fetch `rawUrl` and return its readable text — the page read behind fetch_url.
+ * Thin over fetchRawPage: fetch safely, then strip the document to title and
+ * text.
+ */
+export async function fetchWebPage(
+  rawUrl: string,
+  fetchImpl: typeof fetch = fetch,
+  lookup: typeof dnsLookup = dnsLookup
+): Promise<FetchOutcome> {
+  const raw = await fetchRawPage(rawUrl, fetchImpl, lookup);
+  if (!raw.ok) return raw;
+
+  const { title, text } = extractReadableText(raw.body);
+  if (!text) return { ok: false, reason: "That page had no readable text." };
+
+  const truncated = text.length > maxExtractedCharacters;
+  return {
+    ok: true,
+    url: raw.url,
+    title: title || new URL(raw.url).hostname,
+    text: truncated ? `${text.slice(0, maxExtractedCharacters)}…` : text,
+    truncated
+  };
 }

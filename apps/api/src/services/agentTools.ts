@@ -26,6 +26,7 @@ import {
   writeWorkspaceFile
 } from "./workspace.js";
 import { fetchWebPage } from "./webFetch.js";
+import { webSearch } from "./webSearch.js";
 import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
 import { resolveForAccess } from "./machinePaths.js";
 import { explainMiss } from "./projectContext.js";
@@ -199,6 +200,13 @@ export type ToolContext = {
    * defences, when nothing is supplied.
    */
   fetchPage?: typeof fetchWebPage;
+  /**
+   * Searches the web, injected the same way as fetchPage so a test exercises
+   * web_search's dispatch without a real network call — the real webSearch,
+   * scraping a no-key engine through fetchRawPage's defences, when nothing is
+   * supplied.
+   */
+  searchWeb?: typeof webSearch;
   /**
    * Asks the local model to write an application, for requests that are not one
    * of the two shapes the templates cover.
@@ -703,6 +711,27 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "web_search",
+      description:
+        "Search the web and get back a short list of real result pages — a title, address and "
+        + "snippet for each. Use this when the user asks you to look something up, search for "
+        + "something, or asks about current or recent information you cannot know from your own "
+        + "training. The snippets often already contain the answer — use them directly when they do. "
+        + "Only follow up with fetch_url on a result's address when you genuinely need more detail than "
+        + "the snippets give, and if a page cannot be read, answer from the snippets you already have "
+        + "rather than giving up.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "What to search for, in a few words." }
+        },
+        required: ["query"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "run_command",
       description:
         "Run a command on the user's machine and get back its real output and exit code. Use this "
@@ -914,8 +943,8 @@ const memoryWritingTools = new Set(["remember"]);
 
 /** Offered only when the request names a clock time; see looksLikeClockMath. */
 const clockTools = new Set(["shift_time"]);
-/** Offered only when the request mentions the web; see mentionsWeb. */
-const webTools = new Set(["fetch_url"]);
+/** Offered only when the request mentions the web or asks for a lookup; see mentionsWeb and wantsWebSearch. */
+const webTools = new Set(["fetch_url", "web_search"]);
 /** Offered only when the request mentions the time or the date; see mentionsTime. */
 const timeTools = new Set(["current_datetime"]);
 
@@ -2433,6 +2462,24 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
 
       const notice = result.truncated ? " [showing the first part of this page]" : "";
       return { ok: true, content: `From "${result.title}" (${result.url})${notice}:\n${result.text}` };
+    }
+
+    case "web_search": {
+      const query = requireString(call.arguments.query);
+      if (!query) return { ok: false, content: "web_search needs something to search for." };
+
+      const search = context.searchWeb ?? webSearch;
+      const outcome = await search(query);
+      if (!outcome.ok) return { ok: false, content: `The web search found nothing — ${outcome.reason}.` };
+
+      const lines = outcome.results.map((entry, index) => {
+        const snippet = entry.snippet ? `\n   ${entry.snippet}` : "";
+        return `${index + 1}. ${entry.title}\n   ${entry.url}${snippet}`;
+      });
+      return {
+        ok: true,
+        content: `Web results for "${outcome.query}" (use fetch_url to read one in full):\n${lines.join("\n")}`
+      };
     }
 
     case "run_command": {

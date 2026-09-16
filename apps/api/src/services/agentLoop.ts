@@ -10,7 +10,7 @@ import {
   correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, type ActionKind } from "./actionIntent.js";
+import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -1081,9 +1081,9 @@ export async function runAgent(
         dates: looksLikeDateMath(question),
         // And clock arithmetic only when a clock time is named.
         clock: looksLikeClockMath(question),
-        // The web only when the request mentions it; the clock only when the
-        // request is about time at all.
-        web: mentionsWeb(question),
+        // The web only when the request mentions it or asks for a lookup; the
+        // clock only when the request is about time at all.
+        web: mentionsWeb(question) || wantsWebSearch(question),
         time: mentionsTime(question)
       })
       : [];

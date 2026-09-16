@@ -274,6 +274,42 @@ export function mentionsWeb(message: string): boolean {
 }
 
 /**
+ * Whether the request asks to consult the live web — "search", "look it up",
+ * "google", or a question about current information the model cannot know from
+ * training — so web_search is worth offering.
+ *
+ * Distinct from mentionsWeb, which fires when a URL or the word "web" appears;
+ * this is about wanting a lookup even when no address is given. Deliberately
+ * conservative, in keeping with how every tool here is offered by what the
+ * request is actually about: it does not fire on a plain factual question
+ * ("what is the capital of France" — the model answers that itself), and it
+ * steps aside for a search of the user's own files, notes or memory so
+ * web_search is never offered where search_files or search_memory is meant.
+ */
+export function wantsWebSearch(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  if (!text) return false;
+
+  // Unambiguous "consult the internet" signals win outright.
+  if (/\bgoogle\b/.test(text)) return true;
+  if (/\b(?:on|from|across|over|around)\s+the\s+(?:web|internet)\b/.test(text)) return true;
+  if (/\b(?:search|look)\s+(?:it\s+|this\s+|that\s+)?(?:up\s+)?online\b/.test(text)) return true;
+  if (/\bweb\s?search\b/.test(text)) return true;
+
+  // A bare "search"/"look up" is a web search only when it is not scoped to the
+  // user's own files, notes or memory — those have their own tools.
+  const localScope =
+    /\b(?:my|the)\s+(?:files?|notes?|documents?|docs?|memor(?:y|ies)|workspace|folder|directory|codebase|repo(?:sitory)?|conversation|chat|history)\b/.test(text);
+  if (!localScope && /\b(?:search\s+for|search|look\s+up|look\s+it\s+up|find\s+out)\b/.test(text)) return true;
+
+  // Questions about live, changing information the model cannot have from training.
+  if (/\b(?:latest|current|recent|newest|up[-\s]?to[-\s]?date|today'?s|this\s+week'?s)\b[\s\S]*\b(?:news|price|prices|stock|score|scores|results?|release|releases?|version|weather|forecast|events?|headlines?|standings?)\b/.test(text)) return true;
+  if (/\b(?:news|headlines)\b/.test(text)) return true;
+
+  return false;
+}
+
+/**
  * Whether a request has anything to do with the time or the date, so
  * current_datetime is worth offering. The date is in the system prompt in
  * any case; this stops the clock being read twice on a question about ports.
