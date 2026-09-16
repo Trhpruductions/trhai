@@ -12,6 +12,7 @@ import {
   parseVideoScript, planProject, slugify, titleFrom, videoScriptPrompt, withChanges, type VideoScript
 } from "@ascend/shared";
 import { renderVideo } from "./videoRender.js";
+import type { RunningApp, StartResult } from "./appRunner.js";
 import { authorPrompt, findAppFault, parseAuthoredFiles, type AuthoredFile } from "./appAuthor.js";
 import { verifyBuiltProject } from "./buildVerification.js";
 import { describeConfirmationNeeded, requiresConfirmation } from "./toolPermissions.js";
@@ -160,6 +161,15 @@ export type ToolContext = {
    * given in would mean "yes" to one deletion quietly permitting the next.
    */
   confirmedActions?: ReadonlySet<string>;
+  /**
+   * Starts a built app on a free port and waits for it to answer, so a build
+   * is something running rather than a folder. Injected (like saveMemory) so
+   * unit tests that call runTool never spawn a real server - only the live
+   * API wires it. Absent means "cannot launch here", reported as such.
+   */
+  launchApp?: (project: string) => Promise<StartResult>;
+  stopApp?: (project: string) => boolean;
+  runningApps?: () => RunningApp[];
   /**
    * True when this turn runs with nobody watching — a schedule firing in the
    * background rather than someone at the machine.
@@ -738,6 +748,38 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "run_app",
+      description:
+        "Start an app that build_app built, on a local port, and return the URL it is running at. "
+        + "Use this to actually launch an app so the user can open and use it - after building one "
+        + "when they want to see it, or when they ask to run, open or launch it. Never start a "
+        + "server with run_command; a server never exits and would hang the turn.",
+      parameters: {
+        type: "object",
+        properties: {
+          project: { type: "string", description: "The app's folder in the workspace. Omit for the app worked on most recently." }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "stop_app",
+      description: "Stop an app that run_app started.",
+      parameters: {
+        type: "object",
+        properties: {
+          project: { type: "string", description: "The app's folder in the workspace." }
+        },
+        required: ["project"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "make_video",
       description:
         "Build a short motion-graphics video entirely on this machine - scripted, narrated, "
@@ -797,7 +839,7 @@ const scaffoldingTools = new Set(["build_app", "plan_app"]);
  * the port" is an ordinary thing to ask.
  */
 const machineChangingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "plan_app", "run_command", "run_script"
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "plan_app", "run_command", "run_script", "run_app"
 ]);
 
 /**
@@ -1096,6 +1138,20 @@ function describeSeveral(tool: string, fact: string, candidates: ScorableMemory[
   const listed = candidates.map((memory) => `- ${memory.body}`).join("\n");
   return `Several saved memories match "${fact}":\n${listed}\nNothing was ${outcome}. `
     + `Call ${tool} again with the full wording of the one you mean.`;
+}
+
+/**
+ * Start a just-built app and describe where it is running, or null when there
+ * is no launcher wired (unit tests) so the caller keeps its plain run line.
+ * A launch failure is not a build failure: the files are good, so this says
+ * how to run it by hand rather than turning a successful build into an error.
+ */
+async function launchLine(context: ToolContext, project: string): Promise<string | null> {
+  if (!context.launchApp) return null;
+  const started = await context.launchApp(project);
+  return started.ok
+    ? `It is running live at ${started.app.url} - open that to use it.`
+    : `Built, but I could not start it automatically (${started.reason}). Run it yourself: cd ${project} && npm start`;
 }
 
 export async function runTool(call: ToolCall, context: ToolContext): Promise<ToolResult> {
@@ -1664,7 +1720,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       if (!verification.passed) {
         return { ok: false, content: `Changed "${amended.spec.title}" (${project}/): ${did} - but its own checks FAILED:\n${verification.output}` };
       }
-      return { ok: true, content: `Changed "${amended.spec.title}" (${project}/): ${did}. Verified: ${verification.output}\n\n${runLine}` };
+      const liveLine = await launchLine(context, project);
+      return { ok: true, content: `Changed "${amended.spec.title}" (${project}/): ${did}. Verified: ${verification.output}\n\n${liveLine ?? runLine}` };
     }
 
     case "build_app": {
@@ -1869,12 +1926,40 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         writeAppManifest(folder, { request: askedFor || description, title: spec.title, changes: [] });
       }
 
-      return {
-        ok: true,
-        content: "Built \"" + spec.title + "\" in the workspace at " + folder + "/ with "
-          + written.length + " files, and verified it: " + verifiedDetail(verification.output)
-          + "\n\n" + runLine
-      };
+      const built = "Built \"" + spec.title + "\" in the workspace at " + folder + "/ with "
+        + written.length + " files, and verified it: " + verifiedDetail(verification.output);
+      const liveLine = await launchLine(context, folder);
+      return { ok: true, content: `${built}\n\n${liveLine ?? runLine}` };
+    }
+
+    case "run_app": {
+      const project = requireString(call.arguments.project)?.replace(/[\\/]+$/, "") ?? activeProject(context.sessionId);
+      if (!project) {
+        return {
+          ok: false,
+          content: "run_app needs to know which app: none has been built or worked on this session. Pass project with its folder name."
+        };
+      }
+      if (!context.launchApp) {
+        return { ok: false, content: "Apps cannot be launched here." };
+      }
+      const started = await context.launchApp(project);
+      if (!started.ok) {
+        return { ok: false, content: `Could not start ${project}: ${started.reason}` };
+      }
+      noteProjectTouched(context.sessionId, `${project}/server.js`);
+      const was = started.alreadyRunning ? "was already running" : "is now running";
+      return { ok: true, content: `"${project}" ${was} at ${started.app.url} - open that to use it.` };
+    }
+
+    case "stop_app": {
+      const project = requireString(call.arguments.project)?.replace(/[\\/]+$/, "");
+      if (!project) return { ok: false, content: "stop_app needs the app's folder name." };
+      if (!context.stopApp) return { ok: false, content: "Apps cannot be stopped here." };
+      const stopped = context.stopApp(project);
+      return stopped
+        ? { ok: true, content: `Stopped "${project}".` }
+        : { ok: false, content: `"${project}" was not running.` };
     }
 
     case "make_video": {

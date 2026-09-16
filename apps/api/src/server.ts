@@ -72,6 +72,7 @@ import {
   removeSchedule,
   setScheduleEnabled
 } from "./services/scheduleStore.js";
+import { listRunningApps, startApp, stopApp } from "./services/appRunner.js";
 import { getFlow, saveFlow } from "./services/flowStore.js";
 import { readTelemetry, readIdentity } from "./services/systemTelemetry.js";
 import { getTask } from "./services/taskStore.js";
@@ -242,6 +243,9 @@ function buildAssistInput(
     pinMemory: sessionId
       ? (id: string, pinned: boolean) => Boolean(setMemoryPinned(sessionId, id, pinned))
       : undefined,
+    launchApp: (project: string) => startApp(project),
+    stopApp: (project: string) => stopApp(project),
+    runningApps: () => listRunningApps(),
     authorApp: authorAppWithModel,
     ...(onToken ? { onToken } : {}),
     ...(cancel ? { cancel } : {})
@@ -449,6 +453,9 @@ export function createApp() {
         pinMemory: sessionId
           ? (id: string, pinned: boolean) => Boolean(setMemoryPinned(sessionId, id, pinned))
           : undefined,
+        launchApp: (project: string) => startApp(project),
+        stopApp: (project: string) => stopApp(project),
+        runningApps: () => listRunningApps(),
         authorApp: authorAppWithModel
       }).finally(() => {
         // Whatever a client polling /v1/assist/activity mid-turn was told is
@@ -1090,6 +1097,35 @@ export function createApp() {
   app.get("/v1/execution", (req, res) => {
     const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : "";
     res.json({ data: { events: listEvents(sessionId) }, traceId: "trace-local" });
+  });
+
+  // Apps that build_app built and run_app started, running right now. The web
+  // client shows these with a live preview and an Open link.
+  app.get("/v1/apps", (_req, res) => {
+    res.json({ data: { apps: listRunningApps() }, traceId: "trace-local" });
+  });
+
+  app.post("/v1/apps/start", async (req, res) => {
+    const project = typeof req.body?.project === "string" ? req.body.project : "";
+    if (!project.trim()) {
+      res.status(400).json({ message: "project is required" });
+      return;
+    }
+    const started = await startApp(project);
+    if (!started.ok) {
+      res.status(422).json({ message: started.reason });
+      return;
+    }
+    res.json({ data: { app: started.app, alreadyRunning: started.alreadyRunning }, traceId: "trace-local" });
+  });
+
+  app.post("/v1/apps/stop", (req, res) => {
+    const project = typeof req.body?.project === "string" ? req.body.project : "";
+    if (!project.trim()) {
+      res.status(400).json({ message: "project is required" });
+      return;
+    }
+    res.json({ data: { stopped: stopApp(project) }, traceId: "trace-local" });
   });
 
   // Command access: the switch, and what it has actually run.

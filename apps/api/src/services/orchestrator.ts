@@ -4,6 +4,7 @@ import { isCodeWork } from "./machinePaths.js";
 import { pickAuthorModel } from "./appAuthor.js";
 import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
+import type { RunningApp, StartResult } from "./appRunner.js";
 import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
 import { isContinuationRequest, looksLikeScheduleRequest } from "./requestAnalysis.js";
@@ -70,6 +71,10 @@ export type OrchestratorInput = {
   deleteDocument?: (id: string) => boolean;
   /** Pins or unpins a memory, for the "pin_memory" tool. */
   pinMemory?: (id: string, pinned: boolean) => boolean;
+  /** Launches a built app so it runs live; see appRunner. Forwarded to run_app and build_app. */
+  launchApp?: (project: string) => Promise<StartResult>;
+  stopApp?: (project: string) => boolean;
+  runningApps?: () => RunningApp[];
   /** Writes an application with the local model, for requests no template covers. */
   authorApp?: (description: string) => Promise<{ ok: true; text: string } | { ok: false; reason: string }>;
   /**
@@ -834,6 +839,9 @@ async function answerWithLocalModel(
     updateDocument: input.updateDocument,
     deleteDocument: input.deleteDocument,
     pinMemory: input.pinMemory,
+    launchApp: input.launchApp,
+    stopApp: input.stopApp,
+    runningApps: input.runningApps,
     authorApp: input.authorApp,
     confirmedActions,
     unattended: input.unattended,

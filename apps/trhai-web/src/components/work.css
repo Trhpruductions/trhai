@@ -167,3 +167,34 @@
   .work-files { border-right: none; border-bottom: 1px solid var(--line); }
   .work-list { max-height: 140px; }
 }
+
+/* Running apps: the built app, actually running, previewed on the screen
+   that built it. */
+.work-running {
+  border: 1px solid var(--line, rgba(70, 160, 230, 0.28));
+  border-radius: 6px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  background: rgba(6, 12, 24, 0.6);
+}
+.work-running-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(70, 160, 230, 0.16);
+}
+.work-running-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.work-app-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 8px; border: 1px solid rgba(70, 160, 230, 0.22); border-radius: 4px;
+  font-size: 11px; color: #cfe6f5;
+}
+.work-app-dot { width: 7px; height: 7px; border-radius: 50%; background: #46e0a0; box-shadow: 0 0 6px #46e0a0; }
+.work-app-name { font-family: var(--font-mono, monospace); }
+.work-app-open { color: #8be9ff; text-decoration: none; }
+.work-app-open:hover { text-decoration: underline; }
+.work-app-stop { background: transparent; border: 1px solid rgba(255, 122, 122, 0.4); color: #ff8f8f; border-radius: 3px; font-size: 10px; padding: 2px 6px; cursor: pointer; }
+.work-app-stop:hover { border-color: #ff8f8f; }
+.work-app-frame { width: 100%; height: 300px; border: 0; background: #fff; display: block; }

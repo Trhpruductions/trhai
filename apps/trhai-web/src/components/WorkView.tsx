@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiGet } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
 import "./work.css";
 
 // The split view: what was built, and what was run to build it.
@@ -20,6 +20,7 @@ import "./work.css";
 
 type Entry = { path: string; bytes: number; directory: boolean; modifiedAt: number };
 type CommandRun = { command: string; stdout: string; stderr: string; exitCode: number | null; timedOut: boolean };
+type RunningApp = { project: string; url: string; port: number; startedAt: string };
 
 /** Poll fast while work is live, slowly when it is not. */
 const activeMs = 700;
@@ -34,17 +35,20 @@ function formatBytes(bytes: number): string {
 export function WorkView({ live, onClose }: { live: boolean; onClose: () => void }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [runs, setRuns] = useState<CommandRun[]>([]);
+  const [apps, setApps] = useState<RunningApp[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
   const read = useCallback(async () => {
-    const [files, commands] = await Promise.all([
+    const [files, commands, appList] = await Promise.all([
       apiGet<{ entries: Entry[] }>("/v1/files"),
-      apiGet<{ history: CommandRun[] }>("/v1/commands")
+      apiGet<{ history: CommandRun[] }>("/v1/commands"),
+      apiGet<{ apps: RunningApp[] }>("/v1/apps")
     ]);
     if (files.ok) setEntries(files.data.entries);
     if (commands.ok) setRuns(commands.data.history);
+    if (appList.ok) setApps(appList.data.apps);
   }, []);
 
   useEffect(() => {
@@ -92,6 +96,38 @@ export function WorkView({ live, onClose }: { live: boolean; onClose: () => void
         {live ? <span className="work-live">running</span> : null}
         <button type="button" className="work-close" onClick={onClose}>Close</button>
       </header>
+
+      {apps.length > 0 ? (
+        <div className="work-running">
+          <div className="work-running-head">
+            <span className="hud-label work-sub">Running · {apps.length}</span>
+            <div className="work-running-tabs">
+              {apps.map((app) => (
+                <span key={app.project} className="work-app-chip">
+                  <span className="work-app-dot" aria-hidden="true" />
+                  <span className="work-app-name">{app.project}</span>
+                  <a className="work-app-open" href={app.url} target="_blank" rel="noreferrer">Open ↗</a>
+                  <button
+                    type="button"
+                    className="work-app-stop"
+                    onClick={() => void (async () => {
+                      const stopped = await apiPost<{ stopped: boolean }>("/v1/apps/stop", { project: app.project });
+                      if (stopped.ok) setApps((prior) => prior.filter((other) => other.project !== app.project));
+                    })()}
+                  >Stop</button>
+                </span>
+              ))}
+            </div>
+          </div>
+          {/* A live preview of the most recently started app - the built app,
+              actually running, on the same screen that built it. */}
+          <iframe
+            className="work-app-frame"
+            src={apps[apps.length - 1].url}
+            title={`${apps[apps.length - 1].project} preview`}
+          />
+        </div>
+      ) : null}
 
       <div className="work-body">
         <div className="work-files">
