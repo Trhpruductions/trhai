@@ -236,6 +236,7 @@ export default function DashboardPage() {
   // Which replies were already on disk at open, so a restored answer does
   // not surface itself as if it had just been produced this run.
   const restoredIds = useRef<Set<string> | null>(null);
+  const [dismissedReplyId, setDismissedReplyId] = useState<string | null>(null);
   const lastSpokenId = useRef<string | null>(null);
 
   const { core, label } = presence(status, mic.listening, speech.speaking, online);
@@ -929,8 +930,17 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {(busy || replyFromThisRun) && (lastReply || lastAsked) ? (
+              {(busy || (replyFromThisRun && lastReply?.id !== dismissedReplyId)) && (lastReply || lastAsked) ? (
                 <section className="trh-reply" aria-live="polite">
+                  {!busy && lastReply ? (
+                    <button
+                      type="button"
+                      className="trh-reply-close"
+                      aria-label="Dismiss"
+                      title="Dismiss and return to the core"
+                      onClick={() => setDismissedReplyId(lastReply.id)}
+                    >×</button>
+                  ) : null}
                   {lastAsked ? <p className="trh-reply-asked">{lastAsked.text}</p> : null}
                   {replyFromThisRun && lastReply ? (
                     <Markdown text={lastReply.text} className="trh-reply-text" />

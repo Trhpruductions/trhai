@@ -226,7 +226,9 @@
   box-shadow: 0 0 40px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(56, 208, 255, 0.06);
   backdrop-filter: blur(2px);
 }
-.trh-reply-asked { margin: 0 0 10px; font-size: 12px; letter-spacing: 0.04em; color: var(--c-cyan-bright); border-left: 2px solid var(--c-cyan); padding-left: 10px; }
+.trh-reply-close { position: absolute; top: 8px; right: 10px; width: 22px; height: 22px; display: grid; place-items: center; background: transparent; border: 1px solid var(--c-line-soft); border-radius: 4px; color: var(--c-mut); font-size: 15px; line-height: 1; cursor: pointer; }
+.trh-reply-close:hover { color: var(--c-cyan-bright); border-color: var(--c-cyan); }
+.trh-reply-asked { margin: 0 30px 10px 0; font-size: 12px; letter-spacing: 0.04em; color: var(--c-cyan-bright); border-left: 2px solid var(--c-cyan); padding-left: 10px; }
 .trh-reply-text { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--c-ink); }
 .trh-reply-text p { margin: 0 0 8px; }
 .trh-reply-text p:last-child { margin-bottom: 0; }
