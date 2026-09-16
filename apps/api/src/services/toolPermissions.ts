@@ -89,6 +89,10 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   build_app: 2,
   // Rewrites an app build_app wrote, in its own folder; data untouched.
   change_app: 2,
+  // Starts a real process (a local server). A change to what the machine is
+  // doing, like build_app, though bounded to a workspace app on a free port.
+  run_app: 2,
+  stop_app: 1,
   // Renders to disk and nothing beyond it - the same bound as build_app.
   make_video: 2,
   // Creating a schedule changes what this machine will do later, unattended.

@@ -14,7 +14,6 @@
   --c-cyan-bright: #8be9ff;
   --c-ink: #eaf6ff;
   --c-mut: #7f9bb3;
-  --c-faint: #5c7governance;
   --c-faint: #59788f;
   --c-ok: #46e0a0;
   --c-warn: #ffb454;
@@ -25,28 +24,56 @@
   inset: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  /* The reference's atmosphere: a near-black field with a single cyan bloom
+     concentrated behind the core, a faint cool cast from the top, and a hard
+     vignette pulling every edge and corner into true black. The light lives
+     at the centre, not spread across the screen. */
   background:
-    radial-gradient(120% 90% at 50% 0%, rgba(20, 60, 110, 0.22), transparent 60%),
-    radial-gradient(80% 70% at 50% 120%, rgba(20, 70, 120, 0.18), transparent 60%),
-    var(--c-bg);
+    radial-gradient(40% 44% at 50% 46%, rgba(40, 124, 196, 0.36), transparent 66%),
+    radial-gradient(66% 62% at 50% 47%, rgba(20, 68, 118, 0.20), transparent 72%),
+    radial-gradient(120% 66% at 50% -14%, rgba(16, 52, 94, 0.16), transparent 56%),
+    radial-gradient(140% 125% at 50% 48%, transparent 40%, rgba(0, 1, 4, 0.9) 100%),
+    linear-gradient(180deg, #04070e 0%, #02040a 54%, #010206 100%);
   color: var(--c-ink);
   font-family: var(--font-body);
   overflow: hidden;
 }
 
-/* A faint engineering grid, like the reference's backdrop. */
+/* Angular HUD accents, like the reference's corner circuitry: a sparse
+   diagonal cross-hatch that surfaces toward the edges and behind the panels
+   and fades to nothing around the core, so the centre stays clean black. */
 .trh::before {
   content: "";
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(60, 150, 220, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(60, 150, 220, 0.05) 1px, transparent 1px);
-  background-size: 46px 46px;
-  mask-image: radial-gradient(120% 100% at 50% 40%, #000 55%, transparent 100%);
+    repeating-linear-gradient(45deg, rgba(74, 164, 232, 0.05) 0 1px, transparent 1px 150px),
+    repeating-linear-gradient(-45deg, rgba(74, 164, 232, 0.05) 0 1px, transparent 1px 150px);
+  mask-image: radial-gradient(125% 115% at 50% 46%, transparent 42%, #000 94%);
   pointer-events: none;
   z-index: 0;
 }
+
+/* Light fanning out from behind the core, confined to a ring so it reads as
+   depth around the sphere rather than lines on the screen. It turns very
+   slowly — never a spinning wheel. */
+.trh::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-conic-gradient(
+    from 0deg at 50% 46%,
+    rgba(120, 206, 255, 0.06) 0deg 1deg,
+    transparent 1deg 11deg
+  );
+  mask-image: radial-gradient(closest-side at 50% 46%, transparent 20%, #000 40%, transparent 72%);
+  pointer-events: none;
+  z-index: 0;
+  animation: trh-rays 160s linear infinite;
+  transform-origin: 50% 46%;
+}
+@keyframes trh-rays { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .trh::after { animation-duration: 640s; } }
 
 .trh > * { position: relative; z-index: 1; }
 
