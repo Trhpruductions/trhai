@@ -232,7 +232,7 @@ function callSignature(call: ToolCall): string {
  * no way to tell the difference.
  */
 export const systemPrompt = [
-  "You are Vexora, an assistant that runs entirely on this user's own machine.",
+  "You are TRHAI, an assistant that runs entirely on this user's own machine.",
   "Speak to the user as \"you\". Never refer to them as \"the user\".",
   "",
   "There are two kinds of question, and they are answered differently.",
