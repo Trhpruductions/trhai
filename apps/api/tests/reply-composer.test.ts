@@ -740,6 +740,27 @@ test("more capability phrasings than the original short list", () => {
   }
 });
 
+test("asking about TRHAI by name is an identity question, answered as a capability", () => {
+  // The live failure: "what is TRHAI and what can you do?" fell through to the
+  // model, which answered "I don't know what TRHAI is" about itself.
+  for (const question of [
+    "what is TRHAI?",
+    "what is TRHAI and what can you do?",
+    "who is TRHAI",
+    "what's trh ai",
+    "tell me about yourself",
+    "introduce yourself"
+  ]) {
+    const reply = composeReply({ mode: "general", message: question, memories: [], history: [] });
+    assert.equal(reply.strategy, "capability", `"${question}" produced ${reply.strategy}`);
+  }
+});
+
+test("the capability reply names itself TRHAI, with or without a model", () => {
+  assert.match(buildCapabilityReply(), /\bTRHAI\b/);
+  assert.match(buildCapabilityReply("ollama/qwen2.5-coder:7b"), /\bTRHAI\b/);
+});
+
 // The other half of the fix: broadening the pattern must not turn genuine
 // retrieval, memory, and action requests into capability answers. Every one
 // of these needs its own real handling, not a description of what the
