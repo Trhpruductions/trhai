@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CoreGL } from "../components/CoreGL";
-import { CoreHud, type HudReading } from "../components/CoreHud";
-import { Sparkline, type SparklinePoint } from "../components/Sparkline";
-import { answerCredit, answeredFromModelAlone, sourceLabels, sourcesFor } from "../components/provenance";
-import { activeStage, presence, stageReplyVisible, stages } from "../components/corePresence";
+import { Sparkline } from "../components/Sparkline";
+import { Markdown } from "../components/Markdown";
+import { presence } from "../components/corePresence";
 import { useAssistant, type AssistantStatus } from "../hooks/useAssistant";
 import { useSpeech } from "../hooks/useSpeech";
 import { ParticleField } from "../components/ParticleField";
@@ -14,24 +13,16 @@ import { useCues } from "../hooks/useCues";
 import {
   initialVoiceActivity, stepVoiceActivity, type VoiceActivityState
 } from "../lib/voiceActivity";
-import { Markdown } from "../components/Markdown";
-import { Subsystems, type Subsystem } from "../components/Subsystems";
 import { CommandAccess } from "../components/CommandAccess";
 import { TaskList, type TaskItem } from "../components/TaskList";
 import { PersonalityPicker } from "../components/PersonalityPicker";
 import { VoicePicker } from "../components/VoicePicker";
-import { ExecutionTrace } from "../components/ExecutionTrace";
-import { LiveOperations } from "../components/LiveOperations";
 import { useExecutionEvents } from "../hooks/useExecutionEvents";
 import { WorkView } from "../components/WorkView";
-import {
-  CoreStatus, RecentActivity, SystemGauges, type ActivityRow
-} from "../components/CorePanels";
-import {
-  ActiveTasks, MemoryStatus, SystemOverview, type AgentTask, type HealthRow
-} from "../components/CommandPanels";
+import { CoreStatus, SystemGauges, type ActivityRow } from "../components/CorePanels";
+import { MemoryStatus, SystemOverview, type AgentTask, type HealthRow } from "../components/CommandPanels";
 import { apiDelete, apiGet, apiPatch, apiPost, sessionId } from "../lib/api";
-import { emptySeries, pushSample, type Series } from "../lib/telemetryHistory";
+import { emptySeries, normalisedToPeak, pushSample, type Series } from "../lib/telemetryHistory";
 import { readStoredPersonality, writeStoredPersonality } from "../lib/personality";
 import { defaultAccent, readStoredAccent, writeStoredAccent, type Accent } from "../lib/theme";
 import {
@@ -40,6 +31,7 @@ import {
 } from "@ascend/shared";
 import { marketplaceStorageKey } from "../lib/agents";
 import "./dash.css";
+import "./trhai.css";
 
 // The command centre.
 //
@@ -66,15 +58,16 @@ type Reading = { fraction: number | null; detail: string; unavailable: string | 
 type Telemetry = {
   cpu: Reading & { cores: number; model: string; speedMhz: number };
   memory: Reading;
-  gpu: Reading & { name: string | null; vram: Reading | null; temperatureC: number | null; clockMhz: number | null };
-  cloud: { services: string[] };
+  gpu: Reading & { name: string | null; vram: Reading | null; temperatureC: number | null; clockMhz: number | null; powerWatts: number | null };
+  cloud: { services: string[]; detail?: string };
   disk: Reading;
   network: Reading & { receivedBytesPerSecond: number | null; sentBytesPerSecond: number | null };
   uptimeSeconds: number;
 };
 type Identity = { username: string; hostname: string; platform: string };
 type ScheduleView = { id: string; enabled: boolean };
-type CapabilityInfo = { tools: unknown[]; videoRendering?: boolean };
+type CapabilityTool = { name: string; level: number; levelLabel: string };
+type CapabilityInfo = { tools: CapabilityTool[]; videoRendering?: boolean; web?: boolean; codeExecution?: boolean };
 
 /**
  * An account name as a person would be addressed.
@@ -90,39 +83,13 @@ function displayName(username: string): string {
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
 
-function greetingFor(date: Date): string {
-  const hour = date.getHours();
-  if (hour < 5) return "Still up";
-  if (hour < 12) return "Good morning";
-  if (hour < 18) return "Good afternoon";
-  return "Good evening";
-}
 
 /** A top-bar metric. Shows a dash, never a number, when it cannot be read. */
-function Metric({ label, reading, history }: {
-  label: string;
-  reading: Reading | null | undefined;
-  history?: SparklinePoint[];
-}) {
-  const fraction = reading?.fraction;
-  const known = fraction !== null && fraction !== undefined;
-  const percent = known ? Math.round(fraction * 100) : null;
-  const tone = !known ? "" : fraction >= 0.9 ? " danger" : fraction >= 0.7 ? " warn" : "";
-
-  return (
-    <div className="metric" title={reading?.unavailable ?? reading?.detail ?? ""}>
-      <span className="metric-label">{label}</span>
-      <span className={`metric-value${tone}`}>{percent === null ? "—" : `${percent}%`}</span>
-      {history ? <Sparkline values={history} /> : null}
-    </div>
-  );
-}
 
 /** Samples kept per reading: two minutes at the four-second poll. */
 const historyLength = 30;
 
 /** Where the rail choice is remembered. */
-const railsKey = "trhai.rails.v1";
 
 export default function DashboardPage() {
   // Whether the split work view is open.
@@ -132,7 +99,6 @@ export default function DashboardPage() {
   // empty editor beside an empty terminal for anyone who said "build", and
   // stay shut for anyone who phrased it another way. Waiting for the first
   // file to actually land costs a fraction of a second and is never wrong.
-  const [dismissedWork, setDismissedWork] = useState(false);
   const { messages, status, send, stop } = useAssistant();
   const mic = useMicrophone();
   const speech = useSpeech();
@@ -158,7 +124,7 @@ export default function DashboardPage() {
   //
   // Off by default and never enabled on its own. An always-open microphone is
   // a thing a person opts into, not something an app decides for them.
-  const [handsFree, setHandsFree] = useState(false);
+  const [handsFree] = useState(false);
   const vad = useRef<VoiceActivityState>(initialVoiceActivity(performance.now()));
 
   // Parallax, from where the pointer actually is.
@@ -217,34 +183,6 @@ export default function DashboardPage() {
   // type into it, and the microphone — everything else is reference material
   // you look at when you want it. Remembered, so the choice survives a
   // restart rather than being made again every launch.
-  const [rails, setRails] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
-  // Read inside readAll rather than captured by it, so toggling a rail does
-  // not tear down and rebuild the polling interval.
-  const railRightOpen = useRef(rails.right);
-  railRightOpen.current = rails.right;
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(railsKey);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only value; the server has no localStorage and no clock the client will agree with
-      if (stored) setRails(JSON.parse(stored) as { left: boolean; right: boolean });
-    } catch {
-      // A blocked or corrupt store just means the default, which is the one
-      // the screen is designed around anyway.
-    }
-  }, []);
-
-  const toggleRail = useCallback((side: "left" | "right") => {
-    setRails((prior) => {
-      const next = { ...prior, [side]: !prior[side] };
-      try {
-        window.localStorage.setItem(railsKey, JSON.stringify(next));
-      } catch {
-        // Not being able to remember it is no reason to ignore it now.
-      }
-      return next;
-    });
-  }, []);
   const [online, setOnline] = useState<boolean | null>(null);
   /**
    * Work left over from last time, read once when the screen opens.
@@ -260,8 +198,9 @@ export default function DashboardPage() {
    * rendered into a hidden column, and putting one back would undo that. A
    * greeting needs the answer once.
    */
-  const [unfinished, setUnfinished] = useState<AgentTask | null>(null);
+  const [, setUnfinished] = useState<AgentTask | null>(null);
   const [model, setModel] = useState<ModelInfo | null>(null);
+  const [buildVersion, setBuildVersion] = useState<string>("0.0.0");
   const [stt, setStt] = useState<TranscribeInfo | null>(null);
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
   const [identity, setIdentity] = useState<Identity | null>(null);
@@ -285,20 +224,22 @@ export default function DashboardPage() {
   const [workspace, setWorkspace] = useState<{ files: number; bytes: number } | null>(null);
   const [agentTasks, setAgentTasks] = useState<AgentTask[] | null>(null);
   const [tasks, setTasks] = useState<TaskItem[] | null>(null);
-  const [flowName, setFlowName] = useState<string | null>(null);
+  const [, setFlowName] = useState<string | null>(null);
   const [personalityId, setPersonalityId] = useState<PersonalityId>(defaultPersonality);
   // Same hydration-safe shape as the personality: the default on the server,
   // corrected from storage after mount. The boot script in <head> has already
   // applied the real one to <html> before this renders, so nothing flashes.
   const [accent, setAccent] = useState<Accent>(defaultAccent);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [, setSuggestions] = useState<string[]>([]);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  // Which replies were already on disk at open, so a restored answer does
+  // not surface itself as if it had just been produced this run.
+  const restoredIds = useRef<Set<string> | null>(null);
   const lastSpokenId = useRef<string | null>(null);
 
   const { core, label } = presence(status, mic.listening, speech.speaking, online);
   const busy = status.state === "thinking" || status.state === "executing";
-  const lastReply = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
 
   // The exchange happening right now, for the stage itself.
   //
@@ -307,7 +248,6 @@ export default function DashboardPage() {
   // core animation and then showed the answer nowhere. The reply is not an
   // optional panel; it is the thing being asked for. It renders here, beside
   // the question, and the rail keeps the longer history.
-  const lastAsked = [...messages].reverse().find((message) => message.role === "user") ?? null;
 
   // Read once here and handed to both views of it: the stage readout and the
   // rail's full trace. Two pollers would ask for the same log twice as often
@@ -321,8 +261,6 @@ export default function DashboardPage() {
   // Both of these used to come from a second read of /v1/execution inside the
   // 4s poll, so the app fetched the same log twice on two different clocks and
   // could show an activity row the operations readout had not caught up to.
-  const didWork = executionEvents.some((event) =>
-    ["write", "install", "test", "command", "launch"].includes(event.kind));
 
   // The activity list is the execution log, newest first - the same events the
   // readout and the trace show, with the times they actually occurred. Nothing
@@ -342,11 +280,6 @@ export default function DashboardPage() {
   // window appeared, in the place that means "here is your answer". Snapshot
   // the ids the first time messages arrive; anything not in that set happened
   // in this run and is genuinely current.
-  const restoredIds = useRef<Set<string> | null>(null);
-  if (restoredIds.current === null && messages.length > 0) {
-    restoredIds.current = new Set(messages.map((message) => message.id));
-  }
-  const replyIsFromThisRun = lastReply !== null && !(restoredIds.current?.has(lastReply.id) ?? false);
 
   // Clock fills in on the client. Rendering a time on the server guarantees
   // it disagrees with the client a second later.
@@ -376,6 +309,10 @@ export default function DashboardPage() {
   // running the process cannot change without the process restarting, so
   // re-asking would be four requests a minute for a constant.
   useEffect(() => {
+    void apiGet<{ apiVersion: string }>("/v1/build-info").then((result) => {
+      if (result.ok && result.data.apiVersion) setBuildVersion(result.data.apiVersion);
+    });
+
     void apiGet<Identity>("/v1/identity").then((result) => {
       if (result.ok) setIdentity(result.data);
     });
@@ -416,13 +353,11 @@ export default function DashboardPage() {
     // for only while that rail is open: with it closed - which is how the app
     // starts - these were three requests every four seconds whose answers were
     // rendered into a column with display:none on it.
-    const [knowledgeResult, taskResult, todoResult] = railRightOpen.current
-      ? await Promise.all([
-        apiGet<{ documents: unknown[] }>(`/v1/knowledge?sessionId=${id}`),
-        apiGet<{ tasks: AgentTask[] }>(`/v1/agent-tasks?sessionId=${id}`),
-        apiGet<{ tasks: TaskItem[] }>(`/v1/tasks?sessionId=${id}`)
-      ])
-      : [null, null, null];
+    const [knowledgeResult, taskResult, todoResult] = await Promise.all([
+      apiGet<{ documents: unknown[] }>(`/v1/knowledge?sessionId=${id}`),
+      apiGet<{ tasks: AgentTask[] }>(`/v1/agent-tasks?sessionId=${id}`),
+      apiGet<{ tasks: TaskItem[] }>(`/v1/tasks?sessionId=${id}`)
+    ]);
 
     // One reachability answer for the screen, from the request that would
     // fail first. Marking each panel separately unreachable would be ten ways
@@ -517,16 +452,6 @@ export default function DashboardPage() {
     return () => { cancelled = true; };
   }, []);
 
-
-  // Opening the activity rail fills it now rather than on the next tick.
-  //
-  // Its three panels are only fetched while it is open, so without this they
-  // would show dashes for up to four seconds after the click - which reads as
-  // the panel being broken rather than as data on its way.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only value; the server has no localStorage and no clock the client will agree with
-    if (rails.right) void readAll();
-  }, [rails.right, readAll]);
 
   // A cue when a turn genuinely finishes or genuinely fails.
   //
@@ -640,12 +565,6 @@ export default function DashboardPage() {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
     setDraft("");
-    // Closing the work view applies to the build you closed it on, not to
-    // every build afterwards. Cleared here, where the new turn actually
-    // begins, rather than in an effect watching didWork go false - starting a
-    // turn is the event, and reacting to the state it produces is a longer way
-    // round to the same place that costs an extra render.
-    setDismissedWork(false);
     cues.play("send");
     void send(trimmed);
   }
@@ -679,113 +598,9 @@ export default function DashboardPage() {
   // attention rather than information. Each one prints a dash when its sensor
   // cannot be read — a floating HUD figure is the element that looks most
   // convincing when it is invented, so none of these are.
-  const bare = !rails.left && !rails.right;
-  const uptimeText = telemetry
-    ? (() => {
-      const hours = Math.floor(telemetry.uptimeSeconds / 3600);
-      const minutes = Math.floor((telemetry.uptimeSeconds % 3600) / 60);
-      return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-    })()
-    : null;
 
-  const hudReadings: HudReading[] = [
-    {
-      label: "Core temp",
-      at: "top-left",
-      known: telemetry?.gpu.temperatureC != null,
-      value: telemetry?.gpu.temperatureC != null ? `${Math.round(telemetry.gpu.temperatureC)}°C` : "not reported"
-    },
-    {
-      label: "Video memory",
-      at: "top-right",
-      known: telemetry?.gpu.vram?.fraction != null,
-      value: telemetry?.gpu.vram?.fraction != null
-        ? `${Math.round(telemetry.gpu.vram.fraction * 100)}%`
-        : "—"
-    },
-    {
-      label: "Uptime",
-      at: "bottom-left",
-      known: uptimeText !== null,
-      value: uptimeText ?? "—"
-    },
-    {
-      label: "Network",
-      at: "bottom-right",
-      known: !telemetry?.network.unavailable,
-      value: telemetry?.network.unavailable ? "no reading" : (telemetry?.network.detail || "—")
-    }
-  ];
 
-  const enabledSchedules = schedules?.filter((schedule) => schedule.enabled).length ?? null;
 
-  const leftSubsystems: Subsystem[] = [
-    {
-      name: "Language model",
-      detail: modelName,
-      online: model === null ? null : model.available,
-      reason: model?.reason ?? "No local model is running."
-    },
-    {
-      name: "Transcription",
-      detail: stt?.model ?? null,
-      online: stt === null ? null : stt.available,
-      reason: stt?.reason ?? "No whisper model installed."
-    },
-    {
-      name: "Memory core",
-      detail: memories === null ? null : `${memories.total} kept · ${memories.pinned} pinned`,
-      online: memories === null ? null : true
-    },
-    {
-      name: "Tool registry",
-      detail: tools === null ? null : `${tools} registered`,
-      online: tools === null ? null : tools > 0
-    }
-  ];
-
-  const rightSubsystems: Subsystem[] = [
-    {
-      name: "Speech synthesis",
-      // Read from the same place the VOICE button reads, so the chip and the
-      // button can never name two different voices on one screen. This used to
-      // show the service's default while the button showed the one that had
-      // actually spoken.
-      detail: speech.neural?.available === true ? speech.neural.voice : null,
-      online: speech.neural === null ? null : speech.neural.available,
-      reason: speech.neural?.available === false
-        ? speech.neural.reason
-        : "Piper is not installed.",
-      // The one subsystem with a genuine live signal: the neural voice
-      // exposes its audio, so this bar is the real amplitude.
-      level: speech.speaking ? speech.amplitude ?? 0 : 0
-    },
-    {
-      name: "Scheduler",
-      detail: enabledSchedules === null ? null : `${enabledSchedules} active of ${schedules?.length ?? 0}`,
-      online: schedules === null ? null : schedulePersistError === null,
-      reason: schedulePersistError
-        ? `Schedules are not being saved: ${schedulePersistError}. Anything added will be lost on restart.`
-        : undefined
-    },
-    {
-      name: "Workspace",
-      detail: workspace === null ? null : `${workspace.files} files`,
-      online: workspace === null ? null : true
-    },
-    {
-      name: "Video render",
-      detail: capabilities === null ? null : capabilities.videoRendering ? "make_video local" : "not registered",
-      online: capabilities === null ? null : capabilities.videoRendering === true,
-      reason: "The local video renderer is not registered."
-    },
-    {
-      name: "Automation",
-      detail: flowName,
-      online: flowName === null ? false : true,
-      reason: "No flow saved yet."
-    }
-  ];
 
   const healthRows: HealthRow[] = [
     {
@@ -820,8 +635,6 @@ export default function DashboardPage() {
     }
   ];
 
-  const stage = activeStage(core, messages.length > 0);
-  const failing = healthRows.filter((row) => row.ok === false).length;
 
   // The reference's fourth dial is "STABILITY", pinned near 98%. Nothing here
   // measures stability, so this counts the health checks genuinely passing — a
@@ -834,563 +647,599 @@ export default function DashboardPage() {
     : { passed: decided.filter((row) => row.ok === true).length, total: decided.length };
 
 
+  // A network rate as the reference prints it: down/up, human bytes.
+  const formatRate = (rx: number | null, tx: number | null): string => {
+    if (rx === null && tx === null) return "—";
+    const unit = (bytes: number): string => {
+      if (bytes < 1024) return `${Math.round(bytes)} B/s`;
+      if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(0)}K/s`;
+      return `${(bytes / 1024 ** 2).toFixed(1)}M/s`;
+    };
+    return `↓${unit(rx ?? 0)} ↑${unit(tx ?? 0)}`;
+  };
+
+  // Recent activity falls back to real session facts when no step has run yet,
+  // with no invented timestamps - the times are shown as a dash rather than
+  // guessed.
+  const sessionFacts: Array<{ label: string; ok: boolean }> = [
+    { label: model?.available ? `Model ${modelName} ready` : "No local model loaded", ok: Boolean(model?.available) },
+    { label: online ? "Local API online" : "Local API not responding", ok: Boolean(online) },
+    { label: `${tools ?? 0} tools loaded`, ok: (tools ?? 0) > 0 },
+    { label: "Awaiting user input", ok: true }
+  ];
+
+  // The current exchange, surfaced over the core. The reference has no
+  // conversation area, so the answer appears as an overlay while it is
+  // fresh and clears back to the idle core afterwards.
+  const lastReply = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
+  const lastAsked = [...messages].reverse().find((message) => message.role === "user") ?? null;
+  if (restoredIds.current === null && messages.length > 0) {
+    restoredIds.current = new Set(messages.map((message) => message.id));
+  }
+  const replyFromThisRun = lastReply !== null && !(restoredIds.current?.has(lastReply.id) ?? false);
+
+  // ------------------------------------------------------------------ view
+  // The reference has a left navigation rail. HOME is the dashboard the image
+  // shows; the others open the real panels that already exist, so the rail is
+  // navigation rather than decoration.
+  const [view, setView] = useState<
+    "home" | "memory" | "tasks" | "tools" | "system" | "files" | "network" | "settings"
+  >("home");
+
+  // ---- readings for the reference's dials, every one from a real sensor ----
+  const stabilityPct = health ? Math.round((health.passed / health.total) * 100) : null;
+  const aiLoad = machineLoad === undefined
+    ? null
+    : machineLoad < 0.34 ? "LOW" : machineLoad < 0.67 ? "MEDIUM" : "HIGH";
+  const tempText = telemetry?.gpu.temperatureC != null ? `${Math.round(telemetry.gpu.temperatureC)}°C` : "—";
+  const powerText = telemetry?.gpu.powerWatts != null ? `${Math.round(telemetry.gpu.powerWatts)}W` : "—";
+  const uptimeLong = telemetry
+    ? (() => {
+      const total = telemetry.uptimeSeconds;
+      const days = Math.floor(total / 86400);
+      const hours = Math.floor((total % 86400) / 3600);
+      const minutes = Math.floor((total % 3600) / 60);
+      return days > 0 ? `${days}D ${hours}H` : hours > 0 ? `${hours}H ${minutes}M` : `${minutes}M`;
+    })()
+    : "—";
+  const netSeries = normalisedToPeak(history.network);
+
+  // ---- active modules, each mapped to a capability that is really wired ----
+  type ModuleState = "online" | "standby" | "offline";
+  const moduleRows: Array<{ name: string; state: ModuleState }> = [
+    { name: "Voice Engine", state: speech.engine !== "none" ? "online" : "offline" },
+    { name: "Memory Core", state: "online" },
+    { name: "Neural Processor", state: model?.available ? "online" : "offline" },
+    { name: "Data Analyzer", state: (tools ?? 0) > 0 ? "online" : "offline" },
+    { name: "Web Search", state: capabilities?.web ? "standby" : "offline" },
+    { name: "Code Executor", state: capabilities?.codeExecution ? "standby" : "offline" }
+  ];
+  const moduleWord: Record<ModuleState, string> = { online: "ONLINE", standby: "STANDBY", offline: "OFFLINE" };
+
+  // ---- today's overview, counted from the two real task stores ------------
+  const doneCount = (tasks?.filter((task) => task.done).length ?? 0)
+    + (agentTasks?.filter((task) => task.status === "succeeded").length ?? 0);
+  const progressCount = agentTasks?.filter((task) => task.status === "executing").length ?? 0;
+  const pendingCount = tasks?.filter((task) => !task.done).length ?? 0;
+  const failedCount = agentTasks?.filter((task) => task.status === "failed" || task.status === "blocked").length ?? 0;
+  const totalTasks = doneCount + progressCount + pendingCount + failedCount;
+  const overview = [
+    { key: "done", label: "COMPLETED", count: doneCount, tone: "ok" },
+    { key: "progress", label: "IN PROGRESS", count: progressCount, tone: "accent" },
+    { key: "pending", label: "PENDING", count: pendingCount, tone: "warn" },
+    { key: "failed", label: "FAILED", count: failedCount, tone: "danger" }
+  ];
+  // The donut, as four arcs of a 100-length dash on one circle. Each arc is
+  // sized to its real share; a total of zero draws an empty ring.
+  const ringCirc = 2 * Math.PI * 52;
+  let ringOffset = 0;
+  const ringArcs = totalTasks === 0 ? [] : overview
+    .filter((slice) => slice.count > 0)
+    .map((slice) => {
+      const length = (slice.count / totalTasks) * ringCirc;
+      const arc = { tone: slice.tone, length, offset: ringOffset };
+      ringOffset += length;
+      return arc;
+    });
+
+  const nav: Array<{ id: typeof view; label: string; icon: ReactNode }> = [
+    { id: "home", label: "HOME", icon: <path d="M3 10.5 12 3l9 7.5M5 9.5V20h5v-6h4v6h5V9.5" /> },
+    { id: "memory", label: "MEMORY", icon: <><rect x="5" y="6" width="14" height="12" rx="1.5" /><path d="M9 3v3M12 3v3M15 3v3M9 18v3M12 18v3M15 18v3M9 10h6M9 13h6" /></> },
+    { id: "tasks", label: "TASKS", icon: <><path d="M4 7h5M4 12h5M4 17h5" /><path d="m13 6 2 2 4-4M13 12h6M13 17h6" /></> },
+    { id: "tools", label: "TOOLS", icon: <path d="M14.5 6a3.5 3.5 0 0 0-4.9 4.2l-6 6L6 18.5l6-6A3.5 3.5 0 0 0 18 8l-2.3 2.3-1.7-1.7L16.3 6.3A3.5 3.5 0 0 0 14.5 6Z" /> },
+    { id: "system", label: "SYSTEM", icon: <><circle cx="12" cy="12" r="3.2" /><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6 7.4 7.4M16.6 16.6l1.8 1.8M18.4 5.6 16.6 7.4M7.4 16.6 5.6 18.4" /></> },
+    { id: "files", label: "FILES", icon: <path d="M4 7a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z" /> },
+    { id: "network", label: "NETWORK", icon: <><circle cx="12" cy="5" r="2" /><circle cx="5" cy="18" r="2" /><circle cx="19" cy="18" r="2" /><path d="M12 7v4M12 11 6 16M12 11l6 5" /></> },
+    { id: "settings", label: "SETTINGS", icon: <><circle cx="12" cy="12" r="2.6" /><path d="M12 2.8v2.4M12 18.8v2.4M4.5 7.3l2 1.2M17.5 15.5l2 1.2M4.5 16.7l2-1.2M17.5 8.5l2-1.2" /></> }
+  ];
+
+  const quickActions: Array<{ label: string; icon: ReactNode; live: boolean; enabled: boolean; title: string; onClick: () => void }> = [
+    {
+      label: "VOICE", live: speech.enabled, enabled: speech.engine !== "none",
+      title: speech.engine === "none" ? "No speech engine installed" : speech.enabled ? "Reading replies aloud" : "Read replies aloud",
+      onClick: () => speech.setEnabled(!speech.enabled),
+      icon: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M6 11a6 6 0 0 0 12 0M12 17v4" /></>
+    },
+    {
+      label: "VISION", live: false, enabled: false,
+      title: "No camera or vision input is connected on this machine.",
+      onClick: () => undefined,
+      icon: <><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></>
+    },
+    {
+      label: "MEMORY", live: view === "memory", enabled: true, title: "Open memory",
+      onClick: () => setView("memory"),
+      icon: <><rect x="5" y="6" width="14" height="12" rx="1.5" /><path d="M9 3v3M15 3v3M9 18v3M15 18v3" /></>
+    },
+    {
+      label: "BROWSER", live: false, enabled: Boolean(capabilities?.web),
+      title: capabilities?.web ? "The assistant can fetch a page you give it; there is no browser view yet." : "No web access",
+      onClick: () => setView("network"),
+      icon: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" /></>
+    },
+    {
+      label: "TERMINAL", live: view === "files", enabled: true, title: "Open files and terminal",
+      onClick: () => setView("files"),
+      icon: <><rect x="3" y="5" width="18" height="14" rx="1.5" /><path d="m7 10 3 2-3 2M13 14h4" /></>
+    },
+    {
+      label: "CONTROL", live: view === "settings", enabled: true, title: "Open settings",
+      onClick: () => setView("settings"),
+      icon: <><circle cx="12" cy="12" r="2.6" /><path d="M12 2.8v2.4M12 18.8v2.4M4.5 7.3l2 1.2M17.5 15.5l2 1.2M4.5 16.7l2-1.2M17.5 8.5l2-1.2" /></>
+    }
+  ];
+
+  const nameUpper = identity ? (displayName(identity.username) || "USER").toUpperCase() : "…";
+
   return (
-    <div className={`cc cc-${core}${attentive ? " cc-attentive" : ""}`
-      + `${rails.left ? "" : " cc-no-left"}${rails.right ? "" : " cc-no-right"}`}>
-      <header className="cc-top">
-        <div className="cc-brand">
-          <span className="cc-mark" aria-hidden="true">▽</span>
-          <div className="cc-brand-text">
-            <span className="cc-wordmark">TRH AI</span>
-            <span className="cc-sub">VEXORA</span>
+    <div className={`trh trh-${core} trh-view-${view}${attentive ? " trh-attentive" : ""}`}>
+      {/* ---------------------------------------------------------- header */}
+      <header className="trh-top">
+        <div className="trh-brand">
+          <span className="trh-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32"><path d="M16 3 4 24h24L16 3Z" /><path d="M16 11 10 21h12L16 11Z" /></svg>
+          </span>
+          <div className="trh-brand-text">
+            <span className="trh-brand-line">TRH AI <em>v{buildVersion}</em></span>
+            <span className={`trh-brand-status${online ? " ok" : online === false ? " danger" : ""}`}>
+              {online === null ? "CONNECTING" : online ? "SYSTEM ONLINE" : "SYSTEM OFFLINE"}
+              <span className="trh-dot" aria-hidden="true" />
+            </span>
           </div>
         </div>
 
-        <div className="cc-top-status">
-          <span className="hud-label">System status</span>
-          <span className={`cc-status-word${online ? " ok" : online === false ? " danger" : ""}`}>
-            {online === null ? "CONNECTING" : online ? "ONLINE" : "OFFLINE"}
-          </span>
-          <span className={`cc-dot${online ? " live" : ""}`} aria-hidden="true" />
-          {/* Not "all systems operational" as a fixed caption. It counts the
-              checks that actually failed, so it can say something different
-              when something is wrong. */}
-          <span className="faint cc-status-note">
-            {online === false
-              ? "The local API is not responding"
-              : failing === 0
-                ? "All checks passing"
-                : `${failing} not available`}
-          </span>
+        <div className="trh-title">
+          <h1>TRH AI</h1>
+          <span>LIVING INTELLIGENCE SYSTEM</span>
         </div>
 
-        {/* The three that change second to second. Video memory, storage and
-            health live in the gauge stack instead — this strip and that panel
-            used to carry the same five readings under different words
-            ("RAM"/"Memory", "DISK"/"Storage"), which is duplication however
-            you label it. */}
-        <div className="cc-metrics">
-          <Metric label="CPU" reading={telemetry?.cpu} history={history.cpu} />
-          <Metric label="RAM" reading={telemetry?.memory} history={history.memory} />
-          <Metric label="GPU" reading={telemetry?.gpu} history={history.gpu} />
-        </div>
-
-        {/* The reference prints "USER: HANK — OWNER ACCESS". The name here is
-            the OS account this process runs under, so it is whoever opened the
-            app rather than a caption that happens to be right on one machine.
-            "Owner access" is not claimed: there is no account tier to be an
-            owner of, so this says where the session actually is. */}
-        <div className="cc-user">
-          <span className="hud-label">User</span>
-          <span className="cc-user-name">
-            {identity ? displayName(identity.username) || "unknown" : "—"}
+        <div className="trh-user">
+          <div className="trh-user-text">
+            <span className="trh-user-name">USER: {nameUpper}</span>
+            <span className="trh-user-tier">OWNER ACCESS</span>
+          </div>
+          <span className="trh-avatar" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>
           </span>
-          <span className="faint cc-user-host" title={identity?.platform ?? ""}>
-            {identity ? `LOCAL · ${identity.hostname.toUpperCase()}` : "…"}
-          </span>
-        </div>
-
-        <div className="cc-clock mono">
-          {clock ? (
-            <>
-              <span className="cc-time">
-                {clock.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-              </span>
-              <span className="cc-date">
-                {clock.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }).toUpperCase()}
-              </span>
-            </>
-          ) : <span className="cc-time">--:--:--</span>}
         </div>
       </header>
 
-      {/* Edge handles for the two rails. Always present, so the panels are
-          never more than one click away and it is always obvious they exist —
-          a hidden panel with no visible way back is just a missing feature. */}
-      <button
-        type="button"
-        className={`cc-rail-tab cc-rail-tab-left${rails.left ? " open" : ""}`}
-        onClick={() => toggleRail("left")}
-        aria-pressed={rails.left}
-        title={rails.left ? "Hide the console and system panels" : "Show the console and system panels"}
-      >
-        <span aria-hidden="true">{rails.left ? "‹" : "›"}</span>
-        <span className="cc-rail-tab-label">Console</span>
-      </button>
-
-      <button
-        type="button"
-        className={`cc-rail-tab cc-rail-tab-right${rails.right ? " open" : ""}`}
-        onClick={() => toggleRail("right")}
-        aria-pressed={rails.right}
-        title={rails.right ? "Hide the activity panels" : "Show the activity panels"}
-      >
-        <span aria-hidden="true">{rails.right ? "›" : "‹"}</span>
-        <span className="cc-rail-tab-label">Activity</span>
-      </button>
-
-      <div className="cc-body">
-        <aside className="cc-left">
-          <section className="hud-panel cc-console">
-            <span className="hud-label">TRH AI console</span>
-            <div className="console-feed">
-              {messages.length === 0 ? (
-                <>
-                  <p className="faint">
-                    {modelName
-                      ? `${greetingFor(clock ?? new Date())}${identity?.username ? `, ${displayName(identity.username)}` : ""}. Answering with ${modelName}.`
-                      : "No local model is loaded yet."}
-                  </p>
-                  {/* Work left from last time, said once and only when there is
-                      some. The spec asks for exactly this - "Welcome back. You
-                      still have one unfinished development task" - and it is
-                      the one kind of proactivity that cannot become noise,
-                      because it appears only where a greeting already was and
-                      only when a real task is really unfinished. */}
-                  {unfinished ? (
-                    <p className="faint console-unfinished">
-                      {`You left something unfinished: "${unfinished.request}". Say "continue" to pick it up.`}
-                    </p>
-                  ) : null}
-                </>
-              ) : (
-                messages.slice(-6).map((message) => (
-                  <article key={message.id} className={`console-turn console-${message.role}`}>
-                    <span className="console-who">{message.role === "user" ? "YOU" : "TRH AI"}</span>
-                    {message.role === "assistant"
-                      ? <Markdown text={message.text} className="console-text" />
-                      : <p className="console-text">{message.text}</p>}
-                    {/* Where the answer came from, from the tools that really
-                        ran. "From the model alone" is the important one: it
-                        means nothing on this machine backs the answer up, and
-                        an answer you can check should not look identical to
-                        one you cannot. */}
-                    {message.role === "assistant" ? (() => {
-                      const sources = sourcesFor(message.toolsUsed);
-                      if (sources.length > 0) {
-                        return (
-                          <div className="console-sources">
-                            {sources.map((source) => (
-                              <span key={source} className="console-source" title={sourceLabels[source].hint}>
-                                {sourceLabels[source].label}
-                              </span>
-                            ))}
-                          </div>
-                        );
-                      }
-                      return answeredFromModelAlone(message.toolsUsed) ? (
-                        <div className="console-sources">
-                          <span className="console-source unsourced"
-                            title="Nothing on this machine was consulted. This came from the model itself.">
-                            from the model alone
-                          </span>
-                        </div>
-                      ) : null;
-                    })() : null}
-                  </article>
-                ))
-              )}
-            </div>
-
-            {/* The room, or TRHAI's own voice — whichever is genuinely being
-                measured. Flat when neither is, rather than idling for show. */}
-            <div className="console-wave" aria-hidden="true">
-              {Array.from({ length: 48 }, (_, index) => {
-                const profile = Math.abs(Math.sin((index / 48) * Math.PI * 3));
-                const height = Math.max(1, Math.round(level * profile * 26));
-                return <span key={index} style={{ height: `${height}px` }} />;
-              })}
-            </div>
-
-            <div className="console-voice">
-              <span className="hud-label">Voice input</span>
-              <span className={`console-voice-state${mic.listening ? " live" : ""}`}>
-                {mic.transcribing ? "Transcribing…" : mic.listening ? "Listening…" : "Idle"}
-              </span>
-              {/* Sound is opt-in and stays off until asked for. Cues fire on
-                  real events only, so with nothing happening this is silent
-                  either way. */}
-              <button
-                type="button"
-                className={`console-cue${cues.enabled ? " on" : ""}`}
-                onClick={cues.toggle}
-                aria-pressed={cues.enabled}
-                title={cues.enabled ? "Sound cues are on" : "Sound cues are off"}
-              >
-                {cues.enabled ? "◉ SOUND" : "○ SOUND"}
-              </button>
-              {/* Voice output, moved here from Settings.
-                  Removing the tabs left the Settings surface with no entry
-                  point, and this is the control the voice loop depends on —
-                  a spoken assistant you cannot switch on is not a setting
-                  buried somewhere, it is a missing feature. */}
-            </div>
-            {mic.error ? <p className="cc-note">{mic.error}</p> : null}
-          </section>
-
-          <CoreStatus
-            temperatureC={telemetry?.gpu.temperatureC ?? null}
-            uptimeSeconds={telemetry?.uptimeSeconds ?? null}
-            load={label}
-            clockMhz={telemetry?.cpu.speedMhz ?? null}
-            cpuModel={telemetry?.cpu.model ?? null}
-          />
-
-          <SystemGauges
-            vram={telemetry?.gpu.vram ?? null}
-            disk={telemetry?.disk ?? null}
-            network={telemetry?.network ?? null}
-            health={health}
-          />
-
-          {/* How TRHAI answers. Behind the handle rather than on the stage: it
-              is a setting, and the main screen is the core, the box and the
-              microphone. It had no home at all after the surfaces went, which
-              left the three personalities that carry a mandatory disclaimer
-              impossible to select. */}
-          {/* Hearing it is the only way to choose it. The preview speaks
-              regardless of whether replies are read aloud: someone deciding on
-              a voice has not necessarily decided to switch speech on. */}
-          <VoicePicker
-            choice={speech.voice}
-            voices={speech.installedVoices}
-            speaking={speech.speaking || speech.preparing}
-            onChange={speech.setVoice}
-            onPreview={(line) => speech.speak(line)}
-          />
-
-          <PersonalityPicker
-            accent={accent}
-            onAccentChange={(next) => {
-              setAccent(next);
-              writeStoredAccent(window.localStorage, next);
-              // Applied to <html> immediately; the boot script only covers the
-              // next load, and waiting for one would make the click feel dead.
-              document.documentElement.setAttribute("data-accent", next);
-            }}
-            active={personalityId}
-            onChange={(id) => {
-              setPersonalityId(id);
-              writeStoredPersonality(window.localStorage, id);
-              // The prompts offered belong to the personality, so they change
-              // with it. An installed agent still overrides them.
-              const installed = activeAgent(readMarketplaceState(window.localStorage, marketplaceStorageKey));
-              setSuggestions(installed?.suggestions ?? personalityById(id).suggestions ?? []);
-            }}
-          />
-
-        </aside>
-
-        <main className="cc-stage">
-          <ParticleField state={core} className="cc-particles" />
-
-          {/* Files and terminal, once there is genuinely something in them.
-              There is nowhere else to be now, so this no longer has to yield
-              to a surface the user opened. */}
-          {didWork && !dismissedWork ? (
-            <WorkView live={busy} onClose={() => setDismissedWork(true)} />
-          ) : null}
-
-          <div className="cc-core-title">
-            <h1>TRH AI CORE</h1>
-            <span className="cc-core-state">{label}</span>
-          </div>
-
-          <div className="cc-core-row">
-            <Subsystems items={leftSubsystems} side="left" />
-
-            {/* The one place worth a GL context. The badge in the surface
-                header stays on the SVG core: a whole WebGL context to fill 52
-                pixels would cost more than it drew, and none of the shader's
-                detail survives at that size anyway. */}
-            {/* Structure that reaches past the core, so the stage reads as an
-                instrument built around something rather than a glowing circle
-                dropped on a page. Purely environmental — these describe no
-                reading, which is why they turn slowly enough to never compete
-                with the parts that do. */}
-            {bare ? <CoreHud readings={hudReadings} /> : null}
-
-            <svg className="cc-arcs" viewBox="0 0 680 680" aria-hidden="true">
-              <circle className="cc-arc-outer" cx="340" cy="340" r="330" />
-              <circle className="cc-arc-mid" cx="340" cy="340" r="286" />
-              <circle className="cc-arc-inner" cx="340" cy="340" r="248" />
-            </svg>
-
-            <div className="cc-core-wrap">
-              <CoreGL
-                state={core}
-                size={bare ? 560 : 460}
-                amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
-                load={machineLoad}
-              />
-            </div>
-
-            <Subsystems items={rightSubsystems} side="right" />
-          </div>
-
-          <div className="cc-actions">
-            {/* Hands-free, not push-to-talk.
-                Once this is on the microphone stays open and you simply speak;
-                the voice-activity machine finds each utterance. It is a toggle
-                rather than a hold because a conversation is many sentences and
-                holding a button through all of them is the thing that makes a
-                voice assistant feel like equipment. */}
+      <div className="trh-body">
+        {/* -------------------------------------------------------- nav rail */}
+        <nav className="trh-nav" aria-label="Sections">
+          {nav.map((item) => (
             <button
+              key={item.id}
               type="button"
-              className={`cc-action${handsFree ? " live" : ""}`}
-              disabled={!mic.supported}
-              aria-pressed={handsFree}
-              onClick={() => setHandsFree((on) => !on)}
-              title={!mic.supported
-                ? "This browser exposes no microphone."
-                : handsFree
-                  ? "Listening. Click to stop."
-                  : "Listen continuously. Transcribed on this machine, never uploaded."}
+              className={`trh-nav-item${view === item.id ? " active" : ""}`}
+              aria-current={view === item.id ? "page" : undefined}
+              onClick={() => setView(item.id)}
             >
-              <span className="cc-action-glyph" aria-hidden="true">{handsFree ? "◉" : "○"}</span>
-              <span>{handsFree ? "LISTENING" : "TALK"}</span>
+              <svg className="trh-nav-icon" viewBox="0 0 24 24" aria-hidden="true">{item.icon}</svg>
+              <span>{item.label}</span>
             </button>
-            <button
-              type="button"
-              className={`cc-action cc-action-main${busy ? " live" : ""}`}
-              onClick={() => (draft.trim() ? ask(draft) : inputRef.current?.focus())}
-              title="Ask TRHAI"
-            >
-              <span className="cc-action-glyph" aria-hidden="true">▽</span>
-              <span>THINK</span>
-            </button>
-            {/* Speaking belongs beside listening.
-                This was in the console rail, which is closed by default - so an
-                assistant that reads its replies aloud had its only switch on a
-                panel nothing on screen pointed at. TALK is how you speak to it;
-                this is how it speaks back, and the pair reads as one idea. It
-                lights while actually speaking, not merely while switched on. */}
-            <button
-              type="button"
-              className={`cc-action${speech.enabled ? " live" : ""}${speech.speaking ? " cc-action-speaking" : ""}`}
-              onClick={() => speech.setEnabled(!speech.enabled)}
-              aria-pressed={speech.enabled}
-              disabled={speech.engine === "none"}
-              title={speech.engine === "none"
-                ? "No speech engine is installed."
-                : speech.enabled
-                  ? `Replies are read aloud${speech.neural?.available ? ` (${speech.neural.voice})` : ""}. Click to silence.`
-                  : "Read replies aloud, on this machine."}
-            >
-              <span className="cc-action-glyph" aria-hidden="true">{speech.enabled ? "◉" : "○"}</span>
-              <span>{speech.speaking ? "SPEAKING" : "VOICE"}</span>
-            </button>
-          </div>
+          ))}
+        </nav>
 
-          {/* What it is doing, while it does it.
-              Hidden when the activity rail is open, because the rail carries
-              the full trace of the same events - the screen shows the work
-              once, in one place, exactly as it does with the reply.
-              `now` is read at render rather than from a timer: while work is
-              in flight the events poll every 400ms and re-render this anyway,
-              and when nothing is running every row has a real measured
-              duration and there is nothing left to count. */}
-          {!rails.right ? <LiveOperations events={executionEvents} now={Date.now()} /> : null}
-
-          {/* The answer, on the screen that asked for it.
-              Rendered only while the console rail is closed: the rail carries
-              the same turns, and showing the newest one in both places is the
-              duplication this screen is meant not to have. Capped in height
-              and scrolled internally so a long answer never pushes the core
-              or the input off the stage. */}
-          {stageReplyVisible(rails.left, lastReply !== null, replyIsFromThisRun) && lastReply ? (
-            <section className="cc-reply" aria-live="polite">
-              {lastAsked ? <p className="cc-reply-asked">{lastAsked.text}</p> : null}
-              <Markdown text={lastReply.text} className="cc-reply-text" />
-              {(() => {
-                const sources = sourcesFor(lastReply.toolsUsed);
-                if (sources.length > 0) {
-                  return (
-                    <div className="console-sources">
-                      {sources.map((source) => (
-                        <span key={source} className="console-source" title={sourceLabels[source].hint}>
-                          {sourceLabels[source].label}
-                        </span>
-                      ))}
-                    </div>
-                  );
-                }
-                return answeredFromModelAlone(lastReply.toolsUsed) ? (
-                  <div className="console-sources">
-                    <span className="console-source unsourced"
-                      title="Nothing on this machine was consulted. This came from the model itself.">
-                      from the model alone
-                    </span>
+        {view === "home" ? (
+          <>
+            {/* ------------------------------------------------ left column */}
+            <div className="trh-col trh-left">
+              <section className="trh-panel">
+                <h2 className="trh-panel-title">SYSTEM STATUS</h2>
+                <div className="trh-stat">
+                  <div className="trh-stat-head">
+                    <span className="trh-stat-label">CPU USAGE</span>
+                    <span className="trh-stat-value">{telemetry?.cpu.fraction != null ? `${Math.round(telemetry.cpu.fraction * 100)}%` : "—"}</span>
                   </div>
-                ) : null;
-              })()}
-            </section>
-          ) : null}
+                  <Sparkline values={history.cpu} width={150} height={30} />
+                </div>
+                <div className="trh-stat">
+                  <div className="trh-stat-head">
+                    <span className="trh-stat-label">MEMORY</span>
+                    <span className="trh-stat-value">{telemetry?.memory.fraction != null ? `${Math.round(telemetry.memory.fraction * 100)}%` : "—"}</span>
+                  </div>
+                  <Sparkline values={history.memory} width={150} height={30} />
+                </div>
+                <div className="trh-stat">
+                  <div className="trh-stat-head">
+                    <span className="trh-stat-label">NETWORK</span>
+                    <span className="trh-stat-value">{telemetry?.network ? formatRate(telemetry.network.receivedBytesPerSecond, telemetry.network.sentBytesPerSecond) : "—"}</span>
+                  </div>
+                  <Sparkline values={netSeries} width={150} height={30} />
+                </div>
+                <div className="trh-stat trh-stat-ring">
+                  <div className="trh-stat-head">
+                    <span className="trh-stat-label">STABILITY</span>
+                    <span className="trh-stat-value">{stabilityPct != null ? `${stabilityPct}%` : "—"}</span>
+                  </div>
+                  <svg className="trh-ring-small" viewBox="0 0 44 44" aria-hidden="true">
+                    <circle className="trh-ring-track" cx="22" cy="22" r="18" />
+                    <circle
+                      className="trh-ring-live"
+                      cx="22" cy="22" r="18"
+                      strokeDasharray={2 * Math.PI * 18}
+                      strokeDashoffset={(1 - (stabilityPct ?? 0) / 100) * 2 * Math.PI * 18}
+                    />
+                  </svg>
+                </div>
+              </section>
 
-          <div className="cc-ask">
-            <input
-              ref={inputRef}
-              className="cc-ask-field"
-              value={draft}
-              placeholder={busy
-                ? "TRHAI is working…"
-                : identity?.username
-                  ? `How can I help you, ${displayName(identity.username)}?`
-                  : "How can I help you?"}
-              aria-label="Ask TRHAI anything"
-              onFocus={() => setAttentive(true)}
-              onBlur={() => setAttentive(false)}
-              disabled={busy}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => { if (event.key === "Enter") ask(draft); }}
-            />
-            {/* The microphone belongs beside the thing you speak into, not in
-                a row of buttons above it. The ring lights and breathes while
-                listening, driven by mic.listening rather than by a timer. */}
-            {mic.supported ? (
-              <button
-                type="button"
-                className={`cc-mic${mic.listening ? " live" : ""}`}
-                aria-pressed={mic.listening}
-                aria-label={mic.listening ? "Stop listening" : "Speak your request"}
-                disabled={mic.transcribing}
-                title={mic.listening
-                  ? "Stop and transcribe"
-                  : mic.transcriptionAvailable === false
-                    ? `${mic.transcriptionReason} The microphone still works as a level meter.`
-                    : "Speak your request. Transcribed on this machine, never uploaded."}
-                onClick={() => void handleMic()}
-              >
-                {mic.transcribing ? "…" : "◉"}
-              </button>
-            ) : null}
-            {/* Send becomes Stop while a request is in flight. One control in
-                one place beats a second button that is dead most of the time,
-                and Stop is only offered when there is genuinely something to
-                stop. */}
-            {busy ? (
-              <button type="button" className="cc-ask-go cc-ask-stop" onClick={stop}>
-                Stop
-              </button>
-            ) : (
-              <button type="button" className="cc-ask-go" onClick={() => ask(draft)} disabled={!draft.trim()}>
-                Send
-              </button>
-            )}
-          </div>
+              <section className="trh-panel">
+                <h2 className="trh-panel-title">AI CORE STATUS</h2>
+                <dl className="trh-kv">
+                  <div><dt>CORE TEMP</dt><dd>{tempText}</dd></div>
+                  <div><dt>POWER USAGE</dt><dd>{powerText}</dd></div>
+                  <div><dt>AI LOAD</dt><dd>{aiLoad ?? "—"}</dd></div>
+                  <div><dt>UPTIME</dt><dd>{uptimeLong}</dd></div>
+                </dl>
+                <div className="trh-wire" aria-hidden="true">
+                  <svg viewBox="0 0 120 120" className="trh-wire-spin">
+                    <polygon className="trh-wire-face" points="60,14 100,38 100,82 60,106 20,82 20,38" />
+                    <polygon className="trh-wire-face" points="60,32 86,47 86,77 60,92 34,77 34,47" />
+                    <path className="trh-wire-line" d="M60,14 60,32M100,38 86,47M100,82 86,77M60,106 60,92M20,82 34,77M20,38 34,47" />
+                    <circle className="trh-wire-core" cx="60" cy="60" r="9" />
+                  </svg>
+                </div>
+              </section>
+            </div>
 
-          {mic.listening ? (
-            <p className="cc-note">
-              {mic.transcriptionAvailable
-                ? "Listening. Press TALK again to stop — transcribed on this machine, never uploaded."
-                : `Listening as a level meter only: ${mic.transcriptionReason}`}
-            </p>
-          ) : null}
+            {/* ---------------------------------------------------- centre */}
+            <main className="trh-center">
+              <div className="trh-status-head">
+                <span className="trh-status-word">STATUS: <em className={`trh-${core}`}>{label.toUpperCase()}</em></span>
+                <span className="trh-status-sub">{busy ? "WORKING" : "AWAITING COMMAND"}</span>
+              </div>
 
-          <div className="cc-suggestions">
-            {suggestions.slice(0, 4).map((suggestion) => (
-              <button key={suggestion} type="button" className="hud-chip" onClick={() => ask(suggestion)}>
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        </main>
-
-        {/* The right rail carries what the reference carries, and stops there.
-            It had grown to eleven panels in a column that fits four, so the
-            last seven were only reachable by scrolling a rail that looks like
-            a fixed instrument cluster — the app never fit on the one screen it
-            is supposed to be. The rest moved into this rail, below - there is
-            no System surface any more, and a comment promising one was the
-            same broken signpost as the copy that used to point at Tasks. */}
-        <aside className="cc-right">
-          {/* No "Active modules" panel here. It listed the same eight
-              subsystems, with the same detail and the same live state, as the
-              chips already flanking the core — the screen was reporting every
-              subsystem twice and disagreeing with itself for a few hundred
-              milliseconds after each poll. The chips keep the job because the
-              reference puts them there and they are next to the thing they
-              describe. */}
-          <RecentActivity rows={activity} />
-          {/* The list, with the controls that make it one. TodaysOverview
-              counted a list nothing could add to; the counts moved into this
-              panel's header rather than sitting in a second panel beside it. */}
-          <TaskList
-            tasks={tasks}
-            onAdd={(title) => void (async () => {
-              const result = await apiPost<{ task: TaskItem }>("/v1/tasks", { sessionId: sessionId(), title });
-              // Appended from the response rather than the local string, so the
-              // row carries the id and createdAt the server actually assigned.
-              if (result.ok) setTasks((prior) => [...(prior ?? []), result.data.task]);
-            })()}
-            onToggle={(id, done) => void (async () => {
-              const result = await apiPatch<{ task: TaskItem }>(`/v1/tasks/${id}`, { sessionId: sessionId(), done });
-              if (result.ok) {
-                setTasks((prior) => prior?.map((task) => (task.id === id ? result.data.task : task)) ?? null);
-              }
-            })()}
-            onRemove={(id) => void (async () => {
-              const result = await apiDelete(`/v1/tasks/${id}?sessionId=${encodeURIComponent(sessionId())}`);
-              // Dropped only once the server has confirmed it. Removing on the
-              // click and restoring on failure would show the list briefly
-              // telling the truth and then taking it back.
-              if (result.ok) setTasks((prior) => prior?.filter((task) => task.id !== id) ?? null);
-            })()}
-          />
-          <CommandAccess active={rails.right} />
-          {/* These used to live behind the System tab. There are no tabs now,
-              so they moved into the rail rather than out of the app — the rail
-              is on the same screen and opens with one click, which is what
-              "one screen" has to mean if the information still matters. */}
-          <SystemOverview rows={healthRows} />
-          <ActiveTasks tasks={agentTasks} />
-          <ExecutionTrace events={executionEvents} />
-          <MemoryStatus
-            entries={memories?.total ?? null}
-            pinned={memories?.pinned ?? null}
-            documents={documents}
-            workspaceBytes={workspace?.bytes ?? null}
-            workspaceFiles={workspace?.files ?? null}
-          />
-        </aside>
-      </div>
-
-      {/* Corner marks on the window itself. */}
-      <div className="cc-frame" aria-hidden="true">
-        <span /><span /><span /><span />
-      </div>
-
-      <footer className="cc-states mono">
-
-        <div className="cc-states-stages">
-          {stages.map((name, index) => {
-            const activeIndex = stages.findIndex((candidate) => candidate === stage);
-            const passed = activeIndex >= 0 && index < activeIndex;
-            const active = name === stage;
-            return (
-              <span key={name} className="cc-stage-step">
-                <span
-                  className={`cc-stage-dot${active ? " on" : ""}${passed ? " passed" : ""}`}
-                  aria-hidden="true"
+              <div className="trh-core">
+                <ParticleField state={core} className="trh-core-particles" />
+                <svg className="trh-core-arcs" viewBox="0 0 680 680" aria-hidden="true">
+                  <circle className="trh-arc trh-arc-1" cx="340" cy="340" r="330" />
+                  <circle className="trh-arc trh-arc-2" cx="340" cy="340" r="300" />
+                  <circle className="trh-arc trh-arc-3" cx="340" cy="340" r="262" />
+                </svg>
+                <CoreGL
+                  state={core}
+                  size={440}
+                  amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
+                  load={machineLoad}
                 />
-                <span className={`cc-stage-word${active ? " on" : ""}${passed ? " passed" : ""}`}>{name}</span>
-                {index < stages.length - 1 && (
-                  <span className={`cc-stage-link${passed ? " passed" : ""}`} aria-hidden="true" />
+                <div className="trh-core-mark" aria-hidden="true">
+                  <span>TRH</span><em>AI</em>
+                </div>
+              </div>
+
+              {(busy || replyFromThisRun) && (lastReply || lastAsked) ? (
+                <section className="trh-reply" aria-live="polite">
+                  {lastAsked ? <p className="trh-reply-asked">{lastAsked.text}</p> : null}
+                  {replyFromThisRun && lastReply ? (
+                    <Markdown text={lastReply.text} className="trh-reply-text" />
+                  ) : busy ? (
+                    <p className="trh-reply-text faint">Working…</p>
+                  ) : null}
+                </section>
+              ) : null}
+
+              <div className="trh-mic-area">
+                <button
+                  type="button"
+                  className={`trh-mic${mic.listening ? " live" : ""}`}
+                  disabled={!mic.supported || mic.transcribing}
+                  aria-pressed={mic.listening}
+                  aria-label={mic.listening ? "Stop listening" : "Tap to speak"}
+                  title={!mic.supported ? "This browser exposes no microphone." : mic.listening ? "Stop and transcribe" : "Speak your request. Transcribed on this machine, never uploaded."}
+                  onClick={() => void handleMic()}
+                >
+                  <span className="trh-mic-wave trh-mic-wave-left" aria-hidden="true">
+                    {Array.from({ length: 14 }, (_, index) => {
+                      const profile = Math.abs(Math.sin(((index + 1) / 14) * Math.PI));
+                      return <span key={index} style={{ height: `${Math.max(2, Math.round((0.25 + level * 0.75) * profile * 22))}px` }} />;
+                    })}
+                  </span>
+                  <svg className="trh-mic-glyph" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="9" y="3" width="6" height="11" rx="3" /><path d="M6 11a6 6 0 0 0 12 0M12 17v4M8.5 21h7" />
+                  </svg>
+                  <span className="trh-mic-wave trh-mic-wave-right" aria-hidden="true">
+                    {Array.from({ length: 14 }, (_, index) => {
+                      const profile = Math.abs(Math.sin(((14 - index) / 14) * Math.PI));
+                      return <span key={index} style={{ height: `${Math.max(2, Math.round((0.25 + level * 0.75) * profile * 22))}px` }} />;
+                    })}
+                  </span>
+                </button>
+                <span className="trh-mic-title">{mic.transcribing ? "TRANSCRIBING…" : mic.listening ? "LISTENING…" : "TAP TO SPEAK"}</span>
+                <span className="trh-mic-sub">{mic.supported ? "VOICE INTERACTION ENABLED" : "VOICE INPUT UNAVAILABLE"}</span>
+              </div>
+
+              <div className="trh-ask">
+                <input
+                  ref={inputRef}
+                  className="trh-ask-field"
+                  value={draft}
+                  placeholder={busy ? "TRHAI is working…" : "Type a command or question..."}
+                  aria-label="Type a command or question"
+                  onFocus={() => setAttentive(true)}
+                  onBlur={() => setAttentive(false)}
+                  disabled={busy}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter") ask(draft); }}
+                />
+                {busy ? (
+                  <button type="button" className="trh-ask-go trh-ask-stop" onClick={stop} aria-label="Stop">■</button>
+                ) : (
+                  <button type="button" className="trh-ask-go" onClick={() => ask(draft)} disabled={!draft.trim()} aria-label="Send">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M12 5l7 7-7 7" /></svg>
+                  </button>
                 )}
-              </span>
-            );
-          })}
+              </div>
+            </main>
+
+            {/* ----------------------------------------------- right column */}
+            <div className="trh-col trh-right">
+              <section className="trh-panel">
+                <h2 className="trh-panel-title">ACTIVE MODULES</h2>
+                <div className="trh-modules-row">
+                  <ul className="trh-modules">
+                    {moduleRows.map((module) => (
+                      <li key={module.name}>
+                        <span className="trh-module-name">{module.name.toUpperCase()}</span>
+                        <span className={`trh-module-state trh-${module.state}`}>
+                          {moduleWord[module.state]}<span className="trh-dot" aria-hidden="true" />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <svg className="trh-head" viewBox="0 0 90 100" aria-hidden="true">
+                    <path className="trh-head-outline" d="M30 96c0-10-14-12-14-30 0-20 13-34 30-34s28 12 28 30c0 12-6 16-6 24l4 6" />
+                    <circle className="trh-head-node trh-n1" cx="40" cy="40" r="2.4" />
+                    <circle className="trh-head-node trh-n2" cx="52" cy="34" r="2.4" />
+                    <circle className="trh-head-node trh-n3" cx="58" cy="48" r="2.4" />
+                    <circle className="trh-head-node trh-n4" cx="44" cy="54" r="2.4" />
+                    <circle className="trh-head-node trh-n5" cx="50" cy="64" r="2.4" />
+                    <path className="trh-head-link" d="M40 40 52 34M52 34 58 48M58 48 44 54M44 54 50 64M40 40 44 54" />
+                  </svg>
+                </div>
+              </section>
+
+              <section className="trh-panel">
+                <h2 className="trh-panel-title">RECENT ACTIVITY</h2>
+                <ul className="trh-activity">
+                  {activity.length > 0 ? activity.slice(0, 5).map((row) => (
+                    <li key={row.id}>
+                      <span className={`trh-dot trh-${row.status === "failed" ? "danger" : row.status === "running" ? "warn" : "ok"}`} aria-hidden="true" />
+                      <span className="trh-activity-label">{row.label}</span>
+                      <span className="trh-activity-time mono">{new Date(row.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                    </li>
+                  )) : sessionFacts.map((fact) => (
+                    <li key={fact.label}>
+                      <span className={`trh-dot trh-${fact.ok ? "ok" : "danger"}`} aria-hidden="true" />
+                      <span className="trh-activity-label">{fact.label}</span>
+                      <span className="trh-activity-time mono">—</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <section className="trh-panel">
+                <h2 className="trh-panel-title">TODAY&apos;S OVERVIEW</h2>
+                <div className="trh-overview">
+                  <div className="trh-donut">
+                    <svg viewBox="0 0 120 120" aria-hidden="true">
+                      <circle className="trh-donut-track" cx="60" cy="60" r="52" />
+                      {ringArcs.map((arc) => (
+                        <circle
+                          key={arc.tone}
+                          className={`trh-donut-arc trh-stroke-${arc.tone}`}
+                          cx="60" cy="60" r="52"
+                          strokeDasharray={`${arc.length} ${ringCirc - arc.length}`}
+                          strokeDashoffset={-arc.offset}
+                        />
+                      ))}
+                    </svg>
+                    <div className="trh-donut-center">
+                      <strong>{totalTasks}</strong>
+                      <span>TASKS</span>
+                    </div>
+                  </div>
+                  <ul className="trh-legend">
+                    {overview.map((slice) => (
+                      <li key={slice.key}>
+                        <span className={`trh-dot trh-${slice.tone}`} aria-hidden="true" />
+                        <span className="trh-legend-count">{slice.count}</span>
+                        <span className="trh-legend-label">{slice.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </section>
+
+              <section className="trh-panel">
+                <h2 className="trh-panel-title">VOICE STATUS</h2>
+                <div className="trh-voice-row">
+                  <span className="trh-voice-label">VOICE RECOGNITION</span>
+                  <span className={`trh-module-state trh-${mic.transcriptionAvailable !== false && mic.supported ? "online" : "standby"}`}>
+                    {mic.transcriptionAvailable !== false && mic.supported ? "ACTIVE" : "STANDBY"}<span className="trh-dot" aria-hidden="true" />
+                  </span>
+                </div>
+                <div className="trh-voice-row">
+                  <span className="trh-voice-label">VOICE OUTPUT</span>
+                  <span className={`trh-module-state trh-${speech.enabled && speech.engine !== "none" ? "online" : "standby"}`}>
+                    {speech.enabled && speech.engine !== "none" ? "ACTIVE" : "STANDBY"}<span className="trh-dot" aria-hidden="true" />
+                  </span>
+                </div>
+                <div className="trh-voice-wave" aria-hidden="true">
+                  {Array.from({ length: 40 }, (_, index) => {
+                    const profile = Math.abs(Math.sin((index / 40) * Math.PI * 4));
+                    return <span key={index} style={{ height: `${Math.max(2, Math.round((0.15 + level * 0.85) * profile * 24))}px` }} />;
+                  })}
+                </div>
+              </section>
+            </div>
+          </>
+        ) : (
+          <main className="trh-section">
+            <div className="trh-section-head">
+              <h2>{nav.find((item) => item.id === view)?.label}</h2>
+              <button type="button" className="trh-section-back" onClick={() => setView("home")}>◇ BACK TO HOME</button>
+            </div>
+            <div className="trh-section-body">
+              {view === "memory" ? (
+                <MemoryStatus
+                  entries={memories?.total ?? null}
+                  pinned={memories?.pinned ?? null}
+                  documents={documents}
+                  workspaceBytes={workspace?.bytes ?? null}
+                  workspaceFiles={workspace?.files ?? null}
+                />
+              ) : null}
+              {view === "tasks" ? (
+                <TaskList
+                  tasks={tasks}
+                  onAdd={(title) => void (async () => {
+                    const result = await apiPost<{ task: TaskItem }>("/v1/tasks", { sessionId: sessionId(), title });
+                    if (result.ok) setTasks((prior) => [...(prior ?? []), result.data.task]);
+                  })()}
+                  onToggle={(id, done) => void (async () => {
+                    const result = await apiPatch<{ task: TaskItem }>(`/v1/tasks/${id}`, { sessionId: sessionId(), done });
+                    if (result.ok) setTasks((prior) => prior?.map((task) => (task.id === id ? result.data.task : task)) ?? null);
+                  })()}
+                  onRemove={(id) => void (async () => {
+                    const result = await apiDelete(`/v1/tasks/${id}?sessionId=${encodeURIComponent(sessionId())}`);
+                    if (result.ok) setTasks((prior) => prior?.filter((task) => task.id !== id) ?? null);
+                  })()}
+                />
+              ) : null}
+              {view === "tools" ? (
+                <>
+                  <section className="trh-panel">
+                    <h2 className="trh-panel-title">TOOLS · {tools ?? "—"}</h2>
+                    <ul className="trh-tool-grid">
+                      {(capabilities?.tools ?? []).map((tool) => (
+                        <li key={tool.name}>
+                          <span className="trh-tool-name mono">{tool.name}</span>
+                          <span className={`trh-tool-level trh-level-${tool.level}`}>{tool.levelLabel}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                  <CommandAccess active />
+                </>
+              ) : null}
+              {view === "system" ? (
+                <>
+                  <CoreStatus
+                    temperatureC={telemetry?.gpu.temperatureC ?? null}
+                    uptimeSeconds={telemetry?.uptimeSeconds ?? null}
+                    load={label}
+                    clockMhz={telemetry?.cpu.speedMhz ?? null}
+                    cpuModel={telemetry?.cpu.model ?? null}
+                  />
+                  <SystemGauges
+                    vram={telemetry?.gpu.vram ?? null}
+                    disk={telemetry?.disk ?? null}
+                    network={telemetry?.network ?? null}
+                    health={health}
+                  />
+                  <SystemOverview rows={healthRows} />
+                </>
+              ) : null}
+              {view === "files" ? <WorkView live={busy} onClose={() => setView("home")} /> : null}
+              {view === "network" ? (
+                <section className="trh-panel">
+                  <h2 className="trh-panel-title">NETWORK</h2>
+                  <dl className="trh-kv trh-kv-wide">
+                    <div><dt>THROUGHPUT</dt><dd>{telemetry?.network ? formatRate(telemetry.network.receivedBytesPerSecond, telemetry.network.sentBytesPerSecond) : "—"}</dd></div>
+                    <div><dt>CLOUD SERVICES</dt><dd>{telemetry?.cloud.services.length ?? 0}</dd></div>
+                  </dl>
+                  <p className="trh-note">{telemetry?.cloud.detail ?? "Nothing leaves this machine."}</p>
+                  <Sparkline values={netSeries} width={320} height={44} />
+                </section>
+              ) : null}
+              {view === "settings" ? (
+                <>
+                  <VoicePicker
+                    choice={speech.voice}
+                    voices={speech.installedVoices}
+                    speaking={speech.speaking || speech.preparing}
+                    onChange={speech.setVoice}
+                    onPreview={(line) => speech.speak(line)}
+                  />
+                  <PersonalityPicker
+                    accent={accent}
+                    onAccentChange={(next) => {
+                      setAccent(next);
+                      writeStoredAccent(window.localStorage, next);
+                      document.documentElement.setAttribute("data-accent", next);
+                    }}
+                    active={personalityId}
+                    onChange={(id) => {
+                      setPersonalityId(id);
+                      writeStoredPersonality(window.localStorage, id);
+                      const installed = activeAgent(readMarketplaceState(window.localStorage, marketplaceStorageKey));
+                      setSuggestions(installed?.suggestions ?? personalityById(id).suggestions ?? []);
+                    }}
+                  />
+                </>
+              ) : null}
+            </div>
+          </main>
+        )}
+      </div>
+
+      {/* --------------------------------------------------------- footer */}
+      <footer className="trh-bottom">
+        <div className="trh-bottom-clock mono">
+          {clock ? (
+            <>
+              <span className="trh-bottom-time">{clock.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
+              <span className="trh-bottom-date">{clock.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }).toUpperCase()}</span>
+            </>
+          ) : <span className="trh-bottom-time">--:--</span>}
         </div>
-        <span className="cc-states-note faint">
-          {answerCredit(lastReply?.strategy, lastReply?.model)
-            // 34ch, and that cap is deliberate - widening it pushes COMPLETE
-            // onto a second line (see .cc-states-note). The old sentence was
-            // 54 characters and rendered as "Everything on this screen is
-            // meas...", so the app's own claim about itself was the one line
-            // on screen that got cut off. Said shorter instead of louder.
-            ?? "Measured on this machine."}
-        </span>
+
+        <div className="trh-bottom-ready">
+          <span className={`trh-dot trh-${online ? "ok" : online === false ? "danger" : "warn"}`} aria-hidden="true" />
+          <span className="trh-ready-line">{online === false ? "LOCAL API NOT RESPONDING" : busy ? "TRH AI IS WORKING" : "TRH AI IS READY"}</span>
+          <span className="trh-ready-sub faint">{modelName ? `How can I assist you today?` : "No local model loaded."}</span>
+        </div>
+
+        <div className="trh-quick">
+          {quickActions.map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              className={`trh-quick-item${action.live ? " live" : ""}${action.enabled ? "" : " off"}`}
+              disabled={!action.enabled}
+              title={action.title}
+              onClick={action.onClick}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">{action.icon}</svg>
+              <span>{action.label}</span>
+            </button>
+          ))}
+        </div>
       </footer>
+
+      <div className="trh-frame" aria-hidden="true"><span /><span /><span /><span /></div>
     </div>
   );
 }

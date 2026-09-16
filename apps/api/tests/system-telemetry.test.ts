@@ -69,13 +69,23 @@ test("gigabytes are formatted the way the card shows them", () => {
 });
 
 test("an nvidia-smi line becomes a reading", () => {
-  const parsed = parseGpuLine("NVIDIA GeForce RTX 4060 Ti, 24, 1355, 8188");
+  const parsed = parseGpuLine("NVIDIA GeForce RTX 4060 Ti, 24, 1355, 8188, 54, 765, 68.4");
 
   assert.ok(parsed);
   assert.equal(parsed.name, "NVIDIA GeForce RTX 4060 Ti");
   assert.ok(Math.abs(parsed.fraction - 0.24) < 1e-9);
   assert.match(parsed.detail, /24% busy/);
   assert.match(parsed.detail, /1\.3 \/ 8\.0 GB/);
+  assert.equal(parsed.temperatureC, 54);
+  assert.equal(parsed.clockMhz, 765);
+  assert.ok(parsed.powerWatts !== null && Math.abs(parsed.powerWatts - 68.4) < 1e-9);
+});
+
+test("a gpu line without power reports the rest and null watts", () => {
+  const parsed = parseGpuLine("NVIDIA GeForce RTX 4060 Ti, 24, 1355, 8188");
+  assert.ok(parsed);
+  assert.equal(parsed.powerWatts, null);
+  assert.equal(parsed.temperatureC, null);
 });
 
 test("a gpu line missing its memory figures still reports utilisation", () => {
