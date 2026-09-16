@@ -27,6 +27,7 @@ import {
 } from "./workspace.js";
 import { fetchWebPage } from "./webFetch.js";
 import { webSearch } from "./webSearch.js";
+import { renderMockupPrompt, extractRendering, findRenderFault, saveRendering, inferKind, type RenderKind } from "./renderMockup.js";
 import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
 import { resolveForAccess } from "./machinePaths.js";
 import { explainMiss } from "./projectContext.js";
@@ -732,6 +733,26 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "render_mockup",
+      description:
+        "Show the user a visual: a UI mockup (a screen, dashboard, form) or a diagram "
+        + "(flowchart, architecture, blueprint). Use this when they ask to see, show, render, "
+        + "mock up, sketch, wireframe or diagram something. It produces one self-contained visual "
+        + "that appears live on screen right away — not a running app (that is build_app) and not a "
+        + "video (that is make_video). Describe what to show in full; the visual is generated here.",
+      parameters: {
+        type: "object",
+        properties: {
+          description: { type: "string", description: "What to show, described fully." },
+          kind: { type: "string", description: "Either \"mockup\" for a UI or \"diagram\" for a flow/architecture. Omit to decide from the description." }
+        },
+        required: ["description"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "run_command",
       description:
         "Run a command on the user's machine and get back its real output and exit code. Use this "
@@ -945,6 +966,8 @@ const memoryWritingTools = new Set(["remember"]);
 const clockTools = new Set(["shift_time"]);
 /** Offered only when the request mentions the web or asks for a lookup; see mentionsWeb and wantsWebSearch. */
 const webTools = new Set(["fetch_url", "web_search"]);
+/** Offered only when the request asks to see/show/render something; see wantsRendering. */
+const renderTools = new Set(["render_mockup"]);
 /** Offered only when the request mentions the time or the date; see mentionsTime. */
 const timeTools = new Set(["current_datetime"]);
 
@@ -952,7 +975,7 @@ export function availableTools(
   armed: boolean,
   options: {
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
-    web?: boolean; time?: boolean; writes?: boolean; memory?: boolean;
+    web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -964,6 +987,7 @@ export function availableTools(
   const allowClock = options.clock ?? true;
   const allowWeb = options.web ?? true;
   const allowTime = options.time ?? true;
+  const allowRender = options.render ?? true;
   const allowWrites = options.writes ?? true;
   const allowMemory = options.memory ?? true;
 
@@ -976,6 +1000,7 @@ export function availableTools(
     if (!allowClock && clockTools.has(name)) return false;
     if (!allowWeb && webTools.has(name)) return false;
     if (!allowTime && timeTools.has(name)) return false;
+    if (!allowRender && renderTools.has(name)) return false;
     if (!allowChanges && machineChangingTools.has(name)) return false;
     if (!allowWrites && writingTools.has(name)) return false;
     if (!allowMemory && memoryWritingTools.has(name)) return false;
@@ -2480,6 +2505,28 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         ok: true,
         content: `Web results for "${outcome.query}" (use fetch_url to read one in full):\n${lines.join("\n")}`
       };
+    }
+
+    case "render_mockup": {
+      const description = requireString(call.arguments.description);
+      if (!description) return { ok: false, content: "render_mockup needs a description of what to show." };
+      if (!context.authorApp) {
+        return { ok: false, content: "Rendering needs the local model, which is not available here." };
+      }
+      const rawKind = requireString(call.arguments.kind);
+      const kind: RenderKind = rawKind === "diagram" || rawKind === "mockup" ? rawKind : inferKind(description);
+
+      const authored = await context.authorApp(renderMockupPrompt(description, kind));
+      if (!authored.ok) return { ok: false, content: `Could not render that: ${authored.reason}` };
+
+      const extracted = extractRendering(authored.text);
+      if (!extracted) return { ok: false, content: "The model did not return a usable rendering. Try describing what to show a little differently." };
+
+      const fault = findRenderFault(extracted.html);
+      if (fault) return { ok: false, content: `The rendering was rejected: ${fault}.` };
+
+      const saved = saveRendering(extracted.title || description, kind, extracted.html);
+      return { ok: true, content: `Rendered "${saved.title}" — it is on screen now.` };
     }
 
     case "run_command": {

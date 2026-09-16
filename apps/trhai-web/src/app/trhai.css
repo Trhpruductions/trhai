@@ -187,7 +187,10 @@
 .trh-status-word em { font-style: normal; color: var(--c-cyan-bright); text-shadow: 0 0 10px rgba(56, 208, 255, 0.6); }
 .trh-status-sub { display: block; font-size: 10.5px; letter-spacing: 0.34em; color: var(--c-faint); margin-top: 3px; }
 
-.trh-core { position: relative; width: min(52vh, 460px); height: min(52vh, 460px); display: grid; place-items: center; margin: 6px 0 2px; }
+/* Lifted a little so the live core nests inside the key art's glowing sphere,
+   which sits above centre — measured, not guessed, and in vh so it holds as the
+   viewport changes on whatever machine this runs on. */
+.trh-core { position: relative; width: min(52vh, 460px); height: min(52vh, 460px); display: grid; place-items: center; margin: 6px 0 2px; transform: translateY(-3vh); }
 /* Definite sizes only. A percentage height here fed back through the
    ParticleField's own resize measurement and grew the canvas without bound
    (to ~690,000px), which painted a grey wash over the whole centre column. */
@@ -228,6 +231,37 @@
 .trh-reply-text p:last-child { margin-bottom: 0; }
 .trh-reply::-webkit-scrollbar { width: 6px; }
 .trh-reply::-webkit-scrollbar-thumb { background: var(--c-line); border-radius: 3px; }
+
+/* A rendered visual (render_mockup), projected over the core like a hologram. */
+.trh-render {
+  position: absolute;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 5;
+  width: min(680px, 92%);
+  height: min(60vh, 520px);
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(160deg, rgba(8, 16, 30, 0.94), rgba(6, 12, 24, 0.97));
+  border: 1px solid var(--c-cyan);
+  border-radius: 6px;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  box-shadow: 0 0 60px rgba(56, 208, 255, 0.18), inset 0 0 24px rgba(56, 208, 255, 0.08);
+  animation: trh-render-in 260ms var(--ease, ease);
+}
+@keyframes trh-render-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.trh-render-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 12px; border-bottom: 1px solid var(--c-line);
+  background: linear-gradient(180deg, rgba(20, 44, 74, 0.6), transparent);
+}
+.trh-render-kind { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.16em; color: var(--c-cyan-bright); white-space: nowrap; }
+.trh-render-title { flex: 1; font-size: 12.5px; letter-spacing: 0.06em; color: var(--c-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trh-render-close { width: 22px; height: 22px; display: grid; place-items: center; background: transparent; border: 1px solid var(--c-line-soft); border-radius: 4px; color: var(--c-mut); font-size: 15px; line-height: 1; cursor: pointer; }
+.trh-render-close:hover { color: var(--c-cyan-bright); border-color: var(--c-cyan); }
+.trh-render-frame { flex: 1; width: 100%; border: 0; background: #05070d; border-radius: 0 0 4px 4px; }
 
 /* mic */
 .trh-mic-area { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 4px; }

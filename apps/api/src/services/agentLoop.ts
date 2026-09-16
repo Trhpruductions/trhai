@@ -10,7 +10,7 @@ import {
   correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, type ActionKind } from "./actionIntent.js";
+import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, wantsRendering, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -1011,7 +1011,7 @@ export async function runAgent(
   const changesAsked = new Set<string>();
   // Tools that make one thing per request, whatever the arguments: a second
   // schedule, app or video in the same turn is never what was asked for.
-  const oncePerTurn = new Set(["add_schedule", "build_app", "change_app", "make_video"]);
+  const oncePerTurn = new Set(["add_schedule", "build_app", "change_app", "make_video", "render_mockup"]);
   const madeThisTurn = new Set<string>();
 
   // How many times each exact call has actually been run, across every round
@@ -1111,7 +1111,9 @@ export async function runAgent(
         // maxWebGathers) — after that it answers from what it has rather than
         // fetching more. The clock only when the request is about time at all.
         web: (mentionsWeb(question) || wantsWebSearch(question)) && webGathersDone < maxWebGathers,
-        time: mentionsTime(question)
+        time: mentionsTime(question),
+        // A visual is offered only when the request asks to see one.
+        render: wantsRendering(question)
       })
       : [];
     const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));

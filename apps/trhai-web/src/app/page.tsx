@@ -68,6 +68,7 @@ type Identity = { username: string; hostname: string; platform: string };
 type ScheduleView = { id: string; enabled: boolean };
 type CapabilityTool = { name: string; level: number; levelLabel: string };
 type CapabilityInfo = { tools: CapabilityTool[]; videoRendering?: boolean; web?: boolean; codeExecution?: boolean };
+type RenderingView = { name: string; title: string; kind: "mockup" | "diagram"; html: string; createdAt: string };
 
 /**
  * An account name as a person would be addressed.
@@ -213,6 +214,8 @@ export default function DashboardPage() {
   const [history, setHistory] = useState<Series>(emptySeries);
   const [tools, setTools] = useState<number | null>(null);
   const [capabilities, setCapabilities] = useState<CapabilityInfo | null>(null);
+  const [rendering, setRendering] = useState<RenderingView | null>(null);
+  const [dismissedRenderingName, setDismissedRenderingName] = useState<string | null>(null);
   const [memories, setMemories] = useState<{ total: number; pinned: number } | null>(null);
   const [documents, setDocuments] = useState<number | null>(null);
   const [schedules, setSchedules] = useState<ScheduleView[] | null>(null);
@@ -340,14 +343,15 @@ export default function DashboardPage() {
     // the core, and the subsystem chips flanking it.
     const [
       modelResult, telemetryResult,
-      capabilityResult, memoryResult, scheduleResult, filesResult
+      capabilityResult, memoryResult, scheduleResult, filesResult, renderingResult
     ] = await Promise.all([
       apiGet<ModelInfo>("/v1/assist/model"),
       apiGet<Telemetry>("/v1/system-telemetry"),
       apiGet<CapabilityInfo>("/v1/capabilities"),
       apiGet<{ memories: Array<{ pinned?: boolean }> }>(`/v1/assist/memory?sessionId=${id}`),
       apiGet<{ schedules: ScheduleView[]; persistenceError?: string | null }>("/v1/schedules"),
-      apiGet<{ entries: Array<{ directory: boolean; bytes: number }> }>("/v1/files")
+      apiGet<{ entries: Array<{ directory: boolean; bytes: number }> }>("/v1/files"),
+      apiGet<{ latest: RenderingView | null }>("/v1/renderings")
     ]);
 
     // And the three that only ever reach panels in the activity rail. Asked
@@ -385,6 +389,7 @@ export default function DashboardPage() {
       setTools(capabilityResult.data.tools.length);
       setCapabilities(capabilityResult.data);
     }
+    if (renderingResult.ok) setRendering(renderingResult.data.latest);
     if (memoryResult.ok) {
       setMemories({
         total: memoryResult.data.memories.length,
@@ -947,6 +952,28 @@ export default function DashboardPage() {
                   ) : busy ? (
                     <p className="trh-reply-text faint">Working…</p>
                   ) : null}
+                </section>
+              ) : null}
+
+              {rendering && rendering.name !== dismissedRenderingName ? (
+                <section className="trh-render" aria-label={`Rendering: ${rendering.title}`}>
+                  <header className="trh-render-head">
+                    <span className="trh-render-kind">{rendering.kind === "diagram" ? "◇ DIAGRAM" : "▢ MOCKUP"}</span>
+                    <span className="trh-render-title">{rendering.title}</span>
+                    <button
+                      type="button"
+                      className="trh-render-close"
+                      aria-label="Dismiss rendering"
+                      title="Dismiss and return to the core"
+                      onClick={() => setDismissedRenderingName(rendering.name)}
+                    >×</button>
+                  </header>
+                  <iframe
+                    className="trh-render-frame"
+                    title={rendering.title}
+                    srcDoc={rendering.html}
+                    sandbox=""
+                  />
                 </section>
               ) : null}
 

@@ -99,7 +99,15 @@ const commandVerbs = new Set([
   "schedule", "remind", "notify", "alert", "ping", "clear", "reset", "rename", "move", "copy",
   "append", "insert", "replace", "edit", "change", "turn", "switch", "enable", "disable", "mark",
   "flag", "tag", "count", "measure", "rewrite", "improve", "shorten", "expand", "format", "parse",
-  "validate", "describe", "define", "outline", "prepare", "help"
+  "validate", "describe", "define", "outline", "prepare", "help",
+  // Caught live, same failure as fetch_url's: "mock up a login screen" got
+  // "Got it." and render_mockup was never reached — the verb was not here. A
+  // request to see a visual is a command whatever word it opens with; these are
+  // the leading verbs for render_mockup ("design" and "show" were already
+  // above; "mock", "render", "sketch", "diagram", "wireframe", "draw",
+  // "visualise" were the ones missing).
+  "mock", "mockup", "render", "sketch", "diagram", "wireframe", "draw",
+  "visualize", "visualise", "illustrate"
 ]);
 
 /**

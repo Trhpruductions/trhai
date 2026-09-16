@@ -73,6 +73,7 @@ import {
   setScheduleEnabled
 } from "./services/scheduleStore.js";
 import { listRunningApps, startApp, stopApp } from "./services/appRunner.js";
+import { listRenderings, latestRendering } from "./services/renderMockup.js";
 import { getFlow, saveFlow } from "./services/flowStore.js";
 import { readTelemetry, readIdentity } from "./services/systemTelemetry.js";
 import { getTask } from "./services/taskStore.js";
@@ -1103,6 +1104,12 @@ export function createApp() {
   // client shows these with a live preview and an Open link.
   app.get("/v1/apps", (_req, res) => {
     res.json({ data: { apps: listRunningApps() }, traceId: "trace-local" });
+  });
+
+  // Visuals the assistant has rendered (render_mockup). The dashboard shows the
+  // latest one live, so its HTML rides along rather than needing a second call.
+  app.get("/v1/renderings", (_req, res) => {
+    res.json({ data: { renderings: listRenderings(), latest: latestRendering() }, traceId: "trace-local" });
   });
 
   app.post("/v1/apps/start", async (req, res) => {
