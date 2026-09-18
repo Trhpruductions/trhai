@@ -14,7 +14,7 @@ const testWorkspace = mkdtempSync(path.join(tmpdir(), "ascend-agent-"));
 process.env.ASCEND_WORKSPACE = testWorkspace;
 import {
   describeToolCall, executionKindForTool, explainGatedTool, gatedToolCall,
-  isBareRefusal, looksLikeRawToolCalls, parseTextToolCalls, runAgent, systemPrompt
+  isBareRefusal, looksLikeBareToolCall, looksLikeRawToolCalls, parseTextToolCalls, runAgent, systemPrompt
 } from "../src/services/agentLoop.js";
 import { runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
@@ -1487,6 +1487,44 @@ test("a successful fetch_url does not withhold anything — only a failure does"
     // Tools were still offered on the round after a real success.
     const secondRequest = received[1] as { tools?: unknown };
     assert.notEqual(secondRequest.tools, undefined);
+  } finally {
+    server.close();
+  }
+});
+
+test("looksLikeBareToolCall spots a reply that is nothing but a tool-call object", () => {
+  assert.equal(looksLikeBareToolCall('{"name": "open_url", "arguments": {"url": "http://localhost:49884"}}'), true);
+  assert.equal(looksLikeBareToolCall("```json\n{\"name\": \"x\", \"arguments\": {\"count\": 3}}\n```"), true);
+  assert.equal(looksLikeBareToolCall('{"name": "respond", "parameters": {"message": "hi"}}'), true);
+  // Not tool calls: prose, plain data, a message.
+  assert.equal(looksLikeBareToolCall("Rendered the diagram — it is on screen now."), false);
+  assert.equal(looksLikeBareToolCall('{"port": 4000}'), false);
+  assert.equal(looksLikeBareToolCall(""), false);
+});
+
+test("a bare invented tool-call reply after a successful change does not leak, the change's line stands", async () => {
+  // Live: build_app finished, then the model answered {"name":"open_url", ...}
+  // and the raw JSON rode on top of the real "Built ..." line. Reproduced with
+  // render_mockup (also a mutating tool) for speed.
+  const withAuthor: ToolContext = {
+    ...context,
+    authorApp: async () => ({
+      ok: true,
+      text: "<!-- TITLE: Login -->\n<!doctype html><html><head><style>body{background:#05070d}</style></head>"
+        + "<body><h1>Login</h1><input><button>Go</button> a believable login screen mockup here</body></html>"
+    })
+  };
+  const { server, baseUrl } = await fakeModel([
+    toolCall("render_mockup", { description: "a login screen" }),
+    answer('{"name": "open_url", "arguments": {"url": "http://localhost:49884"}}')
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "mock up a login screen", withAuthor);
+    assert.equal(result.ok, true, result.ok ? "" : result.reason);
+    if (!result.ok) return;
+    assert.match(result.text, /Login|on screen/i);
+    assert.doesNotMatch(result.text, /open_url|"arguments"/);
   } finally {
     server.close();
   }
