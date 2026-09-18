@@ -728,6 +728,31 @@ export function unwrapPseudoReply(text: string): string {
   return text;
 }
 
+/**
+ * Whether a reply is nothing but a tool-call object.
+ *
+ * unwrapPseudoReply pulls the sentence out of a pseudo-call that carries one
+ * ({"name":"respond","arguments":{"message":"Done."}}), but a call with no
+ * message to pull - {"name":"open_url","arguments":{"url":"..."}} - it hands
+ * back verbatim. And parseTextToolCalls only recognises advertised tools, so an
+ * invented one like open_url is never treated as a call at all. Either way the
+ * raw JSON reached the user. Watched live: a finished build_app answered with
+ * {"name":"open_url",...} on top of the real "Built ..." line. A bare tool call
+ * is the model trying to act, not an answer; recognised here so it can be
+ * dropped rather than shown.
+ */
+export function looksLikeBareToolCall(text: string): boolean {
+  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return false;
+  try {
+    const parsed = JSON.parse(trimmed) as { name?: unknown; arguments?: unknown; parameters?: unknown };
+    if (!parsed || typeof parsed !== "object" || typeof parsed.name !== "string") return false;
+    return parsed.arguments != null || parsed.parameters != null;
+  } catch {
+    return false;
+  }
+}
+
 export function parseTextToolCalls(text: string, known = advertisedToolNames()): ToolCall[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
@@ -1241,7 +1266,12 @@ export async function runAgent(
 
     // Tool-call JSON is never shown as an answer, whether or not it was
     // understood: it is the model's working, not its reply.
-    const text = parseTextToolCalls(rawText).length > 0 ? "" : unwrapPseudoReply(rawText);
+    const unwrapped = parseTextToolCalls(rawText).length > 0 ? "" : unwrapPseudoReply(rawText);
+    // A reply that is still a bare tool-call object — even an invented tool like
+    // open_url that parseTextToolCalls does not recognise — is the model trying
+    // to act, not an answer. Drop it so the raw JSON never reaches the user; a
+    // real change's own success line stands in its place.
+    const text = looksLikeBareToolCall(unwrapped) ? "" : unwrapped;
 
     // Both encodings. A model that used the interface and a model that wrote
     // the same calls into its prose are asking for the same thing, and after
@@ -1267,6 +1297,23 @@ export async function runAgent(
         // and the caller moved on to the next installed model, which then
         // did the same work again: a second, differently-timed schedule for
         // one request.
+        // A change succeeded this turn but the model added no words of its own
+        // (or only a bare tool call, stripped above) — its own line is the
+        // answer, not an empty reply. Found live: build_app finished, the model
+        // answered {"name":"open_url",...}, that was stripped to nothing, and
+        // the whole turn was thrown away as empty — losing the build.
+        const doneLines = [...new Set(mutationAttempts.filter((attempt) => attempt.ok).map((attempt) => attempt.content))];
+        if (doneLines.length > 0) {
+          const base = doneLines.join("\n\n");
+          return {
+            ok: true,
+            text: awaitingConfirmation ? `${base}\n\n${pendingConfirmationNotice(awaitingConfirmation.tool)}` : base,
+            model: typeof response.model === "string" ? response.model : config.model,
+            toolsUsed,
+            ...(awaitingConfirmation ? { awaitingConfirmation } : {}),
+            actionAudit: auditFor("tool-called")
+          };
+        }
         return requested.length > 0 || written.length > 0
           ? { ok: false, reason: "The assistant kept searching without reaching an answer.", toolsUsed }
           // Marked unusable so the caller moves on to the next installed
@@ -1561,8 +1608,10 @@ export async function runAgent(
 
       // Nothing left once the invention is gone means there was no answer
       // under it, only the fiction. Treated as an unusable reply so the caller
-      // falls through to the next model, exactly as an empty one is.
-      if (!withoutInvention.trim()) {
+      // falls through to the next model, exactly as an empty one is — unless a
+      // change succeeded this turn, in which case the change's own line (a
+      // build, a render) is the answer, and an empty model text is fine.
+      if (!withoutInvention.trim() && mutationResults.length === 0) {
         return {
           ok: false,
           reason: "The local model replied with fabricated tool output and no actual answer.",
