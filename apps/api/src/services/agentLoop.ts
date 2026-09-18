@@ -134,12 +134,13 @@ export const maxToolRounds = 4;
  * web_search (ok) and fetch_url on the right Wikipedia page (ok) — it already
  * had the answer — then echoed a sentence through run_command, invented
  * https://example.com/prime-minister-canada, fetched that (404), and gave up.
- * Once this many web gathers have succeeded, fetch_url and web_search are no
- * longer offered: the machine's other tools stay, but the model cannot keep
- * fetching or search for a URL it will then make up. It answers from what it
- * gathered, which by then it has. A single successful read withholds nothing —
- * only the second closes the door — so the ordinary search-then-read still runs
- * in full.
+ * Once this many web gathers have succeeded, no tools are offered at all and the
+ * model answers from what it gathered, which by then it has. Withholding only
+ * the web tools was not enough: with the answer already in the page it had
+ * fetched, the model reached for the file tools instead and wandered off into
+ * reading and editing a stray project file. A single successful read withholds
+ * nothing — only the second closes the door — so the ordinary search-then-read
+ * still runs in full.
  */
 export const maxWebGathers = 2;
 
@@ -1094,7 +1095,15 @@ export async function runAgent(
     // On the last round, or the round after fetch_url failed, tools are
     // withheld, which forces an answer rather than another attempt at
     // something the model was not going to conclude on.
-    const offerTools = round < maxToolRounds + correctionRounds && !fetchUrlFailed;
+    // Tools stop once the web-gather budget is spent, the same as after a
+    // failed fetch. Watched live: asked for the latest Node.js version, the
+    // model searched and fetched the page that had the answer, then - with the
+    // web tools gone but the file tools still on offer - read a stray project
+    // file and tried to edit it, answering about "Hello, Vercel!" instead of
+    // the version it already had. After the budget, no tools: it answers from
+    // what it gathered.
+    const offerTools = round < maxToolRounds + correctionRounds && !fetchUrlFailed
+      && webGathersDone < maxWebGathers;
 
     // What this turn actually offers, decided once and used twice: sent to
     // the model, and enforced when the model answers.
