@@ -1531,11 +1531,11 @@ test("a false refusal after a successful render is replaced by the render's own 
   }
 });
 
-test("web tools stop after two successful gathers, so the model answers rather than inventing a URL", async () => {
-  // The live spiral: web_search (ok), fetch_url the right page (ok) — the
-  // answer is in hand — then fetch_url an invented URL, then give up. Once two
-  // web gathers have succeeded the web tools are withheld, so the third fetch
-  // is never offered and never runs; the model answers from what it gathered.
+test("after two web gathers no tools are offered, so the model answers instead of wandering", async () => {
+  // Live: web_search (ok), fetch_url the page with the answer (ok), then — with
+  // the web tools gone but the file tools still on offer — a stray read_file and
+  // edit_file on an unrelated project, answering about the wrong thing. Once the
+  // budget is spent, no tools at all: the model answers from what it gathered.
   let fetchCalls = 0;
   const webContext: ToolContext = {
     ...context,
@@ -1553,8 +1553,7 @@ test("web tools stop after two successful gathers, so the model answers rather t
   const { server, baseUrl, received } = await fakeModel([
     toolCall("web_search", { query: "prime minister of canada" }),
     toolCall("fetch_url", { url: "https://en.wikipedia.org/wiki/PM" }),
-    toolCall("fetch_url", { url: "https://example.com/invented-page" }),
-    answer("The Prime Minister of Canada leads the government.")
+    answer("Canada's prime minister is its head of government.")
   ]);
 
   try {
@@ -1562,15 +1561,15 @@ test("web tools stop after two successful gathers, so the model answers rather t
     assert.equal(result.ok, true, result.ok ? "" : result.reason);
     if (!result.ok) return;
 
-    // The invented third fetch never ran: only the first, real page was read.
-    assert.equal(fetchCalls, 1, "the second (invented) fetch_url must not run");
+    // Only the first, real page was read — the model did not keep fetching.
+    assert.equal(fetchCalls, 1);
 
-    // By the third model round the web tools are gone, though others remain.
-    const thirdRequest = received[2] as { tools?: Array<{ function: { name: string } }> };
-    const offeredNames = (thirdRequest.tools ?? []).map((tool) => tool.function.name);
-    assert.ok(!offeredNames.includes("fetch_url"), "fetch_url is withheld after the budget is spent");
-    assert.ok(!offeredNames.includes("web_search"), "web_search is withheld after the budget is spent");
-    assert.ok(offeredNames.length > 0, "non-web tools are still offered");
+    // By the third round the budget is spent, so NO tools are offered — not the
+    // web tools, and not the file tools it would otherwise wander into. It
+    // answers from what it gathered.
+    const thirdRequest = received[2] as { tools?: unknown };
+    assert.equal(thirdRequest.tools, undefined, "no tools are offered after the budget — the model must answer");
+    assert.match(result.text, /head of government|prime minister/i);
 
     // web_search and the one real fetch_url are the only web calls that ran.
     assert.equal(result.toolsUsed.filter((used) => used.name === "fetch_url").length, 1);
