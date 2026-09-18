@@ -14,7 +14,7 @@ const testWorkspace = mkdtempSync(path.join(tmpdir(), "ascend-agent-"));
 process.env.ASCEND_WORKSPACE = testWorkspace;
 import {
   describeToolCall, executionKindForTool, explainGatedTool, gatedToolCall,
-  looksLikeRawToolCalls, parseTextToolCalls, runAgent, systemPrompt
+  isBareRefusal, looksLikeRawToolCalls, parseTextToolCalls, runAgent, systemPrompt
 } from "../src/services/agentLoop.js";
 import { runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
@@ -1487,6 +1487,45 @@ test("a successful fetch_url does not withhold anything — only a failure does"
     // Tools were still offered on the round after a real success.
     const secondRequest = received[1] as { tools?: unknown };
     assert.notEqual(secondRequest.tools, undefined);
+  } finally {
+    server.close();
+  }
+});
+
+test("isBareRefusal recognises a reply that is only an apology and a refusal", () => {
+  assert.equal(isBareRefusal("I'm sorry, but I can't complete that request. Feel free to ask something else!"), true);
+  assert.equal(isBareRefusal("Sorry, I cannot do that."), true);
+  assert.equal(isBareRefusal("I'm unable to help with that."), true);
+});
+
+test("isBareRefusal leaves a real answer alone, even a long one that says can't", () => {
+  assert.equal(isBareRefusal("Rendered the login flow diagram — it is on screen now."), false);
+  assert.equal(isBareRefusal("The database can't be reached on that port, so the check failed. " + "Here is the log output. ".repeat(12)), false);
+  assert.equal(isBareRefusal(""), false);
+});
+
+test("a false refusal after a successful render is replaced by the render's own success line", async () => {
+  const withAuthor: ToolContext = {
+    ...context,
+    authorApp: async () => ({
+      ok: true,
+      text: "<!-- TITLE: Login Flow -->\n<!doctype html><html><head><style>body{background:#05070d}</style></head>"
+        + "<body><svg viewBox='0 0 10 10'><rect width='4' height='2'/><text x='0' y='1'>User</text></svg>"
+        + " a login flow diagram with real labels here</body></html>"
+    })
+  };
+  const { server, baseUrl } = await fakeModel([
+    toolCall("render_mockup", { description: "the login flow", kind: "diagram" }),
+    answer("I'm sorry, but I can't complete that request. Feel free to ask for something else!")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "draw a diagram of the login flow", withAuthor);
+    assert.equal(result.ok, true, result.ok ? "" : result.reason);
+    if (!result.ok) return;
+    // The truth — the render succeeded — is what the user reads, not the refusal.
+    assert.match(result.text, /Login Flow|on screen/i);
+    assert.doesNotMatch(result.text, /can't complete|i'm sorry/i);
   } finally {
     server.close();
   }

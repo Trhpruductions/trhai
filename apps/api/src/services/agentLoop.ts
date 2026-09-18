@@ -320,7 +320,11 @@ const mutatingTools = new Set([
   // "I added the schedule for you." said nothing about when. The tool's
   // own line - Scheduled "Build Check": Every weekday at 8:00 AM - is what
   // the user needs to check it against what they asked.
-  "add_schedule"
+  "add_schedule",
+  // The rendering succeeded and the model still answered "I'm sorry, I can't
+  // complete that request." Its own line - Rendered "Login Flow" - is the truth
+  // the user needs, and the contradictory refusal is dropped below.
+  "render_mockup"
 ]);
 
 /**
@@ -393,6 +397,30 @@ export function withMutationResults(text: string, mutationResults: string[]): st
 
   const body = missing.join("\n\n");
   return text ? `${text}\n\n${body}` : body;
+}
+
+/**
+ * Whether a reply is nothing but a refusal.
+ *
+ * Caught live: "draw a diagram of the login flow" rendered a real diagram
+ * (render_mockup succeeded, the SVG is on screen) and the model still answered
+ * "I'm sorry, but I can't complete that request." A refusal that follows a
+ * success is false, and printed on its own it tells the user the opposite of
+ * what happened. When a change did succeed this turn, a reply that is only an
+ * apology-and-refusal is dropped so the tool's own success line stands alone.
+ *
+ * Deliberately narrow: it matches a short reply that opens with an apology or
+ * "I can't/cannot/unable", so a long reply that happens to contain the word
+ * "can't" in a real answer is left untouched.
+ */
+export function isBareRefusal(text: string): boolean {
+  const trimmed = (text ?? "").trim();
+  if (!trimmed || trimmed.length > 240) return false;
+  const lower = trimmed.toLowerCase();
+  const opensWithRefusal =
+    /^(?:sorry\b|unfortunately\b|apolog|i(?:'m| am)\s+sorry\b|i(?:'m| am)\s+(?:un|not\s+)?able\b|i\s+can(?:'|no)?t\b|i\s+cannot\b|i\s+won'?t\b)/.test(lower);
+  const hasRefusalVerb = /\b(?:can(?:'|no)?t|cannot|unable|won'?t|not\s+able)\b/.test(lower);
+  return opensWithRefusal && hasRefusalVerb;
 }
 
 /**
@@ -1536,6 +1564,10 @@ export async function runAgent(
 
       const builtAnApp = toolsUsed.some((used) => used.name === "build_app");
       const cleanedText = builtAnApp ? withoutFabricatedLiveClaims(withoutInvention) : withoutInvention;
+      // A change succeeded this turn, yet the reply is only a refusal — false,
+      // and the opposite of what happened. Drop it so the tool's own success
+      // line (appended by withMutationResults) is what the user reads.
+      const reportedText = mutationResults.length > 0 && isBareRefusal(cleanedText) ? "" : cleanedText;
       return {
         ok: true,
         // A held call the reply does not mention is a decision the user cannot
@@ -1543,9 +1575,9 @@ export async function runAgent(
         // reply was "Understood. What can I assist you with today?" - nothing
         // about a confirmation, so nothing to say yes to. The notice is added
         // whenever a confirmation is pending and the reply has not asked.
-        text: awaitingConfirmation && !mentionsConfirmation(cleanedText)
-          ? `${withMutationResults(cleanedText, mutationResults)}\n\n${pendingConfirmationNotice(awaitingConfirmation.tool)}`
-          : withMutationResults(cleanedText, mutationResults),
+        text: awaitingConfirmation && !mentionsConfirmation(reportedText)
+          ? `${withMutationResults(reportedText, mutationResults)}\n\n${pendingConfirmationNotice(awaitingConfirmation.tool)}`
+          : withMutationResults(reportedText, mutationResults),
         model: typeof response.model === "string" ? response.model : config.model,
         toolsUsed,
         ...(awaitingConfirmation ? { awaitingConfirmation } : {}),
