@@ -16,8 +16,9 @@
     {
       "name": "trhai-next",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--workspace", "trhai-web", "--", "-p", "3210"],
-      "port": 3210
+      "runtimeArgs": ["run", "dev", "--workspace", "trhai-web"],
+      "port": 3210,
+      "autoPort": true
     }
   ]
 }
