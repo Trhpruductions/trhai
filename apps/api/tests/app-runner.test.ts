@@ -8,7 +8,7 @@ import path from "node:path";
 const workspace = mkdtempSync(path.join(tmpdir(), "ascend-run-"));
 process.env.ASCEND_WORKSPACE = workspace;
 
-const { startApp, stopApp, listRunningApps, resetRunningApps } = await import("../src/services/appRunner.js");
+const { startApp, stopApp, listRunningApps, resetRunningApps, projectFolderName } = await import("../src/services/appRunner.js");
 const { runTool } = await import("../src/services/agentTools.js");
 
 /** A zero-dependency server that answers /health on the port it is told, like a generated app. */
@@ -27,6 +27,27 @@ function writeApp(name: string, opts: { health?: boolean } = {}): string {
 }
 
 test.afterEach(() => resetRunningApps());
+
+test("projectFolderName reduces a full workspace path to the folder, and refuses escapes", () => {
+  assert.equal(projectFolderName("plant-tracker"), "plant-tracker");
+  assert.equal(projectFolderName("plant-tracker/"), "plant-tracker");
+  assert.equal(projectFolderName(path.join(workspace, "plant-tracker")), "plant-tracker");
+  assert.equal(projectFolderName(path.join(workspace, "plant-tracker", "src")), "plant-tracker");
+  assert.equal(projectFolderName("../escape"), "");
+  assert.equal(projectFolderName(""), "");
+});
+
+test("an app can be started and stopped by its full workspace path, not only its folder name", async () => {
+  // The model routinely passes the full path (change_app echoes it). run_app
+  // joined that onto the workspace root and found nothing; now it resolves.
+  writeApp("by-path");
+  const fullPath = path.join(workspace, "by-path");
+  const started = await startApp(fullPath);
+  assert.equal(started.ok, true, started.ok ? "" : started.reason);
+  if (!started.ok) return;
+  assert.equal(started.app.project, "by-path");
+  assert.equal(stopApp(fullPath), true);
+});
 
 test("a built app is started on a free port and answers over its URL", async () => {
   writeApp("plant-tracker");

@@ -103,9 +103,29 @@ function installCleanup(): void {
 }
 
 /** The server file a project is started from, or null when it has none. */
+/**
+ * The workspace folder a project refers to, whatever shape the caller passed.
+ *
+ * The model routinely hands over the full path it was given - change_app echoes
+ * "D:\\Vexora\\workspace\\track-my-house-plants" as the project, run_app joined
+ * that onto the workspace root, landed nowhere, and the model then tried to run
+ * `build_app` as a shell command and gave up. An absolute path inside the
+ * workspace is reduced to the folder under it; a plain name is kept; anything
+ * with ".." or outside the workspace is refused ("").
+ */
+export function projectFolderName(project: string): string {
+  const trimmed = (project ?? "").trim().replace(/[\\/]+$/, "");
+  if (!trimmed) return "";
+  const root = path.resolve(workspaceRoot());
+  const abs = path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(root, trimmed);
+  const rel = path.relative(root, abs);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return "";
+  return rel.split(/[\\/]/)[0];
+}
+
 function serverEntry(project: string): { dir: string; entry: string } | null {
-  const clean = project.trim().replace(/[\\/]+$/, "");
-  if (!clean || clean.includes("..")) return null;
+  const clean = projectFolderName(project);
+  if (!clean) return null;
   const dir = path.join(path.resolve(workspaceRoot()), clean);
   let stat;
   try {
@@ -135,7 +155,7 @@ export type StartResult =
  * a URL that does not answer is worse than an honest failure.
  */
 export async function startApp(project: string): Promise<StartResult> {
-  const clean = project.trim().replace(/[\\/]+$/, "");
+  const clean = projectFolderName(project);
   const existing = running.get(clean);
   if (existing && !existing.exited && existing.child.exitCode === null) {
     const { child: _child, exited: _exited, ...app } = existing;
@@ -215,7 +235,7 @@ export async function startApp(project: string): Promise<StartResult> {
 
 /** Stop one app. Returns whether it was running. */
 export function stopApp(project: string): boolean {
-  const clean = project.trim().replace(/[\\/]+$/, "");
+  const clean = projectFolderName(project);
   const tracked = running.get(clean);
   if (!tracked) return false;
   killTree(tracked.child);
