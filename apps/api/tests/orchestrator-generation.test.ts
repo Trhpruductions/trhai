@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { runAssistantOrchestrator, parseSaveDocumentRequest, isListDocumentsRequest } from "../src/services/orchestrator.js";
+import { runAssistantOrchestrator, parseSaveDocumentRequest, isListDocumentsRequest, parsePlanAppRequest } from "../src/services/orchestrator.js";
 
 /**
  * A stand-in Ollama that answers everything.
@@ -125,6 +125,26 @@ test("listing documents comes from the store, off the model", async () => {
   assert.equal(result.strategy, "list");
   assert.match(result.assistantMessage, /Sprint Goals/);
   assert.match(result.assistantMessage, /Roadmap/);
+});
+
+test("parsePlanAppRequest extracts a plan-only app description, not a build", () => {
+  assert.equal(parsePlanAppRequest("plan an app for tracking daily workouts"), "tracking daily workouts");
+  // The "do not build it yet" clause is stripped so planProject does not make
+  // "Not" and "Yet" records out of it.
+  assert.equal(parsePlanAppRequest("plan an app for tracking daily workouts, do not build it yet"), "tracking daily workouts");
+  assert.equal(parsePlanAppRequest("outline a tool to manage invoices"), "manage invoices");
+  assert.equal(parsePlanAppRequest("build an app for tracking workouts"), null);
+  assert.equal(parsePlanAppRequest("plan my week"), null);
+});
+
+test("planning an app comes from planProject, off the model, and does not build", async () => {
+  const result = await runAssistantOrchestrator({
+    mode: "general",
+    sessionId: "s-plan",
+    userMessage: "plan an app for tracking daily workouts, do not build it yet"
+  });
+  assert.equal(result.strategy, "plan");
+  assert.match(result.assistantMessage, /nothing built yet/i);
 });
 
 test("an explanation answered by the model offers no build", async () => {
