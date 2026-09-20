@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { runAssistantOrchestrator } from "../src/services/orchestrator.js";
+import { runAssistantOrchestrator, parseSaveDocumentRequest, isListDocumentsRequest } from "../src/services/orchestrator.js";
 
 /**
  * A stand-in Ollama that answers everything.
@@ -65,6 +65,67 @@ async function withFakeModel<T>(
     server.close();
   }
 }
+
+test("parseSaveDocumentRequest pulls the title and body from a save-a-document request", () => {
+  assert.deepEqual(
+    parseSaveDocumentRequest("save a document called Launch Plan with the text: pick a date, invite the team"),
+    { title: "Launch Plan", body: "pick a date, invite the team" }
+  );
+  assert.deepEqual(
+    parseSaveDocumentRequest("create a document titled Notes containing hello world"),
+    { title: "Notes", body: "hello world" }
+  );
+  // Not a document-save request, or missing a body: left to the rest of the pipeline.
+  assert.equal(parseSaveDocumentRequest("what does my Roadmap document say?"), null);
+  assert.equal(parseSaveDocumentRequest("save a document called Roadmap"), null);
+});
+
+test("saving a document goes straight to the store, off the model", async () => {
+  const saved: Array<{ title: string; body: string }> = [];
+  const result = await runAssistantOrchestrator({
+    mode: "general",
+    sessionId: "s-doc",
+    userMessage: "save a document called Launch Plan with the text: pick a date, invite the team",
+    documents: [],
+    saveDocument: (title, body) => { saved.push({ title, body }); return true; }
+  });
+  assert.equal(result.strategy, "document");
+  assert.match(result.assistantMessage, /Saved the document "Launch Plan"/);
+  assert.deepEqual(saved, [{ title: "Launch Plan", body: "pick a date, invite the team" }]);
+});
+
+test("saving a document refuses a duplicate title rather than overwriting", async () => {
+  let calls = 0;
+  const result = await runAssistantOrchestrator({
+    mode: "general",
+    sessionId: "s-doc",
+    userMessage: "create a document called Notes with hello",
+    documents: [{ id: "d1", title: "Notes", body: "existing content" }],
+    saveDocument: () => { calls += 1; return true; }
+  });
+  assert.match(result.assistantMessage, /already exists/);
+  assert.equal(calls, 0, "the store is not touched when the title is taken");
+});
+
+test("isListDocumentsRequest matches a list request but not a specific-document question", () => {
+  assert.equal(isListDocumentsRequest("list my documents"), true);
+  assert.equal(isListDocumentsRequest("what documents do I have?"), true);
+  assert.equal(isListDocumentsRequest("show me all my documents"), true);
+  assert.equal(isListDocumentsRequest("what does my Sprint Goals document say?"), false);
+  assert.equal(isListDocumentsRequest("save a document called Notes with hello"), false);
+});
+
+test("listing documents comes from the store, off the model", async () => {
+  const result = await runAssistantOrchestrator({
+    mode: "general",
+    sessionId: "s-doc",
+    userMessage: "list my documents",
+    documents: [{ id: "d1", title: "Sprint Goals", body: "x" }, { id: "d2", title: "Roadmap", body: "y" }]
+  });
+  assert.equal(result.strategy, "list");
+  assert.match(result.assistantMessage, /Sprint Goals/);
+  assert.match(result.assistantMessage, /Roadmap/);
+});
 
 test("an explanation answered by the model offers no build", async () => {
   // The deterministic path answers a plain question with a generic plan, which

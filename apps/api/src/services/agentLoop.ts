@@ -10,7 +10,7 @@ import {
   correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, wantsRendering, type ActionKind } from "./actionIntent.js";
+import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, wantsRendering, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -1175,7 +1175,11 @@ export async function runAgent(
         web: (mentionsWeb(question) || wantsWebSearch(question)) && webGathersDone < maxWebGathers,
         time: mentionsTime(question),
         // A visual is offered only when the request asks to see one.
-        render: wantsRendering(question)
+        render: wantsRendering(question),
+        // A request about a knowledge document, with no file named, does not get
+        // the workspace file writers — so "save a document called X" reaches
+        // write_document instead of writing an X.txt file.
+        files: !(mentionsDocument(question) && !namesAFilePath(question))
       })
       : [];
     const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));

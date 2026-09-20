@@ -16,7 +16,8 @@ import {
   describeToolCall, executionKindForTool, explainGatedTool, gatedToolCall,
   isBareRefusal, looksLikeBareToolCall, looksLikeRawToolCalls, parseTextToolCalls, runAgent, systemPrompt
 } from "../src/services/agentLoop.js";
-import { runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
+import { availableTools, runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
+import { mentionsDocument, namesAFilePath } from "../src/services/actionIntent.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
 
 const at = new Date("2026-08-17T12:00:00Z").toISOString();
@@ -1490,6 +1491,28 @@ test("a successful fetch_url does not withhold anything — only a failure does"
   } finally {
     server.close();
   }
+});
+
+test("a document request is told apart from a file request", () => {
+  assert.equal(mentionsDocument("save a document called Meeting Notes with the Q4 plan"), true);
+  assert.equal(mentionsDocument("read my Roadmap document"), true);
+  assert.equal(mentionsDocument("add it to the knowledge base"), true);
+  // "document" as a verb, and plain file work, are not document requests.
+  assert.equal(mentionsDocument("document what this function does"), false);
+  assert.equal(mentionsDocument("write notes.txt with hello"), false);
+  // File paths are recognised so a named file still routes to the file tools.
+  assert.equal(namesAFilePath("write notes.txt with hello"), true);
+  assert.equal(namesAFilePath("save a document called Meeting Notes"), false);
+});
+
+test("a document request withholds the workspace file writers so write_document is used", () => {
+  const forDocument = availableTools(true, { files: false }).map((tool) => tool.function.name);
+  assert.ok(!forDocument.includes("write_file"), "write_file is withheld for a document request");
+  assert.ok(!forDocument.includes("edit_file"), "edit_file is withheld for a document request");
+  assert.ok(forDocument.includes("write_document"), "write_document stays available");
+  // The default (a file request) still offers the file writers.
+  const forFile = availableTools(true).map((tool) => tool.function.name);
+  assert.ok(forFile.includes("write_file"));
 });
 
 test("looksLikeBareToolCall spots a reply that is nothing but a tool-call object", () => {

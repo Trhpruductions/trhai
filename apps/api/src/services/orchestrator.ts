@@ -201,6 +201,18 @@ export async function runAssistantOrchestrator(
   const schedules = resolveListSchedules(input, approving, effectiveMessage);
   if (schedules) return schedules;
 
+  // "save a document called X with the text Y" is a list operation, not a
+  // reasoning one: a title and a body, straight into the store. Left to the
+  // model it reached for write_file (an X.txt in the workspace), then
+  // update_document (which will not create), then flailed - never write_document.
+  const savingDocument = resolveSaveDocument(input, approving, effectiveMessage);
+  if (savingDocument) return savingDocument;
+
+  // "list my documents" is a list operation too; left to the model it ran
+  // list_files and read back workspace paths instead of the knowledge base.
+  const listingDocuments = resolveListDocuments(input, approving, effectiveMessage);
+  if (listingDocuments) return listingDocuments;
+
   // Working out what was asked. Set here because this is the line that does
   // it, not a step announced before it starts.
   enterStage(input.sessionId, "understanding");
@@ -717,6 +729,81 @@ function resolvePin(
   return reply(parsed.pinned
     ? `Marked as important: ${match.memory.body}`
     : `No longer marked as important: ${match.memory.body}`);
+}
+
+/**
+ * Parse "save a document called X with the text Y" into a title and body.
+ *
+ * Explicit and shape-bound on purpose: it wants "document" named, a title after
+ * called/titled/named, and a body after with/containing/saying or a colon.
+ * Anything looser is left to the model rather than risk turning an ordinary
+ * sentence into a stored document.
+ */
+export function parseSaveDocumentRequest(message: string): { title: string; body: string } | null {
+  const text = (message ?? "").trim();
+  const match = /^(?:please\s+)?(?:save|create|make|store|write|add|start)\s+(?:me\s+)?(?:a|an|the)?\s*(?:new\s+)?(?:knowledge\s+)?document\s+(?:called|titled|named|labell?ed)\s+["']?(.+?)["']?\s*(?:with(?:\s+the)?\s+(?:text|content|body)?|containing|that\s+says|saying|[:,-])\s*:?\s*["']?([\s\S]+?)["']?$/i
+    .exec(text);
+  if (!match) return null;
+  const title = match[1].trim();
+  const body = match[2].trim();
+  if (!title || !body) return null;
+  return { title, body };
+}
+
+/**
+ * Save a knowledge document deterministically, off the model. Mirrors the
+ * memory resolvers: the request carries the title and body, and the only work
+ * is storing them. A title that already exists is refused rather than
+ * duplicated, the same as write_document does.
+ */
+function resolveSaveDocument(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  if (approving || !input.saveDocument) return null;
+  const parsed = parseSaveDocumentRequest(effectiveMessage);
+  if (!parsed) return null;
+
+  const reply = (text: string) => deterministicResult(effectiveMessage, text, "document");
+  const exists = (input.documents ?? []).some(
+    (document) => document.title.trim().toLowerCase() === parsed.title.toLowerCase()
+  );
+  if (exists) {
+    return reply(`A document called "${parsed.title}" already exists. Ask me to update it, or use a different title.`);
+  }
+
+  const saved = input.saveDocument(parsed.title, parsed.body);
+  return saved
+    ? reply(`Saved the document "${parsed.title}".`)
+    : reply("There is nowhere to save documents right now, so nothing was stored.");
+}
+
+/** Whether the request asks to see the list of knowledge documents (plural). */
+export function isListDocumentsRequest(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  if (/\bdocuments?\s+(?:called|titled|named)\b/.test(text)) return false;
+  return /\b(?:list|show|see|view)\s+(?:me\s+)?(?:my|the|all|any)?\s*documents\b/.test(text)
+    || /\bwhat\s+documents\b/.test(text)
+    || /\bwhich\s+documents\b/.test(text)
+    || /\bhow\s+many\s+documents\b/.test(text)
+    || /\b(?:my|the|all)\s+documents\b\s*\??$/.test(text);
+}
+
+/** List the knowledge documents deterministically, off the model. */
+function resolveListDocuments(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  if (approving || !isListDocumentsRequest(effectiveMessage)) return null;
+  const documents = input.documents ?? [];
+  if (documents.length === 0) {
+    return deterministicResult(effectiveMessage,
+      "You have no documents saved yet. Say \"save a document called X with ...\" to add one.", "list");
+  }
+  const lines = documents.map((document) => `- ${document.title}`).join("\n");
+  return deterministicResult(effectiveMessage, `Your documents (${documents.length}):\n${lines}`, "list");
 }
 
 function toResult(modelReply: Awaited<ReturnType<ModelRouter["generate"]>>): OrchestratorResult {
