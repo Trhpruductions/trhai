@@ -209,6 +209,16 @@ export async function runAssistantOrchestrator(
   const savingDocument = resolveSaveDocument(input, approving, effectiveMessage);
   if (savingDocument) return savingDocument;
 
+  // "add to my Roadmap document: ..." — left to the model it fumbled
+  // update_document's arguments across four rounds and reported confusion.
+  const appendingDocument = resolveAppendDocument(input, approving, effectiveMessage);
+  if (appendingDocument) return appendingDocument;
+
+  // "search my documents for X" — left to the model it ran search_files and
+  // read back workspace paths instead of the knowledge base.
+  const searchingDocuments = resolveSearchDocuments(input, approving, effectiveMessage);
+  if (searchingDocuments) return searchingDocuments;
+
   // "list my documents" is a list operation too; left to the model it ran
   // list_files and read back workspace paths instead of the knowledge base.
   const listingDocuments = resolveListDocuments(input, approving, effectiveMessage);
@@ -860,6 +870,74 @@ function resolvePlanApp(
     `Here is a plan for "${spec.title}" (nothing built yet):\n${entities}\n\nSay "build it" when you want me to create it.`,
     "plan"
   );
+}
+
+/** Parse "add to my Roadmap document: hire two engineers" into a title and addition. */
+export function parseAppendDocumentRequest(message: string): { title: string; addition: string } | null {
+  const text = (message ?? "").trim();
+  let match = /^(?:please\s+)?(?:add|append|put)\s+(?:this\s+)?to\s+(?:my|the)?\s*(.+?)\s+document\s*[:,-]\s*(.+)$/i.exec(text);
+  if (match) return { title: match[1].trim(), addition: match[2].trim() };
+  match = /^(?:please\s+)?(?:add|append|put)\s+(.+?)\s+(?:to|in|into)\s+(?:my|the)?\s*(.+?)\s+document\b/i.exec(text);
+  if (match) return { title: match[2].trim(), addition: match[1].trim() };
+  return null;
+}
+
+/** Append to a knowledge document deterministically, off the model. */
+function resolveAppendDocument(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  if (approving || !input.updateDocument) return null;
+  const parsed = parseAppendDocumentRequest(effectiveMessage);
+  if (!parsed) return null;
+
+  const reply = (text: string) => deterministicResult(effectiveMessage, text, "document");
+  const wanted = parsed.title.toLowerCase();
+  const documents = input.documents ?? [];
+  const doc = documents.find((document) => document.title.trim().toLowerCase() === wanted)
+    ?? documents.find((document) => document.title.toLowerCase().includes(wanted));
+  if (!doc) {
+    return reply(`There is no document called "${parsed.title}". Say "save a document called ${parsed.title} with ..." to create it.`);
+  }
+
+  const next = doc.body.trimEnd() ? `${doc.body.trimEnd()}\n${parsed.addition}` : parsed.addition;
+  return input.updateDocument(doc.id, next)
+    ? reply(`Added to "${doc.title}".`)
+    : reply(`I couldn't update "${doc.title}", so nothing was changed.`);
+}
+
+/** Parse "search my documents for X" / "find X in my documents" into the query. */
+export function parseSearchDocumentsRequest(message: string): string | null {
+  const text = (message ?? "").trim();
+  let match = /^(?:please\s+)?(?:search|find|look)\s+(?:up\s+|through\s+|in\s+)?(?:my|the|all)?\s*documents?\s+(?:for|containing|about|mentioning|with)\s+(.+)$/i.exec(text);
+  if (match) return match[1].trim().replace(/[?.!]+$/, "");
+  match = /^(?:please\s+)?(?:search|find)\s+(.+?)\s+in\s+(?:my|the|all)?\s*documents?\b/i.exec(text);
+  if (match) return match[1].trim().replace(/[?.!]+$/, "");
+  return null;
+}
+
+/** Search the knowledge documents deterministically, off the model. */
+function resolveSearchDocuments(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  if (approving) return null;
+  const query = parseSearchDocumentsRequest(effectiveMessage);
+  if (!query) return null;
+
+  const reply = (text: string) => deterministicResult(effectiveMessage, text, "list");
+  const documents = input.documents ?? [];
+  if (documents.length === 0) return reply("You have no documents saved yet.");
+
+  const needle = query.toLowerCase();
+  const matches = documents.filter(
+    (document) => document.title.toLowerCase().includes(needle) || document.body.toLowerCase().includes(needle)
+  );
+  if (matches.length === 0) return reply(`Nothing in your documents mentions "${query}".`);
+  const lines = matches.map((document) => `- ${document.title}`).join("\n");
+  return reply(`Documents mentioning "${query}" (${matches.length}):\n${lines}`);
 }
 
 function toResult(modelReply: Awaited<ReturnType<ModelRouter["generate"]>>): OrchestratorResult {

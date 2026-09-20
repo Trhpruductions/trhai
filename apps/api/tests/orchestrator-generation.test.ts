@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { runAssistantOrchestrator, parseSaveDocumentRequest, isListDocumentsRequest, parsePlanAppRequest } from "../src/services/orchestrator.js";
+import {
+  runAssistantOrchestrator, parseSaveDocumentRequest, isListDocumentsRequest, parsePlanAppRequest,
+  parseAppendDocumentRequest, parseSearchDocumentsRequest
+} from "../src/services/orchestrator.js";
 
 /**
  * A stand-in Ollama that answers everything.
@@ -145,6 +148,37 @@ test("planning an app comes from planProject, off the model, and does not build"
   });
   assert.equal(result.strategy, "plan");
   assert.match(result.assistantMessage, /nothing built yet/i);
+});
+
+test("parseAppendDocumentRequest and parseSearchDocumentsRequest read the request", () => {
+  assert.deepEqual(parseAppendDocumentRequest("add to my Roadmap document: hire two engineers"), { title: "Roadmap", addition: "hire two engineers" });
+  assert.deepEqual(parseAppendDocumentRequest("append ship faster to my Roadmap document"), { title: "Roadmap", addition: "ship faster" });
+  assert.equal(parseSearchDocumentsRequest("search my documents for engineers"), "engineers");
+  assert.equal(parseSearchDocumentsRequest("find auth in my documents"), "auth");
+});
+
+test("appending to a document updates it deterministically, off the model", async () => {
+  let updated: { id: string; body: string } | null = null;
+  const result = await runAssistantOrchestrator({
+    mode: "general", sessionId: "s-doc",
+    userMessage: "add to my Roadmap document: hire two engineers",
+    documents: [{ id: "d1", title: "Roadmap", body: "ship v2" }],
+    updateDocument: (id, body) => { updated = { id, body }; return true; }
+  });
+  assert.equal(result.strategy, "document");
+  assert.match(result.assistantMessage, /Added to "Roadmap"/);
+  assert.deepEqual(updated, { id: "d1", body: "ship v2\nhire two engineers" });
+});
+
+test("searching documents comes from the store, off the model", async () => {
+  const result = await runAssistantOrchestrator({
+    mode: "general", sessionId: "s-doc",
+    userMessage: "search my documents for engineers",
+    documents: [{ id: "d1", title: "Roadmap", body: "ship v2 and hire engineers" }, { id: "d2", title: "Notes", body: "buy milk" }]
+  });
+  assert.equal(result.strategy, "list");
+  assert.match(result.assistantMessage, /Roadmap/);
+  assert.doesNotMatch(result.assistantMessage, /Notes/);
 });
 
 test("an explanation answered by the model offers no build", async () => {
