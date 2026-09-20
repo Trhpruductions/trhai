@@ -8,6 +8,7 @@ import type { RunningApp, StartResult } from "./appRunner.js";
 import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
 import { isContinuationRequest, looksLikeScheduleRequest } from "./requestAnalysis.js";
+import { planProject } from "@ascend/shared";
 import { classifyIntent } from "./actionIntent.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
@@ -212,6 +213,13 @@ export async function runAssistantOrchestrator(
   // list_files and read back workspace paths instead of the knowledge base.
   const listingDocuments = resolveListDocuments(input, approving, effectiveMessage);
   if (listingDocuments) return listingDocuments;
+
+  // "plan an app for X" is a plan, not a build. Left to the model it ran
+  // build_app - build_app and plan_app both said "when the user wants something
+  // built" - and built the app despite "do not build it yet". planProject is
+  // deterministic, so the plan comes straight from it.
+  const planningApp = resolvePlanApp(input, approving, effectiveMessage);
+  if (planningApp) return planningApp;
 
   // Working out what was asked. Set here because this is the line that does
   // it, not a step announced before it starts.
@@ -804,6 +812,54 @@ function resolveListDocuments(
   }
   const lines = documents.map((document) => `- ${document.title}`).join("\n");
   return deterministicResult(effectiveMessage, `Your documents (${documents.length}):\n${lines}`, "list");
+}
+
+/**
+ * Parse "plan an app for X" into the description to plan. The leading verb must
+ * be plan/outline/sketch - a plan, not a build - and it must name an app-like
+ * thing, so "plan my week" or "build an app" do not match.
+ */
+export function parsePlanAppRequest(message: string): string | null {
+  const text = (message ?? "").trim();
+  const match = /^(?:please\s+)?(?:plan|outline|sketch)\s+(?:out\s+|me\s+)?(?:a|an|the)?\s*(?:app|application|tool|program|system|tracker|dashboard|feature|api)\b\s*(?:for|to|that|which|about|:|-)?\s*(.+)$/i
+    .exec(text);
+  if (!match) return null;
+  // Strip a trailing "do not build it yet" / "just plan it" clause: left in, it
+  // fed planProject junk records ("Not", "Yet" from "do not build it yet").
+  const description = match[1]
+    .replace(/\s*[,;.-]?\s*(?:but\s+)?(?:do\s+not|don'?t|do\s*nt)\s+build\b[\s\S]*$/i, "")
+    .replace(/\s*[,;.-]?\s*(?:without\s+building|just\s+plan(?:ning)?|only\s+plan(?:ning)?|no\s+build|for\s+now|not\s+yet)\b[\s\S]*$/i, "")
+    .trim();
+  return description.length >= 3 ? description : null;
+}
+
+/**
+ * Plan an app deterministically, off the model. Mirrors the other resolvers:
+ * planProject already turns a description into records and fields, so a plan
+ * request needs no model and never turns into a build.
+ */
+function resolvePlanApp(
+  _input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  if (approving) return null;
+  const description = parsePlanAppRequest(effectiveMessage);
+  if (!description) return null;
+
+  const spec = planProject(description);
+  // Nothing concrete to store means there is nothing to plan yet; let the rest
+  // of the pipeline ask for detail rather than print an empty plan.
+  if (spec.entities.length === 0) return null;
+
+  const entities = spec.entities
+    .map((entity) => `- ${entity.label}: ${entity.fields.map((field) => `${field.name} (${field.type})`).join(", ")}`)
+    .join("\n");
+  return deterministicResult(
+    effectiveMessage,
+    `Here is a plan for "${spec.title}" (nothing built yet):\n${entities}\n\nSay "build it" when you want me to create it.`,
+    "plan"
+  );
 }
 
 function toResult(modelReply: Awaited<ReturnType<ModelRouter["generate"]>>): OrchestratorResult {

@@ -360,8 +360,9 @@ export const toolDefinitions: ToolDefinition[] = [
     function: {
       name: "plan_app",
       description:
-        "Work out what a small app described in plain words would contain — its records, their "
-        + "fields, and the screens. Use this when the user describes something they want built.",
+        "Sketch out what an app would contain — its records, fields and screens — WITHOUT building "
+        + "it. Use this only when the user asks to plan, outline, sketch or design an app, or says "
+        + "not to build it yet. To actually create a working app, use build_app instead.",
       parameters: {
         type: "object",
         properties: {
