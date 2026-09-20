@@ -123,6 +123,31 @@ const targetPatterns = [
   /\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i
 ];
 
+/** A real file path or a bare filename with an extension (not a bare URL). */
+export function namesAFilePath(message: string): boolean {
+  const text = message ?? "";
+  return /[a-z]:[\\/][^\s]+/i.test(text)
+    || /(?:^|\s)\/[^\s]+\.[a-z0-9]{1,6}\b/i.test(text)
+    || /\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i.test(text);
+}
+
+/**
+ * Whether the request is about a knowledge-base document rather than a
+ * workspace file. "save a document called Meeting Notes" is a document; "write
+ * notes.txt" is a file. Caught live: the former ran write_file and saved
+ * "Meeting Notes.txt" to the workspace instead of a document. Matches
+ * "document" only as a noun (with an article or a naming verb), so the verb in
+ * "document what it does" does not trigger it.
+ */
+export function mentionsDocument(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  if (/\bknowledge\s*base\b/.test(text)) return true;
+  // An article or possessive, then up to three words (a title), then
+  // "document" as the head noun: "a document", "my Roadmap document".
+  return /\b(?:a|an|the|my|this|that|new|another|as\s+a|into\s+a)\s+(?:[\w'-]+\s+){0,3}documents?\b/.test(text)
+    || /\bdocuments?\s+(?:called|titled|named|labell?ed)\b/.test(text);
+}
+
 /**
  * Something that looks like a command, rather than a request for one.
  *

@@ -954,6 +954,13 @@ const writingTools = new Set([
 ]);
 
 /**
+ * The workspace file writers, withheld when the request is about a knowledge
+ * document. "save a document called Meeting Notes" was writing a Meeting
+ * Notes.txt file instead; with these off, write_document is what is left.
+ */
+const fileWritingTools = new Set(["write_file", "edit_file"]);
+
+/**
  * Offered only when the user asks for something to be kept. "run its smoke
  * test" failed and the model then called remember with "The 'test' script is
  * missing from the package.json file" - a note to itself, saved as the
@@ -975,7 +982,7 @@ export function availableTools(
   armed: boolean,
   options: {
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
-    web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean;
+    web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -989,6 +996,7 @@ export function availableTools(
   const allowTime = options.time ?? true;
   const allowRender = options.render ?? true;
   const allowWrites = options.writes ?? true;
+  const allowFileWrites = options.files ?? true;
   const allowMemory = options.memory ?? true;
 
   return toolDefinitions.filter((definition) => {
@@ -1001,6 +1009,7 @@ export function availableTools(
     if (!allowWeb && webTools.has(name)) return false;
     if (!allowTime && timeTools.has(name)) return false;
     if (!allowRender && renderTools.has(name)) return false;
+    if (!allowFileWrites && fileWritingTools.has(name)) return false;
     if (!allowChanges && machineChangingTools.has(name)) return false;
     if (!allowWrites && writingTools.has(name)) return false;
     if (!allowMemory && memoryWritingTools.has(name)) return false;
@@ -1174,7 +1183,11 @@ function describeMissingDocument(context: ToolContext, title: string): string {
     ? ` "${title}" is a real file in the workspace, not a knowledge document — use read_file or `
       + "write_file instead."
     : "";
-  return `There is no document called "${title}".${available}${fileHint}`;
+  // When it is not a file either, the model reached for update_document to
+  // create something new. Point it at the tool that does - "save a document
+  // called X" arrives as update_document on a document that does not exist yet.
+  const createHint = fileHint ? "" : ` To create a new document, use write_document with a title and content.`;
+  return `There is no document called "${title}".${available}${fileHint}${createHint}`;
 }
 
 /** The same exact-then-partial rule, for a saved fact. */
