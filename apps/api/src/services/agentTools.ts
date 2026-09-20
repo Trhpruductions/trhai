@@ -1689,8 +1689,10 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "shift_date": {
-      const from = requireString(call.arguments.from);
-      if (!from) return { ok: false, content: "shift_date needs a starting date." };
+      // "10 days from today" gives the offset but no start date; today is the
+      // start. Left to fail, the model invented a date (10 days out landed on
+      // the wrong day). parseDate resolves "today" against context.now.
+      const from = requireString(call.arguments.from) ?? "today";
 
       const days = typeof call.arguments.days === "number"
         ? call.arguments.days

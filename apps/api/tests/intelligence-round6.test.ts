@@ -277,6 +277,21 @@ test("a PowerShell cmdlet runs in PowerShell", async () => {
   assert.equal(forShell("cd D:\\x && npm test"), "cd /d D:\\x && npm test");
 });
 
+test("PowerShell commands are detected so they spawn against powershell.exe, not cmd", async () => {
+  const { powershellScript } = await import("../src/services/commandRunner.js");
+  // Through cmd.exe /s /c the quotes were mangled and the cmdlet echoed instead
+  // of running; spawned directly the script is one clean argument.
+  assert.equal(powershellScript("Get-PSDrive D"), "Get-PSDrive D");
+  assert.equal(powershellScript('powershell -NoProfile -Command "Get-Date"'), "Get-Date");
+  assert.equal(powershellScript("powershell -Command 'Get-Process | Select-Object -First 3'"), "Get-Process | Select-Object -First 3");
+  // A trailing "; exit 0" (a cmd habit the model brings) is stripped, or the
+  // command no longer ends in a quote and PowerShell echoes the literal.
+  assert.equal(powershellScript('powershell -Command "Get-PSDrive D"; exit 0'), "Get-PSDrive D");
+  // Not PowerShell: left to cmd.exe.
+  assert.equal(powershellScript("dir D:\\x"), null);
+  assert.equal(powershellScript("npm test"), null);
+});
+
 test("list_files shows a folder's own entries, folders first", async () => {
   const { armCommands, disarmCommands } = await import("../src/services/commandRunner.js");
   const dir = mkdtempSync(path.join(tmpdir(), "ascend-list-"));

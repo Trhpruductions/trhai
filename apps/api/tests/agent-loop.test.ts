@@ -832,6 +832,17 @@ test("shifting a date forwards", async () => {
   assert.match(result.content, /November/);
 });
 
+test("shift_date defaults to today when no start date is given", async () => {
+  // "10 days from today" gives no start date; today is implied. Left to fail,
+  // the model invented a date. Sept 20 + 10 = Sept 30.
+  const result = await runTool(
+    { name: "shift_date", arguments: { days: 10 } },
+    { ...editContext, now: () => new Date(2026, 8, 20) }
+  );
+  assert.equal(result.ok, true, result.content);
+  assert.match(result.content, /September 30, 2026/);
+});
+
 test("a date the tool cannot read is refused, not guessed", async () => {
   const result = await runTool(
     { name: "days_between", arguments: { from: "sometime", to: "2026-08-17" } },
