@@ -344,12 +344,42 @@ export function crossDrive(command: string): string {
  * shown - and cmd printed the line back. A Verb-Noun opening is PowerShell's
  * own shape and nothing cmd knows.
  */
+const POWERSHELL_CMDLET = /^(?:Get|Set|New|Remove|Start|Stop|Restart|Test|Invoke|Select|Where|Format|Measure|Write|Read|Import|Export|Add|Clear|Copy|Move|Rename|Resolve|Out|ConvertTo|ConvertFrom|Enable|Disable|Wait|Show|Update|Install|Uninstall|Find|Register|Unregister)-[A-Z][A-Za-z]+\b/;
+
 export function forShell(command: string): string {
   const trimmed = command.trim();
-  if (/^(?:Get|Set|New|Remove|Start|Stop|Restart|Test|Invoke|Select|Where|Format|Measure|Write|Read|Import|Export|Add|Clear|Copy|Move|Rename|Resolve|Out|ConvertTo|ConvertFrom|Enable|Disable|Wait|Show|Update|Install|Uninstall|Find|Register|Unregister)-[A-Z][A-Za-z]+\b/.test(trimmed)) {
+  if (POWERSHELL_CMDLET.test(trimmed)) {
     return `powershell -NoProfile -Command "${trimmed.replace(/"/g, "\\\"")}"`;
   }
   return crossDrive(trimmed);
+}
+
+/**
+ * The PowerShell script to run for a command, or null when it is not
+ * PowerShell. A bare Verb-Noun cmdlet is itself the script; "powershell ...
+ * -Command X" hands back X (one layer of quotes stripped).
+ *
+ * Running PowerShell through cmd.exe /s /c mangled the quotes so badly that
+ * PowerShell evaluated the command as a string literal and printed it straight
+ * back - "Get-PSDrive D" in, "Get-PSDrive D" out, every cmdlet broken. Spawned
+ * against powershell.exe directly, the script is a single clean argument and
+ * runs.
+ */
+export function powershellScript(command: string): string | null {
+  // The model often appends "; exit 0" out of cmd habit. Left on, it made
+  // "powershell -Command \"Get-PSDrive D\"; exit 0" no longer end in a quote,
+  // so the quotes were not stripped and PowerShell echoed the literal again.
+  const trimmed = command.trim().replace(/\s*[;&]{1,2}\s*exit\b[\s\S]*$/i, "").trim();
+  const invoked = /^powershell(?:\.exe)?\b.*?\s-Command\s+([\s\S]+)$/i.exec(trimmed);
+  if (invoked) {
+    let script = invoked[1].trim();
+    if (script.length >= 2
+      && ((script.startsWith('"') && script.endsWith('"')) || (script.startsWith("'") && script.endsWith("'")))) {
+      script = script.slice(1, -1);
+    }
+    return script.trim() || null;
+  }
+  return POWERSHELL_CMDLET.test(trimmed) ? trimmed : null;
 }
 
 export async function runCommand(
@@ -361,8 +391,14 @@ export async function runCommand(
   const cwd = options.cwd ?? commandWorkingDirectory();
 
   const isWindows = process.platform === "win32";
-  const shell = isWindows ? "cmd.exe" : "/bin/sh";
-  const args = isWindows ? ["/d", "/s", "/c", forShell(command)] : ["-c", command];
+  // PowerShell runs against powershell.exe directly - through cmd.exe the quotes
+  // were mangled and every cmdlet echoed instead of running. Everything else
+  // goes through the platform shell as before.
+  const powershell = isWindows ? powershellScript(command) : null;
+  const shell = powershell ? "powershell.exe" : isWindows ? "cmd.exe" : "/bin/sh";
+  const args = powershell
+    ? ["-NoProfile", "-Command", powershell]
+    : isWindows ? ["/d", "/s", "/c", forShell(command)] : ["-c", command];
 
   return new Promise<CommandRun>((resolve) => {
     let stdout = "";
