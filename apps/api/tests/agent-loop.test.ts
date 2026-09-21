@@ -2207,6 +2207,33 @@ test("a real sum still gets the calculator", async () => {
   }
 });
 
+test("a pure web lookup is not offered the file writers", async () => {
+  // "search the web for the release schedule" had edit_file in reach and the
+  // model wandered into web_search -> edit_file -> edit_file, writing files
+  // nobody asked for. A lookup with no file named gets web tools, not writers.
+  const { server, baseUrl, received } = await fakeModel([answer("Here is what I found.")]);
+  try {
+    await runAgent(configFor(baseUrl), "search the web for the official Node.js release schedule", context);
+    const offered = ((received[0]?.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
+    assert.ok(offered.includes("web_search"), "the web lookup must keep web_search");
+    assert.ok(!offered.includes("edit_file"), "a pure web lookup must not offer edit_file");
+    assert.ok(!offered.includes("write_file"), "a pure web lookup must not offer write_file");
+  } finally {
+    server.close();
+  }
+});
+
+test("a web lookup that names a file to save to keeps the file writers", async () => {
+  const { server, baseUrl, received } = await fakeModel([answer("Saved.")]);
+  try {
+    await runAgent(configFor(baseUrl), "search the web for the latest React version and save it to notes.txt", context);
+    const offered = ((received[0]?.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
+    assert.ok(offered.includes("write_file") || offered.includes("edit_file"), "a named file keeps the writers");
+  } finally {
+    server.close();
+  }
+});
+
 
 test("a tool the turn did not offer is refused even when the model calls it", async () => {
   // The gate on the offer was not enough. With calculate withheld for a
