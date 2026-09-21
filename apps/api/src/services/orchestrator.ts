@@ -23,7 +23,8 @@ import {
   type PendingConfirmation
 } from "./pendingConfirmation.js";
 import {
-  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, parseForgetRequest, parseNthThingRequest, parsePinRequest
+  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, parseForgetRequest, parseNthThingRequest, parsePinRequest,
+  parseRemoveScheduleRequest, parseToggleScheduleRequest
 } from "./memoryRequests.js";
 import { matchMemories } from "./factWording.js";
 import { resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
@@ -61,7 +62,11 @@ export type OrchestratorInput = {
   /** Clears the session's memory, for "forget everything". Returns how many went. */
   forgetAllMemories?: () => number;
   /** The machine's schedules, described, for "what schedules do I have". */
-  listSchedules?: () => Array<{ name: string; cadenceLabel: string; actionLabel: string; enabled: boolean }>;
+  listSchedules?: () => Array<{ id: string; name: string; cadenceLabel: string; actionLabel: string; enabled: boolean }>;
+  /** Removes a schedule by id, for "cancel my daily reminder". */
+  removeSchedule?: (id: string) => boolean;
+  /** Pauses or resumes a schedule by id, for "turn off the 9am reminder". */
+  setScheduleEnabled?: (id: string, enabled: boolean) => boolean;
   /** Documents in this session, for the document tools. */
   documents?: Array<{ id: string; title: string; body: string }>;
   /** Saves a new document, for the "write_document" tool. */
@@ -209,6 +214,15 @@ export async function runAssistantOrchestrator(
 
   const schedules = resolveListSchedules(input, approving, effectiveMessage);
   if (schedules) return schedules;
+
+  // "cancel my daily reminder" answered "Got it." and cancelled nothing; "turn
+  // off the 9am reminder" called add_schedule and made a second one. Both are
+  // decided here now: a confirm-then-do cancel, and a reversible pause/resume.
+  const removingSchedule = resolveRemoveSchedule(input, approving, effectiveMessage);
+  if (removingSchedule) return removingSchedule;
+
+  const togglingSchedule = resolveToggleSchedule(input, approving, effectiveMessage);
+  if (togglingSchedule) return togglingSchedule;
 
   // "save a document called X with the text Y" is a list operation, not a
   // reasoning one: a title and a body, straight into the store. Left to the
@@ -590,6 +604,193 @@ function resolveListSchedules(
     .map((schedule) => `- ${schedule.name}: ${schedule.cadenceLabel}. ${schedule.actionLabel}${schedule.enabled ? "" : " (paused)"}`)
     .join("\n");
   return deterministicResult(effectiveMessage, `Schedules (${schedules.length}):\n${lines}`, "list");
+}
+
+type ScheduleSummary = { id: string; name: string; cadenceLabel: string; actionLabel: string; enabled: boolean };
+
+/** Words too common to tell one schedule from another. */
+const scheduleStopWords = new Set([
+  "the", "a", "an", "my", "me", "to", "for", "about", "that", "this", "and", "of", "on", "at",
+  "every", "day", "daily", "reminder", "schedule", "task", "job", "ask", "check"
+]);
+
+/**
+ * Collapse "9:00 am" and "9 am" to "9am" so a time named loosely ("the 9am
+ * reminder") still meets the cadence text ("Every day at 9:00 AM.").
+ */
+function normalizeScheduleText(value: string): string {
+  return value.toLowerCase()
+    .replace(/(\d{1,2}):00\s*([ap]m)/g, "$1$2")
+    .replace(/(\d{1,2})\s+([ap]m)/g, "$1$2");
+}
+
+type ScheduleMatch =
+  | { kind: "one"; schedule: ScheduleSummary }
+  | { kind: "several"; candidates: ScheduleSummary[] }
+  | { kind: "none" };
+
+/**
+ * Which schedule the user meant, matched loosely against its name, its action
+ * and its cadence. A single containment wins outright; otherwise the schedule
+ * sharing the most words with the request does, and a tie is reported rather
+ * than guessed - cancelling the wrong schedule is exactly what confirmation is
+ * meant to prevent.
+ */
+function matchSchedule(target: string, schedules: ScheduleSummary[]): ScheduleMatch {
+  const needle = normalizeScheduleText(target).trim();
+  if (!needle) return { kind: "none" };
+
+  const hay = (schedule: ScheduleSummary) =>
+    normalizeScheduleText(`${schedule.name} ${schedule.actionLabel} ${schedule.cadenceLabel}`);
+
+  const contained = schedules.filter((schedule) =>
+    normalizeScheduleText(schedule.name) === needle || hay(schedule).includes(needle));
+  if (contained.length === 1) return { kind: "one", schedule: contained[0] };
+
+  const words = needle.split(/\s+/).filter((word) => word.length > 1 && !scheduleStopWords.has(word));
+  const scored = schedules
+    .map((schedule) => ({ schedule, score: words.filter((word) => hay(schedule).includes(word)).length }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (scored.length === 0) return { kind: "none" };
+  if (scored.length === 1 || scored[0].score > scored[1].score) return { kind: "one", schedule: scored[0].schedule };
+  const top = scored[0].score;
+  return { kind: "several", candidates: scored.filter((entry) => entry.score === top).map((entry) => entry.schedule) };
+}
+
+/** How schedules are listed back when a name matches none, or several. */
+function listSchedulesBrief(schedules: ScheduleSummary[]): string {
+  return schedules
+    .map((schedule) => `- ${schedule.name}: ${schedule.cadenceLabel}${schedule.enabled ? "" : " (paused)"}`)
+    .join("\n");
+}
+
+/**
+ * Cancelling a schedule, all of it: the request that names one, the answer that
+ * declines, and the approval that removes it. A confirm-then-do flow like
+ * forget and delete_document, because a cancelled schedule is gone - re-adding
+ * it means restating its cadence and action from scratch.
+ */
+function resolveRemoveSchedule(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  const sessionId = input.sessionId;
+  if (!sessionId || !input.removeSchedule || !input.listSchedules) return null;
+
+  const reply = (text: string, strategy = "schedule", pending?: { tool: string; verb: string; target: string }) =>
+    deterministicResult(effectiveMessage, text, strategy, pending);
+  const schedules = input.listSchedules();
+
+  if (approving?.tool === "delete_schedule") {
+    if (approving.arguments?.all === true) {
+      const removed = schedules.filter((schedule) => input.removeSchedule!(schedule.id)).length;
+      return reply(removed > 0
+        ? `Cancelled every schedule: ${removed} of them.`
+        : "No schedules were set, so nothing was cancelled.");
+    }
+    const id = typeof approving.arguments?.id === "string" ? approving.arguments.id : "";
+    const schedule = schedules.find((entry) => entry.id === id);
+    if (!schedule) return reply("That schedule is no longer set, so nothing was cancelled.");
+    return reply(input.removeSchedule(schedule.id)
+      ? `Cancelled the schedule "${schedule.name}".`
+      : "The schedule could not be cancelled, so nothing was changed.");
+  }
+  if (approving) return null;
+
+  // "no" to a standing offer withdraws it, the same as forget.
+  if (isDecline(effectiveMessage) && getPendingConfirmation(sessionId)?.tool === "delete_schedule") {
+    clearPendingConfirmation(sessionId);
+    return reply("Kept. Nothing was cancelled.");
+  }
+
+  const parsed = parseRemoveScheduleRequest(effectiveMessage);
+  if (!parsed) return null;
+
+  if (schedules.length === 0) return reply("No schedules are set, so there is nothing to cancel.");
+
+  const offer = (pending: Omit<PendingConfirmation, "askedAt">, text: string) => {
+    recordPendingConfirmation(sessionId, pending);
+    return reply(text, "confirm", { tool: pending.tool, ...describePendingAction({ ...pending, askedAt: Date.now() }) });
+  };
+
+  if (parsed.kind === "all") {
+    return offer(
+      { tool: "delete_schedule", arguments: { all: true }, request: effectiveMessage },
+      `This would cancel every schedule - ${schedules.length} of them. Say yes to cancel them all, or no to keep them.`
+    );
+  }
+
+  // "cancel my reminder" with nothing to name it: the one schedule if there is
+  // only one, otherwise a request to say which.
+  if (!parsed.target.trim()) {
+    if (schedules.length === 1) {
+      const only = schedules[0];
+      return offer(
+        { tool: "delete_schedule", arguments: { id: only.id, name: only.name }, request: effectiveMessage },
+        `This would cancel the schedule "${only.name}" (${only.cadenceLabel}). Say yes to cancel it, or no to keep it.`
+      );
+    }
+    return reply(`Which schedule should I cancel? Your schedules:\n${listSchedulesBrief(schedules)}`);
+  }
+
+  const match = matchSchedule(parsed.target, schedules);
+  if (match.kind === "one") {
+    return offer(
+      { tool: "delete_schedule", arguments: { id: match.schedule.id, name: match.schedule.name }, request: effectiveMessage },
+      `This would cancel the schedule "${match.schedule.name}" (${match.schedule.cadenceLabel}). Say yes to cancel it, or no to keep it.`
+    );
+  }
+  if (match.kind === "several") {
+    return reply(`Several schedules match that:\n${listSchedulesBrief(match.candidates)}\n\nSay which one to cancel, by name.`);
+  }
+  return reply(`No schedule matches "${parsed.target}", so nothing was cancelled. Your schedules:\n${listSchedulesBrief(schedules)}`);
+}
+
+/**
+ * Pausing or resuming a schedule. No confirmation: unlike cancelling, a pause
+ * is reversible and keeps the schedule, so it is a level 2 change like any
+ * other. The model's own answer to "turn off the 9am reminder" was to create a
+ * second one, which is why this is decided here.
+ */
+function resolveToggleSchedule(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  if (approving || !input.setScheduleEnabled || !input.listSchedules) return null;
+  const parsed = parseToggleScheduleRequest(effectiveMessage);
+  if (!parsed) return null;
+
+  const reply = (text: string) => deterministicResult(effectiveMessage, text, "schedule");
+  const schedules = input.listSchedules();
+  if (schedules.length === 0) return reply("No schedules are set, so there is nothing to change.");
+
+  const verb = parsed.enabled ? "resume" : "pause";
+  const done = parsed.enabled ? "Resumed" : "Paused";
+
+  if (parsed.kind === "all") {
+    const changed = schedules.filter((schedule) => input.setScheduleEnabled!(schedule.id, parsed.enabled)).length;
+    return reply(`${done} ${changed} schedule${changed === 1 ? "" : "s"}.`);
+  }
+
+  if (!parsed.target.trim() && schedules.length > 1) {
+    return reply(`Which schedule should I ${verb}? Your schedules:\n${listSchedulesBrief(schedules)}`);
+  }
+  const target = parsed.target.trim() || schedules[0].name;
+
+  const match = matchSchedule(target, schedules);
+  if (match.kind === "one") {
+    return reply(input.setScheduleEnabled(match.schedule.id, parsed.enabled)
+      ? `${done} the schedule "${match.schedule.name}" (${match.schedule.cadenceLabel}).`
+      : "That schedule could not be changed, so nothing happened.");
+  }
+  if (match.kind === "several") {
+    return reply(`Several schedules match that:\n${listSchedulesBrief(match.candidates)}\n\nSay which one to ${verb}, by name.`);
+  }
+  return reply(`No schedule matches "${target}", so nothing was changed. Your schedules:\n${listSchedulesBrief(schedules)}`);
 }
 
 /**

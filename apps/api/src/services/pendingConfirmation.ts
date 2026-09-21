@@ -131,6 +131,10 @@ export function describePendingAction(pending: PendingConfirmation): {
         : { verb: "Forget this saved memory", target: argument("fact") };
     case "delete_document":
       return { verb: "Delete this document", target: argument("title") };
+    case "delete_schedule":
+      return pending.arguments?.all === true
+        ? { verb: "Cancel every schedule", target: "all of them" }
+        : { verb: "Cancel this schedule", target: argument("name") };
     default:
       return { verb: `Run ${pending.tool}`, target: "" };
   }

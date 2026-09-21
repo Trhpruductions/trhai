@@ -208,11 +208,14 @@ function buildAssistInput(
     listMemories: sessionId ? () => listSessionMemories(sessionId) : undefined,
     forgetAllMemories: sessionId ? () => forgetAllMemories(sessionId) : undefined,
     listSchedules: () => listSchedules().map((schedule) => ({
+      id: schedule.id,
       name: schedule.name,
       cadenceLabel: describeCadence(schedule.cadence),
       actionLabel: describeAction(schedule.action),
       enabled: schedule.enabled
     })),
+    removeSchedule: (id: string) => removeSchedule(id),
+    setScheduleEnabled: (id: string, enabled: boolean) => Boolean(setScheduleEnabled(id, enabled)),
     documents: sessionId
       ? listDocuments(sessionId).map((document) => ({
         id: document.id,
@@ -418,11 +421,14 @@ export function createApp() {
         listMemories: sessionId ? () => listSessionMemories(sessionId) : undefined,
         forgetAllMemories: sessionId ? () => forgetAllMemories(sessionId) : undefined,
         listSchedules: () => listSchedules().map((schedule) => ({
+          id: schedule.id,
           name: schedule.name,
           cadenceLabel: describeCadence(schedule.cadence),
           actionLabel: describeAction(schedule.action),
           enabled: schedule.enabled
         })),
+        removeSchedule: (id: string) => removeSchedule(id),
+        setScheduleEnabled: (id: string, enabled: boolean) => Boolean(setScheduleEnabled(id, enabled)),
         documents: sessionId
           ? listDocuments(sessionId).map((document) => ({
             id: document.id,

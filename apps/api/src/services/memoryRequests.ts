@@ -164,6 +164,94 @@ export function isListSchedulesRequest(message: unknown): boolean {
   return text !== null && listSchedulesPatterns.some((pattern) => pattern.test(text));
 }
 
+// Cancelling and pausing schedules, decided here for the same reason as forget
+// and pin: the model cannot be trusted with it. "cancel my daily reminder"
+// answered "Got it." and cancelled nothing; "turn off the 9am reminder" called
+// add_schedule and created a second one - the exact opposite of the request.
+// The store can already remove and disable by id; all that was missing was a
+// path from the user's words to that call.
+
+export type ScheduleTargetRequest =
+  | { kind: "one"; target: string }
+  | { kind: "all" };
+
+export type ScheduleToggleRequest =
+  | { kind: "one"; target: string; enabled: boolean }
+  | { kind: "all"; enabled: boolean };
+
+/** The words for a schedule, so a target can be told apart from the noun. */
+const scheduleNoun = /\b(?:schedules?|reminders?|scheduled (?:tasks?|jobs?|runs?)|recurring (?:tasks?|jobs?)|automations?|alerts?)\b/;
+
+/** Removal verbs. Kept apart from the toggle verbs so the two never collide. */
+const removeScheduleVerb = /^(?:cancel|delete|remove|clear|get rid of|call off|kill|wipe|erase|drop) /;
+/** Pause verbs (disable) and resume verbs (enable). */
+const disableScheduleVerb = /^(?:turn off|pause|disable|suspend|mute|deactivate|silence|snooze|halt) /;
+const enableScheduleVerb = /^(?:turn on|resume|enable|unpause|unmute|reactivate|re-?enable|restart|unsnooze) /;
+
+/** "stop reminding me to water the plants" - a removal in different clothes. */
+const stopRemindingPattern = /^stop (?:reminding|alerting|notifying|telling|nagging|pinging) me (?:to |about |that |when )?(.+)$/;
+
+/** all/every/each at the head of what follows the verb: the whole-list case. */
+const allLead = /^(?:all|every|each)\b/;
+/** "the reminder to check the logs": the noun leads, then a connector, then the name. */
+const scheduleNounThenName = /^(?:schedules?|reminders?|scheduled (?:tasks?|jobs?|runs?)|recurring (?:tasks?|jobs?)|automations?|alerts?) (?:to |for |about |that |which |where |called |named |titled |saying |on )(.+)$/;
+/**
+ * A single trailing schedule noun ("... backup schedule"), stripped once. The
+ * leading anchor is (start-or-space) so a bare "reminder" - all that is left of
+ * "cancel my reminder" - reduces to nothing, which the resolver reads as "the
+ * one schedule, if there is only one".
+ */
+const trailingScheduleNoun = /(?:^|\s+)(?:schedules?|reminders?|scheduled (?:tasks?|jobs?|runs?)|recurring (?:tasks?|jobs?)|automations?|alerts?)$/;
+
+/**
+ * The schedule's name, teased out of what follows the verb.
+ *
+ * Only a leading article and one trailing noun are dropped, plus the whole
+ * "reminder to X" lead-in. A noun in the middle is left alone on purpose: a
+ * schedule can be named "Server Logs Reminder", and stripping every noun
+ * turned that into "server logs", which then matched two schedules instead of
+ * the one the user named exactly.
+ */
+function scheduleTarget(afterVerb: string): string {
+  const bare = afterVerb.trim().replace(/^(?:my |the |that |this |a |an )+/, "").trim();
+  const leadIn = bare.match(scheduleNounThenName);
+  if (leadIn) return leadIn[1].trim();
+  return bare.replace(trailingScheduleNoun, "").trim();
+}
+
+export function parseRemoveScheduleRequest(message: unknown): ScheduleTargetRequest | null {
+  const text = plain(message);
+  if (!text) return null;
+
+  const stopMatch = text.match(stopRemindingPattern);
+  if (stopMatch) return { kind: "one", target: stopMatch[1].trim() };
+
+  if (!removeScheduleVerb.test(text) || !scheduleNoun.test(text)) return null;
+  const afterVerb = text.replace(removeScheduleVerb, "").trim();
+  if (allLead.test(afterVerb)) return { kind: "all" };
+  return { kind: "one", target: scheduleTarget(afterVerb) };
+}
+
+export function parseToggleScheduleRequest(message: unknown): ScheduleToggleRequest | null {
+  const text = plain(message);
+  if (!text || !scheduleNoun.test(text)) return null;
+
+  let enabled: boolean;
+  let afterVerb: string;
+  if (enableScheduleVerb.test(text)) {
+    enabled = true;
+    afterVerb = text.replace(enableScheduleVerb, "").trim();
+  } else if (disableScheduleVerb.test(text)) {
+    enabled = false;
+    afterVerb = text.replace(disableScheduleVerb, "").trim();
+  } else {
+    return null;
+  }
+
+  if (allLead.test(afterVerb)) return { kind: "all", enabled };
+  return { kind: "one", target: scheduleTarget(afterVerb), enabled };
+}
+
 const ordinals: Record<string, number> = {
   first: 1, "1st": 1, second: 2, "2nd": 2, third: 3, "3rd": 3, fourth: 4, "4th": 4, fifth: 5, "5th": 5,
   sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10

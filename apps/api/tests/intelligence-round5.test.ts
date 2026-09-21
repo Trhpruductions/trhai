@@ -159,12 +159,12 @@ test("the ways a person asks what is scheduled", () => {
 test("schedules are listed without a model", async () => {
   // Verbatim. Answered from the transcript with the request that made the
   // schedule, quoted back as if it were the answer.
-  const ask = (userMessage: string, schedules: Array<{ name: string; cadenceLabel: string; actionLabel: string; enabled: boolean }>) =>
+  const ask = (userMessage: string, schedules: Array<{ id: string; name: string; cadenceLabel: string; actionLabel: string; enabled: boolean }>) =>
     runAssistantOrchestrator({ mode: "general", userMessage, sessionId: "schedules-flow", listSchedules: () => schedules });
 
   const listed = await ask("what schedules do I have?", [
-    { name: "Build Check", cadenceLabel: "Every weekday at 8:00 AM", actionLabel: "Asks: whether the build passed", enabled: true },
-    { name: "Backup", cadenceLabel: "Every day at 2:00 AM", actionLabel: "Runs: backup.ps1", enabled: false }
+    { id: "s1", name: "Build Check", cadenceLabel: "Every weekday at 8:00 AM", actionLabel: "Asks: whether the build passed", enabled: true },
+    { id: "s2", name: "Backup", cadenceLabel: "Every day at 2:00 AM", actionLabel: "Runs: backup.ps1", enabled: false }
   ]);
   assert.equal(listed.strategy, "list", listed.assistantMessage);
   assert.match(listed.assistantMessage, /Build Check: Every weekday at 8:00 AM/);
