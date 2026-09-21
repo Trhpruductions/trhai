@@ -324,6 +324,30 @@ test("a build request still carries what to build when there is no model", async
   }
 });
 
+test("a web lookup with no model says so, instead of a canned deploy plan", async () => {
+  // Caught live: "search the web for the official Node.js release schedule"
+  // came back as a four-step deploy checklist, because "release" reads as a
+  // deploy task and the plan is the composer's model-unavailable fallback. A
+  // web search needs the model to drive it, so with no model the honest answer
+  // is that it could not run - not a plan for something the user never asked.
+  const previous = process.env.OLLAMA_BASE_URL;
+  process.env.OLLAMA_BASE_URL = "http://127.0.0.1:9";
+
+  try {
+    const result = await runAssistantOrchestrator({
+      mode: "general",
+      userMessage: "search the web for the official Node.js release schedule"
+    });
+
+    assert.equal(result.strategy, "failed", result.assistantMessage);
+    assert.doesNotMatch(result.assistantMessage, /deploy|rollback|flag/i);
+    assert.match(result.assistantMessage, /web search|model/i);
+  } finally {
+    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
+    else process.env.OLLAMA_BASE_URL = previous;
+  }
+});
+
 test("a remember-then-ask turn reaches the model with the fact already known", async () => {
   // Caught live: "Remember that the server room door code is 4471. Then tell
   // me every door code I have saved." saved the fact and answered with a bare
