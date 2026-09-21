@@ -1530,9 +1530,16 @@ test("looksLikeBareToolCall spots a reply that is nothing but a tool-call object
   assert.equal(looksLikeBareToolCall('{"name": "open_url", "arguments": {"url": "http://localhost:49884"}}'), true);
   assert.equal(looksLikeBareToolCall("```json\n{\"name\": \"x\", \"arguments\": {\"count\": 3}}\n```"), true);
   assert.equal(looksLikeBareToolCall('{"name": "respond", "parameters": {"message": "hi"}}'), true);
-  // Not tool calls: prose, plain data, a message.
+  // Malformed - truncated or with a placeholder - but still plainly a tool call
+  // the model emitted as text. These parse as nothing and used to leak verbatim.
+  assert.equal(looksLikeBareToolCall('{"name": "web_search", "arguments": {"query": "<query>}}'), true);
+  assert.equal(looksLikeBareToolCall('{"name": "fetch_url", "arguments": {"url": "http://example.com}}'), true);
+  // Not tool calls: prose, plain data, a message, or malformed JSON that names
+  // no real tool (so a genuine broken answer is not mistaken for one).
   assert.equal(looksLikeBareToolCall("Rendered the diagram — it is on screen now."), false);
   assert.equal(looksLikeBareToolCall('{"port": 4000}'), false);
+  assert.equal(looksLikeBareToolCall('{"name": "notarealtool", "arguments": {"x": "<broken}}'), false);
+  assert.equal(looksLikeBareToolCall('{"note": "<unfinished thought}'), false);
   assert.equal(looksLikeBareToolCall(""), false);
 });
 
