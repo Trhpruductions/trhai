@@ -1141,6 +1141,16 @@ export async function runAgent(
     // other gate had the same hole: scaffolding, the read-only turn, the
     // unattended run. The dispatcher below now refuses anything not in this
     // set, which closes all of them at once.
+    // Whether the request actually wants a file written. namesAFilePath alone
+    // is not that signal: it matches "Node.js" in "search the web for the
+    // Node.js release schedule" (the ".js" reads as a filename), which is how a
+    // pure web lookup ended up with the file writers in reach. A real path, an
+    // intent-classified write, or an explicit "save it to <file>" is.
+    const wantsToWriteAFile = namedAFileToWrite
+      || /[a-z]:[\\/][^\s]+/i.test(question)
+      || /(?:^|\s)\.{0,2}\/[^\s]+\.[a-z0-9]{1,6}\b/i.test(question)
+      || /\b(?:save|store|write|put|export|dump|record)\b.{0,40}\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i.test(question);
+
     const offeredTools = offerTools
       ? availableTools(commandsArmed() && !unattended, {
         // A request to look does not get the tools that change things. Asked
@@ -1178,8 +1188,16 @@ export async function runAgent(
         render: wantsRendering(question),
         // A request about a knowledge document, with no file named, does not get
         // the workspace file writers — so "save a document called X" reaches
-        // write_document instead of writing an X.txt file.
-        files: !(mentionsDocument(question) && !namesAFilePath(question))
+        // write_document instead of writing an X.txt file. Nor does a pure web
+        // lookup that names no file to write: "search the web for the Node.js
+        // release schedule" had edit_file in reach and the model wandered into
+        // web_search → edit_file → edit_file, writing files nobody asked for.
+        // An explicit save target ("save it to notes.txt") keeps them.
+        files: (mentionsDocument(question) && !namesAFilePath(question))
+          ? false
+          : (mentionsWeb(question) || wantsWebSearch(question))
+            ? wantsToWriteAFile
+            : true
       })
       : [];
     const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));
