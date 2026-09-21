@@ -10,7 +10,7 @@ import {
   correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, wantsRendering, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
+import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -1164,8 +1164,11 @@ export async function runAgent(
       ? availableTools(commandsArmed() && !unattended, {
         // A request to look does not get the tools that change things. Asked
         // to read one file, the model read it and then wrote three - see
-        // machineChangingTools in agentTools.
-        changes: intent.kind !== "read",
+        // machineChangingTools in agentTools. A request to STOP an app loses
+        // them too: stop_app is not among them, so it stays in reach while
+        // run_app and build_app do not - which is what stops "stop the notes
+        // app" from stopping it and then restarting it.
+        changes: intent.kind !== "read" && !wantsToStopAnApp(question),
         // A question keeps run_command - the machine answers "is anything
         // listening on port 4000?" - and loses everything that writes.
         writes: !onlyAsks,

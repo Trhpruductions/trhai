@@ -335,6 +335,27 @@ export function wantsWebSearch(message: string): boolean {
 }
 
 /**
+ * Whether the request is to stop or close a running app, so the tools that
+ * start or build things are withheld. Caught live: "stop the notes app" ran
+ * stop_app (good) and then wandered into run_app twice, restarting nothing and
+ * answering with run_app's "no app has been built" failure. stop_app is not a
+ * machine-changing tool, so withholding those still leaves it in reach.
+ */
+export function wantsToStopAnApp(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  if (!text) return false;
+  // A negated stop is not a stop request. build_app's own instruction says
+  // "Do not stop at explaining what it would contain" - the word "stop" and the
+  // word "app" both appear, and reading that as "stop the app" withheld
+  // build_app and broke building entirely.
+  if (/\b(?:do\s+not|don'?t|never|without|not)\s+(?:stop|clos|shut|kill|quit|halt|terminat)/.test(text)) return false;
+  // The stop verb must sit just before an app reference ("stop the notes app"),
+  // not merely somewhere in the same message ("stop at explaining ... app").
+  return /\b(?:stop|close|shut\s*down|shutdown|kill|quit|halt|terminate)\b[^.!?]{0,24}\b(?:app|apps|application|server|site|website|preview)\b/
+    .test(text);
+}
+
+/**
  * Whether the request asks to see a visual — a UI mockup or a diagram — so
  * render_mockup is worth offering. "show me a mockup of a login screen",
  * "diagram how the build works", "wireframe a dashboard".

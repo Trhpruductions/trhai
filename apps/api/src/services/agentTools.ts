@@ -1048,6 +1048,48 @@ function findDocument(context: ToolContext, title: string) {
     ?? documents.find((document) => document.title.toLowerCase().includes(wanted));
 }
 
+const appReferenceStopWords = new Set([
+  "app", "the", "a", "an", "my", "application", "tool", "site", "web", "server", "project"
+]);
+
+/**
+ * Resolve a loose app reference ("the todo app") to a running app's folder
+ * ("simple-todo-list-app").
+ *
+ * The model echoes the user's words, which rarely match the folder verbatim,
+ * so "stop the todo app" was passed straight through, missed, and the app kept
+ * running while the model claimed nothing was built. Exact folder wins;
+ * otherwise the running app whose folder shares the most words. A tie or no
+ * match returns the original untouched, so the caller reports honestly and
+ * lists what is running rather than acting on a guess.
+ */
+function resolveRunningProject(context: ToolContext, project: string): string {
+  const running = (context.runningApps?.() ?? []).map((app) => app.project);
+  if (running.length === 0) return project;
+
+  const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const wanted = norm(project);
+  if (!wanted) return project;
+
+  const exact = running.find((folder) => norm(folder) === wanted);
+  if (exact) return exact;
+
+  const contained = running.filter((folder) => {
+    const f = norm(folder);
+    return f.includes(wanted) || wanted.includes(f);
+  });
+  if (contained.length === 1) return contained[0];
+
+  const words = wanted.split(/\s+/).filter((word) => word.length > 1 && !appReferenceStopWords.has(word));
+  const scored = running
+    .map((folder) => ({ folder, score: words.filter((word) => norm(folder).includes(word)).length }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+  if (scored.length === 1 || (scored.length > 1 && scored[0].score > scored[1].score)) return scored[0].folder;
+
+  return project;
+}
+
 const searchSkipped = new Set(["node_modules", ".git", "dist", ".next", "build", "coverage", ".cache"]);
 const searchMaxMatches = 60;
 const searchMaxFiles = 4000;
@@ -2003,8 +2045,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "run_app": {
-      const project = requireString(call.arguments.project)?.replace(/[\\/]+$/, "") ?? activeProject(context.sessionId);
-      if (!project) {
+      const asked = requireString(call.arguments.project)?.replace(/[\\/]+$/, "") ?? activeProject(context.sessionId);
+      if (!asked) {
         return {
           ok: false,
           content: "run_app needs to know which app: none has been built or worked on this session. Pass project with its folder name."
@@ -2013,6 +2055,9 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       if (!context.launchApp) {
         return { ok: false, content: "Apps cannot be launched here." };
       }
+      // A running app referred to loosely ("open the todo app") resolves to its
+      // folder; anything else is passed through for launchApp to find on disk.
+      const project = resolveRunningProject(context, asked);
       const started = await context.launchApp(project);
       if (!started.ok) {
         return { ok: false, content: `Could not start ${project}: ${started.reason}` };
@@ -2023,13 +2068,21 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "stop_app": {
-      const project = requireString(call.arguments.project)?.replace(/[\\/]+$/, "");
-      if (!project) return { ok: false, content: "stop_app needs the app's folder name." };
+      const asked = requireString(call.arguments.project)?.replace(/[\\/]+$/, "");
+      if (!asked) return { ok: false, content: "stop_app needs the app's folder name." };
       if (!context.stopApp) return { ok: false, content: "Apps cannot be stopped here." };
+      // "stop the todo app" rarely names the folder verbatim; resolve it against
+      // what is actually running so the stop lands instead of missing silently.
+      const project = resolveRunningProject(context, asked);
       const stopped = context.stopApp(project);
-      return stopped
-        ? { ok: true, content: `Stopped "${project}".` }
-        : { ok: false, content: `"${project}" was not running.` };
+      if (stopped) return { ok: true, content: `Stopped "${project}".` };
+      const running = (context.runningApps?.() ?? []).map((app) => app.project);
+      return {
+        ok: false,
+        content: running.length > 0
+          ? `"${asked}" was not running. Running now: ${running.join(", ")}.`
+          : `"${asked}" was not running. No apps are running.`
+      };
     }
 
     case "make_video": {

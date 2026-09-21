@@ -2241,6 +2241,41 @@ test("a web lookup that names a file to save to keeps the file writers", async (
   }
 });
 
+test("a stop-app request keeps stop_app but not run_app or build_app", async () => {
+  // Live: "stop the notes app" ran stop_app then wandered into run_app twice,
+  // answering with run_app's "no app has been built" failure. run_app is a
+  // machine-changing tool and stop_app is not, so withholding those leaves the
+  // stop in reach and takes the restart out of it.
+  const { server, baseUrl, received } = await fakeModel([answer("Stopped it.")]);
+  try {
+    await runAgent(configFor(baseUrl), "stop the notes app", context);
+    const offered = ((received[0]?.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
+    assert.ok(offered.includes("stop_app"), "stop_app must stay in reach");
+    assert.ok(!offered.includes("run_app"), "run_app must not be offered for a stop request");
+    assert.ok(!offered.includes("build_app"), "build_app must not be offered for a stop request");
+  } finally {
+    server.close();
+  }
+});
+
+test("the build augmentation's 'Do not stop' does not trip the stop-app gate", async () => {
+  // The orchestrator appends "Call build_app with this ... Do not stop at
+  // explaining what it would contain" to a build turn. That "stop" beside the
+  // word "app" wrongly read as a stop-app request and withheld build_app,
+  // which broke building outright until the stop check was made precise.
+  const augmented = "build a habit tracker app with a habit name and a streak count\n\n"
+    + "Call build_app with this. Not plan_app - the user wants it actually built, not described. "
+    + "Do not stop at explaining what it would contain.";
+  const { server, baseUrl, received } = await fakeModel([answer("Built it.")]);
+  try {
+    await runAgent(configFor(baseUrl), augmented, context);
+    const offered = ((received[0]?.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
+    assert.ok(offered.includes("build_app"), "a build turn must still offer build_app");
+  } finally {
+    server.close();
+  }
+});
+
 
 test("a tool the turn did not offer is refused even when the model calls it", async () => {
   // The gate on the offer was not enough. With calculate withheld for a

@@ -166,6 +166,42 @@ test("stop_app stops a running app", async () => {
   assert.match(result.content, /Stopped "tool-stop"/);
 });
 
+test("stop_app resolves a loose app reference to the running app's folder", async () => {
+  // "stop the todo app" never matches the folder "simple-todo-list-app"
+  // verbatim; it used to miss silently and leave the app running.
+  writeApp("simple-todo-list-app");
+  await startApp("simple-todo-list-app");
+  const result = await runTool(
+    { name: "stop_app", arguments: { project: "the todo app" } },
+    { memories: [], knowledge: [], stopApp: (p) => stopApp(p), runningApps: () => listRunningApps() }
+  );
+  assert.equal(result.ok, true, result.content);
+  assert.match(result.content, /Stopped "simple-todo-list-app"/);
+  assert.equal(listRunningApps().length, 0, "the app is actually stopped");
+});
+
+test("stop_app that matches nothing running says so and lists what is running", async () => {
+  writeApp("invoice-tracker");
+  await startApp("invoice-tracker");
+  const result = await runTool(
+    { name: "stop_app", arguments: { project: "the weather app" } },
+    { memories: [], knowledge: [], stopApp: (p) => stopApp(p), runningApps: () => listRunningApps() }
+  );
+  assert.equal(result.ok, false, result.content);
+  assert.match(result.content, /invoice-tracker/, "the real running app is named so the model can retry");
+});
+
+test("run_app reopens a running app referred to loosely, rather than failing to find a folder", async () => {
+  writeApp("simple-todo-list-app");
+  await startApp("simple-todo-list-app");
+  const result = await runTool(
+    { name: "run_app", arguments: { project: "the todo app" } },
+    { memories: [], knowledge: [], launchApp: (p) => startApp(p), stopApp: (p) => stopApp(p), runningApps: () => listRunningApps() }
+  );
+  assert.equal(result.ok, true, result.content);
+  assert.match(result.content, /simple-todo-list-app.*running.*http:\/\/localhost:\d+/);
+});
+
 test("build_app launches what it builds when a launcher is wired", async () => {
   // The whole point: a build is something running, not a folder. With no
   // launcher (unit-test default) build_app does not spawn a server, which is
