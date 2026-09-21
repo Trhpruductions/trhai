@@ -9,7 +9,7 @@ import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
 import { isContinuationRequest, looksLikeScheduleRequest } from "./requestAnalysis.js";
 import { planProject } from "@ascend/shared";
-import { classifyIntent } from "./actionIntent.js";
+import { classifyIntent, wantsWebSearch } from "./actionIntent.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
 import {
@@ -481,6 +481,26 @@ export async function runAssistantOrchestrator(
     // A create plan is the exception: with no model at all, the deterministic
     // generator still builds it from the "Build this" control, so the plan is
     // a real deliverable there rather than a template.
+    // A web lookup with the model down must not fall through to the composer's
+    // task plan. "search the web for the official Node.js release schedule"
+    // came back as a four-step deploy checklist, because "release" reads as a
+    // deploy task and the plan is the composer's model-unavailable fallback.
+    // The search needs the model to drive it, so say plainly it could not run.
+    if (!generated && isPlan && wantsWebSearch(effectiveMessage)) {
+      const text = "I couldn't run that web search just now - the local model that drives it isn't "
+        + "available. Nothing was changed, and no plan was made. Try again in a moment.";
+      return {
+        model: "memory",
+        assistantMessage: text,
+        inputTokens: modelReply.inputTokens,
+        outputTokens: estimateTokens(text),
+        strategy: "failed",
+        toolsUsed: [],
+        groundedOn: [],
+        groundedOnHistory: 0
+      };
+    }
+
     const failedIntent = classifyIntent(implied?.request ?? effectiveMessage);
     const deterministicBuild = isPlan && modelReply.planTaskType === "create" && Boolean(modelReply.buildRequest)
       && failedIntent.kind !== "write";
