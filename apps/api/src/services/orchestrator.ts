@@ -190,6 +190,14 @@ export async function runAssistantOrchestrator(
   const forgetting = resolveForget(input, approving, effectiveMessage);
   if (forgetting) return forgetting;
 
+  // "delete my Scratch document" - a destructive doc op. Left to the model it
+  // called delete_document, got "needs confirmation", retried with placeholder
+  // titles across four rounds, invented a confirm_action tool and returned an
+  // empty reply, and the document was never removed. Handled here with the same
+  // confirm-then-do flow as forget.
+  const deletingDocument = resolveDeleteDocument(input, approving, effectiveMessage);
+  if (deletingDocument) return deletingDocument;
+
   const pinning = resolvePin(input, approving, effectiveMessage);
   if (pinning) return pinning;
 
@@ -938,6 +946,94 @@ function resolveSearchDocuments(
   if (matches.length === 0) return reply(`Nothing in your documents mentions "${query}".`);
   const lines = matches.map((document) => `- ${document.title}`).join("\n");
   return reply(`Documents mentioning "${query}" (${matches.length}):\n${lines}`);
+}
+
+/**
+ * Parse "delete my Scratch document" / "remove the document called Notes" into
+ * the title to delete. Requires both a delete verb and the word "document", so
+ * an ordinary sentence can't trigger a destructive op.
+ */
+export function parseDeleteDocumentRequest(message: string): string | null {
+  const text = (message ?? "").trim();
+  const verb = "(?:delete|remove|discard|trash|drop|erase|get\\s+rid\\s+of)";
+  // "delete the document called/titled/named X"
+  let match = new RegExp(
+    `^(?:please\\s+)?${verb}\\s+(?:my|the|that)?\\s*(?:knowledge\\s+)?document\\s+(?:called|titled|named|labell?ed)\\s+["']?(.+?)["']?$`,
+    "i"
+  ).exec(text);
+  if (match) return match[1].trim().replace(/[?.!]+$/, "");
+  // "delete my X document"
+  match = new RegExp(
+    `^(?:please\\s+)?${verb}\\s+(?:my|the|that)?\\s*(.+?)\\s+(?:knowledge\\s+)?document\\b`,
+    "i"
+  ).exec(text);
+  if (match) return match[1].trim().replace(/[?.!]+$/, "");
+  return null;
+}
+
+/**
+ * Delete a knowledge document deterministically, with a confirm-then-do flow.
+ *
+ * Left to the model, delete_document hit the level-3 permission gate, came back
+ * "needs the user's confirmation", and the model retried with placeholder
+ * titles across several rounds, invented a confirm_action tool, and returned an
+ * empty reply - the document was never removed and no confirmation was ever
+ * offered. Mirrors resolveForget: offer, then act on the user's "yes".
+ */
+function resolveDeleteDocument(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  const sessionId = input.sessionId;
+  if (!sessionId || !input.deleteDocument) return null;
+
+  const reply = (text: string, strategy = "document", pending?: { tool: string; verb: string; target: string }) =>
+    deterministicResult(effectiveMessage, text, strategy, pending);
+  const documents = input.documents ?? [];
+  const findDoc = (title: string) => {
+    const wanted = title.trim().toLowerCase();
+    return documents.find((document) => document.title.trim().toLowerCase() === wanted)
+      ?? documents.find((document) => document.title.toLowerCase().includes(wanted));
+  };
+
+  if (approving?.tool === "delete_document") {
+    const title = typeof approving.arguments?.title === "string" ? approving.arguments.title : "";
+    const doc = findDoc(title);
+    if (!doc) return reply(`There is no document called "${title}" any more, so nothing was deleted.`);
+    const removed = input.deleteDocument(doc.id);
+    return reply(removed
+      ? `Deleted the document "${doc.title}".`
+      : "The delete did not go through, so nothing was removed.");
+  }
+  if (approving) return null;
+
+  // "no" to a standing delete offer withdraws it, the same as forget.
+  if (isDecline(effectiveMessage) && getPendingConfirmation(sessionId)?.tool === "delete_document") {
+    clearPendingConfirmation(sessionId);
+    return reply("Kept. Nothing was deleted.");
+  }
+
+  const parsed = parseDeleteDocumentRequest(effectiveMessage);
+  if (!parsed) return null;
+
+  if (documents.length === 0) {
+    return reply("You have no documents saved, so there is nothing to delete.");
+  }
+
+  const doc = findDoc(parsed);
+  if (!doc) {
+    const shown = documents.slice(0, listedWhenUnmatched).map((document) => `- ${document.title}`).join("\n");
+    return reply(`There is no document called "${parsed}", so nothing was deleted. Your documents:\n${shown}`);
+  }
+
+  const pending = { tool: "delete_document", arguments: { title: doc.title }, request: effectiveMessage };
+  recordPendingConfirmation(sessionId, pending);
+  return reply(
+    `This would delete the document "${doc.title}". Say yes to delete it, or no to keep it.`,
+    "confirm",
+    { tool: "delete_document", ...describePendingAction({ ...pending, askedAt: Date.now() }) }
+  );
 }
 
 function toResult(modelReply: Awaited<ReturnType<ModelRouter["generate"]>>): OrchestratorResult {

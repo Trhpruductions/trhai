@@ -4,8 +4,9 @@ import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
 import {
   runAssistantOrchestrator, parseSaveDocumentRequest, isListDocumentsRequest, parsePlanAppRequest,
-  parseAppendDocumentRequest, parseSearchDocumentsRequest
+  parseAppendDocumentRequest, parseSearchDocumentsRequest, parseDeleteDocumentRequest
 } from "../src/services/orchestrator.js";
+import { resetPendingConfirmations } from "../src/services/pendingConfirmation.js";
 
 /**
  * A stand-in Ollama that answers everything.
@@ -128,6 +129,73 @@ test("listing documents comes from the store, off the model", async () => {
   assert.equal(result.strategy, "list");
   assert.match(result.assistantMessage, /Sprint Goals/);
   assert.match(result.assistantMessage, /Roadmap/);
+});
+
+test("parseDeleteDocumentRequest pulls the title from a delete-a-document request", () => {
+  assert.equal(parseDeleteDocumentRequest("delete my Scratch document"), "Scratch");
+  assert.equal(parseDeleteDocumentRequest("remove the document called Launch Plan"), "Launch Plan");
+  assert.equal(parseDeleteDocumentRequest("get rid of my Notes document please"), "Notes");
+  assert.equal(parseDeleteDocumentRequest("trash the Old Ideas document"), "Old Ideas");
+  // Not a delete-a-document request: left to the rest of the pipeline.
+  assert.equal(parseDeleteDocumentRequest("what does my Roadmap document say?"), null);
+  assert.equal(parseDeleteDocumentRequest("delete the file src/index.ts"), null);
+});
+
+test("deleting a document offers a confirmation and only deletes on yes", async () => {
+  resetPendingConfirmations();
+  const deleted: string[] = [];
+  const input = {
+    mode: "general" as const,
+    sessionId: "s-del",
+    userMessage: "delete my Scratch document",
+    documents: [{ id: "d1", title: "Scratch", body: "throwaway" }, { id: "d2", title: "Keep", body: "important" }],
+    deleteDocument: (id: string) => { deleted.push(id); return true; }
+  };
+
+  // First turn: an offer, nothing deleted yet.
+  const offer = await runAssistantOrchestrator(input);
+  assert.equal(offer.strategy, "confirm");
+  assert.match(offer.assistantMessage, /would delete the document "Scratch"/);
+  assert.deepEqual(deleted, [], "nothing is deleted before the user says yes");
+
+  // Second turn: "yes" resolves the standing offer and deletes the right doc.
+  const confirmed = await runAssistantOrchestrator({ ...input, userMessage: "yes" });
+  assert.match(confirmed.assistantMessage, /Deleted the document "Scratch"/);
+  assert.deepEqual(deleted, ["d1"], "the confirmed document is the one that gets removed");
+});
+
+test("declining a delete offer keeps the document", async () => {
+  resetPendingConfirmations();
+  let calls = 0;
+  const input = {
+    mode: "general" as const,
+    sessionId: "s-del-no",
+    userMessage: "delete my Scratch document",
+    documents: [{ id: "d1", title: "Scratch", body: "throwaway" }],
+    deleteDocument: () => { calls += 1; return true; }
+  };
+
+  const offer = await runAssistantOrchestrator(input);
+  assert.equal(offer.strategy, "confirm");
+
+  const declined = await runAssistantOrchestrator({ ...input, userMessage: "no" });
+  assert.match(declined.assistantMessage, /Kept\. Nothing was deleted\./);
+  assert.equal(calls, 0, "the store is never touched when the user declines");
+});
+
+test("deleting a document that does not exist deletes nothing and lists what is there", async () => {
+  resetPendingConfirmations();
+  let calls = 0;
+  const result = await runAssistantOrchestrator({
+    mode: "general",
+    sessionId: "s-del-missing",
+    userMessage: "delete my Nonexistent document",
+    documents: [{ id: "d1", title: "Roadmap", body: "ship v2" }],
+    deleteDocument: () => { calls += 1; return true; }
+  });
+  assert.match(result.assistantMessage, /no document called "Nonexistent"/);
+  assert.match(result.assistantMessage, /Roadmap/);
+  assert.equal(calls, 0);
 });
 
 test("parsePlanAppRequest extracts a plan-only app description, not a build", () => {
