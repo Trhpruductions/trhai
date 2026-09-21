@@ -749,7 +749,16 @@ export function looksLikeBareToolCall(text: string): boolean {
     if (!parsed || typeof parsed !== "object" || typeof parsed.name !== "string") return false;
     return parsed.arguments != null || parsed.parameters != null;
   } catch {
-    return false;
+    // Malformed but unmistakably a tool call the model emitted as text - a
+    // truncated or placeholder call such as
+    //   {"name": "web_search", "arguments": {"query": "<query>}}
+    // parses as nothing, so the check above misses it and it leaked verbatim
+    // into a reply. Match the shape instead: an opening "name" naming a real
+    // tool, with an "arguments"/"parameters" key. Kept strict (a known tool
+    // name) so a genuine, if malformed, JSON answer is not mistaken for one.
+    const nameMatch = trimmed.match(/^\{\s*"name"\s*:\s*"([a-z_]+)"/i);
+    if (!nameMatch || !advertisedToolNames().includes(nameMatch[1])) return false;
+    return /"(?:arguments|parameters)"\s*:/.test(trimmed);
   }
 }
 
