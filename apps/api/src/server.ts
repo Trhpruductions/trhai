@@ -72,7 +72,7 @@ import {
   removeSchedule,
   setScheduleEnabled
 } from "./services/scheduleStore.js";
-import { listRunningApps, listBuiltApps, startApp, stopApp } from "./services/appRunner.js";
+import { listRunningApps, listBuiltApps, removeBuiltApp, startApp, stopApp } from "./services/appRunner.js";
 import { listRenderings, latestRendering } from "./services/renderMockup.js";
 import { getFlow, saveFlow } from "./services/flowStore.js";
 import { readTelemetry, readIdentity } from "./services/systemTelemetry.js";
@@ -251,6 +251,7 @@ function buildAssistInput(
     stopApp: (project: string) => stopApp(project),
     runningApps: () => listRunningApps(),
     listApps: () => listBuiltApps(),
+    deleteApp: (name: string) => removeBuiltApp(name),
     authorApp: authorAppWithModel,
     ...(onToken ? { onToken } : {}),
     ...(cancel ? { cancel } : {})
@@ -465,6 +466,7 @@ export function createApp() {
         stopApp: (project: string) => stopApp(project),
         runningApps: () => listRunningApps(),
         listApps: () => listBuiltApps(),
+        deleteApp: (name: string) => removeBuiltApp(name),
         authorApp: authorAppWithModel
       }).finally(() => {
         // Whatever a client polling /v1/assist/activity mid-turn was told is

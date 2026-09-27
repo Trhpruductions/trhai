@@ -11,7 +11,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
-import { existsSync, statSync, readdirSync } from "node:fs";
+import { existsSync, statSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { workspaceRoot } from "./workspace.js";
 
@@ -75,6 +75,28 @@ export function listBuiltApps(): BuiltApp[] {
       return { name, running: Boolean(app), url: app ? app.url : null };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Delete a built app's folder from the workspace. Refuses a RUNNING app: a live
+ * server holds its files locked on Windows and a force-kill returns before the
+ * OS has released them, so the caller stops it first. Retries the removal to
+ * ride out any brief lock a recently-stopped server still holds. Guarded by
+ * projectFolderName: it can only ever delete a folder inside the workspace,
+ * never an absolute path or one that escapes it.
+ */
+export function removeBuiltApp(name: string): boolean {
+  const folder = projectFolderName(name);
+  if (!folder) return false;
+  if (running.has(folder)) return false; // caller must stop it first
+  const dir = path.join(path.resolve(workspaceRoot()), folder);
+  if (!existsSync(dir)) return false;
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    return !existsSync(dir);
+  } catch {
+    return false;
+  }
 }
 
 function freePort(): Promise<number> {

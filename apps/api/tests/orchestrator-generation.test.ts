@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
 import {
   runAssistantOrchestrator, parseSaveDocumentRequest, isListDocumentsRequest, parsePlanAppRequest,
-  parseAppendDocumentRequest, parseSearchDocumentsRequest, parseDeleteDocumentRequest
+  parseAppendDocumentRequest, parseSearchDocumentsRequest, parseDeleteDocumentRequest, parseDeleteAppRequest
 } from "../src/services/orchestrator.js";
 import { resetPendingConfirmations } from "../src/services/pendingConfirmation.js";
 
@@ -169,6 +169,66 @@ test("listing many apps caps the display, running-first, with a remainder note",
   const idx07 = result.assistantMessage.indexOf("app-07");
   const idx00 = result.assistantMessage.indexOf("app-00");
   assert.ok(idx07 >= 0 && idx07 < idx00, "the running app is listed before the alphabetical first");
+});
+
+test("parseDeleteAppRequest reads the app name and rejects non-requests", () => {
+  assert.equal(parseDeleteAppRequest("delete my recipe box app"), "recipe box");
+  assert.equal(parseDeleteAppRequest("remove the app called Calculator"), "Calculator");
+  assert.equal(parseDeleteAppRequest("get rid of the todo app please"), "todo");
+  assert.equal(parseDeleteAppRequest("what apps do I have?"), null);
+  assert.equal(parseDeleteAppRequest("delete my Notes document"), null); // a document, not an app
+});
+
+test("deleting an app offers a confirmation and only deletes on yes", async () => {
+  resetPendingConfirmations();
+  const deleted: string[] = [];
+  const apps = [
+    { name: "recipe-box", running: false, url: null },
+    { name: "calculator", running: false, url: null }
+  ];
+  const input = {
+    mode: "general" as const, sessionId: "s-del-app",
+    userMessage: "delete my recipe box app",
+    listApps: () => apps,
+    deleteApp: (name: string) => { deleted.push(name); return true; }
+  };
+  const offer = await runAssistantOrchestrator(input);
+  assert.equal(offer.strategy, "confirm", offer.assistantMessage);
+  assert.match(offer.assistantMessage, /permanently delete the app "recipe-box"/);
+  assert.deepEqual(deleted, [], "nothing deleted before the user says yes");
+  const confirmed = await runAssistantOrchestrator({ ...input, userMessage: "yes" });
+  assert.match(confirmed.assistantMessage, /Deleted the app "recipe-box"/);
+  assert.deepEqual(deleted, ["recipe-box"], "only the confirmed app is deleted");
+});
+
+test("declining an app delete keeps it", async () => {
+  resetPendingConfirmations();
+  let calls = 0;
+  const input = {
+    mode: "general" as const, sessionId: "s-del-app-no",
+    userMessage: "delete the calculator app",
+    listApps: () => [{ name: "calculator", running: false, url: null }],
+    deleteApp: () => { calls += 1; return true; }
+  };
+  const offer = await runAssistantOrchestrator(input);
+  assert.equal(offer.strategy, "confirm");
+  const declined = await runAssistantOrchestrator({ ...input, userMessage: "no" });
+  assert.match(declined.assistantMessage, /Kept\. Nothing was deleted\./);
+  assert.equal(calls, 0);
+});
+
+test("deleting a running app is refused until it is stopped", async () => {
+  resetPendingConfirmations();
+  let calls = 0;
+  const result = await runAssistantOrchestrator({
+    mode: "general", sessionId: "s-del-app-run",
+    userMessage: "delete the recipe box app",
+    listApps: () => [{ name: "recipe-box", running: true, url: "http://localhost:7000" }],
+    deleteApp: () => { calls += 1; return true; }
+  });
+  assert.match(result.assistantMessage, /is running/);
+  assert.match(result.assistantMessage, /stop the recipe-box app/);
+  assert.equal(calls, 0, "a running app is never deleted");
 });
 
 test("parseDeleteDocumentRequest pulls the title from a delete-a-document request", () => {
