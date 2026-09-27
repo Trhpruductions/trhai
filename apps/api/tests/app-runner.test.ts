@@ -8,7 +8,7 @@ import path from "node:path";
 const workspace = mkdtempSync(path.join(tmpdir(), "ascend-run-"));
 process.env.ASCEND_WORKSPACE = workspace;
 
-const { startApp, stopApp, listRunningApps, listBuiltApps, resetRunningApps, projectFolderName } = await import("../src/services/appRunner.js");
+const { startApp, stopApp, listRunningApps, listBuiltApps, removeBuiltApp, resetRunningApps, projectFolderName } = await import("../src/services/appRunner.js");
 const { runTool } = await import("../src/services/agentTools.js");
 
 /** A zero-dependency server that answers /health on the port it is told, like a generated app. */
@@ -264,4 +264,22 @@ test("run_app starts a built-but-stopped app referred to loosely", async () => {
   );
   assert.equal(result.ok, true, result.content);
   assert.match(result.content, /kanban-board-xyz.*running.*http:\/\/localhost:\d+/);
+});
+
+test("removeBuiltApp deletes a built app's folder and refuses to escape the workspace", async () => {
+  writeApp("throwaway-app");
+  assert.ok(listBuiltApps().some((a) => a.name === "throwaway-app"), "the app exists first");
+  assert.equal(removeBuiltApp("throwaway-app"), true);
+  assert.ok(!listBuiltApps().some((a) => a.name === "throwaway-app"), "the app folder is gone");
+  assert.equal(removeBuiltApp("throwaway-app"), false, "deleting a missing app returns false");
+  // Path guard: an escaping or empty name resolves to nothing inside the workspace.
+  assert.equal(removeBuiltApp("../.."), false);
+  assert.equal(removeBuiltApp(""), false);
+});
+
+test("removeBuiltApp refuses to delete a running app; its folder stays", async () => {
+  writeApp("live-app-keep");
+  await startApp("live-app-keep");
+  assert.equal(removeBuiltApp("live-app-keep"), false, "a running app is not deleted");
+  assert.ok(listBuiltApps().some((a) => a.name === "live-app-keep"), "the app folder is still there");
 });

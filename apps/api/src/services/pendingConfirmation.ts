@@ -135,6 +135,8 @@ export function describePendingAction(pending: PendingConfirmation): {
       return pending.arguments?.all === true
         ? { verb: "Cancel every schedule", target: "all of them" }
         : { verb: "Cancel this schedule", target: argument("name") };
+    case "delete_app":
+      return { verb: "Delete this app and its files", target: argument("name") };
     default:
       return { verb: `Run ${pending.tool}`, target: "" };
   }

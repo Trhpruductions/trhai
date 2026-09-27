@@ -65,6 +65,8 @@ export type OrchestratorInput = {
   listSchedules?: () => Array<{ id: string; name: string; cadenceLabel: string; actionLabel: string; enabled: boolean }>;
   /** Apps build_app has written to the workspace, for "what apps have I built". */
   listApps?: () => Array<{ name: string; running: boolean; url: string | null }>;
+  /** Deletes a built app's folder, for "delete the X app". */
+  deleteApp?: (name: string) => boolean;
   /** Removes a schedule by id, for "cancel my daily reminder". */
   removeSchedule?: (id: string) => boolean;
   /** Pauses or resumes a schedule by id, for "turn off the 9am reminder". */
@@ -220,6 +222,10 @@ export async function runAssistantOrchestrator(
   // "what apps have I built" - a workspace listing, off the model.
   const apps = resolveListApps(input, approving, effectiveMessage);
   if (apps) return apps;
+
+  // "delete the recipe box app" - a destructive folder removal, confirm-then-do.
+  const deletingApp = resolveDeleteApp(input, approving, effectiveMessage);
+  if (deletingApp) return deletingApp;
 
   // "cancel my daily reminder" answered "Got it." and cancelled nothing; "turn
   // off the 9am reminder" called add_schedule and made a second one. Both are
@@ -663,6 +669,129 @@ function resolveListApps(
   const runningCount = apps.filter((app) => app.running).length;
   const tail = runningCount > 0 ? `\n\n${runningCount} running now.` : "\n\nNone are running - say \"run the <name> app\" to start one.";
   return deterministicResult(effectiveMessage, `Your apps (${apps.length}):\n${lines}${more}${tail}`, "list");
+}
+
+/**
+ * Parse "delete my Recipe Box app" / "remove the app called X" into the app
+ * name to delete. Requires both a delete verb and the word "app", so an
+ * ordinary sentence can't trigger a destructive folder removal.
+ */
+export function parseDeleteAppRequest(message: string): string | null {
+  const text = (message ?? "").trim();
+  const verb = "(?:delete|remove|discard|trash|drop|erase|get\\s+rid\\s+of|uninstall)";
+  // "delete the app called/named X"
+  let match = new RegExp(
+    `^(?:please\\s+)?${verb}\\s+(?:my|the|that)?\\s*(?:built\\s+)?app(?:lication)?\\s+(?:called|named|titled)\\s+["']?(.+?)["']?$`,
+    "i"
+  ).exec(text);
+  if (match) return match[1].trim().replace(/[?.!]+$/, "");
+  // "delete my X app"
+  match = new RegExp(
+    `^(?:please\\s+)?${verb}\\s+(?:my|the|that)?\\s*(.+?)\\s+app(?:lication)?\\b`,
+    "i"
+  ).exec(text);
+  if (match) return match[1].trim().replace(/[?.!]+$/, "");
+  return null;
+}
+
+type AppNameMatch =
+  | { kind: "one"; name: string }
+  | { kind: "several"; names: string[] }
+  | { kind: "none" };
+
+const appNameStopWords = new Set([
+  "app", "the", "a", "an", "my", "application", "tool", "site", "web", "server", "project"
+]);
+
+/** Which built app a loose reference names - exact, then single containment, then most-shared-words; a tie is reported rather than guessed. */
+function matchAppName(target: string, names: string[]): AppNameMatch {
+  const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const wanted = norm(target);
+  if (!wanted || names.length === 0) return { kind: "none" };
+
+  const exact = names.find((name) => norm(name) === wanted);
+  if (exact) return { kind: "one", name: exact };
+
+  const contained = names.filter((name) => {
+    const n = norm(name);
+    return n.includes(wanted) || wanted.includes(n);
+  });
+  if (contained.length === 1) return { kind: "one", name: contained[0] };
+
+  const words = wanted.split(/\s+/).filter((word) => word.length > 1 && !appNameStopWords.has(word));
+  const scored = names
+    .map((name) => ({ name, score: words.filter((word) => norm(name).includes(word)).length }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+  if (scored.length === 0) return { kind: "none" };
+  if (scored.length === 1 || scored[0].score > scored[1].score) return { kind: "one", name: scored[0].name };
+  const top = scored[0].score;
+  return { kind: "several", names: scored.filter((entry) => entry.score === top).map((entry) => entry.name) };
+}
+
+/**
+ * Deleting a built app, with a confirm-then-do flow like forget and
+ * delete_document - it removes a folder and its files, which nothing here can
+ * undo. Completes the app lifecycle (build, list, run, stop, delete) and lets
+ * the junk apps that test builds leave behind be cleared by chat.
+ */
+function resolveDeleteApp(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  const sessionId = input.sessionId;
+  if (!sessionId || !input.deleteApp || !input.listApps) return null;
+
+  const reply = (text: string, strategy = "app", pending?: { tool: string; verb: string; target: string }) =>
+    deterministicResult(effectiveMessage, text, strategy, pending);
+  const apps = input.listApps();
+
+  if (approving?.tool === "delete_app") {
+    const name = typeof approving.arguments?.name === "string" ? approving.arguments.name : "";
+    if (!apps.some((app) => app.name === name)) {
+      return reply(`There is no app called "${name}" any more, so nothing was deleted.`);
+    }
+    return reply(input.deleteApp(name)
+      ? `Deleted the app "${name}".`
+      : "The app could not be deleted, so nothing was changed.");
+  }
+  if (approving) return null;
+
+  // "no" to a standing offer withdraws it, the same as forget.
+  if (isDecline(effectiveMessage) && getPendingConfirmation(sessionId)?.tool === "delete_app") {
+    clearPendingConfirmation(sessionId);
+    return reply("Kept. Nothing was deleted.");
+  }
+
+  const parsed = parseDeleteAppRequest(effectiveMessage);
+  if (!parsed) return null;
+
+  if (apps.length === 0) return reply("You have no built apps, so there is nothing to delete.");
+
+  const match = matchAppName(parsed, apps.map((app) => app.name));
+  if (match.kind === "none") {
+    const shown = apps.slice(0, listedWhenUnmatched).map((app) => `- ${app.name}`).join("\n");
+    return reply(`No app matches "${parsed}", so nothing was deleted. Your apps:\n${shown}`);
+  }
+  if (match.kind === "several") {
+    const listed = match.names.map((name) => `- ${name}`).join("\n");
+    return reply(`Several apps match that:\n${listed}\n\nSay which one to delete, by name.`);
+  }
+
+  // A running app holds its files locked; stop it before its folder can go.
+  const matched = apps.find((app) => app.name === match.name);
+  if (matched?.running) {
+    return reply(`The app "${match.name}" is running. Say "stop the ${match.name} app" first, then delete it.`);
+  }
+
+  const pending = { tool: "delete_app", arguments: { name: match.name }, request: effectiveMessage };
+  recordPendingConfirmation(sessionId, pending);
+  return reply(
+    `This would permanently delete the app "${match.name}" and its files. Say yes to delete it, or no to keep it.`,
+    "confirm",
+    { tool: "delete_app", ...describePendingAction({ ...pending, askedAt: Date.now() }) }
+  );
 }
 
 type ScheduleSummary = { id: string; name: string; cadenceLabel: string; actionLabel: string; enabled: boolean };
