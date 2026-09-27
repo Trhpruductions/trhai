@@ -131,6 +131,46 @@ test("listing documents comes from the store, off the model", async () => {
   assert.match(result.assistantMessage, /Roadmap/);
 });
 
+test("listing apps comes from the workspace, off the model", async () => {
+  const result = await runAssistantOrchestrator({
+    mode: "general",
+    sessionId: "s-apps",
+    userMessage: "what apps have I built?",
+    listApps: () => [
+      { name: "todo-list-app", running: true, url: "http://localhost:5123" },
+      { name: "recipe-box", running: false, url: null }
+    ]
+  });
+  assert.equal(result.strategy, "list", result.assistantMessage);
+  assert.match(result.assistantMessage, /todo-list-app/);
+  assert.match(result.assistantMessage, /running at http:\/\/localhost:5123/);
+  assert.match(result.assistantMessage, /recipe-box/);
+  assert.match(result.assistantMessage, /1 running now/);
+});
+
+test("listing apps with none built says so, not an empty list", async () => {
+  const result = await runAssistantOrchestrator({
+    mode: "general", sessionId: "s-apps2", userMessage: "list my apps", listApps: () => []
+  });
+  assert.equal(result.strategy, "list");
+  assert.match(result.assistantMessage, /haven't built any apps yet/);
+});
+
+test("listing many apps caps the display, running-first, with a remainder note", async () => {
+  const many = Array.from({ length: 50 }, (_, i) => ({
+    name: `app-${String(i).padStart(2, "0")}`, running: i === 7, url: i === 7 ? "http://localhost:6000" : null
+  }));
+  const result = await runAssistantOrchestrator({
+    mode: "general", sessionId: "s-apps3", userMessage: "list my apps", listApps: () => many
+  });
+  assert.match(result.assistantMessage, /Your apps \(50\)/);
+  assert.match(result.assistantMessage, /and 10 more/); // 50 total - 40 cap
+  assert.match(result.assistantMessage, /app-07 \(running at http:\/\/localhost:6000\)/);
+  const idx07 = result.assistantMessage.indexOf("app-07");
+  const idx00 = result.assistantMessage.indexOf("app-00");
+  assert.ok(idx07 >= 0 && idx07 < idx00, "the running app is listed before the alphabetical first");
+});
+
 test("parseDeleteDocumentRequest pulls the title from a delete-a-document request", () => {
   assert.equal(parseDeleteDocumentRequest("delete my Scratch document"), "Scratch");
   assert.equal(parseDeleteDocumentRequest("remove the document called Launch Plan"), "Launch Plan");
