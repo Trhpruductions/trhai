@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
 import {
   runAssistantOrchestrator, parseSaveDocumentRequest, isListDocumentsRequest, parsePlanAppRequest,
-  parseAppendDocumentRequest, parseSearchDocumentsRequest, parseDeleteDocumentRequest, parseDeleteAppRequest
+  parseAppendDocumentRequest, parseSearchDocumentsRequest, parseDeleteDocumentRequest, parseDeleteAppRequest, parseClearAppsRequest
 } from "../src/services/orchestrator.js";
 import { resetPendingConfirmations } from "../src/services/pendingConfirmation.js";
 
@@ -229,6 +229,52 @@ test("deleting a running app is refused until it is stopped", async () => {
   assert.match(result.assistantMessage, /is running/);
   assert.match(result.assistantMessage, /stop the recipe-box app/);
   assert.equal(calls, 0, "a running app is never deleted");
+});
+
+test("parseClearAppsRequest matches a whole-workspace clear, not a single-app delete", () => {
+  assert.equal(parseClearAppsRequest("delete all my apps"), true);
+  assert.equal(parseClearAppsRequest("clear the stopped apps"), true);
+  assert.equal(parseClearAppsRequest("clean up the workspace"), true);
+  assert.equal(parseClearAppsRequest("delete all the junk apps"), true);
+  assert.equal(parseClearAppsRequest("delete my recipe box app"), false); // single, names one
+  assert.equal(parseClearAppsRequest("what apps do I have"), false);
+});
+
+test("clearing apps offers a confirmation and deletes only the stopped ones", async () => {
+  resetPendingConfirmations();
+  const deleted: string[] = [];
+  const apps = [
+    { name: "junk-one", running: false, url: null },
+    { name: "junk-two", running: false, url: null },
+    { name: "live-app", running: true, url: "http://localhost:7001" }
+  ];
+  const input = {
+    mode: "general" as const, sessionId: "s-clear",
+    userMessage: "delete all my apps",
+    listApps: () => apps,
+    deleteApp: (name: string) => { deleted.push(name); return true; }
+  };
+  const offer = await runAssistantOrchestrator(input);
+  assert.equal(offer.strategy, "confirm", offer.assistantMessage);
+  assert.match(offer.assistantMessage, /all 2 stopped apps/);
+  assert.match(offer.assistantMessage, /1 running app.*kept/);
+  assert.deepEqual(deleted, [], "nothing deleted before yes");
+  const confirmed = await runAssistantOrchestrator({ ...input, userMessage: "yes" });
+  assert.match(confirmed.assistantMessage, /Deleted 2 stopped apps/);
+  assert.deepEqual([...deleted].sort(), ["junk-one", "junk-two"], "only stopped apps deleted; running one kept");
+});
+
+test("clearing apps when all are running clears nothing", async () => {
+  resetPendingConfirmations();
+  let calls = 0;
+  const result = await runAssistantOrchestrator({
+    mode: "general", sessionId: "s-clear-run",
+    userMessage: "clear all stopped apps",
+    listApps: () => [{ name: "live", running: true, url: "http://localhost:1" }],
+    deleteApp: () => { calls += 1; return true; }
+  });
+  assert.match(result.assistantMessage, /all 1 apps are running/i);
+  assert.equal(calls, 0);
 });
 
 test("parseDeleteDocumentRequest pulls the title from a delete-a-document request", () => {
