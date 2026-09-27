@@ -91,6 +91,12 @@ export type ToolResult = {
    * and the same call would succeed once authorised.
    */
   needsConfirmation?: boolean;
+  /**
+   * The file a write or edit landed on, as the caller named it. Set only by
+   * write_file and edit_file, so the loop can find the built app the file
+   * belongs to and re-run that app's own checks after the change.
+   */
+  path?: string;
 };
 
 /**
@@ -2382,7 +2388,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         ok: true,
         content: inWorkspace === result.path
           ? `Wrote ${target} to the workspace.`
-          : `Wrote ${result.path}.`
+          : `Wrote ${result.path}.`,
+        path: target
       };
     }
 
@@ -2452,7 +2459,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         noteProjectTouched(context.sessionId, target);
         noteFileTouched(context.sessionId, target);
         const lines = addition.replace(/\n$/, "").split("\n").length;
-        return { ok: true, content: `Added ${lines} line${lines === 1 ? "" : "s"} to the end of ${written.path}.` };
+        return { ok: true, content: `Added ${lines} line${lines === 1 ? "" : "s"} to the end of ${written.path}.`, path: target };
       }
 
       const edited = applyEdit(current.content, oldText as string, newText as string);
@@ -2463,7 +2470,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
 
       noteProjectTouched(context.sessionId, target);
       noteFileTouched(context.sessionId, target);
-      return { ok: true, content: `Edited ${written.path} — ${describeEdit(oldText as string, newText as string)}.` };
+      return { ok: true, content: `Edited ${written.path} — ${describeEdit(oldText as string, newText as string)}.`, path: target };
     }
 
     case "list_schedules": {

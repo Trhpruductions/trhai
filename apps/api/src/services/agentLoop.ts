@@ -1,5 +1,5 @@
 import type { LocalModelConfig } from "./localModel.js";
-import { availableTools, runTool, type ToolContext, type ToolCall } from "./agentTools.js";
+import { availableTools, runTool, verifiedDetail, type ToolContext, type ToolCall } from "./agentTools.js";
 import { commandsArmed } from "./commandRunner.js";
 import { readStream, toLines } from "./streamReader.js";
 import { enterStage, stageForTool } from "./reasoningStage.js";
@@ -15,7 +15,11 @@ import { analyzeRequest } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
-import { activeProject, resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
+import { activeProject, projectForPath, resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
+import { verifyBuiltProject } from "./buildVerification.js";
+import { resolveInWorkspace } from "./workspace.js";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 // Re-exported so nothing that already imports it from here has to move.
 export type { ToolActivity };
@@ -327,6 +331,43 @@ const mutatingTools = new Set([
   // the user needs, and the contradictory refusal is dropped below.
   "render_mockup"
 ]);
+
+/**
+ * Re-run a built app's own smoke test after the assistant changed one of its
+ * files, and say what happened.
+ *
+ * build_app proves a build works before reporting it. An edit to that same app
+ * was reported on the strength of the write alone, so "Edited server.js" could
+ * leave a broken app behind with no word of it - the one gap in a codebase
+ * whose whole point is never claiming work that did not happen.
+ *
+ * Only for apps in the workspace that ship a smoke.js (every generated app
+ * does; it is self-contained and takes seconds). An external project's test
+ * suite is not this loop's to run. Three outcomes, three sentences - passed,
+ * failed its checks, could not be run - and never one dressed as another.
+ * Null means "nothing to verify here", not silence about a failure.
+ */
+async function verifyAfterEdit(sessionId: string | undefined, project: string): Promise<string | null> {
+  const dir = resolveInWorkspace(project);
+  if (!dir || !existsSync(path.join(dir, "smoke.js"))) return null;
+
+  const verifying = beginEvent(sessionId, "verify", `Re-running ${project}'s own checks after the edit`);
+  const verification = await verifyBuiltProject(project);
+  endEvent(
+    sessionId,
+    verifying,
+    !verification.ran ? "skipped" : verification.passed ? "ok" : "failed",
+    verification.ran ? verification.output : verification.reason
+  );
+
+  if (!verification.ran) {
+    return `Could not re-verify ${project} after the edit: ${verification.reason}`;
+  }
+  if (!verification.passed) {
+    return `The edit broke ${project} - it failed its own checks:\n${verification.output}`;
+  }
+  return `Re-verified ${project} after the edit: ${verifiedDetail(verification.output)}`;
+}
 
 /**
  * Tools that write their own execution events.
@@ -1076,6 +1117,9 @@ export async function runAgent(
   // schedule, app or video in the same turn is never what was asked for.
   const oncePerTurn = new Set(["add_schedule", "build_app", "change_app", "make_video", "render_mockup"]);
   const madeThisTurn = new Set<string>();
+  // Built apps whose own checks have already been re-run this turn, so a turn
+  // that edits three files in one app verifies it once, after the first.
+  const verifiedProjects = new Set<string>();
 
   // How many times each exact call has actually been run, across every round
   // of this one request — not per round, since the failure this guards
@@ -1951,6 +1995,24 @@ export async function runAgent(
       // where the user read internal plumbing addressed to someone else.
       if (mutatingTools.has(call.name) && !result.needsConfirmation) {
         mutationAttempts.push({ name: call.name, content: result.content, ok: result.ok });
+      }
+      // A change to a built app is followed by that app's own checks, so the
+      // reply carries proof the app still works - or the news that it does not
+      // - the way a build does. Once per app per turn (verifiedProjects).
+      if (result.ok && result.path && (call.name === "edit_file" || call.name === "write_file")) {
+        const project = projectForPath(result.path);
+        if (project && !verifiedProjects.has(project)) {
+          verifiedProjects.add(project);
+          const report = await verifyAfterEdit(context.sessionId, project);
+          if (report) {
+            // Surfaced verbatim like any mutation, and marked ok because the
+            // report itself is sound: a failed check is stated in its text and
+            // must never be dropped as "a failure beside a success" - that
+            // filter is for retried attempts, and this is not one.
+            mutationAttempts.push({ name: call.name, content: report, ok: true });
+            messages.push({ role: "tool", content: report });
+          }
+        }
       }
       if (result.ok && !changesSomething(call.name)) readResults.push(result.content);
     }
