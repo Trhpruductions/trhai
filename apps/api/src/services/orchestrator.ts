@@ -672,6 +672,18 @@ function resolveListApps(
 }
 
 /**
+ * Whether the request is to clear ALL apps in one go ("delete all my apps",
+ * "clear the stopped apps", "clean up the workspace") rather than name one.
+ * Kept separate from parseDeleteAppRequest, which needs a specific name.
+ */
+export function parseClearAppsRequest(message: string): boolean {
+  const text = (message ?? "").trim();
+  return /^(?:please\s+)?(?:delete|remove|clear|wipe|prune|clean\s*up)\s+(?:all|every|the)\s+(?:of\s+)?(?:my\s+|the\s+)?(?:stopped\s+|built\s+|junk\s+|old\s+|unused\s+)?apps?\b/i.test(text)
+    || /^(?:please\s+)?(?:delete|remove|clear|wipe|prune)\s+(?:all\s+)?(?:my\s+|the\s+)?(?:stopped|junk|old|unused|built)\s+apps?\b/i.test(text)
+    || /^(?:please\s+)?(?:clean\s*up|prune)\s+(?:my\s+|the\s+)?(?:apps|workspace|app\s+workspace)\b/i.test(text);
+}
+
+/**
  * Parse "delete my Recipe Box app" / "remove the app called X" into the app
  * name to delete. Requires both a delete verb and the word "app", so an
  * ordinary sentence can't trigger a destructive folder removal.
@@ -748,6 +760,16 @@ function resolveDeleteApp(
   const apps = input.listApps();
 
   if (approving?.tool === "delete_app") {
+    if (approving.arguments?.clearStopped === true) {
+      // Only stopped apps: a running one holds its files locked, and this must
+      // never kill something the user is using.
+      const stopped = apps.filter((app) => !app.running);
+      const removed = stopped.filter((app) => input.deleteApp!(app.name)).length;
+      const runningLeft = apps.length - stopped.length;
+      if (removed === 0) return reply("No stopped apps were deleted.");
+      return reply(`Deleted ${removed} stopped app${removed === 1 ? "" : "s"}.`
+        + (runningLeft > 0 ? ` ${runningLeft} running app${runningLeft === 1 ? "" : "s"} kept.` : ""));
+    }
     const name = typeof approving.arguments?.name === "string" ? approving.arguments.name : "";
     if (!apps.some((app) => app.name === name)) {
       return reply(`There is no app called "${name}" any more, so nothing was deleted.`);
@@ -762,6 +784,27 @@ function resolveDeleteApp(
   if (isDecline(effectiveMessage) && getPendingConfirmation(sessionId)?.tool === "delete_app") {
     clearPendingConfirmation(sessionId);
     return reply("Kept. Nothing was deleted.");
+  }
+
+  // "delete all my apps" / "clear the stopped apps" - a whole-workspace clear,
+  // confirmed like forget-everything. Only stopped apps are removed; running
+  // ones are kept (their files are locked, and they may be in use).
+  if (parseClearAppsRequest(effectiveMessage)) {
+    if (apps.length === 0) return reply("You have no built apps, so there is nothing to delete.");
+    const stopped = apps.filter((app) => !app.running);
+    const runningLeft = apps.length - stopped.length;
+    if (stopped.length === 0) {
+      return reply(`All ${apps.length} apps are running, so there is nothing to clear - stop the ones you want gone first.`);
+    }
+    const pending = { tool: "delete_app", arguments: { clearStopped: true, count: stopped.length }, request: effectiveMessage };
+    recordPendingConfirmation(sessionId, pending);
+    return reply(
+      `This would permanently delete all ${stopped.length} stopped app${stopped.length === 1 ? "" : "s"} and their files`
+        + `${runningLeft > 0 ? ` (${runningLeft} running app${runningLeft === 1 ? "" : "s"} kept)` : ""}. `
+        + "Say yes to delete them, or no to keep them.",
+      "confirm",
+      { tool: "delete_app", ...describePendingAction({ ...pending, askedAt: Date.now() }) }
+    );
   }
 
   const parsed = parseDeleteAppRequest(effectiveMessage);
