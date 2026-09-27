@@ -8,7 +8,7 @@ import path from "node:path";
 const workspace = mkdtempSync(path.join(tmpdir(), "ascend-run-"));
 process.env.ASCEND_WORKSPACE = workspace;
 
-const { startApp, stopApp, listRunningApps, resetRunningApps, projectFolderName } = await import("../src/services/appRunner.js");
+const { startApp, stopApp, listRunningApps, listBuiltApps, resetRunningApps, projectFolderName } = await import("../src/services/appRunner.js");
 const { runTool } = await import("../src/services/agentTools.js");
 
 /** A zero-dependency server that answers /health on the port it is told, like a generated app. */
@@ -217,4 +217,51 @@ test("build_app launches what it builds when a launcher is wired", async () => {
   );
   assert.equal(result.ok, true, result.content);
   assert.match(result.content, /running live at http:\/\/localhost:\d+/);
+});
+
+test("listBuiltApps enumerates workspace apps and marks which are running", async () => {
+  writeApp("alpha-tracker");
+  writeApp("beta-notes");
+  writeApp("gamma-dash");
+  await startApp("beta-notes"); // one running, two built-but-stopped
+  const apps = listBuiltApps();
+  const names = apps.map((a) => a.name);
+  // Other tests leave app folders in the shared workspace, so assert presence,
+  // not an exact set. All three of ours must be listed.
+  for (const n of ["alpha-tracker", "beta-notes", "gamma-dash"]) {
+    assert.ok(names.includes(n), `${n} should be listed`);
+  }
+  assert.deepEqual(names, [...names].sort((a, b) => a.localeCompare(b)), "the list is sorted");
+  const beta = apps.find((a) => a.name === "beta-notes");
+  assert.equal(beta?.running, true, "the running one is marked running");
+  assert.match(beta?.url ?? "", /http:\/\/localhost:\d+/, "running app carries its url");
+  const alpha = apps.find((a) => a.name === "alpha-tracker");
+  assert.equal(alpha?.running, false, "a built-but-stopped app is listed and not running");
+  assert.equal(alpha?.url, null);
+});
+
+test("listBuiltApps ignores plain folders that are not runnable apps", async () => {
+  writeApp("real-app");
+  // a folder with no server entry is not an app
+  mkdirSync(path.join(workspace, "just-a-folder", "sub"), { recursive: true });
+  writeFileSync(path.join(workspace, "just-a-folder", "readme.txt"), "not an app", "utf8");
+  const names = listBuiltApps().map((a) => a.name);
+  assert.ok(names.includes("real-app"), "the real app is listed");
+  assert.ok(!names.includes("just-a-folder"), "a folder with no server entry is not listed as an app");
+});
+
+test("run_app starts a built-but-stopped app referred to loosely", async () => {
+  // Built earlier, never started this run. Without built-app resolution,
+  // "the kanban board" would miss (it only matched RUNNING apps) and fail to launch.
+  writeApp("kanban-board-xyz");
+  const result = await runTool(
+    { name: "run_app", arguments: { project: "the kanban board" } },
+    {
+      memories: [], knowledge: [],
+      launchApp: (p) => startApp(p), stopApp: (p) => stopApp(p),
+      runningApps: () => listRunningApps(), listApps: () => listBuiltApps()
+    }
+  );
+  assert.equal(result.ok, true, result.content);
+  assert.match(result.content, /kanban-board-xyz.*running.*http:\/\/localhost:\d+/);
 });

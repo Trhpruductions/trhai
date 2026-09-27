@@ -164,6 +164,19 @@ export function isListSchedulesRequest(message: unknown): boolean {
   return text !== null && listSchedulesPatterns.some((pattern) => pattern.test(text));
 }
 
+/** "what apps have I built", "list my apps", "show my applications". */
+const listAppsPatterns = [
+  /^(?:list|show(?: me)?|display|see) (?:my |the |all (?:of )?(?:my |the )?)?(?:built )?(?:apps|applications)$/,
+  /^what (?:apps|applications) (?:do i have|have i (?:built|made|created)|are (?:there|built|available))$/,
+  /^which (?:apps|applications) (?:do i have|have i (?:built|made))$/,
+  /^(?:do i have|are there) any (?:apps|applications)(?: built)?$/
+];
+
+export function isListAppsRequest(message: unknown): boolean {
+  const text = plain(message);
+  return text !== null && listAppsPatterns.some((pattern) => pattern.test(text));
+}
+
 // Cancelling and pausing schedules, decided here for the same reason as forget
 // and pin: the model cannot be trusted with it. "cancel my daily reminder"
 // answered "Got it." and cancelled nothing; "turn off the 9am reminder" called

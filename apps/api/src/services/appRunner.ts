@@ -11,7 +11,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { workspaceRoot } from "./workspace.js";
 
@@ -46,6 +46,35 @@ export function runningApp(project: string): RunningApp | null {
   if (!found) return null;
   const { child: _child, exited: _exited, ...app } = found;
   return app;
+}
+
+export type BuiltApp = { name: string; running: boolean; url: string | null };
+
+/**
+ * Every app build_app has written to the workspace - a folder with a runnable
+ * server entry - and whether it is running right now. Read fresh from disk, so
+ * an app built in an earlier session, or one that has since stopped, is still
+ * listed. This is what makes "what apps have I built" answerable and lets a
+ * stopped app be run by name; listRunningApps only knows the live ones.
+ */
+export function listBuiltApps(): BuiltApp[] {
+  const root = path.resolve(workspaceRoot());
+  let names: string[];
+  try {
+    names = readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+  const live = new Map(listRunningApps().map((app) => [app.project, app] as const));
+  return names
+    .filter((name) => serverEntry(name) !== null)
+    .map((name) => {
+      const app = live.get(name);
+      return { name, running: Boolean(app), url: app ? app.url : null };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function freePort(): Promise<number> {

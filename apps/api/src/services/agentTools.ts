@@ -172,6 +172,8 @@ export type ToolContext = {
   launchApp?: (project: string) => Promise<StartResult>;
   stopApp?: (project: string) => boolean;
   runningApps?: () => RunningApp[];
+  /** Every built app in the workspace, running or not — lets run_app start a stopped app by name. */
+  listApps?: () => Array<{ name: string; running: boolean; url: string | null }>;
   /**
    * True when this turn runs with nobody watching — a schedule firing in the
    * background rather than someone at the machine.
@@ -1063,31 +1065,47 @@ const appReferenceStopWords = new Set([
  * match returns the original untouched, so the caller reports honestly and
  * lists what is running rather than acting on a guess.
  */
-function resolveRunningProject(context: ToolContext, project: string): string {
-  const running = (context.runningApps?.() ?? []).map((app) => app.project);
-  if (running.length === 0) return project;
+function matchProjectName(candidates: string[], project: string): string {
+  if (candidates.length === 0) return project;
 
   const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const wanted = norm(project);
   if (!wanted) return project;
 
-  const exact = running.find((folder) => norm(folder) === wanted);
+  const exact = candidates.find((folder) => norm(folder) === wanted);
   if (exact) return exact;
 
-  const contained = running.filter((folder) => {
+  const contained = candidates.filter((folder) => {
     const f = norm(folder);
     return f.includes(wanted) || wanted.includes(f);
   });
   if (contained.length === 1) return contained[0];
 
   const words = wanted.split(/\s+/).filter((word) => word.length > 1 && !appReferenceStopWords.has(word));
-  const scored = running
+  const scored = candidates
     .map((folder) => ({ folder, score: words.filter((word) => norm(folder).includes(word)).length }))
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
   if (scored.length === 1 || (scored.length > 1 && scored[0].score > scored[1].score)) return scored[0].folder;
 
   return project;
+}
+
+/** Resolve a loose reference against the RUNNING apps (for stop_app). */
+function resolveRunningProject(context: ToolContext, project: string): string {
+  return matchProjectName((context.runningApps?.() ?? []).map((app) => app.project), project);
+}
+
+/**
+ * Resolve a loose reference against every BUILT app, running or not (for
+ * run_app) - so "run the todo app" starts a stopped app by name. Falls back to
+ * the running list when no built-app list is wired.
+ */
+function resolveBuiltProject(context: ToolContext, project: string): string {
+  const built = context.listApps
+    ? context.listApps().map((app) => app.name)
+    : (context.runningApps?.() ?? []).map((app) => app.project);
+  return matchProjectName(built, project);
 }
 
 const searchSkipped = new Set(["node_modules", ".git", "dist", ".next", "build", "coverage", ".cache"]);
@@ -2055,9 +2073,10 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       if (!context.launchApp) {
         return { ok: false, content: "Apps cannot be launched here." };
       }
-      // A running app referred to loosely ("open the todo app") resolves to its
-      // folder; anything else is passed through for launchApp to find on disk.
-      const project = resolveRunningProject(context, asked);
+      // A built app referred to loosely ("run the todo app") resolves to its
+      // folder — running or stopped — so a stopped app starts by name; anything
+      // unmatched is passed through for launchApp to find on disk.
+      const project = resolveBuiltProject(context, asked);
       const started = await context.launchApp(project);
       if (!started.ok) {
         return { ok: false, content: `Could not start ${project}: ${started.reason}` };

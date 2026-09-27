@@ -23,7 +23,7 @@ import {
   type PendingConfirmation
 } from "./pendingConfirmation.js";
 import {
-  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, parseForgetRequest, parseNthThingRequest, parsePinRequest,
+  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, isListAppsRequest, parseForgetRequest, parseNthThingRequest, parsePinRequest,
   parseRemoveScheduleRequest, parseToggleScheduleRequest
 } from "./memoryRequests.js";
 import { matchMemories } from "./factWording.js";
@@ -63,6 +63,8 @@ export type OrchestratorInput = {
   forgetAllMemories?: () => number;
   /** The machine's schedules, described, for "what schedules do I have". */
   listSchedules?: () => Array<{ id: string; name: string; cadenceLabel: string; actionLabel: string; enabled: boolean }>;
+  /** Apps build_app has written to the workspace, for "what apps have I built". */
+  listApps?: () => Array<{ name: string; running: boolean; url: string | null }>;
   /** Removes a schedule by id, for "cancel my daily reminder". */
   removeSchedule?: (id: string) => boolean;
   /** Pauses or resumes a schedule by id, for "turn off the 9am reminder". */
@@ -214,6 +216,10 @@ export async function runAssistantOrchestrator(
 
   const schedules = resolveListSchedules(input, approving, effectiveMessage);
   if (schedules) return schedules;
+
+  // "what apps have I built" - a workspace listing, off the model.
+  const apps = resolveListApps(input, approving, effectiveMessage);
+  if (apps) return apps;
 
   // "cancel my daily reminder" answered "Got it." and cancelled nothing; "turn
   // off the 9am reminder" called add_schedule and made a second one. Both are
@@ -624,6 +630,39 @@ function resolveListSchedules(
     .map((schedule) => `- ${schedule.name}: ${schedule.cadenceLabel}. ${schedule.actionLabel}${schedule.enabled ? "" : " (paused)"}`)
     .join("\n");
   return deterministicResult(effectiveMessage, `Schedules (${schedules.length}):\n${lines}`, "list");
+}
+
+/**
+ * "what apps have I built" - answered from the workspace, off the model.
+ *
+ * The model had no tool for this: build_app builds and run_app/stop_app act on
+ * one, but nothing listed what exists, so a stopped app built in an earlier
+ * session was invisible and unreachable by name. listBuiltApps reads the
+ * workspace directly, so the list is real rather than remembered.
+ */
+function resolveListApps(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  if (approving || !input.listApps || !isListAppsRequest(effectiveMessage)) return null;
+
+  const apps = input.listApps();
+  if (apps.length === 0) {
+    return deterministicResult(effectiveMessage,
+      "You haven't built any apps yet. Say \"build me a ...\" and I will create one.", "list");
+  }
+  // Running apps first (most relevant), then the rest, capped so a workspace
+  // with dozens of apps does not return an unreadable wall of bullets.
+  const displayCap = 40;
+  const ordered = [...apps.filter((app) => app.running), ...apps.filter((app) => !app.running)];
+  const lines = ordered.slice(0, displayCap)
+    .map((app) => `- ${app.name}${app.running && app.url ? ` (running at ${app.url})` : ""}`)
+    .join("\n");
+  const more = ordered.length > displayCap ? `\n- ...and ${ordered.length - displayCap} more` : "";
+  const runningCount = apps.filter((app) => app.running).length;
+  const tail = runningCount > 0 ? `\n\n${runningCount} running now.` : "\n\nNone are running - say \"run the <name> app\" to start one.";
+  return deterministicResult(effectiveMessage, `Your apps (${apps.length}):\n${lines}${more}${tail}`, "list");
 }
 
 type ScheduleSummary = { id: string; name: string; cadenceLabel: string; actionLabel: string; enabled: boolean };
@@ -1380,6 +1419,7 @@ async function answerWithLocalModel(
     launchApp: input.launchApp,
     stopApp: input.stopApp,
     runningApps: input.runningApps,
+    listApps: input.listApps,
     authorApp: input.authorApp,
     confirmedActions,
     unattended: input.unattended,
