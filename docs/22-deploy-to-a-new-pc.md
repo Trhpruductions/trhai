@@ -67,6 +67,10 @@ npm run build     # builds every workspace (api, trhai-web, desktop)
 
 ## 6. Confirm it works on the new machine
 
+- **Quickest check — `npm run doctor`.** A read-only preflight that reports Node
+  version, whether Ollama is reachable and the model is pulled, whether ffmpeg is
+  present (for `make_video`), and whether the workspace is writable — one
+  glanceable pass/warn summary, ideal on a headless server before you launch.
 - Open the app; the **SYSTEM** panel should show *this* machine's live CPU / GPU
   / RAM (readings are measured, never carried over — a dial shows "—" when its
   sensor can't be read here).
