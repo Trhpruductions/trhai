@@ -447,10 +447,6 @@ export function classifyIntent(message: string): IntentVerdict {
   }
 
   for (const group of actionVerbs) {
-    const matched = group.words.find((word) =>
-      text.startsWith(word) || text.includes(` ${word}`));
-    if (!matched) continue;
-
     // An order that has been negated is not an order.
     //
     // "Do NOT create or edit any files. Just tell me what a package.json is
@@ -463,7 +459,14 @@ export function classifyIntent(message: string): IntentVerdict {
     // The window is the clause the verb sits in: back to the previous comma or
     // stop, at most forty characters. "Don't just plan, build the app" keeps
     // its build, because the negation lives in the clause before the comma.
-    if (negatedBefore(text, matched)) continue;
+    //
+    // Checked per word, not only on the group's first match. "append hello to
+    // notes.txt, don't change anything else" found "change" first (it comes
+    // earlier in the list), saw it negated and skipped the whole group - so the
+    // append the sentence opens with was never read as a write at all.
+    const matched = group.words.find((word) =>
+      (text.startsWith(word) || text.includes(` ${word}`)) && !negatedBefore(text, word));
+    if (!matched) continue;
 
     if (group.kind === "execute" && conversationalRun.test(text)) continue;
 
@@ -489,6 +492,116 @@ export function classifyIntent(message: string): IntentVerdict {
   }
 
   return { action: false, hasTarget, reason: "no action verb", expects: [] };
+}
+
+/** Verbs that open an order to do something: change a file, run, start, build. */
+const doVerbs =
+  /^(?:edit|change|modify|update|fix|delete|remove|write|create|add|append|prepend|insert|replace|patch|put|set|save|make|rewrite|overwrite|clear|empty|comment|uncomment|run|start|restart|stop|launch|open|build|install|deploy|commit|push|turn|switch|enable|disable|test|check|verify|lint|format|bump|increase|decrease)\b/;
+
+/** Clauses that only look, or only say where or how: not a change of their own. */
+const passiveOpeners =
+  /^(?:read|show|list|find|search|look|see|view|tell|explain|describe|print|display|in|inside|within|on|at|to|into|from|for|of|near|with|after|before|without|don'?t|do not|never|not|no need|nothing|only|exactly|thanks|thank you)\b/;
+
+/** Politeness and preamble in front of the verb. */
+const preamble =
+  /^(?:please|pls|now|ok(?:ay)?|so|just|hey|hi|go ahead and|kindly|help me|let'?s|can you|could you|would you|will you|i (?:want|need|would like|'d like) you to|you should)\s+/;
+
+/**
+ * Orders that take more than one step with the tools here, or that name more
+ * than one thing to change. "rename a.js to b.js" is a write and a delete;
+ * "fix the typos" is as many edits as there are typos.
+ */
+const multiStepVerbs = /\b(?:rename|move|refactor|reorgani[sz]e|restructure|migrate|convert|split|merge|copy|duplicate)\b/;
+const pluralObjects =
+  /\b(?:files|functions|methods|routes|endpoints|fields|columns|comments|tests|imports|occurrences|instances|places|entries|items|references|calls|changes|edits|fixes|bugs|errors|typos|steps|sections|parts|pages|components|features|things)\b/;
+/** Verbs that only add text, so their plural "lines" still go in one call. */
+const additiveVerbs = /^(?:add|append|prepend|insert|write|put|create)\b/;
+const quantities = /\b(?:each|every|all|both|several|multiple|twice|everywhere|throughout)\b/;
+const fileNames = /[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/g;
+
+/** The clauses of an order, each with its preamble taken off. */
+function clausesOf(text: string): string[] {
+  return text
+    .split(/[,;]|\b(?:and|then|also|plus|after that|afterwards)\b/)
+    .map((clause) => {
+      let rest = clause.trim();
+      for (let previous = ""; previous !== rest;) {
+        previous = rest;
+        rest = rest.replace(preamble, "").trim();
+      }
+      return rest;
+    })
+    .filter(Boolean);
+}
+
+/**
+ * How many separate changes an order asks for, or null when the words do not
+ * say.
+ *
+ * A single-change order is finished once its change is made, and the agent
+ * loop had no way to know that. Watched live, three runs each on two branches
+ * of "Append this exact line to the end of <app>/server.js: // second harmless
+ * comment": every run made the edit and then kept going, appending "//
+ * Additional line added by the assistant." and the like until the rounds ran
+ * out, and two of the six followed the edit with write_file and replaced the
+ * app's 233-line server.js with a few lines of their own. The loop can only
+ * stop at the right moment if it knows what the right moment is.
+ *
+ * Deliberately conservative, because the two ways of being wrong are not
+ * equal. A count too high, or null, leaves the loop as it was; a count too low
+ * cuts off an order that genuinely had a second step. So anything that might
+ * be more than one change is null: two files, a plural object, a quantity, an
+ * "and" in front of a second object rather than a verb, or a verb that takes
+ * two steps here, such as rename. Only verbs that open a clause are counted,
+ * so "edit server.js to add a route" is one change, and the noun in "the build
+ * script" is not a verb. Over-counting a verb ("open notes.txt and add a
+ * line") is the safe mistake, so anything that might act is counted.
+ *
+ * Quoted text, and anything after a colon, is what to write rather than what
+ * to do: "append this line to notes.txt: fix the car" is one change. A further
+ * order after the content ("...: hello, then restart the app") is still seen.
+ */
+export function changesAskedFor(message: string): number | null {
+  const text = (message ?? "").trim().toLowerCase();
+  // More than one line is a list of steps, or content - either way not
+  // something to count clause by clause.
+  if (!text || /\n\s*\S/.test(text)) return null;
+
+  const unquoted = text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/"[^"]*"|“[^”]*”|`[^`]*`/g, " ")
+    .replace(/(^|\s)'[^']*'(?=$|[\s.,;!?])/g, "$1 ");
+  // A drive path's or a URL's colon is followed by a slash, not a space.
+  const colon = unquoted.search(/:\s/);
+  const instruction = colon === -1 ? unquoted : unquoted.slice(0, colon);
+  const payload = colon === -1 ? "" : unquoted.slice(colon + 1);
+
+  if (clausesOf(payload).slice(1).some((clause) => doVerbs.test(clause))) return null;
+  if (new Set(instruction.match(fileNames) ?? []).size > 1) return null;
+  // Paths and file names are places, not words of the order: a folder called
+  // "bug-fixes" is not a plural, and "and" between two slashes joins nothing.
+  // The comma after a path is kept - it is what ends the clause. Swallowed
+  // with the path, "in notes/a.txt, replace x with y" read as one clause
+  // opening with "in", the replace went uncounted, and live the model
+  // followed the edit by writing an invented line over the whole file.
+  const words = instruction.replace(/[^\s,;]*[\\/][^\s,;]*/g, " ").replace(fileNames, " ");
+  if (multiStepVerbs.test(words) || pluralObjects.test(words) || quantities.test(words)) return null;
+
+  let changes = 0;
+  let onlyAdds = true;
+  for (const [index, clause] of clausesOf(words).entries()) {
+    if (doVerbs.test(clause)) {
+      changes += 1;
+      if (!additiveVerbs.test(clause)) onlyAdds = false;
+    }
+    // Neither an order nor a qualifier - the second object in "add a comment
+    // and a blank line" - so how many edits that takes is not in the words.
+    else if (!passiveOpeners.test(clause) && index > 0) return null;
+  }
+  // "Append these lines" is one append, however many lines; "remove the debug
+  // lines" is an edit for each one.
+  if (/\blines\b/.test(words) && !onlyAdds) return null;
+  return changes > 0 ? changes : null;
 }
 
 /**

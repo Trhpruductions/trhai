@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyIntent, clarificationFor, isExplanatoryQuestion, looksArithmetic } from "../src/services/actionIntent.js";
+import { changesAskedFor, classifyIntent, clarificationFor, isExplanatoryQuestion, looksArithmetic } from "../src/services/actionIntent.js";
 
 // The classifier that decides whether prose alone would be a failure.
 //
@@ -255,5 +255,79 @@ test("a pattern or a syllogism does not", () => {
     "read the file at C:/work/notes.txt"
   ]) {
     assert.equal(looksArithmetic(notASum), false, `should not offer the calculator for: ${notASum}`);
+  }
+});
+
+test("a negated verb does not hide the order the sentence opens with", () => {
+  // "change" sits earlier in the word list than "append", was found first, was
+  // negated - and the whole group was skipped, so this was not a write at all.
+  const verdict = classifyIntent("append hello to notes.txt, don't change anything else");
+  assert.equal(verdict.action, true);
+  assert.equal(verdict.kind, "write");
+  // The negation itself still holds.
+  assert.equal(classifyIntent("Do not create or edit any files. Just tell me what a package.json is for").action, false);
+});
+
+// ---- How many changes an order asks for ----------------------------------------
+//
+// Too low is the costly mistake - it cuts off a real second step - so every
+// case that is not plainly one change has to come back null, not 1.
+
+test("the live request, and the usual ways of asking for one change, count as one", () => {
+  for (const request of [
+    "Append this exact line to the end of post-edit-check-tmp/server.js: // second harmless comment",
+    "create notes.txt saying hello",
+    "Edit server.js to add a /health route",
+    "please change the port in server.js to 3001",
+    "In server.js, change the port to 3001",
+    "append hello to notes.txt, don't change anything else",
+    "append a line to the build script in package.json",
+    "read notes.txt and add a line saying omega",
+    "I need you to add a line saying hi to notes.txt",
+    "add 'hello, world' to notes.txt",
+    // A folder's name is a place, not a word of the order.
+    "append beta to bug-fixes/notes.txt",
+    "add a line to all-tests/notes.txt",
+    // However many lines an append carries, it is one call. Live, left
+    // uncounted, this one wandered on for four rounds of invented lines.
+    "Append these lines to the end of post-edit-check-tmp/server.js: // alpha and // beta",
+    // The comma after a path still ends its clause. Live, it was swallowed
+    // with the path, this went uncounted, and the file was overwritten.
+    "in battery-tmp/notes.txt, replace 'first note' with 'first note (edited)'"
+  ]) {
+    assert.equal(changesAskedFor(request), 1, request);
+  }
+});
+
+test("what to write is not counted as what to do", () => {
+  // After a colon, and inside quotes, the words are the content.
+  assert.equal(changesAskedFor("append this line to notes.txt: remember to fix the car and buy milk"), 1);
+  assert.equal(changesAskedFor('write "a and b, then c" into notes.txt'), 1);
+  // A further order after the content is still an order.
+  assert.equal(changesAskedFor("append this to notes.txt: hello, then restart the app"), null);
+});
+
+test("two orders in one sentence count as two", () => {
+  assert.equal(changesAskedFor("add a route to server.js and restart the app"), 2);
+  assert.equal(changesAskedFor("add a route to server.js, then run the app"), 2);
+  assert.equal(changesAskedFor("append beta to two-changes/notes.txt, then append gamma to two-changes/notes.txt"), 2);
+});
+
+test("anything that might be more than one change is left uncounted", () => {
+  for (const request of [
+    "create a.txt and b.txt",
+    "update a.js and b.js",
+    "add a comment and a blank line to x.js",
+    "add salt and pepper to notes.txt",
+    "rename a.js to b.js",
+    "copy a.js to b.js",
+    "fix the typos in readme.md",
+    "remove all the console.log calls from server.js",
+    "remove the debug lines from server.js",
+    "add these lines to notes.txt\nalpha\nbeta",
+    "the title in index.html should say hello",
+    ""
+  ]) {
+    assert.equal(changesAskedFor(request), null, JSON.stringify(request));
   }
 });

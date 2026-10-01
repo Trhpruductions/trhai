@@ -32,7 +32,7 @@ import { commandsArmed, describeRun, runCommand } from "./commandRunner.js";
 import { resolveForAccess } from "./machinePaths.js";
 import { explainMiss } from "./projectContext.js";
 import { activeProject, impliedFileFor, noteFileTouched, noteProjectTouched, withinActiveProject } from "./activeProject.js";
-import { applyEdit, describeEdit } from "./fileEdit.js";
+import { applyEdit, describeEdit, placeholderIn, replacesMostOf } from "./fileEdit.js";
 import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
 import { enterStage } from "./reasoningStage.js";
 import {
@@ -1288,6 +1288,21 @@ async function launchLine(context: ToolContext, project: string): Promise<string
     : `Built, but I could not start it automatically (${started.reason}). Run it yourself: cd ${project} && npm start`;
 }
 
+/**
+ * Why write_file must not replace the file at `absolutePath` with `content`,
+ * or null when it may. See replacesMostOf; a file that does not exist yet is
+ * never refused.
+ */
+function wouldGut(absolutePath: string, content: string, request: string | undefined): string | null {
+  const current = readFileAt(absolutePath);
+  if (!current.ok) return null;
+  const shrink = replacesMostOf(current.content, content, request);
+  if (!shrink) return null;
+  return `${path.basename(absolutePath)} has ${shrink.before} lines, and this would keep ${shrink.kept} of them. `
+    + "To add to it or change part of it, use edit_file: append for new lines at the end, or old_text with "
+    + "new_text. Nothing was written.";
+}
+
 export async function runTool(call: ToolCall, context: ToolContext): Promise<ToolResult> {
   // The permission gate, applied once here rather than inside each handler.
   //
@@ -2365,6 +2380,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       if (!target || content === null) {
         return { ok: false, content: "write_file needs both a path and content." };
       }
+      const placeholder = placeholderIn(target, content);
+      if (placeholder) return { ok: false, content: `${placeholder} Nothing was written.` };
 
       const verdict = resolveForAccess(target, {
         // As above: an unattended run stays in the workspace.
@@ -2373,6 +2390,9 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         insideWorkspace: resolveInWorkspace
       });
       if (!verdict.ok) return { ok: false, content: `${verdict.reason} Nothing was written.` };
+
+      const gutting = wouldGut(verdict.path, content, context.request);
+      if (gutting) return { ok: false, content: gutting };
 
       const result = writeFileAt(verdict.path, content);
       if (!result.ok) return { ok: false, content: `${result.reason} Nothing was written.` };
@@ -2408,6 +2428,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       if (!target || (addition === null && (oldText === null || newText === null))) {
         return { ok: false, content: "edit_file needs a path, and either append or old_text with new_text." };
       }
+      const placeholder = placeholderIn(target, addition ?? newText ?? "");
+      if (placeholder) return { ok: false, content: `${placeholder} Nothing was changed.` };
 
       // Read and write are checked separately with the same rule, so an edit
       // cannot reach anywhere a read or a write could not.
