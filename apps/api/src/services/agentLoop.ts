@@ -10,7 +10,7 @@ import {
   correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
+import { changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -228,6 +228,50 @@ function callSignature(call: ToolCall): string {
   return `${call.name}:${JSON.stringify(sortedArguments)}`;
 }
 
+/** One spelling per file, so the same change is recognised however its path was written. */
+function samePath(candidate: string): string {
+  const resolved = (resolveInWorkspace(candidate) ?? path.resolve(candidate)).split(path.sep).join("/");
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * Whether a write or edit would put an earlier step's own report into a file.
+ *
+ * Exact, not "contains": the written text, less any comment marker in front,
+ * is the first line of a report and nothing else. A note that merely mentions
+ * an edit, or a log the user asked for, is left alone; only the copy-the-last-
+ * result-into-the-next-call failure is refused.
+ */
+export function echoesAReport(args: Record<string, unknown> | undefined, reports: string[]): boolean {
+  const written = ["content", "append", "new_text"]
+    .map((key) => args?.[key])
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.trim().replace(/^(?:\/\/|#|--|\/\*|<!--)\s*/, "").replace(/\s*(?:\*\/|-->)$/, "").trim());
+  if (written.length === 0) return false;
+  return reports.some((report) => {
+    const line = report.split("\n")[0].trim();
+    return line.length >= 12 && written.includes(line);
+  });
+}
+
+/**
+ * Whether a write or edit put down only text the user gave word for word.
+ *
+ * Then an app it broke is what was asked for, not a mistake to repair. Told to
+ * append "throw new Error('boom');" to a built app's server.js, the model did -
+ * and, with the tools left in reach to fix the break, spent three rounds
+ * running `node server.js` at ever more mangled paths. Repairing it would have
+ * meant undoing the user's own instruction; the honest move is to do it and
+ * say what it broke.
+ */
+export function wroteWhatWasAsked(args: Record<string, unknown> | undefined, request: string): boolean {
+  const written = ["content", "append", "new_text"]
+    .map((key) => args?.[key])
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.trim());
+  return written.length > 0 && written.every((value) => request.includes(value));
+}
+
 /**
  * Who the assistant is, and what it is not allowed to do.
  *
@@ -351,12 +395,17 @@ const mutatingTools = new Set([
  * after an edit, so this line was the whole reply - and "Re-verified X after
  * the edit" left the user to guess which edit. edit_file's own result is not
  * repeated in replies (see mutatingTools), so this line must stand alone.
+ *
+ * `broke` is carried beside the sentence rather than read back out of it: an
+ * edit that broke its app has not finished the order it was made for, and the
+ * loop keeps the tools in reach for the fix (see changesAskedFor) - unless the
+ * user gave that exact text to write (see wroteWhatWasAsked).
  */
 async function verifyAfterEdit(
   sessionId: string | undefined,
   project: string,
   editedPath: string
-): Promise<string | null> {
+): Promise<{ report: string; broke: boolean } | null> {
   const dir = resolveInWorkspace(project);
   if (!dir || !existsSync(path.join(dir, "smoke.js"))) return null;
 
@@ -375,12 +424,12 @@ async function verifyAfterEdit(
   );
 
   if (!verification.ran) {
-    return `Could not re-verify ${project} after editing ${file}: ${verification.reason}`;
+    return { report: `Could not re-verify ${project} after editing ${file}: ${verification.reason}`, broke: false };
   }
   if (!verification.passed) {
-    return describeBrokenEdit(project, file, verification.output);
+    return { report: describeBrokenEdit(project, file, verification.output), broke: true };
   }
-  return `Re-verified ${project} after editing ${file}: ${verifiedDetail(verification.output)}`;
+  return { report: `Re-verified ${project} after editing ${file}: ${verifiedDetail(verification.output)}`, broke: false };
 }
 
 /**
@@ -1107,6 +1156,23 @@ export async function runAgent(
   // as generate and keep build_app. Only a write verb with a named file target
   // lands here. "create a todo app" names no file, so it is not caught either.
   const namedAFileToWrite = intent.kind === "write" && intent.hasTarget;
+
+  // How many changes this order asks for, when its words say (see
+  // changesAskedFor). Once that many have worked - and none broke the app it
+  // touched - the order is done: no tool is offered again and the model's next
+  // reply is the answer. Counted from the user's own words where the caller
+  // passes them, since the question here can carry saved facts after it.
+  //
+  // The same move as maxWebGathers, for the same reason. Asked to append one
+  // line to server.js, the model appended it and then, still holding edit_file
+  // and write_file, kept "improving" the file every round until the round
+  // limit; twice it replaced the whole file. Asking it to stop did not hold
+  // for the web tools either. Removing the choice does.
+  const changeBudget = intent.action && intent.kind === "write"
+    ? changesAskedFor(context.request ?? question)
+    : null;
+  let settledChanges = 0;
+  const orderComplete = () => changeBudget !== null && settledChanges >= changeBudget;
   let firstTurnToolCalls: number | null = null;
 
   // Stated at each path rather than inferred at the end, through named
@@ -1142,7 +1208,47 @@ export async function runAgent(
   // left to guess which half is true, and the app did in fact build.
   // `verifiedProject` marks a post-edit check report (see verifyAfterEdit), so
   // a later check of the same app can replace it instead of sitting beside it.
-  const mutationAttempts: Array<{ name: string; content: string; ok: boolean; verifiedProject?: string }> = [];
+  // `quiet` marks a change whose result is not repeated under a written reply
+  // (edit_file, run_app, run_command - see mutatingTools), kept so that a reply
+  // the model never wrote can still say what changed.
+  const mutationAttempts: Array<{
+    name: string; content: string; ok: boolean; verifiedProject?: string; quiet?: boolean;
+  }> = [];
+  // Every change that worked this turn, in the order it happened.
+  //
+  // The answer when the model wrote none. Before this, a turn that edited a
+  // file and then produced an empty or invented reply was thrown away as "the
+  // model returned nothing" - and the caller handed the request to the next
+  // installed model, which started from the beginning and made the same
+  // change again. Seen live: four appends by qwen2.5-coder, a reply that was
+  // only a made-up <tool_response>, two more models tried from scratch, and
+  // "no local model could be loaded" shown over a file that had been changed
+  // four times.
+  const doneSoFar = () => [...new Set(mutationAttempts.filter((attempt) => attempt.ok).map((attempt) => attempt.content))];
+  // A turn that ends without a reply after changing something still says what
+  // changed - as an answer, never as a failure, because a failure sends the
+  // request on to the next model to start over (see doneSoFar). Null when
+  // nothing changed, so the ordinary failure stands.
+  const reportWhatWasDone = (model: string, coda?: string): AgentResult | null => {
+    const done = doneSoFar();
+    if (done.length === 0) return null;
+    const base = coda ? `${done.join("\n\n")}\n\n${coda}` : done.join("\n\n");
+    return {
+      ok: true,
+      text: awaitingConfirmation ? `${base}\n\n${pendingConfirmationNotice(awaitingConfirmation.tool)}` : base,
+      model,
+      toolsUsed,
+      ...(awaitingConfirmation ? { awaitingConfirmation } : {}),
+      actionAudit: auditFor("tool-called")
+    };
+  };
+  const stoppedMidway = "The local model stopped responding before it wrote a reply. The lines above are what was actually done.";
+  // What each change this turn reported, so a call that would write one of
+  // those reports into a file can be recognised. See echoesAReport.
+  const changeReports: string[] = [];
+  // Apps whose own checks ran this turn after an edit - which started them,
+  // so there is nothing to learn from starting them again by hand.
+  const checkedApps = new Set<string>();
   // Successful results of tools that only read, for the round-limit fallback
   // at the bottom of this function.
   const readResults: string[] = [];
@@ -1216,9 +1322,10 @@ export async function runAgent(
     // web tools gone but the file tools still on offer - read a stray project
     // file and tried to edit it, answering about "Hello, Vercel!" instead of
     // the version it already had. After the budget, no tools: it answers from
-    // what it gathered.
+    // what it gathered. And none once the order's changes are made: see
+    // changeBudget.
     const offerTools = round < maxToolRounds + correctionRounds && !fetchUrlFailed
-      && webGathersDone < maxWebGathers;
+      && webGathersDone < maxWebGathers && !orderComplete();
 
     // What this turn actually offers, decided once and used twice: sent to
     // the model, and enforced when the model answers.
@@ -1324,6 +1431,11 @@ export async function runAgent(
         const unusable = raw.status >= 500
           && /out of memory|failed to allocate|terminated|no space/i.test(detail);
 
+        // Not handed to another model once something has changed: it would
+        // start over and change it again.
+        const early = reportWhatWasDone(config.model, stoppedMidway);
+        if (early) return early;
+
         return {
           ok: false,
           reason: unusable
@@ -1365,6 +1477,10 @@ export async function runAgent(
       if (cancel?.aborted) {
         return { ok: false, reason: "Stopped.", toolsUsed, stopped: true };
       }
+
+      // A model that stalls after making a change has still made it.
+      const early = reportWhatWasDone(config.model, stoppedMidway);
+      if (early) return early;
 
       const detail = error instanceof Error && error.name === "AbortError"
         ? `it did not reply within ${Math.round(config.timeoutMs / 1000)}s`
@@ -1417,18 +1533,10 @@ export async function runAgent(
         // answer, not an empty reply. Found live: build_app finished, the model
         // answered {"name":"open_url",...}, that was stripped to nothing, and
         // the whole turn was thrown away as empty — losing the build.
-        const doneLines = [...new Set(mutationAttempts.filter((attempt) => attempt.ok).map((attempt) => attempt.content))];
-        if (doneLines.length > 0) {
-          const base = doneLines.join("\n\n");
-          return {
-            ok: true,
-            text: awaitingConfirmation ? `${base}\n\n${pendingConfirmationNotice(awaitingConfirmation.tool)}` : base,
-            model: typeof response.model === "string" ? response.model : config.model,
-            toolsUsed,
-            ...(awaitingConfirmation ? { awaitingConfirmation } : {}),
-            actionAudit: auditFor("tool-called")
-          };
-        }
+        // An edit counts the same, though its line is not repeated under a
+        // written reply: see doneSoFar.
+        const done = reportWhatWasDone(typeof response.model === "string" ? response.model : config.model);
+        if (done) return done;
         return requested.length > 0 || written.length > 0
           ? { ok: false, reason: "The assistant kept searching without reaching an answer.", toolsUsed }
           // Marked unusable so the caller moves on to the next installed
@@ -1661,8 +1769,10 @@ export async function runAgent(
       // with the fact - and the second call is what is pending. Appending the
       // first refusal printed "forget was called with nothing to act on"
       // underneath a correct request for confirmation.
-      const relevant = mutationAttempts.filter((attempt) =>
-        !(awaitingConfirmation && attempt.name === awaitingConfirmation.tool && !attempt.ok));
+      // Quiet results are left out here: they are the fallback for a reply
+      // the model did not write, not lines to add under one it did.
+      const relevant = mutationAttempts.filter((attempt) => !attempt.quiet
+        && !(awaitingConfirmation && attempt.name === awaitingConfirmation.tool && !attempt.ok));
       const succeeded = relevant.filter((attempt) => attempt.ok);
       const mutationResults = (succeeded.length > 0 ? succeeded : relevant)
         .map((attempt) => attempt.content);
@@ -1727,6 +1837,10 @@ export async function runAgent(
       // change succeeded this turn, in which case the change's own line (a
       // build, a render) is the answer, and an empty model text is fine.
       if (!withoutInvention.trim() && mutationResults.length === 0) {
+        // Unless an edit, a launch or a command worked: then what it did is the
+        // answer, and handing the request to another model would do it twice.
+        const done = reportWhatWasDone(typeof response.model === "string" ? response.model : config.model);
+        if (done) return done;
         return {
           ok: false,
           reason: "The local model replied with fabricated tool output and no actual answer.",
@@ -1811,6 +1925,10 @@ export async function runAgent(
         // Without "reason": `npm run test` was run three times in a row, each
         // with a differently worded reason, and each counted as new.
         const { reason: _reason, ...argumentsThatMatter } = (call.arguments ?? {}) as Record<string, unknown>;
+        // And one file however its path is spelled. Live, one turn named the
+        // same server.js three ways - "app/server.js", "D:/ws/app/server.js"
+        // and "D:\\ws\\app\\server.js" - and each would have counted as new.
+        if (typeof argumentsThatMatter.path === "string") argumentsThatMatter.path = samePath(argumentsThatMatter.path);
         const signature = `${call.name}:${JSON.stringify(argumentsThatMatter)}`;
         if (changesAsked.has(signature)) {
           toolActivity.markBlocked();
@@ -1859,19 +1977,40 @@ export async function runAgent(
         continue;
       }
 
+      // A tool's own report is not file content. Seen live: "// Added 1 line to
+      // the end of D:\...\server.js." appended to that same server.js, and
+      // "Wrote .../server.js to the workspace." written over the whole file -
+      // the model copying the last result it read into its next call.
+      if ((call.name === "write_file" || call.name === "edit_file") && echoesAReport(call.arguments, changeReports)) {
+        toolActivity.markBlocked();
+        messages.push({
+          role: "tool",
+          content: `${call.name} was not run: what it would write is the report of an earlier step, not something `
+            + "anyone asked to put in the file. Nothing was changed. Reply to the user now."
+        });
+        continue;
+      }
+
       // An app built or changed this turn is not started here. After every
       // build the model ran `cd <app> && npm start`: from the wrong directory
       // it failed, and the model then ran `echo 'Command failed'` to "report"
       // it; from the right one it would have hung until the timeout, since a
       // server does not exit. The build's own checks already ran it.
-      if (call.name === "run_command" && madeThisTurn.has("build_app") || call.name === "run_command" && madeThisTurn.has("change_app")) {
+      // Nor after an edit whose checks just ran the app: live, the model
+      // followed an edit with `node D:\...\server.js` "to check it runs" - a
+      // server that starts fine runs until the command times out.
+      const builtThisTurn = madeThisTurn.has("build_app") || madeThisTurn.has("change_app");
+      if (call.name === "run_command" && (builtThisTurn || checkedApps.size > 0)) {
         const command = typeof call.arguments?.command === "string" ? call.arguments.command : "";
         if (/\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:start|dev|serve)\b|\bnode\s+(?:\S*[\\/])?(?:server|index|app)\.(?:m?js|cjs)\b/i.test(command)) {
           toolActivity.markBlocked();
           messages.push({
             role: "tool",
-            content: "Not run: the app is built and its own checks already ran it, and starting its server here "
-              + "would run until killed. Tell the user it is built and how to start it themselves."
+            content: builtThisTurn
+              ? "Not run: the app is built and its own checks already ran it, and starting its server here "
+                + "would run until killed. Tell the user it is built and how to start it themselves."
+              : "Not run: the app's own checks already ran it after the edit, and starting its server here "
+                + "would run until killed. Tell the user what those checks found."
           });
           continue;
         }
@@ -2030,9 +2169,19 @@ export async function runAgent(
       // instruction written for the model — "Tell the user plainly what it
       // would do and ask them to confirm" — verbatim underneath the reply,
       // where the user read internal plumbing addressed to someone else.
+      const changed = result.ok && !result.needsConfirmation && changesSomething(call.name);
       if (mutatingTools.has(call.name) && !result.needsConfirmation) {
         mutationAttempts.push({ name: call.name, content: result.content, ok: result.ok });
+      } else if (changed) {
+        // See doneSoFar. A command's output is cut short: this is a record of
+        // what happened, not the place to read the whole of it.
+        const content = result.content.length > 600 ? `${result.content.slice(0, 600)}\n[...]` : result.content;
+        mutationAttempts.push({ name: call.name, content, ok: true, quiet: true });
       }
+      if (changesSomething(call.name) && !result.needsConfirmation) changeReports.push(result.content);
+      // Whether this change counts toward the order being done: it worked,
+      // and if it touched a built app, that app still passes its own checks.
+      let settled = changed;
       // A change to a built app is followed by that app's own checks, so the
       // reply carries proof the app still works - or the news that it does not
       // - the way a build does.
@@ -2044,8 +2193,10 @@ export async function runAgent(
       // followed broke it. The cost is bounded by the round limit.
       if (result.ok && result.path && (call.name === "edit_file" || call.name === "write_file")) {
         const project = projectForPath(result.path);
-        const report = project ? await verifyAfterEdit(context.sessionId, project, result.path) : null;
-        if (project && report) {
+        const check = project ? await verifyAfterEdit(context.sessionId, project, result.path) : null;
+        if (project && check) {
+          const { report } = check;
+          changeReports.push(report);
           // The newest check of an app replaces the one before it. Round one
           // breaking the app and round two fixing it must read as fixed, not
           // as both - the model still has the earlier report in its history,
@@ -2065,6 +2216,23 @@ export async function runAgent(
           const last = messages[messages.length - 1];
           if (last && last.role === "tool") last.content = `${last.content}\n\n${report}`;
           else messages.push({ role: "tool", content: report });
+          checkedApps.add(project);
+          // An edit that broke its app has not finished anything: the fix is
+          // still to come, and the tools stay in reach for it - unless what
+          // broke it is exactly what the user said to write.
+          if (check.broke && !wroteWhatWasAsked(call.arguments, context.request ?? question)) settled = false;
+        }
+      }
+      if (settled) {
+        settledChanges += 1;
+        // Said where the model reads next - the result of the change that
+        // finished the order - since its next round has no tools to reach for.
+        if (orderComplete()) {
+          const last = messages[messages.length - 1];
+          if (last && last.role === "tool") {
+            last.content = `${last.content}\n\nThat is everything this request asked for. Reply to the user `
+              + "now in plain sentences saying what changed - no tool call, no JSON.";
+          }
         }
       }
       if (result.ok && !changesSomething(call.name)) readResults.push(result.content);
@@ -2077,6 +2245,10 @@ export async function runAgent(
   // the answer, then wandered off reading invented paths until the rounds
   // ran out - and the user got the composer's "I don't have anything saved
   // that answers that". The netstat output was the answer.
+  // A change made along the way comes first: what was done to the machine
+  // matters more than what was read, and must never be reported as nothing.
+  const done = reportWhatWasDone(config.model);
+  if (done) return done;
   const useful = readResults.filter((result) => result.trim().length > 0);
   if (useful.length > 0) {
     const shown = useful.slice(-2).map((result) => result.length > 1500 ? `${result.slice(0, 1500)}\n[...]` : result);

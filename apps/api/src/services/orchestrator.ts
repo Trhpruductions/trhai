@@ -4,6 +4,7 @@ import { isCodeWork } from "./machinePaths.js";
 import { pickAuthorModel } from "./appAuthor.js";
 import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
+import { changesSomething } from "./toolPermissions.js";
 import type { RunningApp, StartResult } from "./appRunner.js";
 import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
@@ -1631,6 +1632,15 @@ async function answerWithLocalModel(
     // anywhere said the model had been asked and had failed.
     if (!result.modelUnusable) {
       console.warn(`[assist] ${model} could not answer: ${result.reason}`);
+      return null;
+    }
+    // Never once something has changed. The next model starts the request
+    // from the beginning, so it would make the same change a second time -
+    // seen live as two schedules for one request, and as an edit about to be
+    // repeated after the first model's reply was thrown away. The loop itself
+    // answers with what was done in this case; this holds even if it stops.
+    if (result.toolsUsed.some((used) => used.ok && changesSomething(used.name))) {
+      console.warn(`[assist] ${model} unusable after it changed something, so no other model is tried: ${result.reason}`);
       return null;
     }
     console.warn(`[assist] ${model} unusable: ${result.reason}`);

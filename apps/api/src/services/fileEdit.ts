@@ -137,6 +137,61 @@ export function applyEdit(source: string, oldText: string, newText: string): Edi
 }
 
 /**
+ * A path or content the model left as a template instead of filling in.
+ *
+ * Seen live: write_file called with "<new_content>" as the whole of an app's
+ * server.js, and a file created at workspace/path/to/file. Neither is anything
+ * a user asked for, and the first destroyed the file it replaced.
+ *
+ * Narrow on purpose: angle brackets around words that name a slot ("content",
+ * "code", "your ...", "... here"), so a file that really is one HTML tag is
+ * left alone.
+ */
+export function placeholderIn(target: string, content: string): string | null {
+  if (/(?:^|[\\/])path[\\/]to(?:[\\/]|$)/i.test(target) || /[<>]/.test(target)) {
+    return `"${target}" is a placeholder, not a real path.`;
+  }
+  const trimmed = content.trim();
+  if (/^<[a-z][\w -]*>$/i.test(trimmed) && /content|text|code|here|placeholder|your|insert|value|updated|new/i.test(trimmed)) {
+    return `"${trimmed}" is a placeholder, not what the file should say.`;
+  }
+  return null;
+}
+
+/** Lines in a piece of text, not counting the newline that ends the last one. */
+function lineCount(text: string): number {
+  return text.length === 0 ? 0 : text.replace(/\n$/, "").split("\n").length;
+}
+
+/** Words that ask for a whole file to be replaced rather than added to. */
+const replaceWholeFile =
+  /\b(?:overwrite|rewrite|re-write|start (?:it )?over|from scratch|replace (?:the |its |all (?:of )?(?:the |its )?)?(?:whole |entire )?(?:file|contents?|everything|text|code)|clear|empty|wipe|reset|truncate|trim|shorten|cut down|strip|simplify|only (?:say|says|contain|contains|have|has|keep)|just (?:say|says|contain|contains|have|has)|contains? only|nothing but|(?:delete|remove) (?:everything|all|most))\b/i;
+
+/**
+ * Whether writing `next` over `current` would throw most of a file away when
+ * the request never asked for that.
+ *
+ * Watched live: asked to append one line to an app's 233-line server.js, the
+ * model made the append with edit_file - then called write_file with
+ * "\n// Additional line added\n" as the entire content, and the server was
+ * gone. write_file is right for a new file, or for a rewrite someone asked
+ * for; for anything else edit_file changes only what it names and cannot drop
+ * the rest. So a write that keeps less than half of a file of ten lines or
+ * more is refused, unless the request says in so many words to replace it.
+ */
+export function replacesMostOf(
+  current: string,
+  next: string,
+  request: string | undefined
+): { before: number; after: number } | null {
+  const before = lineCount(current);
+  const after = lineCount(next);
+  if (before < 10 || after * 2 >= before) return null;
+  if (replaceWholeFile.test(request ?? "")) return null;
+  return { before, after };
+}
+
+/**
  * A short description of what an edit did, for the activity trace.
  *
  * Line counts rather than the text itself: a diff belongs in the file, and a

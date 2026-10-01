@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyEdit, describeEdit } from "../src/services/fileEdit.js";
+import { applyEdit, describeEdit, placeholderIn, replacesMostOf } from "../src/services/fileEdit.js";
 
 // Targeted editing exists because whole-file rewriting lost things. Asked to
 // add an exclamation mark to a greeting, the model returned one line for a file
@@ -134,4 +134,55 @@ test("text that is genuinely absent is still refused", () => {
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.match(result.reason, /not in the file/);
+});
+
+// ---- write_file's guards -----------------------------------------------------
+
+const serverFile = Array.from({ length: 233 }, (_, index) => `line ${index + 1};`).join("\n") + "\n";
+
+test("a write that would keep a line or two of a long file is caught", () => {
+  // The live case: one line asked to be appended to a 233-line server.js, then
+  // write_file with that line alone as the whole file.
+  const shrink = replacesMostOf(serverFile, "\n// Additional line added\n", undefined);
+  assert.deepEqual(shrink, { before: 233, after: 2 });
+  assert.ok(replacesMostOf(serverFile, "<new_content>", "Append this exact line to the end of server.js: // x"));
+});
+
+test("a rewrite the request asked for in so many words goes through", () => {
+  for (const request of [
+    "rewrite server.js as a minimal express server",
+    "overwrite notes.txt with hello",
+    "replace the contents of server.js with a hello world",
+    "make notes.txt only say hi",
+    "clear notes.txt",
+    "start over on server.js from scratch"
+  ]) {
+    assert.equal(replacesMostOf(serverFile, "hi\n", request), null, `should allow: ${request}`);
+  }
+});
+
+test("a replacement of one passage is not a request to replace the file", () => {
+  assert.ok(replacesMostOf(serverFile, "hi\n", "replace foo with bar in server.js"));
+});
+
+test("short files, and writes that keep half or more, are not second-guessed", () => {
+  assert.equal(replacesMostOf("a\nb\nc\n", "x\n", undefined), null, "under ten lines");
+  const twenty = Array.from({ length: 20 }, (_, index) => `${index}`).join("\n");
+  const ten = Array.from({ length: 10 }, (_, index) => `${index}`).join("\n");
+  assert.equal(replacesMostOf(twenty, ten, undefined), null, "half is kept");
+  assert.equal(replacesMostOf("", "anything\n", undefined), null, "an empty file");
+});
+
+test("a template left unfilled is recognised, in the content or the path", () => {
+  assert.match(placeholderIn("app/server.js", "<new_content>") ?? "", /placeholder/);
+  assert.match(placeholderIn("app/server.js", "  <your code here>\n") ?? "", /placeholder/);
+  assert.match(placeholderIn("path/to/file", "hello") ?? "", /placeholder, not a real path/);
+  assert.match(placeholderIn("D:\\ws\\path\\to\\file.txt", "hello") ?? "", /not a real path/);
+  assert.match(placeholderIn("<path>", "hello") ?? "", /not a real path/);
+});
+
+test("real content that happens to use angle brackets is left alone", () => {
+  assert.equal(placeholderIn("index.html", "<br>"), null);
+  assert.equal(placeholderIn("index.html", "<!DOCTYPE html>\n<html></html>"), null);
+  assert.equal(placeholderIn("notes/paths-to-check.md", "path to glory"), null);
 });

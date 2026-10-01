@@ -1,9 +1,9 @@
 import test from "node:test";
-import { disarmCommands } from "../src/services/commandRunner.js";
+import { armCommands, commandsArmed, disarmCommands } from "../src/services/commandRunner.js";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -13,8 +13,9 @@ import path from "node:path";
 const testWorkspace = mkdtempSync(path.join(tmpdir(), "ascend-agent-"));
 process.env.ASCEND_WORKSPACE = testWorkspace;
 import {
-  describeToolCall, executionKindForTool, explainGatedTool, gatedToolCall,
-  isBareRefusal, looksLikeBareToolCall, looksLikeRawToolCalls, parseTextToolCalls, runAgent, systemPrompt
+  describeToolCall, echoesAReport, executionKindForTool, explainGatedTool, gatedToolCall,
+  isBareRefusal, looksLikeBareToolCall, looksLikeRawToolCalls, parseTextToolCalls, runAgent, systemPrompt,
+  wroteWhatWasAsked
 } from "../src/services/agentLoop.js";
 import { availableTools, runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
 import { mentionsDocument, namesAFilePath } from "../src/services/actionIntent.js";
@@ -2551,6 +2552,326 @@ test("a later edit's check replaces the earlier one: broken then fixed reads as 
     assert.match(tools, /broke verify-fix-app/);
     assert.match(tools, /Re-verified verify-fix-app/);
   } finally {
+    server.close();
+  }
+});
+
+// ---- An order is done when its change is made -----------------------------------
+//
+// Live, "Append this exact line to the end of <app>/server.js: ..." made the
+// edit and then kept going on every run - more appends nobody asked for, and
+// twice a write_file that replaced the whole server.js. Same on master and
+// with the post-edit check, so neither caused it; nothing told the loop the
+// order was finished.
+
+/** A plain workspace folder with one small notes file - no smoke check, so no verification. */
+function makeNotes(name: string, content = "alpha\n"): string {
+  const dir = path.join(testWorkspace, name);
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "notes.txt");
+  writeFileSync(file, content, "utf8");
+  return file;
+}
+
+type Offered = Sent & { tools?: unknown[] };
+
+test("a one-change order is done once the change is made: no tool is offered again", async () => {
+  const file = makeNotes("one-change");
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("edit_file", { path: "one-change/notes.txt", append: "// harmless" }),
+    // What the live model did next, every time: another edit nobody asked for.
+    toolCall("edit_file", { path: "one-change/notes.txt", append: "// Additional line added by the assistant." }),
+    answer("Done.")
+  ]);
+  try {
+    const result = await runAgent(
+      configFor(baseUrl), "Append this exact line to the end of one-change/notes.txt: // harmless", context
+    );
+    assert.ok(result.ok, "the loop should answer");
+    if (!result.ok) return;
+    assert.equal(readFileSync(file, "utf8"), "alpha\n// harmless\n", "only the line that was asked for");
+    assert.deepEqual(result.toolsUsed, [{ name: "edit_file", ok: true }]);
+
+    // The round after the change offered nothing, and was told why.
+    const second = received[1] as Offered;
+    assert.equal(second.tools, undefined, "no tools once the order is done");
+    const lastTool = (second.messages ?? []).filter((m) => m.role === "tool").at(-1);
+    assert.match(lastTool?.content ?? "", /That is everything this request asked for/);
+    // It answered with a call it could no longer make, so the reply is what was done.
+    assert.match(result.text, /Added 1 line to the end of/);
+  } finally {
+    server.close();
+  }
+});
+
+test("an order for two changes gets both, and not a third", async () => {
+  const file = makeNotes("two-changes");
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("edit_file", { path: "two-changes/notes.txt", append: "beta" }),
+    toolCall("edit_file", { path: "two-changes/notes.txt", append: "gamma" }),
+    toolCall("edit_file", { path: "two-changes/notes.txt", append: "delta" }),
+    answer("Added beta and gamma.")
+  ]);
+  try {
+    const result = await runAgent(
+      configFor(baseUrl), "append beta to two-changes/notes.txt, then append gamma to two-changes/notes.txt", context
+    );
+    assert.ok(result.ok, "the loop should answer");
+    assert.equal(readFileSync(file, "utf8"), "alpha\nbeta\ngamma\n");
+    assert.ok((received[1] as Offered).tools, "the second change still had its tools");
+    assert.equal((received[2] as Offered).tools, undefined, "none after the second");
+  } finally {
+    server.close();
+  }
+});
+
+test("an edit that broke its app does not finish the order: the tools stay for the fix", async () => {
+  makeCheckedApp("budget-fix-app");
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("edit_file", { path: "budget-fix-app/server.js", append: "// BROKEN" }),
+    toolCall("edit_file", { path: "budget-fix-app/server.js", old_text: "// BROKEN", new_text: "// fixed" }),
+    toolCall("edit_file", { path: "budget-fix-app/server.js", append: "// one more thing" }),
+    answer("Fixed it.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "add a comment line to budget-fix-app/server.js", context);
+    assert.ok(result.ok, "the loop should answer");
+    if (!result.ok) return;
+    assert.ok((received[1] as Offered).tools, "tools offered after the edit that broke the app");
+    assert.equal((received[2] as Offered).tools, undefined, "none once the fix passed its checks");
+    const source = readFileSync(path.join(testWorkspace, "budget-fix-app", "server.js"), "utf8");
+    assert.match(source, /\/\/ fixed/);
+    assert.doesNotMatch(source, /one more thing/);
+    assert.match(result.text, /Re-verified budget-fix-app after editing server\.js: 1\/1 checks passed/);
+  } finally {
+    server.close();
+  }
+});
+
+test("the count comes from the user's own words, not the facts added after them", async () => {
+  // The caller appends saved facts to the question on their own lines, which
+  // on its own would leave the count open.
+  const file = makeNotes("own-words");
+  const { server, baseUrl } = await fakeModel([
+    toolCall("edit_file", { path: "own-words/notes.txt", append: "beta" }),
+    toolCall("edit_file", { path: "own-words/notes.txt", append: "an improvement nobody asked for" }),
+    answer("Added beta.")
+  ]);
+  const request = "append beta to own-words/notes.txt";
+  try {
+    const result = await runAgent(
+      configFor(baseUrl),
+      `${request}\n\nAlready in the user's saved memory — it is stored, do not save it again, just use it directly:\n`
+        + "- notes for this project live in own-words",
+      { ...context, request }
+    );
+    assert.ok(result.ok, "the loop should answer");
+    assert.equal(readFileSync(file, "utf8"), "alpha\nbeta\n");
+  } finally {
+    server.close();
+  }
+});
+
+test("a change followed by an invented reply reports the change instead of failing over", async () => {
+  // Live: four appends, then a reply that was only a made-up <tool_response>.
+  // It was judged unusable, two more models started the request over, and the
+  // user read "no local model could be loaded" over a file changed four times.
+  const file = makeNotes("invented-reply");
+  const { server, baseUrl } = await fakeModel([
+    toolCall("edit_file", { path: "invented-reply/notes.txt", append: "salt and pepper" }),
+    answer("<tool_response>\nAdded 1 line to the end of invented-reply/notes.txt.\n</tool_response>")
+  ]);
+  try {
+    // "and" leaves the count open, so no order budget applies: this must hold either way.
+    const result = await runAgent(configFor(baseUrl), "add salt and pepper to invented-reply/notes.txt", context);
+    assert.equal(result.ok, true, "a turn that changed something is never handed to another model");
+    if (!result.ok) return;
+    assert.match(result.text, /Added 1 line to the end of/);
+    assert.doesNotMatch(result.text, /tool_response/);
+    assert.equal(readFileSync(file, "utf8"), "alpha\nsalt and pepper\n");
+  } finally {
+    server.close();
+  }
+});
+
+test("a model that fails after making a change still reports the change", async () => {
+  // Out of memory mid-turn used to mean "try the next model" - which starts
+  // the request from the beginning and makes the change a second time.
+  const file = makeNotes("failed-after-change");
+  let turn = 0;
+  const server = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      turn += 1;
+      if (turn === 1) {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({
+          model: "llama3.2:latest",
+          ...toolCall("edit_file", { path: "failed-after-change/notes.txt", append: "beta" })
+        }));
+        return;
+      }
+      response.writeHead(500, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "cudaMalloc failed: out of memory" }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const result = await runAgent(configFor(baseUrl), "add beta and gamma to failed-after-change/notes.txt", context);
+    assert.equal(result.ok, true, "not modelUnusable: the caller must not start over");
+    if (!result.ok) return;
+    assert.match(result.text, /Added 1 line to the end of/);
+    assert.match(result.text, /stopped responding before it wrote a reply/);
+    assert.equal(readFileSync(file, "utf8"), "alpha\nbeta\n");
+  } finally {
+    server.close();
+  }
+});
+
+test("a write that would copy an earlier step's report into the file is refused", async () => {
+  // Live: "Wrote .../server.js to the workspace." written over server.js as
+  // its entire content.
+  const dir = path.join(testWorkspace, "echo-guard");
+  mkdirSync(dir, { recursive: true });
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("write_file", { path: "echo-guard/a.txt", content: "hello" }),
+    toolCall("write_file", { path: "echo-guard/a.txt", content: "Wrote echo-guard/a.txt to the workspace." }),
+    answer("Wrote it.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "write hello and goodbye to echo-guard/a.txt", context);
+    assert.ok(result.ok, "the loop should answer");
+    assert.equal(readFileSync(path.join(dir, "a.txt"), "utf8"), "hello");
+    const tools = ((received[2] as Sent).messages ?? []).filter((m) => m.role === "tool");
+    assert.match(tools.at(-1)?.content ?? "", /report of an earlier step/);
+  } finally {
+    server.close();
+  }
+});
+
+test("only an exact copy of a report counts as echoing it", () => {
+  const reports = ["Added 1 line to the end of D:\\ws\\app\\server.js."];
+  assert.equal(echoesAReport({ append: "// Added 1 line to the end of D:\\ws\\app\\server.js." }, reports), true);
+  assert.equal(echoesAReport({ content: "Added 1 line to the end of D:\\ws\\app\\server.js." }, reports), true);
+  // A log the user asked for may mention an edit; that is not a copy.
+  assert.equal(echoesAReport({ append: "- 10:02 Added 1 line to the end of D:\\ws\\app\\server.js. (log)" }, reports), false);
+  assert.equal(echoesAReport({ append: "beta" }, reports), false);
+  assert.equal(echoesAReport({ append: "ok" }, ["ok"]), false, "too short to mean anything");
+});
+
+test("the same change asked twice under different spellings of its path runs once", async () => {
+  // Live, one turn named one server.js three ways; each counted as new.
+  const file = makeNotes("path-spellings");
+  const { server, baseUrl } = await fakeModel([
+    toolCall("edit_file", { path: "path-spellings/notes.txt", append: "beta" }),
+    toolCall("edit_file", { path: file, append: "beta" }),
+    answer("Added beta.")
+  ]);
+  try {
+    // "and" leaves the count open, so only the duplicate check stands in the way.
+    const result = await runAgent(configFor(baseUrl), "add beta and gamma to path-spellings/notes.txt", context);
+    assert.ok(result.ok, "the loop should answer");
+    assert.equal(readFileSync(file, "utf8"), "alpha\nbeta\n");
+  } finally {
+    server.close();
+  }
+});
+
+test("write_file will not replace most of an existing file unless asked to", async () => {
+  const dir = path.join(testWorkspace, "gut-guard");
+  mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, "server.js");
+  const original = Array.from({ length: 40 }, (_, index) => `line ${index};`).join("\n") + "\n";
+  writeFileSync(target, original, "utf8");
+
+  const refused = await runTool(
+    { name: "write_file", arguments: { path: "gut-guard/server.js", content: "// Additional line added\n" } },
+    { ...context, request: "Append this exact line to the end of gut-guard/server.js: // x" }
+  );
+  assert.equal(refused.ok, false);
+  assert.match(refused.content, /server\.js has 40 lines, and this would replace all of them with 1\./);
+  assert.match(refused.content, /use edit_file/);
+  assert.equal(readFileSync(target, "utf8"), original, "nothing was written");
+
+  const asked = await runTool(
+    { name: "write_file", arguments: { path: "gut-guard/server.js", content: "console.log('hi');\n" } },
+    { ...context, request: "rewrite gut-guard/server.js to just log hi" }
+  );
+  assert.equal(asked.ok, true, "a rewrite asked for in so many words goes through");
+  assert.equal(readFileSync(target, "utf8"), "console.log('hi');\n");
+});
+
+test("write_file refuses a template it was never meant to write", async () => {
+  const dir = path.join(testWorkspace, "placeholder-guard");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "server.js"), "// app\n", "utf8");
+
+  const content = await runTool(
+    { name: "write_file", arguments: { path: "placeholder-guard/server.js", content: "<new_content>" } },
+    context
+  );
+  assert.equal(content.ok, false);
+  assert.match(content.content, /placeholder/);
+  assert.equal(readFileSync(path.join(dir, "server.js"), "utf8"), "// app\n");
+
+  const where = await runTool({ name: "write_file", arguments: { path: "path/to/file", content: "hello" } }, context);
+  assert.equal(where.ok, false);
+  assert.match(where.content, /not a real path/);
+  assert.equal(existsSync(path.join(testWorkspace, "path")), false, "no path/to/file folder");
+});
+
+test("a break the user's own words caused is reported, not repaired", async () => {
+  // Live: told to append a line that throws, the model did - then, with the
+  // tools left in reach to fix the break, ran `node server.js` three times at
+  // mangled paths. Repairing it would undo exactly what was asked.
+  makeCheckedApp("exact-break-app");
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("edit_file", { path: "exact-break-app/server.js", append: "// BROKEN" }),
+    toolCall("edit_file", { path: "exact-break-app/server.js", old_text: "// BROKEN", new_text: "// fixed" }),
+    answer("Done.")
+  ]);
+  try {
+    const result = await runAgent(
+      configFor(baseUrl), "Append this exact line to the end of exact-break-app/server.js: // BROKEN", context
+    );
+    assert.ok(result.ok, "the loop should answer");
+    if (!result.ok) return;
+    assert.equal((received[1] as Offered).tools, undefined, "nothing left to do: this is what was asked");
+    assert.match(readFileSync(path.join(testWorkspace, "exact-break-app", "server.js"), "utf8"), /\/\/ BROKEN/);
+    assert.match(result.text, /Editing server\.js broke exact-break-app/);
+  } finally {
+    server.close();
+  }
+});
+
+test("text the user gave word for word is recognised as theirs", () => {
+  const request = "Append this exact line to the end of app/server.js: throw new Error('boom');";
+  assert.equal(wroteWhatWasAsked({ path: "app/server.js", append: "throw new Error('boom');\n" }, request), true);
+  assert.equal(wroteWhatWasAsked({ append: "// an idea of the model's own" }, request), false);
+  assert.equal(wroteWhatWasAsked({ path: "app/server.js" }, request), false, "nothing written is nothing given");
+});
+
+test("after an edit's checks ran the app, starting its server by hand is refused", async () => {
+  // A server that starts fine runs until the command times out; the checks
+  // already started it and said what they found.
+  makeCheckedApp("no-manual-start-app");
+  const wasArmed = commandsArmed();
+  armCommands();
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("edit_file", { path: "no-manual-start-app/server.js", append: "// BROKEN" }),
+    toolCall("run_command", { command: "node no-manual-start-app/server.js" }),
+    answer("The edit broke the app.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "add a comment line to no-manual-start-app/server.js", context);
+    assert.ok(result.ok, "the loop should answer");
+    if (!result.ok) return;
+    assert.deepEqual(result.toolsUsed.map((used) => used.name), ["edit_file"], "the server was never started");
+    const tools = ((received[2] as Sent).messages ?? []).filter((m) => m.role === "tool");
+    assert.match(tools.at(-1)?.content ?? "", /checks already ran it after the edit/);
+  } finally {
+    if (!wasArmed) disarmCommands();
     server.close();
   }
 });
