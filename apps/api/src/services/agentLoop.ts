@@ -1,5 +1,5 @@
 import type { LocalModelConfig } from "./localModel.js";
-import { availableTools, runTool, type ToolContext, type ToolCall } from "./agentTools.js";
+import { availableTools, runTool, verifiedDetail, type ToolContext, type ToolCall } from "./agentTools.js";
 import { commandsArmed } from "./commandRunner.js";
 import { readStream, toLines } from "./streamReader.js";
 import { enterStage, stageForTool } from "./reasoningStage.js";
@@ -15,7 +15,11 @@ import { analyzeRequest } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
-import { activeProject, resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
+import { activeProject, projectForPath, resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
+import { verifyBuiltProject } from "./buildVerification.js";
+import { resolveInWorkspace } from "./workspace.js";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 // Re-exported so nothing that already imports it from here has to move.
 export type { ToolActivity };
@@ -327,6 +331,81 @@ const mutatingTools = new Set([
   // the user needs, and the contradictory refusal is dropped below.
   "render_mockup"
 ]);
+
+/**
+ * Re-run a built app's own smoke test after the assistant changed one of its
+ * files, and say what happened.
+ *
+ * build_app proves a build works before reporting it. An edit to that same app
+ * was reported on the strength of the write alone, so "Edited server.js" could
+ * leave a broken app behind with no word of it - the one gap in a codebase
+ * whose whole point is never claiming work that did not happen.
+ *
+ * Only for apps in the workspace that ship a smoke.js (every generated app
+ * does; it is self-contained and takes seconds). An external project's test
+ * suite is not this loop's to run. Three outcomes, three sentences - passed,
+ * failed its checks, could not be run - and never one dressed as another.
+ * Null means "nothing to verify here", not silence about a failure.
+ *
+ * Each sentence names the file. Seen live: the model wrote no closing text
+ * after an edit, so this line was the whole reply - and "Re-verified X after
+ * the edit" left the user to guess which edit. edit_file's own result is not
+ * repeated in replies (see mutatingTools), so this line must stand alone.
+ */
+async function verifyAfterEdit(
+  sessionId: string | undefined,
+  project: string,
+  editedPath: string
+): Promise<string | null> {
+  const dir = resolveInWorkspace(project);
+  if (!dir || !existsSync(path.join(dir, "smoke.js"))) return null;
+
+  // The file as it sits inside the app ("server.js", "public/app.js"), from
+  // whatever form the model gave the path in - workspace-relative or absolute.
+  const absolute = resolveInWorkspace(editedPath);
+  const file = absolute ? path.relative(dir, absolute).split(path.sep).join("/") : path.basename(editedPath);
+
+  const verifying = beginEvent(sessionId, "verify", `Re-running ${project}'s own checks after editing ${file}`);
+  const verification = await verifyBuiltProject(project);
+  endEvent(
+    sessionId,
+    verifying,
+    !verification.ran ? "skipped" : verification.passed ? "ok" : "failed",
+    verification.ran ? verification.output : verification.reason
+  );
+
+  if (!verification.ran) {
+    return `Could not re-verify ${project} after editing ${file}: ${verification.reason}`;
+  }
+  if (!verification.passed) {
+    return describeBrokenEdit(project, file, verification.output);
+  }
+  return `Re-verified ${project} after editing ${file}: ${verifiedDetail(verification.output)}`;
+}
+
+/**
+ * The sentence for an edit that broke an app, in terms a person can act on.
+ *
+ * smoke.js normally prints ok/FAIL lines, which summarize() turns into
+ * "17/19 checks passed; failed: ...". When the edit crashes the app before it
+ * answers, smoke.js dies on its own first request instead and its output is a
+ * stack trace - accurate, and unreadable as a reply. Seen live: a top-level
+ * throw appended to server.js was reported as forty lines of undici internals.
+ * That case is named for what it means, keeping the one line of the trace
+ * that says anything.
+ */
+function describeBrokenEdit(project: string, file: string, output: string): string {
+  if (/checks passed/.test(output)) {
+    return `Editing ${file} broke ${project} - it failed its own checks: ${output}`;
+  }
+  const errorLine = output.split("\n").map((line) => line.trim()).find((line) => /^[A-Za-z]*Error: /.test(line));
+  if (/fetch failed|ECONNREFUSED|ECONNRESET|socket hang up/i.test(output)) {
+    return `Editing ${file} broke ${project} - the app no longer starts, so its checks could not reach it`
+      + (errorLine ? ` (${errorLine})` : "") + ".";
+  }
+  return `Editing ${file} broke ${project} - it failed its own checks: `
+    + (errorLine ?? output.split("\n").slice(0, 3).join(" ").trim());
+}
 
 /**
  * Tools that write their own execution events.
@@ -1061,7 +1140,9 @@ export async function runAgent(
   // carried both - "I could not write that app... Nothing was written."
   // immediately followed by "Built \"Celsius\" in the workspace". The user is
   // left to guess which half is true, and the app did in fact build.
-  const mutationAttempts: Array<{ name: string; content: string; ok: boolean }> = [];
+  // `verifiedProject` marks a post-edit check report (see verifyAfterEdit), so
+  // a later check of the same app can replace it instead of sitting beside it.
+  const mutationAttempts: Array<{ name: string; content: string; ok: boolean; verifiedProject?: string }> = [];
   // Successful results of tools that only read, for the round-limit fallback
   // at the bottom of this function.
   const readResults: string[] = [];
@@ -1951,6 +2032,40 @@ export async function runAgent(
       // where the user read internal plumbing addressed to someone else.
       if (mutatingTools.has(call.name) && !result.needsConfirmation) {
         mutationAttempts.push({ name: call.name, content: result.content, ok: result.ok });
+      }
+      // A change to a built app is followed by that app's own checks, so the
+      // reply carries proof the app still works - or the news that it does not
+      // - the way a build does.
+      //
+      // After every change, not once per turn. Only one change runs per reply
+      // (changedThisRound), so a second edit to the same app always lands in a
+      // later round - and checking only after the first left that second edit
+      // unverified: the reply could say the app passed while the edit that
+      // followed broke it. The cost is bounded by the round limit.
+      if (result.ok && result.path && (call.name === "edit_file" || call.name === "write_file")) {
+        const project = projectForPath(result.path);
+        const report = project ? await verifyAfterEdit(context.sessionId, project, result.path) : null;
+        if (project && report) {
+          // The newest check of an app replaces the one before it. Round one
+          // breaking the app and round two fixing it must read as fixed, not
+          // as both - the model still has the earlier report in its history,
+          // which is where it belongs.
+          for (let i = mutationAttempts.length - 1; i >= 0; i -= 1) {
+            if (mutationAttempts[i].verifiedProject === project) mutationAttempts.splice(i, 1);
+          }
+          // Marked ok because the report itself is sound: a failed check is
+          // stated in its text and must never be dropped as "a failure beside
+          // a success" - that filter is for retried attempts, and this is not one.
+          mutationAttempts.push({ name: call.name, content: report, ok: true, verifiedProject: project });
+          // Folded into the edit's own result - one call, one result. Sent as a
+          // second tool message it read to the model as the result of a call it
+          // never made, and it kept making calls: live, "append this line to
+          // server.js" ended with an invented Express server.js written to the
+          // workspace root, twice. The edit's result is the message just pushed.
+          const last = messages[messages.length - 1];
+          if (last && last.role === "tool") last.content = `${last.content}\n\n${report}`;
+          else messages.push({ role: "tool", content: report });
+        }
       }
       if (result.ok && !changesSomething(call.name)) readResults.push(result.content);
     }

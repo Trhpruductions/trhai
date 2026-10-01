@@ -3,7 +3,7 @@ import { disarmCommands } from "../src/services/commandRunner.js";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -2411,6 +2411,145 @@ test("a refused first attempt does not leak under the confirmation it led to", a
     if (!result.ok) return;
     assert.ok(result.awaitingConfirmation, "the second call must be pending");
     assert.doesNotMatch(result.text, /nothing to act on/i, "the stale refusal must not be shown");
+  } finally {
+    server.close();
+  }
+});
+
+// ---- Post-edit verification ---------------------------------------------------
+
+/**
+ * A built app with its own smoke check, the shape every generated app has:
+ * smoke.js passes unless server.js contains "BROKEN". No server is started -
+ * the check reads the file - so these tests stay fast and need no free port.
+ */
+function makeCheckedApp(name: string): string {
+  const dir = path.join(testWorkspace, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ type: "commonjs" }), "utf8");
+  writeFileSync(path.join(dir, "server.js"), "// app server\n", "utf8");
+  writeFileSync(
+    path.join(dir, "smoke.js"),
+    "const src = require('fs').readFileSync(__dirname + '/server.js', 'utf8');\n"
+      // CRASH stands in for an app that dies on start: a real smoke.js then
+      // fails on its own first request, which is what this throw imitates.
+      + "if (src.includes('CRASH')) { throw new TypeError('fetch failed'); }\n"
+      + "if (src.includes('BROKEN')) { console.log('FAIL server: contains BROKEN'); process.exitCode = 1; }\n"
+      + "else { console.log('ok server'); }\n",
+    "utf8"
+  );
+  return dir;
+}
+
+type Sent = { messages?: Array<{ role: string; content: string }> };
+
+test("editing a built app re-runs its own checks and reports that they passed", async () => {
+  makeCheckedApp("verify-pass-app");
+  const { server, baseUrl } = await fakeModel([
+    toolCall("edit_file", { path: "verify-pass-app/server.js", append: "// harmless comment" }),
+    answer("I added the comment.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "add a comment line to verify-pass-app/server.js", context);
+    assert.ok(result.ok, "the loop should answer");
+    if (!result.ok) return;
+    assert.match(result.text, /Re-verified verify-pass-app after editing server\.js: 1\/1 checks passed/);
+  } finally {
+    server.close();
+  }
+});
+
+test("an edit that breaks a built app is reported as breaking it, and the model is told in time to react", async () => {
+  makeCheckedApp("verify-fail-app");
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("edit_file", { path: "verify-fail-app/server.js", append: "// BROKEN" }),
+    answer("Done.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "add a line to verify-fail-app/server.js", context);
+    assert.ok(result.ok, "the loop should answer");
+    if (!result.ok) return;
+    // The user is not left believing the edit was fine.
+    assert.match(result.text, /Editing server\.js broke verify-fail-app - it failed its own checks/);
+    assert.match(result.text, /FAIL server: contains BROKEN/);
+    // And the model saw the failure before writing its reply.
+    const next = received[1] as Sent;
+    assert.ok(
+      (next.messages ?? []).some((m) => m.role === "tool" && /broke verify-fail-app/.test(m.content)),
+      "the failed check must reach the model, not only the user"
+    );
+    // One call, one result: the check rides on the edit's own tool message. A
+    // second tool message read to the model as a call it never made.
+    const toolMessages = (next.messages ?? []).filter((m) => m.role === "tool");
+    assert.equal(toolMessages.length, 1, "exactly one tool message for the one edit");
+    assert.match(toolMessages[0].content, /Added 1 line[\s\S]*broke verify-fail-app/);
+  } finally {
+    server.close();
+  }
+});
+
+test("an edit that crashes a built app on start is reported plainly, not as a stack trace", async () => {
+  makeCheckedApp("verify-crash-app");
+  const { server, baseUrl } = await fakeModel([
+    toolCall("edit_file", { path: "verify-crash-app/server.js", append: "// CRASH" }),
+    answer("Done.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "add a line to verify-crash-app/server.js", context);
+    assert.ok(result.ok, "the loop should answer");
+    if (!result.ok) return;
+    assert.match(
+      result.text,
+      /Editing server\.js broke verify-crash-app - the app no longer starts, so its checks could not reach it \(TypeError: fetch failed\)\./
+    );
+    assert.doesNotMatch(result.text, /at Object\.<anonymous>|node:internal/, "no stack trace in the reply");
+  } finally {
+    server.close();
+  }
+});
+
+test("editing a workspace folder that has no smoke check runs no verification", async () => {
+  const dir = path.join(testWorkspace, "plain-notes-folder");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "notes.txt"), "alpha\n", "utf8");
+  const { server, baseUrl } = await fakeModel([
+    toolCall("edit_file", { path: "plain-notes-folder/notes.txt", append: "beta" }),
+    answer("Added beta.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "add beta to plain-notes-folder/notes.txt", context);
+    assert.ok(result.ok, "the loop should answer");
+    if (!result.ok) return;
+    assert.doesNotMatch(result.text, /Re-verified|failed its own checks|Could not re-verify/);
+    assert.equal(readFileSync(path.join(dir, "notes.txt"), "utf8"), "alpha\nbeta\n", "the edit itself still happened");
+  } finally {
+    server.close();
+  }
+});
+
+test("a later edit's check replaces the earlier one: broken then fixed reads as fixed", async () => {
+  // One change runs per reply, so a second edit to the same app always lands in
+  // a later round. Checking only after the first edit left this second one
+  // unverified - the bug this replaced.
+  makeCheckedApp("verify-fix-app");
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("edit_file", { path: "verify-fix-app/server.js", append: "// BROKEN" }),
+    toolCall("edit_file", { path: "verify-fix-app/server.js", old_text: "// BROKEN", new_text: "// fixed" }),
+    answer("Fixed it.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "edit verify-fix-app/server.js", context);
+    assert.ok(result.ok, "the loop should answer");
+    if (!result.ok) return;
+    assert.match(result.text, /Re-verified verify-fix-app after editing server\.js: 1\/1 checks passed/);
+    assert.doesNotMatch(result.text, /broke verify-fix-app/, "the stale failure from the first edit is gone");
+
+    // Both checks ran: the model's final request holds the failure after the
+    // first edit and the pass after the second.
+    const last = received[received.length - 1] as Sent;
+    const tools = (last.messages ?? []).filter((m) => m.role === "tool").map((m) => m.content).join("\n");
+    assert.match(tools, /broke verify-fix-app/);
+    assert.match(tools, /Re-verified verify-fix-app/);
   } finally {
     server.close();
   }
