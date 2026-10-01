@@ -580,7 +580,11 @@ export function changesAskedFor(message: string): number | null {
   if (new Set(instruction.match(fileNames) ?? []).size > 1) return null;
   // Paths and file names are places, not words of the order: a folder called
   // "bug-fixes" is not a plural, and "and" between two slashes joins nothing.
-  const words = instruction.replace(/\S*[\\/]\S*/g, " ").replace(fileNames, " ");
+  // The comma after a path is kept - it is what ends the clause. Swallowed
+  // with the path, "in notes/a.txt, replace x with y" read as one clause
+  // opening with "in", the replace went uncounted, and live the model
+  // followed the edit by writing an invented line over the whole file.
+  const words = instruction.replace(/[^\s,;]*[\\/][^\s,;]*/g, " ").replace(fileNames, " ");
   if (multiStepVerbs.test(words) || pluralObjects.test(words) || quantities.test(words)) return null;
 
   let changes = 0;

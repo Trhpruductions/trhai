@@ -1298,9 +1298,9 @@ function wouldGut(absolutePath: string, content: string, request: string | undef
   if (!current.ok) return null;
   const shrink = replacesMostOf(current.content, content, request);
   if (!shrink) return null;
-  return `${path.basename(absolutePath)} has ${shrink.before} lines, and this would replace all of them with `
-    + `${shrink.after}. To add to it or change part of it, use edit_file: append for new lines at the end, `
-    + "or old_text with new_text. Nothing was written.";
+  return `${path.basename(absolutePath)} has ${shrink.before} lines, and this would keep ${shrink.kept} of them. `
+    + "To add to it or change part of it, use edit_file: append for new lines at the end, or old_text with "
+    + "new_text. Nothing was written.";
 }
 
 export async function runTool(call: ToolCall, context: ToolContext): Promise<ToolResult> {

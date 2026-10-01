@@ -290,7 +290,10 @@ test("the live request, and the usual ways of asking for one change, count as on
     "add a line to all-tests/notes.txt",
     // However many lines an append carries, it is one call. Live, left
     // uncounted, this one wandered on for four rounds of invented lines.
-    "Append these lines to the end of post-edit-check-tmp/server.js: // alpha and // beta"
+    "Append these lines to the end of post-edit-check-tmp/server.js: // alpha and // beta",
+    // The comma after a path still ends its clause. Live, it was swallowed
+    // with the path, this went uncounted, and the file was overwritten.
+    "in battery-tmp/notes.txt, replace 'first note' with 'first note (edited)'"
   ]) {
     assert.equal(changesAskedFor(request), 1, request);
   }

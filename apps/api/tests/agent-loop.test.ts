@@ -2790,7 +2790,7 @@ test("write_file will not replace most of an existing file unless asked to", asy
     { ...context, request: "Append this exact line to the end of gut-guard/server.js: // x" }
   );
   assert.equal(refused.ok, false);
-  assert.match(refused.content, /server\.js has 40 lines, and this would replace all of them with 1\./);
+  assert.match(refused.content, /server\.js has 40 lines, and this would keep 0 of them\./);
   assert.match(refused.content, /use edit_file/);
   assert.equal(readFileSync(target, "utf8"), original, "nothing was written");
 

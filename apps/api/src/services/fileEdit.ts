@@ -158,37 +158,58 @@ export function placeholderIn(target: string, content: string): string | null {
   return null;
 }
 
-/** Lines in a piece of text, not counting the newline that ends the last one. */
-function lineCount(text: string): number {
-  return text.length === 0 ? 0 : text.replace(/\n$/, "").split("\n").length;
+/** A text's non-blank lines, trimmed, so re-indenting a line is not losing it. */
+function contentLines(text: string): string[] {
+  return text.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
-/** Words that ask for a whole file to be replaced rather than added to. */
+/** Words that ask for a whole file to be replaced or transformed, not added to. */
 const replaceWholeFile =
-  /\b(?:overwrite|rewrite|re-write|start (?:it )?over|from scratch|replace (?:the |its |all (?:of )?(?:the |its )?)?(?:whole |entire )?(?:file|contents?|everything|text|code)|clear|empty|wipe|reset|truncate|trim|shorten|cut down|strip|simplify|only (?:say|says|contain|contains|have|has|keep)|just (?:say|says|contain|contains|have|has)|contains? only|nothing but|(?:delete|remove) (?:everything|all|most))\b/i;
+  /\b(?:overwrite|rewrite|re-write|redo|regenerate|start (?:it )?over|from scratch|replace (?:the |its |all (?:of )?(?:the |its )?)?(?:whole |entire )?(?:file|contents?|everything|text|code)|clear|empty|wipe|reset|truncate|trim|shorten|cut down|strip|simplify|convert|translate|transform|reformat|format|prettify|beautify|minify|uppercase|lowercase|capitali[sz]e|sort|reorder|only (?:say|says|contain|contains|have|has|keep)|just (?:say|says|contain|contains|have|has)|contains? only|nothing but|(?:delete|remove) (?:everything|all|most))\b/i;
 
 /**
- * Whether writing `next` over `current` would throw most of a file away when
- * the request never asked for that.
+ * Whether writing `next` over `current` would throw away most of what the
+ * file says, when the request never asked for that.
  *
- * Watched live: asked to append one line to an app's 233-line server.js, the
- * model made the append with edit_file - then called write_file with
- * "\n// Additional line added\n" as the entire content, and the server was
- * gone. write_file is right for a new file, or for a rewrite someone asked
- * for; for anything else edit_file changes only what it names and cannot drop
- * the rest. So a write that keeps less than half of a file of ten lines or
- * more is refused, unless the request says in so many words to replace it.
+ * Watched live, twice. Asked to append one line to an app's 233-line
+ * server.js, the model made the append with edit_file - then called
+ * write_file with "\n// Additional line added\n" as the entire content, and
+ * the server was gone. Asked to replace one phrase in a two-line notes file,
+ * it made the replacement and then wrote "Notes for the battery project." over
+ * both lines. write_file is right for a new file, or for a rewrite or a
+ * transformation someone asked for; for anything else edit_file changes only
+ * what it names and cannot drop the rest.
+ *
+ * Measured by what survives, not by size: a write that reproduces the file
+ * with a change in it keeps nearly every line and goes through however long
+ * the file is, while one that keeps fewer than half of its lines is refused
+ * unless the request says in so many words to replace or transform it. Each
+ * line of the new text vouches for one line of the old, so a single "}" does
+ * not keep every closing brace in a source file. A one-line file is left
+ * alone: replacing a single line is an ordinary write.
  */
 export function replacesMostOf(
   current: string,
   next: string,
   request: string | undefined
-): { before: number; after: number } | null {
-  const before = lineCount(current);
-  const after = lineCount(next);
-  if (before < 10 || after * 2 >= before) return null;
+): { before: number; kept: number } | null {
+  const before = contentLines(current);
+  if (before.length < 2) return null;
+
+  const available = new Map<string, number>();
+  for (const line of contentLines(next)) available.set(line, (available.get(line) ?? 0) + 1);
+  let kept = 0;
+  for (const line of before) {
+    const left = available.get(line) ?? 0;
+    if (left > 0) {
+      kept += 1;
+      available.set(line, left - 1);
+    }
+  }
+
+  if (kept * 2 >= before.length) return null;
   if (replaceWholeFile.test(request ?? "")) return null;
-  return { before, after };
+  return { before: before.length, kept };
 }
 
 /**

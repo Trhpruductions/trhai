@@ -144,8 +144,33 @@ test("a write that would keep a line or two of a long file is caught", () => {
   // The live case: one line asked to be appended to a 233-line server.js, then
   // write_file with that line alone as the whole file.
   const shrink = replacesMostOf(serverFile, "\n// Additional line added\n", undefined);
-  assert.deepEqual(shrink, { before: 233, after: 2 });
+  assert.deepEqual(shrink, { before: 233, kept: 0 });
   assert.ok(replacesMostOf(serverFile, "<new_content>", "Append this exact line to the end of server.js: // x"));
+});
+
+test("a small file is protected too: what counts is what survives, not the size", () => {
+  // Live: one phrase replaced in a two-line notes file, then an invented line
+  // written over both.
+  assert.deepEqual(
+    replacesMostOf(
+      "first note (edited)\nsecond note\n",
+      "Notes for the battery project.",
+      "in battery-tmp/notes.txt, replace 'first note' with 'first note (edited)'"
+    ),
+    { before: 2, kept: 0 }
+  );
+});
+
+test("a write that reproduces the file with a change in it goes through", () => {
+  const changed = serverFile.replace("line 117;", "line 117; // tuned");
+  assert.equal(replacesMostOf(serverFile, changed, undefined), null);
+  // Re-indenting is not losing a line.
+  assert.equal(replacesMostOf("a\nb\nc\n", "  a\n  b\n  c\n", undefined), null);
+});
+
+test("one new line does not vouch for every copy of it in the old file", () => {
+  const braces = Array.from({ length: 12 }, () => "}").join("\n") + "\n";
+  assert.deepEqual(replacesMostOf(braces, "}\n", undefined), { before: 12, kept: 1 });
 });
 
 test("a rewrite the request asked for in so many words goes through", () => {
@@ -155,7 +180,11 @@ test("a rewrite the request asked for in so many words goes through", () => {
     "replace the contents of server.js with a hello world",
     "make notes.txt only say hi",
     "clear notes.txt",
-    "start over on server.js from scratch"
+    "start over on server.js from scratch",
+    // A transformation of the whole file, asked for.
+    "sort the lines in notes.txt",
+    "convert notes.txt to uppercase",
+    "translate notes.txt into French"
   ]) {
     assert.equal(replacesMostOf(serverFile, "hi\n", request), null, `should allow: ${request}`);
   }
@@ -165,8 +194,8 @@ test("a replacement of one passage is not a request to replace the file", () => 
   assert.ok(replacesMostOf(serverFile, "hi\n", "replace foo with bar in server.js"));
 });
 
-test("short files, and writes that keep half or more, are not second-guessed", () => {
-  assert.equal(replacesMostOf("a\nb\nc\n", "x\n", undefined), null, "under ten lines");
+test("one-line and empty files, and writes that keep half or more, are not second-guessed", () => {
+  assert.equal(replacesMostOf("hello\n", "goodbye\n", undefined), null, "a single line is an ordinary write");
   const twenty = Array.from({ length: 20 }, (_, index) => `${index}`).join("\n");
   const ten = Array.from({ length: 10 }, (_, index) => `${index}`).join("\n");
   assert.equal(replacesMostOf(twenty, ten, undefined), null, "half is kept");
