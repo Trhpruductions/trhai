@@ -139,7 +139,11 @@ test("a change asked for twice with the same arguments runs once", async () => {
   ]);
 
   try {
-    const result = await runAgent(configFor(baseUrl), "Create once.txt containing one.", context);
+    // Two files named, so the number of changes is left open. "Create once.txt
+    // containing one." is finished after its first write and offered no tools
+    // at all (see changesAskedFor) - the repeat is never even asked for there,
+    // which leaves this check, the one every other order relies on, untested.
+    const result = await runAgent(configFor(baseUrl), "Create once.txt and twice.txt containing one.", context);
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.deepEqual(result.toolsUsed.map((used) => used.name), ["write_file"], "the repeat is not run");
     const third = received[2]?.messages as Array<{ role: string; content: string }> | undefined;
