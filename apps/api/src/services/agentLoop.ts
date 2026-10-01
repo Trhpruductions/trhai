@@ -346,12 +346,26 @@ const mutatingTools = new Set([
  * suite is not this loop's to run. Three outcomes, three sentences - passed,
  * failed its checks, could not be run - and never one dressed as another.
  * Null means "nothing to verify here", not silence about a failure.
+ *
+ * Each sentence names the file. Seen live: the model wrote no closing text
+ * after an edit, so this line was the whole reply - and "Re-verified X after
+ * the edit" left the user to guess which edit. edit_file's own result is not
+ * repeated in replies (see mutatingTools), so this line must stand alone.
  */
-async function verifyAfterEdit(sessionId: string | undefined, project: string): Promise<string | null> {
+async function verifyAfterEdit(
+  sessionId: string | undefined,
+  project: string,
+  editedPath: string
+): Promise<string | null> {
   const dir = resolveInWorkspace(project);
   if (!dir || !existsSync(path.join(dir, "smoke.js"))) return null;
 
-  const verifying = beginEvent(sessionId, "verify", `Re-running ${project}'s own checks after the edit`);
+  // The file as it sits inside the app ("server.js", "public/app.js"), from
+  // whatever form the model gave the path in - workspace-relative or absolute.
+  const absolute = resolveInWorkspace(editedPath);
+  const file = absolute ? path.relative(dir, absolute).split(path.sep).join("/") : path.basename(editedPath);
+
+  const verifying = beginEvent(sessionId, "verify", `Re-running ${project}'s own checks after editing ${file}`);
   const verification = await verifyBuiltProject(project);
   endEvent(
     sessionId,
@@ -361,12 +375,36 @@ async function verifyAfterEdit(sessionId: string | undefined, project: string): 
   );
 
   if (!verification.ran) {
-    return `Could not re-verify ${project} after the edit: ${verification.reason}`;
+    return `Could not re-verify ${project} after editing ${file}: ${verification.reason}`;
   }
   if (!verification.passed) {
-    return `The edit broke ${project} - it failed its own checks:\n${verification.output}`;
+    return describeBrokenEdit(project, file, verification.output);
   }
-  return `Re-verified ${project} after the edit: ${verifiedDetail(verification.output)}`;
+  return `Re-verified ${project} after editing ${file}: ${verifiedDetail(verification.output)}`;
+}
+
+/**
+ * The sentence for an edit that broke an app, in terms a person can act on.
+ *
+ * smoke.js normally prints ok/FAIL lines, which summarize() turns into
+ * "17/19 checks passed; failed: ...". When the edit crashes the app before it
+ * answers, smoke.js dies on its own first request instead and its output is a
+ * stack trace - accurate, and unreadable as a reply. Seen live: a top-level
+ * throw appended to server.js was reported as forty lines of undici internals.
+ * That case is named for what it means, keeping the one line of the trace
+ * that says anything.
+ */
+function describeBrokenEdit(project: string, file: string, output: string): string {
+  if (/checks passed/.test(output)) {
+    return `Editing ${file} broke ${project} - it failed its own checks: ${output}`;
+  }
+  const errorLine = output.split("\n").map((line) => line.trim()).find((line) => /^[A-Za-z]*Error: /.test(line));
+  if (/fetch failed|ECONNREFUSED|ECONNRESET|socket hang up/i.test(output)) {
+    return `Editing ${file} broke ${project} - the app no longer starts, so its checks could not reach it`
+      + (errorLine ? ` (${errorLine})` : "") + ".";
+  }
+  return `Editing ${file} broke ${project} - it failed its own checks: `
+    + (errorLine ?? output.split("\n").slice(0, 3).join(" ").trim());
 }
 
 /**
@@ -1102,7 +1140,9 @@ export async function runAgent(
   // carried both - "I could not write that app... Nothing was written."
   // immediately followed by "Built \"Celsius\" in the workspace". The user is
   // left to guess which half is true, and the app did in fact build.
-  const mutationAttempts: Array<{ name: string; content: string; ok: boolean }> = [];
+  // `verifiedProject` marks a post-edit check report (see verifyAfterEdit), so
+  // a later check of the same app can replace it instead of sitting beside it.
+  const mutationAttempts: Array<{ name: string; content: string; ok: boolean; verifiedProject?: string }> = [];
   // Successful results of tools that only read, for the round-limit fallback
   // at the bottom of this function.
   const readResults: string[] = [];
@@ -1117,9 +1157,6 @@ export async function runAgent(
   // schedule, app or video in the same turn is never what was asked for.
   const oncePerTurn = new Set(["add_schedule", "build_app", "change_app", "make_video", "render_mockup"]);
   const madeThisTurn = new Set<string>();
-  // Built apps whose own checks have already been re-run this turn, so a turn
-  // that edits three files in one app verifies it once, after the first.
-  const verifiedProjects = new Set<string>();
 
   // How many times each exact call has actually been run, across every round
   // of this one request — not per round, since the failure this guards
@@ -1998,20 +2035,36 @@ export async function runAgent(
       }
       // A change to a built app is followed by that app's own checks, so the
       // reply carries proof the app still works - or the news that it does not
-      // - the way a build does. Once per app per turn (verifiedProjects).
+      // - the way a build does.
+      //
+      // After every change, not once per turn. Only one change runs per reply
+      // (changedThisRound), so a second edit to the same app always lands in a
+      // later round - and checking only after the first left that second edit
+      // unverified: the reply could say the app passed while the edit that
+      // followed broke it. The cost is bounded by the round limit.
       if (result.ok && result.path && (call.name === "edit_file" || call.name === "write_file")) {
         const project = projectForPath(result.path);
-        if (project && !verifiedProjects.has(project)) {
-          verifiedProjects.add(project);
-          const report = await verifyAfterEdit(context.sessionId, project);
-          if (report) {
-            // Surfaced verbatim like any mutation, and marked ok because the
-            // report itself is sound: a failed check is stated in its text and
-            // must never be dropped as "a failure beside a success" - that
-            // filter is for retried attempts, and this is not one.
-            mutationAttempts.push({ name: call.name, content: report, ok: true });
-            messages.push({ role: "tool", content: report });
+        const report = project ? await verifyAfterEdit(context.sessionId, project, result.path) : null;
+        if (project && report) {
+          // The newest check of an app replaces the one before it. Round one
+          // breaking the app and round two fixing it must read as fixed, not
+          // as both - the model still has the earlier report in its history,
+          // which is where it belongs.
+          for (let i = mutationAttempts.length - 1; i >= 0; i -= 1) {
+            if (mutationAttempts[i].verifiedProject === project) mutationAttempts.splice(i, 1);
           }
+          // Marked ok because the report itself is sound: a failed check is
+          // stated in its text and must never be dropped as "a failure beside
+          // a success" - that filter is for retried attempts, and this is not one.
+          mutationAttempts.push({ name: call.name, content: report, ok: true, verifiedProject: project });
+          // Folded into the edit's own result - one call, one result. Sent as a
+          // second tool message it read to the model as the result of a call it
+          // never made, and it kept making calls: live, "append this line to
+          // server.js" ended with an invented Express server.js written to the
+          // workspace root, twice. The edit's result is the message just pushed.
+          const last = messages[messages.length - 1];
+          if (last && last.role === "tool") last.content = `${last.content}\n\n${report}`;
+          else messages.push({ role: "tool", content: report });
         }
       }
       if (result.ok && !changesSomething(call.name)) readResults.push(result.content);
