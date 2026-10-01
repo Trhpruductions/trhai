@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBaseUrl, sessionId as resolveSessionId } from "../lib/api";
 import { applyResponseStyle } from "@ascend/shared";
 import { readStoredPersonality } from "../lib/personality";
+import { readActiveAgent } from "../lib/agents";
 
 // Conversation state, talking to the real local orchestrator — the same
 // service the rest of this monorepo already built, tested, and runs against
@@ -149,7 +150,13 @@ export function useAssistant() {
       const response = await fetch(`${apiBaseUrl}/v1/assist/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, sessionId: session.current, history, mode: "general" }),
+        // The active agent goes by id only; the API looks it up in the shared
+        // catalogue rather than taking a persona from the client. Read now, so
+        // a change in the settings rail applies to the very next message.
+        body: JSON.stringify({
+          message: text, sessionId: session.current, history, mode: "general",
+          agentId: readActiveAgent(window.localStorage)?.id
+        }),
         // Aborting closes the connection, which the API notices and uses to
         // stop the model. Without it, stopping would only hide the reply while
         // the machine carried on producing it.

@@ -99,6 +99,9 @@ export type ToolResult = {
   path?: string;
 };
 
+/** What the assistant needs to know about an active agent; see ToolContext.agent. */
+export type AgentLens = { name: string; role: string; description: string; focus: string };
+
 /**
  * Everything the tools need in order to be real.
  *
@@ -155,6 +158,14 @@ export type ToolContext = {
    * and falls back to the description when it does not.
    */
   request?: string;
+  /**
+   * The agent the user has made active, from the shared catalogue.
+   *
+   * A lens, not a capability: it changes what the assistant keeps in view and
+   * how it pitches its answer - the system prompt says so - and nothing about
+   * which tools exist or what they are allowed to do. Absent means no agent.
+   */
+  agent?: AgentLens;
   /**
    * The file this turn is about, when the request said "it" and the previous
    * turn had touched one. See resolveFilePronoun in activeProject.ts. The file

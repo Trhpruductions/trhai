@@ -1,5 +1,5 @@
 import type { LocalModelConfig } from "./localModel.js";
-import { availableTools, runTool, verifiedDetail, type ToolContext, type ToolCall } from "./agentTools.js";
+import { availableTools, runTool, verifiedDetail, type AgentLens, type ToolContext, type ToolCall } from "./agentTools.js";
 import { commandsArmed } from "./commandRunner.js";
 import { readStream, toLines } from "./streamReader.js";
 import { enterStage, stageForTool } from "./reasoningStage.js";
@@ -312,6 +312,27 @@ export const systemPrompt = [
   "",
   "Answer in plain prose. Be brief unless detail was asked for."
 ].join("\n");
+
+/**
+ * The paragraph an active agent adds to the system prompt.
+ *
+ * Agents existed only as suggestion chips: activating "Ada, Programmer" changed
+ * three buttons under the input and nothing about a single answer, which is
+ * the decorative card the catalogue's own design note says an agent must not
+ * be. This is the part that reaches the model. Its description goes in whole,
+ * because that is where the limits live - "Not a substitute for counsel",
+ * "Does not recommend investments" - and an agent that dropped them would be
+ * worse than none. Stated as emphasis on top of the rules above, never instead
+ * of them: the tools, the permission gates and the honesty rules are the same
+ * whichever agent is active.
+ */
+export function describeAgentLens(agent: AgentLens): string {
+  const role = agent.role.toLowerCase();
+  const article = /^[aeiou]/.test(role) ? "an" : "a";
+  return `For this conversation the user has asked you to work as ${agent.name}, ${article} ${role}. `
+    + `${agent.description} Keep in view: ${agent.focus} `
+    + "This is an emphasis, not a new set of rules: everything above still holds, and the tools are the same.";
+}
 
 /**
  * Tools that change something durable, as opposed to only looking something up.
@@ -1056,6 +1077,8 @@ export async function runAgent(
             + "work on any path on this machine, not only the workspace. A full path like C:/Users/... "
             + "or D:/... is fine to pass as given - do not refuse it and do not ask for access."
           : "")
+        // Last, so it reads as a lens on everything above rather than ahead of it.
+        + (context.agent ? `\n\n${describeAgentLens(context.agent)}` : "")
     },
     { role: "user", content: question }
   ];

@@ -4,6 +4,7 @@ import { isCodeWork } from "./machinePaths.js";
 import { pickAuthorModel } from "./appAuthor.js";
 import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
+import type { AgentLens } from "./agentTools.js";
 import type { RunningApp, StartResult } from "./appRunner.js";
 import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
@@ -53,6 +54,11 @@ export type OrchestratorInput = {
   forgottenFacts?: string[];
   /** The file "it" means this turn; see resolveFilePronoun. Set by the orchestrator. */
   impliedFile?: string;
+  /**
+   * The agent the user made active, already checked against the catalogue.
+   * Reaches the model as a lens on the system prompt; see describeAgentLens.
+   */
+  agent?: AgentLens;
   /**
    * Every memory in the session, for the forget flow. memoryContext is the
    * newest few, chosen for the model's prompt; a request to forget something
@@ -1597,6 +1603,7 @@ async function answerWithLocalModel(
     unattended: input.unattended,
     sessionId: input.sessionId,
     impliedFile: input.impliedFile,
+    agent: input.agent,
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history,
