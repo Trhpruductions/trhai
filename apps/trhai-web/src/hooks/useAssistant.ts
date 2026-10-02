@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiBaseUrl, sessionId as resolveSessionId } from "../lib/api";
+import { apiBaseUrl, requestHeaders, sessionId as resolveSessionId } from "../lib/api";
 import { applyAgentDisclaimer, applyResponseStyle } from "@ascend/shared";
 import { readStoredPersonality } from "../lib/personality";
 import { readActiveAgent } from "../lib/agents";
@@ -70,7 +70,8 @@ export function useAssistant() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${apiBaseUrl}/v1/assist/conversation?sessionId=${encodeURIComponent(session.current)}`)
+    // Signed in, the transcript is the account's, wherever it was last used.
+    fetch(`${apiBaseUrl}/v1/assist/conversation?sessionId=${encodeURIComponent(session.current)}`, { headers: requestHeaders() })
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
         const turns: Array<{ role: ChatRole; content: string; strategy?: string; model?: string }> =
@@ -109,7 +110,7 @@ export function useAssistant() {
     // one. Absent is the ordinary case for most turns, which stay "thinking"
     // the whole way through.
     const activityPoll = window.setInterval(() => {
-      fetch(`${apiBaseUrl}/v1/assist/activity?sessionId=${encodeURIComponent(session.current)}`)
+      fetch(`${apiBaseUrl}/v1/assist/activity?sessionId=${encodeURIComponent(session.current)}`, { headers: requestHeaders() })
         .then((response) => (response.ok ? response.json() : null))
         .then((payload) => {
           if (!stillCurrent()) return;
@@ -149,7 +150,7 @@ export function useAssistant() {
     try {
       const response = await fetch(`${apiBaseUrl}/v1/assist/stream`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: requestHeaders({ "Content-Type": "application/json" }),
         // The active agent goes by id only; the API looks it up in the shared
         // catalogue rather than taking a persona from the client. Read now, so
         // a change in the settings rail applies to the very next message.
@@ -339,7 +340,7 @@ export function useAssistant() {
     try {
       await fetch(`${apiBaseUrl}/v1/assist/conversation`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
+        headers: requestHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ sessionId: session.current })
       });
     } catch {
