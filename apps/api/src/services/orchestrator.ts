@@ -1766,6 +1766,11 @@ async function answerWithLocalModel(
     sessionId: input.sessionId,
     impliedFile: input.impliedFile,
     agent: input.agent,
+    // The same stand-ins the approval uses, so the check before a message is
+    // held sees what the send after it will. Without this a test's "a phone is
+    // linked" reached only the send, the check read the real machine, and the
+    // result depended on whether the PC running the suite had a phone linked.
+    ...(input.messaging ? { messaging: input.messaging } : {}),
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history,
