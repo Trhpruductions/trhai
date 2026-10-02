@@ -106,12 +106,21 @@ import {
   disarmCommands
 } from "./services/commandRunner.js";
 import {
+  fileFacts,
+  findByName,
+  listDirectory,
   listWorkspace,
   looksBinary,
+  maxDirectoryEntries,
   maxListedFiles,
+  newestChange,
   readWorkspaceFile,
+  resolveInWorkspace,
+  workspaceMedia,
+  workspaceRelative,
   workspaceRoot
 } from "./services/workspace.js";
+import { readAppManifest, searchFiles } from "./services/agentTools.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -1469,6 +1478,48 @@ export function createApp() {
     res.json({ data: { stopped: stopApp(project) }, traceId: "trace-local" });
   });
 
+  // Every app TRH AI has built, for the Code workspace: what it was asked to
+  // be, the changes made to it since, when its files last changed, and whether
+  // it is running - with the server's own recent output when it is. Read from
+  // disk each time, so an app built in another session is still listed.
+  app.get("/v1/apps/built", (_req, res) => {
+    const running = listRunningApps();
+    const apps = listBuiltApps().map((built) => {
+      const manifest = readAppManifest(built.name);
+      const live = running.find((entry) => entry.project === built.name);
+      return {
+        ...built,
+        title: manifest?.title || null,
+        request: manifest?.request ?? null,
+        changes: manifest?.changes ?? [],
+        modifiedAt: newestChange(built.name),
+        startedAt: live?.startedAt ?? null,
+        output: live?.output ?? []
+      };
+    });
+    res.json({ data: { apps }, traceId: "trace-local" });
+  });
+
+  // Delete an app's folder. Refused while it runs - stop it first - so a
+  // server is never left serving files that are being removed under it.
+  app.delete("/v1/apps/built/:name", (req, res) => {
+    const name = req.params.name;
+    const built = listBuiltApps().find((entry) => entry.name === name);
+    if (!built) {
+      res.status(404).json({ code: "NOT_FOUND", message: "There is no app by that name.", traceId: "trace-local" });
+      return;
+    }
+    if (built.running) {
+      res.status(409).json({ code: "RUNNING", message: "That app is running. Stop it first.", traceId: "trace-local" });
+      return;
+    }
+    if (!removeBuiltApp(name)) {
+      res.status(500).json({ code: "NOT_REMOVED", message: "Its folder could not be removed; something may still have its files open.", traceId: "trace-local" });
+      return;
+    }
+    res.status(204).end();
+  });
+
   // Command access: the switch, and what it has actually run.
   //
   // Deliberately a switch with a horizon rather than a permanent setting. A
@@ -1601,14 +1652,93 @@ export function createApp() {
     // Binary content is not sent at all: it is megabytes of noise that would
     // render as mojibake and make the file look corrupted.
     const binary = looksBinary(result.content);
+    // Its real size and date ride along, so a file opened from a search hit
+    // can say how big it is without the page guessing.
+    const facts = fileFacts(requested);
     res.json({
       data: {
         path: requested,
         content: binary ? "" : result.content,
         truncated: result.truncated,
-        binary
+        binary,
+        ...(facts ?? {})
       },
       traceId: "trace-local"
+    });
+  });
+
+  // One folder at a time, for the Files workspace - see listDirectory for why
+  // the walk above cannot serve a folder view. Same guard as every other path.
+  app.get("/v1/files/list", (req, res) => {
+    const requested = typeof req.query.path === "string" && req.query.path.trim() ? req.query.path : ".";
+    const listed = listDirectory(requested);
+    if (listed === null || listed.kind === "not-a-folder") {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: listed === null ? "That path is outside the workspace." : "That is a file, not a folder.",
+        traceId: "trace-local"
+      });
+      return;
+    }
+    if (listed.kind === "missing") {
+      res.status(404).json({ code: "NOT_FOUND", message: "There is no folder there.", traceId: "trace-local" });
+      return;
+    }
+    res.json({
+      data: { root: workspaceRoot(), path: requested, entries: listed.entries, truncated: listed.truncated, limit: maxDirectoryEntries },
+      traceId: "trace-local"
+    });
+  });
+
+  // Names that match and lines that match, under the workspace or one folder
+  // of it. The lines come from the same search the search_files tool runs.
+  app.get("/v1/files/search", (req, res) => {
+    const query = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 200) : "";
+    const requested = typeof req.query.path === "string" && req.query.path.trim() ? req.query.path : ".";
+    const target = resolveInWorkspace(requested);
+    if (!query || !target) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: !query ? "Say what to search for." : "That path is outside the workspace.",
+        traceId: "trace-local"
+      });
+      return;
+    }
+    const names = findByName(requested, query) ?? { entries: [], truncated: false };
+    const contents = searchFiles(target, query, null);
+    res.json({
+      data: {
+        query,
+        names: names.entries,
+        lines: contents.kind === "ok"
+          ? contents.matches.map((match) => ({ path: workspaceRelative(match.file), line: match.line, text: match.text }))
+          : [],
+        truncated: names.truncated || (contents.kind === "ok" && contents.truncated)
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  // A picture, a sound or a video from the workspace, for its preview. Media
+  // only - see workspaceMedia - and served so that even opened on its own it
+  // can run nothing: sandboxed, and its type never guessed from the bytes.
+  // Same-site, because the page showing it is on another port of this machine.
+  app.get("/v1/files/raw", (req, res) => {
+    const media = workspaceMedia(typeof req.query.path === "string" ? req.query.path : "");
+    if (!media.ok) {
+      res.status(media.status).json({
+        code: media.status === 404 ? "NOT_FOUND" : media.status === 415 ? "UNSUPPORTED_MEDIA_TYPE" : "INVALID_REQUEST",
+        message: media.reason,
+        traceId: "trace-local"
+      });
+      return;
+    }
+    res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-site");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.type(media.contentType);
+    res.sendFile(media.absolutePath, (error) => {
+      if (error && !res.headersSent) res.status(404).json({ code: "NOT_FOUND", message: "There is no file there.", traceId: "trace-local" });
     });
   });
 

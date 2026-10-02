@@ -50,6 +50,3 @@
 .os .field:focus-visible { border-color: var(--os-accent-line); box-shadow: 0 0 0 3px var(--os-accent-soft); }
 
 .os .chip { font: 500 var(--os-fs-2xs)/1.6 var(--os-font-mono); letter-spacing: 0.06em; }
-
-/* The work view brings its own two-pane layout; let it fill the workspace. */
-.os .os-files-host { min-height: 60vh; }

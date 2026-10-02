@@ -8,7 +8,7 @@
 export type ViewId =
   | "home" | "chat" | "voice"
   | "memory" | "files"
-  | "tasks" | "tools"
+  | "code" | "tasks" | "tools"
   | "system" | "network" | "settings";
 
 export type ViewGroup = "Command" | "Knowledge" | "Work" | "System";
@@ -43,8 +43,12 @@ export const views: ViewDef[] = [
     icon: "M5 6h14v12H5zM9 3v3M12 3v3M15 3v3M9 18v3M12 18v3M15 18v3M9 10h6M9 13h6", keywords: "remember facts documents knowledge notes"
   },
   {
-    id: "files", label: "Files", group: "Knowledge", blurb: "The workspace on this PC, and what TRH AI has built in it.",
-    icon: "M4 7a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z", keywords: "workspace folder documents terminal"
+    id: "files", label: "Files", group: "Knowledge", blurb: "TRH AI's workspace on this PC - browse it, search it, preview anything in it.",
+    icon: "M4 7a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z", keywords: "workspace folder documents browse search preview images video"
+  },
+  {
+    id: "code", label: "Code", group: "Work", blurb: "The apps TRH AI has built - run them, see them live, read their code - and every command it has run.",
+    icon: "M8.5 8 4.5 12l4 4M15.5 8l4 4-4 4M13.5 5.5l-3 13", keywords: "apps projects build run preview terminal commands code"
   },
   {
     id: "tasks", label: "Tasks", group: "Work", blurb: "What TRH AI is working on, what runs on a schedule, everything it has finished - and your to-dos.",
@@ -82,4 +86,25 @@ export function viewById(id: ViewId): ViewDef {
 export function viewFromHash(hash: string): ViewId {
   const id = hash.replace(/^#\/?/, "").split(/[/?]/)[0].toLowerCase();
   return isViewId(id) ? id : "home";
+}
+
+/**
+ * What an address says within its view - "#files/app2/src" is the app2/src
+ * folder - or null. Decoded once; the view decides what it means.
+ */
+export function detailFromHash(hash: string): string | null {
+  const rest = hash.replace(/^#\/?/, "");
+  const slash = rest.indexOf("/");
+  if (slash === -1) return null;
+  try {
+    const detail = decodeURIComponent(rest.slice(slash + 1));
+    return detail || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The address for a view, and something within it. */
+export function hashFor(view: ViewId, detail?: string | null): string {
+  return detail ? `${view}/${encodeURIComponent(detail)}` : view;
 }
