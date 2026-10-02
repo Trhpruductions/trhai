@@ -98,6 +98,15 @@ test("a request opening with an unlisted verb reaches the model instead of \"Got
   });
 });
 
+test("a unit conversion is answered exactly, without asking the model", async () => {
+  await withFakeModel("The result of 12.5 * 3 + 7 is 44.5.", async (received) => {
+    const result = await runAssistantOrchestrator({ mode: "general", userMessage: "convert 5 miles to kilometers" });
+    assert.equal(result.strategy, "conversion");
+    assert.equal(result.assistantMessage, "5 miles is 8.047 kilometers.");
+    assert.equal(received.length, 0, "the model was not asked");
+  });
+});
+
 test("saving a document goes straight to the store, off the model", async () => {
   const saved: Array<{ title: string; body: string }> = [];
   const result = await runAssistantOrchestrator({

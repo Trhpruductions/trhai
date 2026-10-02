@@ -4,6 +4,13 @@ import {
   changesAskedFor, classifyIntent, clarificationFor, isExplanatoryQuestion, looksArithmetic, mentionsScheduling, mentionsVideo
 } from "../src/services/actionIntent.js";
 
+test("a unit conversion gets the calculator", () => {
+  // Without it the model invented a convert_units tool instead.
+  assert.equal(looksArithmetic("convert 5 miles to kilometers"), true);
+  assert.equal(looksArithmetic("how much is 70 fahrenheit in celsius"), true);
+  assert.equal(looksArithmetic("convert this file to markdown"), false, "no number, nothing to calculate");
+});
+
 test("a request about a video is recognised, and nothing else is", () => {
   for (const request of ["make a short video about our launch", "render an explainer clip", "animate the logo", "a motion graphics intro"]) {
     assert.equal(mentionsVideo(request), true, request);

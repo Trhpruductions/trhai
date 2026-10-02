@@ -247,8 +247,10 @@ export function looksArithmetic(message: string): boolean {
   // 12 + 7, 3*4, 10/2, 2^8, 15% of 80 (the "of" form is below), (12.5 * 3)
   const operatorBetweenNumbers = /\d\s*[+\-*/×÷^]\s*\d/;
   // "what is 15 percent of 80", "add 12 and 30", "the sum of 4 and 9"
+  // And a unit conversion: "convert 5 miles to kilometers" is a multiplication
+  // the model gets roughly right on its own and exactly right with the tool.
   const arithmeticWords =
-    /\b(?:plus|minus|times|multiplied|divided|percent|per cent|% of|sum of|total of|add|subtract|multiply|divide|squared|cubed|square root|to the power|calculate|compute|how much is)\b/;
+    /\b(?:plus|minus|times|multiplied|divided|percent|per cent|% of|sum of|total of|add|subtract|multiply|divide|squared|cubed|square root|to the power|calculate|compute|how much is|convert|in (?:km|kilometers|kilometres|miles|meters|metres|feet|inches|pounds|kilograms|kg|lbs|celsius|fahrenheit))\b/;
 
   return operatorBetweenNumbers.test(text) || arithmeticWords.test(text);
 }

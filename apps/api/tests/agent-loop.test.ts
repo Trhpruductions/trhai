@@ -1324,9 +1324,32 @@ test("argument order alone does not make two calls look different", async () => 
   // {from, to} and {to, from} name the same call. If the signature were
   // sensitive to key order, this would never trigger the guard at all, and
   // all three attempts below would run for real.
+  //
+  // search_memory rather than a date tool: days_between is pure now (see
+  // pureTools), so its reordered repeat is answered from the first result and
+  // never reaches this guard - covered by the test after this one.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("search_memory", { query: "billing", limit: 3 }),
+    toolCall("search_memory", { limit: 3, query: "billing" }),
+    toolCall("search_memory", { limit: 3, query: "billing" }),
+    answer("Your billing database is Postgres 16.")
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what is my billing setup", context);
+    assert.equal(result.ok, true);
+    // Two real attempts despite the keys being reordered on the second and
+    // third calls; the third is refused as a repeat of the second, not run
+    // as though it were a different question.
+    if (result.ok) assert.equal(result.toolsUsed.length, 2);
+  } finally {
+    server.close();
+  }
+});
+
+test("a pure tool's repeat with its arguments reordered is answered, not run", async () => {
   const { server, baseUrl } = await fakeModel([
     toolCall("days_between", { from: "2026-01-01", to: "2026-01-10" }),
-    toolCall("days_between", { to: "2026-01-10", from: "2026-01-01" }),
     toolCall("days_between", { to: "2026-01-10", from: "2026-01-01" }),
     answer("That's 9 days.")
   ]);
@@ -1334,10 +1357,7 @@ test("argument order alone does not make two calls look different", async () => 
   try {
     const result = await runAgent(configFor(baseUrl), "how many days between those dates", context);
     assert.equal(result.ok, true);
-    // Two real attempts despite the keys being reordered on the second and
-    // third calls; the third is refused as a repeat of the second, not run
-    // as though it were a different question.
-    if (result.ok) assert.equal(result.toolsUsed.length, 2);
+    if (result.ok) assert.equal(result.toolsUsed.length, 1);
   } finally {
     server.close();
   }
@@ -2958,4 +2978,152 @@ test("an agent's lens names it, keeps its limits whole, and changes no rules", (
   assert.match(lens, /not a new set of rules/);
   // "an" before a vowel, whatever role a future catalogue entry has.
   assert.match(describeAgentLens({ ...ada, name: "Ed", role: "Engineer" }), /Ed, an engineer\./);
+});
+
+// ---- Everyday failures from a live battery ---------------------------------------
+
+test("a call to a tool that does not exist is answered, not dropped as silence", async () => {
+  // Verbatim: "convert 5 miles to kilometers" got only this call, was judged
+  // an empty reply on every installed model, and ended as a planning template.
+  const { server, baseUrl, received } = await fakeModel([
+    answer('{"name": "convert_units", "arguments": {"value": 5, "from_unit": "miles", "to_unit": "kilometers"}}'),
+    answer("5 miles is about 8.05 kilometers.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "convert 5 miles to kilometers", context);
+    assert.equal(result.ok, true, "not handed on as an empty reply");
+    if (!result.ok) return;
+    assert.match(result.text, /8\.05 kilometers/);
+    const told = ((received[1] as Sent).messages ?? []).at(-1)?.content ?? "";
+    assert.match(told, /There is no tool called convert_units/);
+  } finally {
+    server.close();
+  }
+});
+
+test("an invented call carrying only input is corrected, not shown as the answer", async () => {
+  // Verbatim second round of "convert 70 fahrenheit to celsius": calculate had
+  // already returned 21.11, and the reply shown was the bare expression.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("calculate", { expression: "(70 - 32) * 5 / 9" }),
+    answer('{"name": "calculate_expression", "arguments": {"expression": "((70 - 32) * 5) / 9"}}'),
+    answer("70°F is about 21.1°C.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "convert 70 fahrenheit to celsius", context);
+    assert.ok(result.ok, "the loop should answer");
+    if (!result.ok) return;
+    assert.match(result.text, /21\.1°C/);
+    assert.doesNotMatch(result.text, /\(\(70 - 32\)/);
+  } finally {
+    server.close();
+  }
+});
+
+test("a switched-off tool asked for as the whole reply is explained, not echoed", async () => {
+  const wasArmed = commandsArmed();
+  disarmCommands();
+  const { server, baseUrl } = await fakeModel([
+    answer('{"name": "run_command", "arguments": {"command": "echo hello"}}')
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "print hello from the shell", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.match(result.text, /Machine control is switched off, so nothing was run/);
+    assert.notEqual(result.text.trim(), "echo hello", "the command is not the answer");
+  } finally {
+    if (wasArmed) armCommands();
+    server.close();
+  }
+});
+
+test("run_app with no project starts the app the request names", async () => {
+  // Live: the model called run_app with no arguments, and with nothing worked
+  // on this session the tool gave up while calculator sat in the workspace.
+  const started: string[] = [];
+  const appsContext: ToolContext = {
+    ...context,
+    listApps: () => [
+      { name: "calculator", running: false, url: null },
+      { name: "tip-calculator", running: false, url: null }
+    ],
+    launchApp: async (project) => {
+      started.push(project);
+      return {
+        ok: true,
+        alreadyRunning: false,
+        app: { project, port: 4321, url: "http://localhost:4321", pid: 1, startedAt: at, output: [] }
+      };
+    }
+  };
+  const plain = await runTool({ name: "run_app", arguments: {} }, { ...appsContext, request: "run the calculator app" });
+  assert.equal(plain.ok, true, plain.content);
+  assert.match(plain.content, /"calculator" is now running at http:\/\/localhost:4321/);
+  // The closer name wins, the same as for an explicit one.
+  await runTool({ name: "run_app", arguments: {} }, { ...appsContext, request: "start the tip calculator" });
+  assert.deepEqual(started, ["calculator", "tip-calculator"]);
+});
+
+test("stop_app with no project stops the running app the request names", async () => {
+  const stopped: string[] = [];
+  const result = await runTool({ name: "stop_app", arguments: {} }, {
+    ...context,
+    request: "stop the calculator app",
+    runningApps: () => [{ project: "calculator", port: 4321, url: "http://localhost:4321", pid: 1, startedAt: at, output: [] }],
+    stopApp: (project) => { stopped.push(project); return true; }
+  });
+  assert.equal(result.ok, true, result.content);
+  assert.deepEqual(stopped, ["calculator"]);
+});
+
+test("a pure tool asked the same thing again hands back its answer instead of running", async () => {
+  // Live: calculate("5 * 1.60934") three times over, and then - told to try a
+  // different approach - an unrelated sum, answered as the conversion.
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("calculate", { expression: "5 * 1.60934" }),
+    toolCall("calculate", { expression: "5 * 1.60934" }),
+    answer("5 miles is about 8.05 kilometers.")
+  ]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "convert 5 miles to kilometers", context);
+    assert.ok(result.ok, "the loop should answer");
+    if (!result.ok) return;
+    assert.equal(result.toolsUsed.length, 1, "the repeat did not run");
+    const tools = ((received[2] as Sent).messages ?? []).filter((m) => m.role === "tool");
+    assert.match(
+      tools.at(-1)?.content ?? "",
+      /calculate already answered exactly this: 5 \* 1\.60934 = 8\.0467\. Answer the user with it now/
+    );
+    assert.match(result.text, /8\.05 kilometers/);
+  } finally {
+    server.close();
+  }
+});
+
+test("a sum is offered the calculator and not the shell", async () => {
+  // Live: with both on offer, "convert 5 miles to kilometers" ran `bc` three
+  // times on a machine that does not have it.
+  const wasArmed = commandsArmed();
+  armCommands();
+  try {
+    const offered = await offeredFor("convert 5 miles to kilometers");
+    assert.ok(offered.includes("calculate"));
+    assert.ok(!offered.includes("run_command"));
+    // A question the machine answers keeps it.
+    assert.ok((await offeredFor("how much free space is on drive D?")).includes("run_command"));
+  } finally {
+    if (!wasArmed) disarmCommands();
+  }
+});
+
+test("a request that only reads is not offered the document writers", async () => {
+  // Live: "read ... and summarize it" read the file and then saved a summary
+  // document nobody asked for.
+  const reading = await offeredFor("read recipe-box/README.md and summarize it in two sentences");
+  for (const writer of ["write_document", "update_document", "delete_document"]) {
+    assert.ok(!reading.includes(writer), `${writer} was offered`);
+  }
+  // Asked to keep one, it still can.
+  assert.ok((await offeredFor("read notes.txt and save a summary as a document called Notes Summary")).includes("write_document"));
 });

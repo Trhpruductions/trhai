@@ -451,16 +451,24 @@ test("several invented calls, one per line, are unwrapped into the answer they c
   assert.equal(unwrapPseudoReply(`${three}\n{"port": 4000}`), `${three}\n{"port": 4000}`);
 });
 
-test("an invented call with a single string argument is that string, whatever its key", async () => {
+test("an invented call carrying something said is unwrapped; one carrying input is not", async () => {
   const { unwrapPseudoReply } = await import("../src/services/agentLoop.js");
   // Verbatim: dropped as an empty reply before.
   assert.equal(
     unwrapPseudoReply('{"name": "tell_fact", "arguments": {"fact": "Octopuses have three hearts."}}'),
     "Octopuses have three hearts."
   );
-  // Two strings is not one sentence to pick; left alone.
+  // Verbatim: this answered "convert 70 fahrenheit to celsius" with the
+  // expression and no result. An expression is input, not the answer.
+  const expression = '{"name": "calculate_expression", "arguments": {"expression": "((70 - 32) * 5) / 9"}}';
+  assert.equal(unwrapPseudoReply(expression), expression);
+  // Nothing recognisable as said; left alone.
   const two = '{"name": "x", "arguments": {"a": "one", "b": "two"}}';
   assert.equal(unwrapPseudoReply(two), two);
+  // And a call to one of the app's own tools is a call, not a reply: with
+  // machine control off this answered "echo hello".
+  const real = '{"name": "run_command", "arguments": {"command": "echo hello"}}';
+  assert.equal(unwrapPseudoReply(real), real);
 });
 
 test("a weekday schedule skips the weekend", async () => {

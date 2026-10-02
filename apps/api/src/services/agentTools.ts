@@ -368,7 +368,10 @@ export const toolDefinitions: ToolDefinition[] = [
       parameters: {
         type: "object",
         properties: {
-          expression: { type: "string", description: "The expression, for example (12.5 * 3) + 7." }
+          // No worked example. The one that was here, "(12.5 * 3) + 7", was
+          // copied in as the expression for "convert 5 miles to kilometers"
+          // and answered as "The result of 12.5 * 3 + 7 is 44.5."
+          expression: { type: "string", description: "The expression to work out, built from the numbers in the question." }
         },
         required: ["expression"]
       }
@@ -995,6 +998,14 @@ const clockTools = new Set(["shift_time"]);
 const scheduleTools = new Set(["add_schedule"]);
 /** Offered only when the request is about a video; see mentionsVideo. */
 const videoTools = new Set(["make_video"]);
+/**
+ * The knowledge-base writers, withheld from a request that only reads unless
+ * it asks for something to be kept. machineChangingTools already stops a read
+ * from writing files; these were the gap. Live, "read recipe-box/README.md
+ * and summarize it in two sentences" read the file and then saved a new
+ * document, "Summary of recipe-box/README.md", that nobody asked for.
+ */
+const documentWritingTools = new Set(["write_document", "update_document", "delete_document"]);
 /** Offered only when the request mentions the web or asks for a lookup; see mentionsWeb and wantsWebSearch. */
 const webTools = new Set(["fetch_url", "web_search"]);
 /** Offered only when the request asks to see/show/render something; see wantsRendering. */
@@ -1007,7 +1018,7 @@ export function availableTools(
   options: {
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
-    schedules?: boolean; video?: boolean;
+    schedules?: boolean; video?: boolean; documents?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1025,6 +1036,7 @@ export function availableTools(
   const allowMemory = options.memory ?? true;
   const allowSchedules = options.schedules ?? true;
   const allowVideo = options.video ?? true;
+  const allowDocumentWrites = options.documents ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1042,6 +1054,7 @@ export function availableTools(
     if (!allowMemory && memoryWritingTools.has(name)) return false;
     if (!allowSchedules && scheduleTools.has(name)) return false;
     if (!allowVideo && videoTools.has(name)) return false;
+    if (!allowDocumentWrites && documentWritingTools.has(name)) return false;
     return true;
   });
 }
@@ -1117,21 +1130,43 @@ function matchProjectName(candidates: string[], project: string): string {
   return project;
 }
 
+/** The folders of the apps running right now. */
+function runningAppNames(context: ToolContext): string[] {
+  return (context.runningApps?.() ?? []).map((app) => app.project);
+}
+
+/** Every built app, running or not; the running list when no built-app list is wired. */
+function builtAppNames(context: ToolContext): string[] {
+  return context.listApps ? context.listApps().map((app) => app.name) : runningAppNames(context);
+}
+
 /** Resolve a loose reference against the RUNNING apps (for stop_app). */
 function resolveRunningProject(context: ToolContext, project: string): string {
-  return matchProjectName((context.runningApps?.() ?? []).map((app) => app.project), project);
+  return matchProjectName(runningAppNames(context), project);
 }
 
 /**
  * Resolve a loose reference against every BUILT app, running or not (for
- * run_app) - so "run the todo app" starts a stopped app by name. Falls back to
- * the running list when no built-app list is wired.
+ * run_app) - so "run the todo app" starts a stopped app by name.
  */
 function resolveBuiltProject(context: ToolContext, project: string): string {
-  const built = context.listApps
-    ? context.listApps().map((app) => app.name)
-    : (context.runningApps?.() ?? []).map((app) => app.project);
-  return matchProjectName(built, project);
+  return matchProjectName(builtAppNames(context), project);
+}
+
+/**
+ * The app the user's own words name, when a call left the project out.
+ *
+ * "run the calculator app" reached run_app with no arguments at all - the
+ * model dropped the one word that mattered - and with nothing worked on this
+ * session the tool gave up ("none has been built or worked on this session")
+ * while calculator sat in the workspace. The request names it, which is enough;
+ * the same loose matching as an explicit name, so "the tip calculator" is
+ * tip-calculator, not calculator. Null unless it lands on a real app.
+ */
+function appNamedIn(candidates: string[], request: string | undefined): string | null {
+  if (!request || candidates.length === 0) return null;
+  const match = matchProjectName(candidates, request);
+  return candidates.includes(match) ? match : null;
 }
 
 const searchSkipped = new Set(["node_modules", ".git", "dist", ".next", "build", "coverage", ".cache"]);
@@ -2104,7 +2139,9 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "run_app": {
-      const asked = requireString(call.arguments.project)?.replace(/[\\/]+$/, "") ?? activeProject(context.sessionId);
+      const asked = requireString(call.arguments.project)?.replace(/[\\/]+$/, "")
+        ?? appNamedIn(builtAppNames(context), context.request)
+        ?? activeProject(context.sessionId);
       if (!asked) {
         return {
           ok: false,
@@ -2128,7 +2165,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "stop_app": {
-      const asked = requireString(call.arguments.project)?.replace(/[\\/]+$/, "");
+      const asked = requireString(call.arguments.project)?.replace(/[\\/]+$/, "")
+        ?? appNamedIn(runningAppNames(context), context.request);
       if (!asked) return { ok: false, content: "stop_app needs the app's folder name." };
       if (!context.stopApp) return { ok: false, content: "Apps cannot be stopped here." };
       // "stop the todo app" rarely names the folder verbatim; resolve it against

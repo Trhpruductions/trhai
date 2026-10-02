@@ -209,6 +209,13 @@ export function admitsNothingChanged(text: string): boolean {
  */
 const maxIdenticalAttempts = 2;
 
+/**
+ * Tools whose answer depends only on their arguments, so asking again can
+ * never tell the model anything new. current_datetime is not one - the clock
+ * moves - and nor is anything that reads the disk or the web.
+ */
+const pureTools = new Set(["calculate", "days_between", "shift_date", "shift_time"]);
+
 /** Whether a reply already asks the user to confirm something. */
 function mentionsConfirmation(text: string): boolean {
   const lower = text.toLowerCase();
@@ -874,13 +881,23 @@ export function unwrapPseudoReply(text: string): string {
 }
 
 /**
- * The sentence inside one pseudo-call, or null when it is not one.
+ * Argument names that carry something said to the user, as opposed to
+ * something handed to a tool.
  *
- * The usual keys first. Failing those, an argument list holding exactly one
- * string is that string, whatever the model called it: {"name": "tell_fact",
- * "arguments": {"fact": "Octopuses have three hearts..."}} is a fact, and was
- * dropped as an empty reply.
+ * {"name": "tell_fact", "arguments": {"fact": "Octopuses have three hearts"}}
+ * is a fact, and was dropped as an empty reply. But "any lone string" was too
+ * loose: {"name": "calculate_expression", "arguments": {"expression": "((70 -
+ * 32) * 5) / 9"}} answered "convert 70 fahrenheit to celsius" with the
+ * expression and no result. An expression, a path, a command or a name is
+ * input, never the answer.
  */
+const spokenArgumentKeys = [
+  "text", "message", "content", "reply", "response", "answer", "output",
+  "fact", "facts", "tip", "tips", "advice", "suggestion", "suggestions", "idea", "ideas",
+  "summary", "explanation", "result", "note", "notes", "greeting", "joke", "story", "poem", "quote"
+];
+
+/** The sentence inside one pseudo-call, or null when it is not one; see spokenArgumentKeys. */
 function sentenceFromPseudoCall(candidate: string): string | null {
   let parsed: unknown;
   try {
@@ -891,15 +908,18 @@ function sentenceFromPseudoCall(candidate: string): string | null {
   if (!parsed || typeof parsed !== "object") return null;
   const record = parsed as { name?: unknown; arguments?: unknown; parameters?: unknown };
   if (typeof record.name !== "string") return null;
+  // A call to one of this app's own tools is a call, not a reply in costume -
+  // one that is switched off is explained by gatedToolCall instead. Read as a
+  // reply, {"name":"run_command","arguments":{"command":"echo hello"}} with
+  // machine control off answered "echo hello".
+  if (allToolNames().includes(record.name)) return null;
   const args = (record.arguments ?? record.parameters) as Record<string, unknown> | undefined;
   if (!args || typeof args !== "object") return null;
 
-  for (const key of ["text", "message", "content", "reply", "response", "answer", "output"]) {
+  for (const key of spokenArgumentKeys) {
     const value = args[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }
-  const values = Object.values(args);
-  if (values.length === 1 && typeof values[0] === "string" && values[0].trim()) return values[0].trim();
   return null;
 }
 
@@ -935,6 +955,13 @@ export function looksLikeBareToolCall(text: string): boolean {
     if (!nameMatch || !advertisedToolNames().includes(nameMatch[1])) return false;
     return /"(?:arguments|parameters)"\s*:/.test(trimmed);
   }
+}
+
+/** The name in a reply that is nothing but a call to a tool this app does not have, or null. */
+export function inventedToolName(text: string): string | null {
+  if (!looksLikeBareToolCall(text)) return null;
+  const name = /^\s*(?:```(?:json)?\s*)?\{\s*"name"\s*:\s*"([^"]+)"/i.exec(text)?.[1];
+  return name && !allToolNames().includes(name) ? name : null;
 }
 
 export function parseTextToolCalls(text: string, known = advertisedToolNames()): ToolCall[] {
@@ -1177,6 +1204,7 @@ export async function runAgent(
   let correctedRetrieval = false;
   let correctedUnwrittenOrder = false;
   let correctedNarratedCommand = false;
+  let correctedInventedTool = false;
 
   // Fixed for the turn: what was asked does not change as the loop runs.
   const askedAQuestion = isExplanatoryQuestion(question);
@@ -1326,6 +1354,8 @@ export async function runAgent(
   // against is the model retrying the same call in a *later* round after the
   // *earlier* round already told it there was nothing there.
   const attemptsBySignature = new Map<string, number>();
+  // What each pure tool returned, by call signature; see pureTools.
+  const pureResults = new Map<string, string>();
 
   // Whether fetch_url has failed this turn. A telling-it-plainly rule in the
   // system prompt did not hold: refused for reaching this machine's own
@@ -1406,7 +1436,11 @@ export async function runAgent(
       || /\b(?:save|store|write|put|export|dump|record)\b.{0,40}\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i.test(question);
 
     const offeredTools = offerTools
-      ? availableTools(commandsArmed() && !unattended, {
+      // A sum is not a job for the shell. Asked to "convert 5 miles to
+      // kilometers" with calculate on offer, the model ran `bc` three times -
+      // a POSIX calculator this Windows machine does not have - and answered
+      // with advice to install it. An order to run something keeps the shell.
+      ? availableTools(commandsArmed() && !unattended && !(looksArithmetic(question) && !intent.action), {
         // A request to look does not get the tools that change things. Asked
         // to read one file, the model read it and then wrote three - see
         // machineChangingTools in agentTools. A request to STOP an app loses
@@ -1447,6 +1481,9 @@ export async function runAgent(
         // and a video only when it mentions one.
         schedules: mentionsScheduling(question),
         video: mentionsVideo(question),
+        // A request that only reads does not write to the knowledge base
+        // either, unless it asks for something to be kept.
+        documents: intent.kind !== "read" || /\b(?:save|store|keep|record)\b/i.test(question),
         // A request about a knowledge document, with no file named, does not get
         // the workspace file writers — so "save a document called X" reaches
         // write_document instead of writing an X.txt file. Nor does a pure web
@@ -1598,6 +1635,41 @@ export async function runAgent(
         // written reply: see doneSoFar.
         const done = reportWhatWasDone(typeof response.model === "string" ? response.model : config.model);
         if (done) return done;
+        // A switched-off tool asked for as the whole reply: the reason it did
+        // not run is the answer, the same as for one written inside prose.
+        const gatedCall = gatedToolCall(rawText);
+        if (gatedCall) {
+          return {
+            ok: true,
+            text: explainGatedTool(gatedCall),
+            model: typeof response.model === "string" ? response.model : config.model,
+            toolsUsed
+          };
+        }
+        // A call to a tool that does not exist is not an empty reply either.
+        // Asked to "convert 5 miles to kilometers", the model answered with
+        // nothing but {"name": "convert_units", ...}: stripped as a bare call,
+        // that read as silence, every installed model was tried in turn, and
+        // the user got the generic four-step planning template. Told once that
+        // there is no such tool, the model answers the question itself.
+        // The question and what the tools already said go with it: told only
+        // "answer the question yourself", the model lost the thread and asked
+        // which expression it should evaluate - with calculate's 21.11 for
+        // "convert 70 fahrenheit to celsius" already in hand.
+        const invented = inventedToolName(rawText);
+        if (invented && !correctedInventedTool) {
+          correctedInventedTool = true;
+          spendCorrection();
+          const found = readResults.slice(-2).map((result) => result.length > 300 ? `${result.slice(0, 300)}...` : result);
+          messages.push({ role: "assistant", content: rawText });
+          messages.push({
+            role: "user",
+            content: `There is no tool called ${invented}, so nothing ran. Answer this yourself, in plain `
+              + `sentences - no tool call, no JSON: "${question}"`
+              + (found.length > 0 ? ` What the tools already returned: ${found.join(" | ")}` : "")
+          });
+          continue;
+        }
         return requested.length > 0 || written.length > 0
           ? { ok: false, reason: "The assistant kept searching without reaching an answer.", toolsUsed }
           // Marked unusable so the caller moves on to the next installed
@@ -2130,6 +2202,23 @@ export async function runAgent(
       const signature = callSignature(call);
       const attempts = attemptsBySignature.get(signature) ?? 0;
 
+      // A pure tool asked the same thing twice has already answered it: the
+      // same sum gives the same result. Watched live: calculate("5 * 1.60934")
+      // returned 8.0467, the model asked again, and again - and, told to "try
+      // a genuinely different approach", calculated an unrelated expression
+      // and answered with that. For these, the earlier result is handed back
+      // with the one instruction that fits.
+      const earlier = pureResults.get(signature);
+      if (earlier !== undefined) {
+        toolActivity.markBlocked();
+        messages.push({
+          role: "tool",
+          content: `${call.name} already answered exactly this: ${earlier.trim().replace(/\.*$/, "")}. `
+            + "Answer the user with it now - no more tool calls."
+        });
+        continue;
+      }
+
       if (attempts >= maxIdenticalAttempts) {
         // A valid call was produced and refused before running. Not "none":
         // the model did ask for a tool, and the terminal message says it did
@@ -2297,6 +2386,7 @@ export async function runAgent(
         }
       }
       if (result.ok && !changesSomething(call.name)) readResults.push(result.content);
+      if (result.ok && pureTools.has(call.name)) pureResults.set(callSignature(call), result.content);
     }
   }
 
