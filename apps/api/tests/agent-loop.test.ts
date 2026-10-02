@@ -13,7 +13,7 @@ import path from "node:path";
 const testWorkspace = mkdtempSync(path.join(tmpdir(), "ascend-agent-"));
 process.env.ASCEND_WORKSPACE = testWorkspace;
 import {
-  describeToolCall, echoesAReport, executionKindForTool, explainGatedTool, gatedToolCall,
+  describeAgentLens, describeToolCall, echoesAReport, executionKindForTool, explainGatedTool, gatedToolCall,
   isBareRefusal, looksLikeBareToolCall, looksLikeRawToolCalls, parseTextToolCalls, runAgent, systemPrompt,
   wroteWhatWasAsked
 } from "../src/services/agentLoop.js";
@@ -2913,4 +2913,49 @@ test("a request that is neither an order nor a statement gets nothing that write
 test("a request about a video still gets make_video", async () => {
   assert.ok((await offeredFor("make a short video about our product launch")).includes("make_video"));
   assert.ok(!(await offeredFor("make a todo list app")).includes("make_video"), "and a build does not");
+});
+
+// ---- Agents -----------------------------------------------------------------------
+
+const ada = {
+  name: "Ada",
+  role: "Programmer",
+  description: "Reads the workspace, proposes changes, and explains what a failure is actually telling you.",
+  focus: "Files, failures, and the smallest change that fixes them."
+};
+
+test("an active agent reaches the model as the last paragraph of the system prompt", async () => {
+  const { server, baseUrl, received } = await fakeModel([answer("Start from the failing assertion.")]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "how should I approach a flaky test?", { ...context, agent: ada });
+    assert.ok(result.ok, "the loop should answer");
+    const system = ((received[0] as Sent).messages ?? [])[0];
+    assert.equal(system?.role, "system");
+    assert.ok(system?.content.endsWith(describeAgentLens(ada)), "the lens comes after everything else");
+    // The rules it sits on top of are all still there.
+    assert.match(system?.content ?? "", /Rules you do not break/);
+  } finally {
+    server.close();
+  }
+});
+
+test("with no agent active, the system prompt carries no persona", async () => {
+  const { server, baseUrl, received } = await fakeModel([answer("Start from the failing assertion.")]);
+  try {
+    await runAgent(configFor(baseUrl), "how should I approach a flaky test?", context);
+    const system = ((received[0] as Sent).messages ?? [])[0];
+    assert.doesNotMatch(system?.content ?? "", /work as|Keep in view/);
+  } finally {
+    server.close();
+  }
+});
+
+test("an agent's lens names it, keeps its limits whole, and changes no rules", () => {
+  const lens = describeAgentLens(ada);
+  assert.match(lens, /work as Ada, a programmer\./);
+  assert.match(lens, /explains what a failure is actually telling you\./);
+  assert.match(lens, /Keep in view: Files, failures, and the smallest change that fixes them\./);
+  assert.match(lens, /not a new set of rules/);
+  // "an" before a vowel, whatever role a future catalogue entry has.
+  assert.match(describeAgentLens({ ...ada, name: "Ed", role: "Engineer" }), /Ed, an engineer\./);
 });

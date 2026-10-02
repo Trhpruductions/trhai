@@ -26,10 +26,11 @@ import { emptySeries, normalisedToPeak, pushSample, type Series } from "../lib/t
 import { readStoredPersonality, writeStoredPersonality } from "../lib/personality";
 import { defaultAccent, readStoredAccent, writeStoredAccent, type Accent } from "../lib/theme";
 import {
-  activeAgent, defaultPersonality, personalityById, readMarketplaceState, readFlow,
-  speakableText, type PersonalityId
+  defaultPersonality, personalityById, readFlow,
+  speakableText, type Agent, type PersonalityId
 } from "@ascend/shared";
-import { marketplaceStorageKey } from "../lib/agents";
+import { chooseAgent, readActiveAgent } from "../lib/agents";
+import { AgentPicker } from "../components/AgentPicker";
 import "./dash.css";
 import "./trhai.css";
 
@@ -234,6 +235,9 @@ export default function DashboardPage() {
   // applied the real one to <html> before this renders, so nothing flashes.
   const [accent, setAccent] = useState<Accent>(defaultAccent);
   const [, setSuggestions] = useState<string[]>([]);
+  // The agent TRHAI is working as, if any. Hydrated from storage below, like
+  // the personality; the request reads storage itself at send time.
+  const [agent, setAgent] = useState<Agent | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   // Which replies were already on disk at open, so a restored answer does
@@ -300,7 +304,8 @@ export default function DashboardPage() {
     setPersonalityId(storedId);
     setAccent(readStoredAccent(window.localStorage));
     const chosen = personalityById(storedId);
-    const installed = activeAgent(readMarketplaceState(window.localStorage, marketplaceStorageKey));
+    const installed = readActiveAgent(window.localStorage);
+    setAgent(installed);
     // The agent and personality are no longer displayed here - the card that
     // showed them went with the surfaces. Both still take effect: the prompts
     // below come from whichever is active, and useAssistant reads the stored
@@ -1012,7 +1017,11 @@ export default function DashboardPage() {
                   ref={inputRef}
                   className="trh-ask-field"
                   value={draft}
-                  placeholder={busy ? "TRHAI is working…" : "Type a command or question..."}
+                  // The active agent, named where you type, so a change in how
+                  // answers are pitched is never a mystery set three panels away.
+                  placeholder={busy
+                    ? "TRHAI is working…"
+                    : agent ? `Ask ${agent.name} (${agent.role.toLowerCase()})...` : "Type a command or question..."}
                   aria-label="Type a command or question"
                   onFocus={() => setAttentive(true)}
                   onBlur={() => setAttentive(false)}
@@ -1231,8 +1240,16 @@ export default function DashboardPage() {
                     onChange={(id) => {
                       setPersonalityId(id);
                       writeStoredPersonality(window.localStorage, id);
-                      const installed = activeAgent(readMarketplaceState(window.localStorage, marketplaceStorageKey));
+                      const installed = readActiveAgent(window.localStorage);
                       setSuggestions(installed?.suggestions ?? personalityById(id).suggestions ?? []);
+                    }}
+                  />
+                  <AgentPicker
+                    active={agent}
+                    onChange={(id) => {
+                      const next = chooseAgent(window.localStorage, id);
+                      setAgent(next);
+                      setSuggestions(next?.suggestions ?? personalityById(personalityId).suggestions ?? []);
                     }}
                   />
                 </>
