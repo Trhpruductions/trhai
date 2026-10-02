@@ -1,4 +1,4 @@
-import { contextWindow, modelOptions, type LocalModelConfig } from "./localModel.js";
+import { contextWindow, modelOptions, noReplyWithin, replyTooLong, type LocalModelConfig } from "./localModel.js";
 import { recordContextUse } from "./contextUse.js";
 import { estimateTokens, fitPromptToWindow, fitToolResult, promptBudgetTokens, requestTokens } from "./contextBudget.js";
 import { sendingTools } from "./messaging.js";
@@ -696,6 +696,8 @@ type ChatResponse = {
     tool_calls?: Array<{ function?: { name?: unknown; arguments?: unknown } }>;
   };
   model?: unknown;
+  /** "stop" when the model finished; "length" when the reply limit cut it off. */
+  done_reason?: unknown;
 };
 
 /** The useful sentence out of an error body, without the stack of allocator noise. */
@@ -1545,6 +1547,8 @@ export async function runAgent(
     };
   };
   const stoppedMidway = "The local model stopped responding before it wrote a reply. The lines above are what was actually done.";
+  const ranPastTheLimit = "The local model's reply after that ran past the length limit without finishing. "
+    + "The lines above are what was actually done.";
   // What each change this turn reported, so a call that would write one of
   // those reports into a file can be recognised. See echoesAReport.
   const changeReports: string[] = [];
@@ -1826,7 +1830,8 @@ export async function runAgent(
             role: "assistant",
             content: streamed.content,
             ...(streamed.toolCalls ? { tool_calls: streamed.toolCalls } : {})
-          }
+          },
+          ...(streamed.doneReason ? { done_reason: streamed.doneReason } : {})
         } as ChatResponse;
       } else {
         response = await raw.json() as ChatResponse;
@@ -1844,10 +1849,25 @@ export async function runAgent(
       const early = reportWhatWasDone(config.model, stoppedMidway);
       if (early) return early;
 
-      const detail = error instanceof Error && error.name === "AbortError"
-        ? `it did not reply within ${Math.round(config.timeoutMs / 1000)}s`
-        : "the request failed";
-      return { ok: false, reason: `Local model unavailable: ${detail}.`, toolsUsed };
+      return {
+        ok: false,
+        reason: error instanceof Error && error.name === "AbortError"
+          ? noReplyWithin(config)
+          : "Local model unavailable: the request failed.",
+        toolsUsed
+      };
+    }
+
+    // Cut off at the reply limit, not finished (see replyLimit). None of it is
+    // used: a tool call stopped mid-argument would write half a file, and
+    // anything else is the start of an answer that never ended. Not handed to
+    // another model either - this one already spent a whole window on it, and
+    // the next would start over. A change made earlier in the turn still
+    // stands as the answer, as it does when the model stalls.
+    if (response.done_reason === "length") {
+      const early = reportWhatWasDone(config.model, ranPastTheLimit);
+      if (early) return early;
+      return { ok: false, reason: replyTooLong(config), toolsUsed };
     }
 
     // Tool calls are not honoured on the final round. A model can return them

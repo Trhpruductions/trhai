@@ -74,14 +74,69 @@ export function contextWindow(config: Pick<LocalModelConfig, "contextTokens">): 
 }
 
 /**
+ * The longest a single reply may be, in tokens: one context window.
+ *
+ * Without a limit, a model that does not stop is stopped only by the timeout.
+ * On 2 October qwen2.5:3b, asked for "a short checklist, eight items, for
+ * reviewing a pull request", filled the 16,384-token window after about 12,900
+ * tokens of reply, threw half of the window away to keep going ("slot context
+ * shift" in Ollama's log), and was still writing - past 13,000 tokens - when
+ * the request gave up at 180 s. The task was then recorded as having had no
+ * model to run it.
+ *
+ * Not lower, because the app accepts replies far longer than it usually gets.
+ * The longest reply to end on its own in Ollama's log on this PC, across 1,948
+ * of them from 12 September to 2 October, was 1,198 tokens, and the largest
+ * thing ever asked for in one reply is a whole application (see authorPrompt),
+ * which qwen2.5-coder writes in about thirty seconds. But a tool call carries
+ * a whole file in its arguments: appAuthor accepts a file of up to 64 KB,
+ * which is 17,000 to 22,000 tokens of code by estimateTokens, and write_file
+ * up to 500 KB. A cap below the window would cut off a file the app would
+ * have written, so the window, not any of those limits, is the bound.
+ *
+ * Not higher, because a reply as long as the window has pushed everything
+ * before it out of the model's view, the instructions and the question
+ * included. What it writes after that continues its own text; it is no
+ * longer answering anything.
+ *
+ * Taken from the window rather than fixed, so raising OLLAMA_NUM_CTX for
+ * longer work raises this with it. A reply stopped here comes back with
+ * done_reason "length" and is reported as one that ran too long (see
+ * replyTooLong), never as an answer.
+ */
+export function replyLimit(config: Pick<LocalModelConfig, "contextTokens">): number {
+  return contextWindow(config);
+}
+
+/**
  * The options sent with every request to the model.
  *
  * The same on every call, so the model is not reloaded between them: Ollama
  * restarts a model whose window changes, and a different window for the agent
- * and for app authoring would reload it on every switch.
+ * and for app authoring would reload it on every switch. The reply limit would
+ * not - measured, a request with a different num_predict found the model still
+ * loaded, in 3 ms - but it is the same everywhere regardless.
  */
-export function modelOptions(config: Pick<LocalModelConfig, "contextTokens">): { num_ctx: number } {
-  return { num_ctx: contextWindow(config) };
+export function modelOptions(config: Pick<LocalModelConfig, "contextTokens">): { num_ctx: number; num_predict: number } {
+  return { num_ctx: contextWindow(config), num_predict: replyLimit(config) };
+}
+
+/**
+ * Why a request was given up on: no reply in the time it was allowed.
+ *
+ * Not "unavailable", which is what this used to say. The model was installed,
+ * loaded and still writing when the time ran out, and "Local model
+ * unavailable" sent anyone reading it looking for a model that was there.
+ */
+export function noReplyWithin(config: Pick<LocalModelConfig, "model" | "timeoutMs">): string {
+  const allowed = config.timeoutMs >= 1000 ? `${Math.round(config.timeoutMs / 1000)} s` : `${config.timeoutMs} ms`;
+  return `${config.model} did not reply within ${allowed}.`;
+}
+
+/** Why a reply stopped by replyLimit is not used: it ran on and never finished. */
+export function replyTooLong(config: Pick<LocalModelConfig, "model" | "contextTokens">): string {
+  return `The reply from ${config.model} ran past the length limit `
+    + `(${replyLimit(config).toLocaleString("en-US")} tokens) without finishing.`;
 }
 
 export function readLocalModelConfig(env: NodeJS.ProcessEnv = process.env): LocalModelConfig {
@@ -334,7 +389,13 @@ export async function generate(
       return { ok: false, reason: `Ollama answered ${response.status}.` };
     }
 
-    const payload = await response.json() as { response?: unknown; model?: unknown };
+    const payload = await response.json() as { response?: unknown; model?: unknown; done_reason?: unknown };
+    // Cut off at replyLimit rather than finished. An answer that stops
+    // mid-sentence is not an answer, and for app authoring it is worse: a file
+    // cut off mid-line can still pass for a whole one.
+    if (payload.done_reason === "length") {
+      return { ok: false, reason: replyTooLong(config) };
+    }
     const text = typeof payload.response === "string" ? payload.response.trim() : "";
     if (!text) {
       return { ok: false, reason: "The local model returned an empty reply." };
@@ -346,9 +407,11 @@ export async function generate(
       model: typeof payload.model === "string" ? payload.model : config.model
     };
   } catch (error) {
-    const detail = error instanceof Error && error.name === "AbortError"
-      ? `it did not reply within ${Math.round(config.timeoutMs / 1000)}s`
-      : "the request failed";
-    return { ok: false, reason: `Local model unavailable: ${detail}.` };
+    return {
+      ok: false,
+      reason: error instanceof Error && error.name === "AbortError"
+        ? noReplyWithin(config)
+        : "Local model unavailable: the request failed."
+    };
   }
 }

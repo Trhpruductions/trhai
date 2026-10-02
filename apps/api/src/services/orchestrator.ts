@@ -546,7 +546,7 @@ export async function runAssistantOrchestrator(
       });
     }
 
-    const generated = await runTrackedTask(input.sessionId, attemptStartedAt, () => answerWithLocalModel(
+    const attempt = await runTrackedTask(input.sessionId, attemptStartedAt, () => answerWithLocalModel(
       { ...input, userMessage: effectiveMessage, ...(impliedFile ? { impliedFile: impliedFile.file } : {}) },
       known,
       question,
@@ -554,6 +554,7 @@ export async function runAssistantOrchestrator(
       // was asked about. An approval does not become a standing permission.
       approving ? new Set([approving.tool]) : undefined
     ));
+    const generated = attempt.ok ? attempt : null;
 
     // The gate refused something. Hold the offer open so the user's "yes"
     // has a specific action to attach to, rather than being read as blanket
@@ -567,18 +568,22 @@ export async function runAssistantOrchestrator(
     }
 
     if (input.sessionId) {
-      const ended = updateTask(input.sessionId, generated
+      const ended = updateTask(input.sessionId, attempt.ok
         ? {
           status: "succeeded",
           // Names only: the task store is a record of what ran, not the
           // source of a user-facing label.
-          toolsUsed: generated.toolsUsed.map((used) => used.name),
-          lastResult: generated.text
+          toolsUsed: attempt.toolsUsed.map((used) => used.name),
+          lastResult: attempt.text
         }
-        // No local model to ask. The work did not fail on its merits — it never
-        // ran — so it stays resumable and says why, rather than being recorded
-        // as a failure or quietly dropped.
-        : { status: "blocked", error: "No local model was available to run this." });
+        // What actually happened, which the Task center shows as the reason.
+        // This was "No local model was available to run this" for every
+        // failure - including a model that was installed, loaded, and still
+        // writing when the time ran out. Blocked when the work never ran (no
+        // model could take it, or it was stopped); failed when a model took it
+        // and came back without an answer. Resumable either way, rather than
+        // quietly dropped.
+        : { status: attempt.kind === "failed" ? "failed" : "blocked", error: attempt.reason });
       if (ended) recordFinishedTask(input.sessionId, ended, stepsSince(input.sessionId, attemptStartedAt));
     }
 
@@ -601,9 +606,14 @@ export async function runAssistantOrchestrator(
     // came back as a four-step deploy checklist, because "release" reads as a
     // deploy task and the plan is the composer's model-unavailable fallback.
     // The search needs the model to drive it, so say plainly it could not run.
-    if (!generated && isPlan && wantsWebSearch(effectiveMessage)) {
-      const text = "I couldn't run that web search just now - the local model that drives it isn't "
-        + "available. Nothing was changed, and no plan was made. Try again in a moment.";
+    // "Isn't available" only when that is what happened: a model that timed
+    // out, or ran past its length limit, was there.
+    if (!attempt.ok && isPlan && wantsWebSearch(effectiveMessage)) {
+      const text = attempt.kind === "unavailable"
+        ? "I couldn't run that web search just now - the local model that drives it isn't "
+          + "available. Nothing was changed, and no plan was made. Try again in a moment."
+        : `I couldn't finish that web search. ${attempt.reason} Nothing was changed, and no plan was made. `
+          + "Try again in a moment.";
       return {
         model: "memory",
         assistantMessage: text,
@@ -1855,7 +1865,35 @@ function estimateTokens(value: string): number {
 }
 
 /**
- * Ask a local model, or return null if there is not one to ask.
+ * What asking the local model came to: an answer, or why there was none.
+ *
+ * The why used to be thrown away - this returned null whatever happened, and
+ * the caller recorded every null as "No local model was available". A model
+ * that was installed and loaded and then ran until the timeout was filed
+ * under the same words as a machine with no model at all.
+ */
+type LocalModelAttempt =
+  | {
+    ok: true;
+    text: string;
+    model: string;
+    toolsUsed: ToolOutcome[];
+    awaitingConfirmation?: { tool: string; arguments: Record<string, unknown> };
+  }
+  | {
+    ok: false;
+    /** What happened, in a sentence. The task keeps it as its error. */
+    reason: string;
+    /**
+     * "unavailable": no model could take the work - none answering, none
+     * installed, none that would load. "stopped": the turn was stopped before
+     * it finished. "failed": a model took it and came back without an answer.
+     */
+    kind: "unavailable" | "stopped" | "failed";
+  };
+
+/**
+ * Ask a local model, or say why that could not produce an answer.
  *
  * Availability is checked per request rather than cached. A user starts Ollama
  * after the API, or stops it mid-session, and a cached "unavailable" would keep
@@ -1873,16 +1911,11 @@ async function answerWithLocalModel(
   askAs?: string,
   /** Tool names the user authorised this turn; see the permission ladder. */
   confirmedActions?: ReadonlySet<string>
-): Promise<{
-  text: string;
-  model: string;
-  toolsUsed: ToolOutcome[];
-  awaitingConfirmation?: { tool: string; arguments: Record<string, unknown> };
-} | null> {
+): Promise<LocalModelAttempt> {
   // The conversation's own model when it has one; the usual choice otherwise.
   const config = withChosenModel(readLocalModelConfig(), input.model);
   const availability = await checkAvailability(config);
-  if (!availability.available) return null;
+  if (!availability.available) return { ok: false, kind: "unavailable", reason: availability.reason };
 
   const { sessionId } = input;
   const onToolStart = sessionId ? (tool: string) => setActivity(sessionId, tool) : undefined;
@@ -1931,6 +1964,8 @@ async function answerWithLocalModel(
     ? [coder, ...ordinary.filter((name) => name !== coder)]
     : ordinary;
   const attempted: string[] = [];
+  // Why the last model that could not be used was not, for when none could.
+  let lastUnusable = "";
 
   for (const model of candidates) {
     attempted.push(model);
@@ -1994,6 +2029,7 @@ async function answerWithLocalModel(
 
     if (result.ok) {
       return {
+        ok: true,
         text: result.text,
         model: `ollama/${result.model}`,
         toolsUsed: result.toolsUsed,
@@ -2001,10 +2037,15 @@ async function answerWithLocalModel(
       };
     }
 
+    // Stopped on purpose. Nothing failed, and no other model is asked to
+    // start it again.
+    if (result.stopped) return { ok: false, kind: "stopped", reason: "Stopped before it finished." };
+
     // Only a model that could not be loaded, or that produced nothing at all,
     // is worth replacing. One that loaded and answered badly will answer
     // badly again, and trying every installed model against it just makes the
-    // user wait.
+    // user wait. A model that timed out or ran past its length limit is one
+    // of those: it was asked, and it did not come back with an answer.
     //
     // Logged either way. This used to return null in silence, which meant a
     // model failing mid-conversation was invisible: the caller fell back to a
@@ -2012,7 +2053,7 @@ async function answerWithLocalModel(
     // anywhere said the model had been asked and had failed.
     if (!result.modelUnusable) {
       console.warn(`[assist] ${model} could not answer: ${result.reason}`);
-      return null;
+      return { ok: false, kind: "failed", reason: result.reason };
     }
     // Never once something has changed. The next model starts the request
     // from the beginning, so it would make the same change a second time -
@@ -2021,15 +2062,18 @@ async function answerWithLocalModel(
     // answers with what was done in this case; this holds even if it stops.
     if (result.toolsUsed.some((used) => used.ok && changesSomething(used.name))) {
       console.warn(`[assist] ${model} unusable after it changed something, so no other model is tried: ${result.reason}`);
-      return null;
+      return { ok: false, kind: "failed", reason: result.reason };
     }
     console.warn(`[assist] ${model} unusable: ${result.reason}`);
+    lastUnusable = result.reason;
   }
 
-  if (attempted.length > 0) {
-    console.error(`[assist] no local model could be loaded; tried ${attempted.join(", ")}`);
-  }
-
-  return null;
+  if (attempted.length === 0) return { ok: false, kind: "unavailable", reason: "No local model is installed." };
+  console.error(`[assist] no local model could be loaded; tried ${attempted.join(", ")}`);
+  return {
+    ok: false,
+    kind: "unavailable",
+    reason: `None of the installed models could take it (tried ${attempted.join(", ")}). ${lastUnusable}`
+  };
 }
 

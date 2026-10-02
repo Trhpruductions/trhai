@@ -10,8 +10,11 @@ import {
   generate,
   minimumContextTokens,
   modelOptions,
+  noReplyWithin,
   pickModel,
   readLocalModelConfig,
+  replyLimit,
+  replyTooLong,
   type LocalModelConfig, orderedCandidates } from "../src/services/localModel.js";
 
 /**
@@ -85,7 +88,24 @@ test("the context window can be set, but never below what the prompt needs", () 
   // Not a number at all is ignored rather than sent to the model as NaN.
   assert.equal(read("lots"), defaultContextTokens);
   assert.equal(read("0"), defaultContextTokens);
-  assert.deepEqual(modelOptions({ contextTokens: 20000.7 }), { num_ctx: 20000 });
+  assert.deepEqual(modelOptions({ contextTokens: 20000.7 }), { num_ctx: 20000, num_predict: 20000 });
+});
+
+test("a reply may be as long as the window, and no longer", () => {
+  // Not below it: the app accepts a 64 KB file from the model, which is more
+  // tokens than the window holds. Not above it: by then the question has been
+  // pushed out of the model's view. See replyLimit.
+  assert.equal(replyLimit({}), defaultContextTokens);
+  assert.equal(replyLimit({ contextTokens: 32768 }), 32768, "a larger window allows a longer reply");
+  assert.equal(replyLimit({ contextTokens: 4096 }), minimumContextTokens, "and follows the window's own floor");
+  assert.equal(modelOptions({}).num_predict, modelOptions({}).num_ctx);
+});
+
+test("a timeout and a cut-off reply are each said as what happened", () => {
+  assert.equal(noReplyWithin({ model: "qwen2.5:3b", timeoutMs: 180000 }), "qwen2.5:3b did not reply within 180 s.");
+  assert.equal(noReplyWithin({ model: "qwen2.5:3b", timeoutMs: 300 }), "qwen2.5:3b did not reply within 300 ms.");
+  assert.equal(replyTooLong({ model: "qwen2.5:3b" }),
+    "The reply from qwen2.5:3b ran past the length limit (16,384 tokens) without finishing.");
 });
 
 test("no server at all is reported as unavailable, not as an error", async () => {
@@ -150,12 +170,14 @@ test("a server with nothing pulled says how to pull it", async () => {
 test("a generated answer comes back with the model that produced it", async () => {
   const { server, baseUrl } = await fakeOllama((url, body) => {
     assert.equal(url, "/api/generate");
-    const request = body as { model: string; stream: boolean; prompt: string; options?: { num_ctx?: number } };
+    const request = body as { model: string; stream: boolean; prompt: string; options?: { num_ctx?: number; num_predict?: number } };
     assert.equal(request.stream, false);
     assert.match(request.prompt, /Question: What is the capital of France\?/);
     // The same window as the agent's requests, so switching between them does
     // not make Ollama reload the model.
     assert.equal(request.options?.num_ctx, defaultContextTokens);
+    // And the same reply limit: authoring and summaries go this way too.
+    assert.equal(request.options?.num_predict, defaultContextTokens);
     return { status: 200, payload: { model: "llama3.2:latest", response: "  Paris.  " } };
   });
 
@@ -182,6 +204,31 @@ test("an empty reply is a failure, not an empty answer", async () => {
   }
 });
 
+test("a reply cut off at the length limit is a failure that says so, not a shorter answer", async () => {
+  // For app authoring a cut-off reply is worse than a short one: the last file
+  // stops mid-line and can still pass for a whole one. The same words twice,
+  // so what decides is Ollama's done_reason.
+  const words = "=== FILE: README.md\n# Snake\n\nUse the arrow keys to";
+  let doneReason = "length";
+  const { server, baseUrl } = await fakeOllama(() => ({
+    status: 200, payload: { model: "llama3.2:latest", response: words, done: true, done_reason: doneReason }
+  }));
+
+  try {
+    const cut = await generate(configFor(baseUrl), { question: "anything", context: [], rawPrompt: "write an app" });
+    assert.equal(cut.ok, false);
+    if (cut.ok) return;
+    assert.equal(cut.reason, "The reply from llama3.2 ran past the length limit (16,384 tokens) without finishing.");
+
+    doneReason = "stop";
+    const finished = await generate(configFor(baseUrl), { question: "anything", context: [], rawPrompt: "write an app" });
+    assert.equal(finished.ok, true);
+    if (finished.ok) assert.equal(finished.text, words);
+  } finally {
+    server.close();
+  }
+});
+
 test("a server that never replies gives up rather than hanging the request", async () => {
   const { server, baseUrl } = await fakeOllama(() => "hang");
 
@@ -189,7 +236,8 @@ test("a server that never replies gives up rather than hanging the request", asy
     const result = await generate(configFor(baseUrl, { timeoutMs: 300 }), { question: "anything", context: [] });
     assert.equal(result.ok, false);
     if (result.ok) return;
-    assert.match(result.reason, /did not reply/);
+    // Said as what happened: the model was there and did not answer in time.
+    assert.equal(result.reason, "llama3.2 did not reply within 300 ms.");
   } finally {
     server.close();
   }

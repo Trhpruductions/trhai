@@ -1281,6 +1281,77 @@ test("a configured window is used, and one too small to hold the prompt is raise
   }
 });
 
+// The reply limit. With none, a model that did not stop was stopped only by
+// the timeout: qwen2.5:3b, asked for an eight-item checklist, wrote past
+// 13,000 tokens and was then reported as no model at all. See replyLimit.
+
+test("every round caps the reply at the window, and a configured window moves the cap with it", async () => {
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("current_datetime", {}),
+    answer("It is Monday."),
+    answer("Hello.")
+  ]);
+
+  try {
+    await runAgent(configFor(baseUrl), "what day is it today?", context);
+    await runAgent({ ...configFor(baseUrl), contextTokens: 32768 }, "hello", context);
+
+    const caps = (received as Array<{ options?: { num_predict?: number } }>).map((request) => request.options?.num_predict);
+    assert.deepEqual(caps, [defaultContextTokens, defaultContextTokens, 32768], "each round, not only the first");
+  } finally {
+    server.close();
+  }
+});
+
+test("a reply cut off at the length limit is reported as too long, never as the answer", async () => {
+  // The same words twice, once cut off and once finished, so what decides is
+  // Ollama's done_reason and nothing in the text.
+  const words = "1. Read the description.\n2. Run the tests.\n3. Read the diff.";
+  const { server, baseUrl, received } = await fakeModel([
+    { message: { content: words }, done_reason: "length" },
+    { message: { content: words }, done_reason: "stop" }
+  ]);
+  const request = "Write a short checklist, eight items, for reviewing a pull request.";
+
+  try {
+    const cut = await runAgent(configFor(baseUrl), request, context);
+    assert.equal(received.length, 1, "asked once - a cut-off reply is not followed by another round");
+    assert.equal(cut.ok, false);
+    if (cut.ok) return;
+    assert.equal(cut.reason, "The reply from llama3.2 ran past the length limit (16,384 tokens) without finishing.");
+    assert.notEqual(cut.modelUnusable, true, "not handed to another model, which would start it over");
+    assert.notEqual(cut.stopped, true, "and not mistaken for the user stopping it");
+
+    const finished = await runAgent(configFor(baseUrl), request, context);
+    assert.equal(finished.ok, true, "the same reply, finished, is the answer");
+    if (!finished.ok) return;
+    assert.match(finished.text, /Read the description/);
+  } finally {
+    server.close();
+  }
+});
+
+test("a change made before a reply ran past the length limit still stands as the answer", async () => {
+  // Reported as a failure, the turn would go to the next installed model,
+  // which would make the change again.
+  const { server, baseUrl } = await fakeModel([
+    toolCall("write_file", { path: "limit-check.txt", content: "capped\n" }),
+    { message: { content: "Done. I also want to" }, done_reason: "length" }
+  ]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "create limit-check.txt saying capped", context);
+    assert.equal(result.ok, true, result.ok ? "" : result.reason);
+    if (!result.ok) return;
+    assert.match(result.text, /Wrote .*limit-check\.txt/);
+    assert.match(result.text, /ran past the length limit without finishing/);
+    assert.doesNotMatch(result.text, /I also want to/, "nothing of the cut-off reply is shown");
+    assert.equal(readFileSync(path.join(testWorkspace, "limit-check.txt"), "utf8"), "capped\n");
+  } finally {
+    server.close();
+  }
+});
+
 // Anti-repeat protection.
 //
 // Caught live: asked a capability question with nothing to search for, the
