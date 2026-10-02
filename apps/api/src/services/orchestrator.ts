@@ -12,7 +12,7 @@ import type { RunningApp, StartResult } from "./appRunner.js";
 import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
 import { isContinuationRequest, looksLikeScheduleRequest } from "./requestAnalysis.js";
-import { planProject } from "@ascend/shared";
+import { asksAboutTheScreen, planProject } from "@ascend/shared";
 import { classifyIntent, wantsToStopAnApp, wantsWebSearch } from "./actionIntent.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
@@ -657,6 +657,10 @@ async function resolveSendMessage(
   return null;
 }
 
+export const screenNotShared = "I can only see your screen when a picture of it comes with your message. "
+  + "In the TRH AI app, ask again or press **SCREEN** and it's shared for that one question - looked at on this PC, "
+  + "never saved. You can also attach a screenshot with **VISION**.";
+
 /**
  * A message that came with images, answered by the vision model.
  *
@@ -668,8 +672,14 @@ async function resolveSendMessage(
  */
 async function resolveImages(input: OrchestratorInput): Promise<OrchestratorResult | null> {
   const images = input.images ?? [];
-  if (images.length === 0) return null;
   const question = input.userMessage;
+  // A question about the screen with no picture of it. The web client shares
+  // the screen before sending one of these, so this is a client that cannot -
+  // and the chat model, asked anyway, would describe a screen it never saw.
+  if (images.length === 0 && asksAboutTheScreen(question)) {
+    return { ...deterministicResult(question, screenNotShared, "vision"), model: "memory" };
+  }
+  if (images.length === 0) return null;
   const look = input.vision ?? ((shown: VisionImage[], asked: string) => lookAtImages(shown, asked, readLocalModelConfig()));
   if (input.sessionId) setActivity(input.sessionId, "look_at_image");
   const seen = await look(images, question);
@@ -1806,6 +1816,9 @@ async function answerWithLocalModel(
     // linked" reached only the send, the check read the real machine, and the
     // result depended on whether the PC running the suite had a phone linked.
     ...(input.messaging ? { messaging: input.messaging } : {}),
+    // And the same vision model the images route uses, so look_at_image in
+    // the loop sees what a test's stand-in sees rather than the real Ollama.
+    ...(input.vision ? { vision: input.vision } : {}),
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history,
