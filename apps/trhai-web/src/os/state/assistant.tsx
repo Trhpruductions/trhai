@@ -116,6 +116,9 @@ type ConversationsApi = {
   pinConversation: (id: string, pinned: boolean) => Promise<boolean>;
   archiveConversation: (id: string, archived: boolean) => Promise<boolean>;
   deleteConversation: (id: string) => Promise<void>;
+  /** The model answering the open conversation; null means the usual one. */
+  conversationModel: string | null;
+  chooseModel: (model: string | null) => void;
 };
 
 const AssistantContext = createContext<AssistantApi | null>(null);
@@ -130,7 +133,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const {
     messages, status, restored, send, stop, clear, regenerate,
     conversationId, conversations, loadConversations, newConversation, openConversation,
-    renameConversation, pinConversation, archiveConversation, deleteConversation
+    renameConversation, pinConversation, archiveConversation, deleteConversation, conversationModel, chooseModel
   } = useAssistant();
   const mic = useMicrophone();
   const speech = useSpeech();
@@ -431,9 +434,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   const conversationsApi = useMemo<ConversationsApi>(() => ({
     conversationId, conversations, loadConversations, newConversation, openConversation,
-    renameConversation, pinConversation, archiveConversation, deleteConversation
+    renameConversation, pinConversation, archiveConversation, deleteConversation, conversationModel, chooseModel
   }), [conversationId, conversations, loadConversations, newConversation, openConversation,
-    renameConversation, pinConversation, archiveConversation, deleteConversation]);
+    renameConversation, pinConversation, archiveConversation, deleteConversation, conversationModel, chooseModel]);
 
   const voice = useMemo<VoiceApi>(() => ({
     mic: {

@@ -1,5 +1,6 @@
 import { ModelRouter, type ComposerKnowledge, type MemoryWriteOutcome } from "./modelRouter.js";
 import { checkAvailability, orderedCandidates, readLocalModelConfig } from "./localModel.js";
+import { withChosenModel } from "./modelCatalog.js";
 import { isCodeWork } from "./machinePaths.js";
 import { pickAuthorModel } from "./appAuthor.js";
 import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
@@ -115,6 +116,11 @@ export type OrchestratorInput = {
   vision?: (images: VisionImage[], question: string) => Promise<VisionResult>;
   /** Reads this machine's sensors; the real ones when absent. Injected for tests. */
   readTelemetry?: typeof readTelemetry;
+  /**
+   * The model the user picked for this conversation. The usual choice if it
+   * names none, or names one that is no longer installed (see modelCatalog).
+   */
+  model?: string;
   /** Launches a built app so it runs live; see appRunner. Forwarded to run_app and build_app. */
   launchApp?: (project: string) => Promise<StartResult>;
   stopApp?: (project: string) => boolean;
@@ -1867,7 +1873,8 @@ async function answerWithLocalModel(
   toolsUsed: ToolOutcome[];
   awaitingConfirmation?: { tool: string; arguments: Record<string, unknown> };
 } | null> {
-  const config = readLocalModelConfig();
+  // The conversation's own model when it has one; the usual choice otherwise.
+  const config = withChosenModel(readLocalModelConfig(), input.model);
   const availability = await checkAvailability(config);
   if (!availability.available) return null;
 

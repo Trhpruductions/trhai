@@ -1,4 +1,5 @@
 import { contextWindow, modelOptions, type LocalModelConfig } from "./localModel.js";
+import { recordContextUse } from "./contextUse.js";
 import { estimateTokens, fitPromptToWindow, fitToolResult, promptBudgetTokens, requestTokens } from "./contextBudget.js";
 import { sendingTools } from "./messaging.js";
 import {
@@ -1747,6 +1748,8 @@ export async function runAgent(
     const budget = promptBudgetTokens(contextWindow(config));
     const shortenedBy = fitPromptToWindow(messages, toolsTokens, budget, neverShortened);
     const promptSize = requestTokens(messages, toolsTokens);
+    // What the reply will report as its context use: this prompt, as sent.
+    if (context.sessionId) recordContextUse(context.sessionId, { promptTokens: promptSize, windowTokens: contextWindow(config) });
     if (promptSize > budget) {
       // Everything that could give has given. Said where someone looking at
       // the log can see it, because what happens next is the silent cut.

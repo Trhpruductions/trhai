@@ -45,6 +45,8 @@ export type StoredConversation = {
   updatedAt: string;
   pinned: boolean;
   archived: boolean;
+  /** The model picked for this conversation; absent means the usual choice. */
+  model?: string;
   turns: StoredTurn[];
 };
 
@@ -56,6 +58,7 @@ export type ConversationSummary = {
   updatedAt: string;
   pinned: boolean;
   archived: boolean;
+  model?: string;
   turnCount: number;
   /** The newest turn, shortened - what the list shows under the title. */
   preview: string;
@@ -137,6 +140,7 @@ function toConversation(value: unknown): StoredConversation | null {
     updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : turns[turns.length - 1]?.createdAt ?? createdAt,
     pinned: entry.pinned === true,
     archived: entry.archived === true,
+    ...(typeof entry.model === "string" && /^[A-Za-z0-9._:/-]{1,100}$/.test(entry.model) ? { model: entry.model } : {}),
     turns
   };
 }
@@ -255,9 +259,19 @@ function created(id: string | undefined): StoredConversation {
   };
 }
 
+/** A line of a reply as plain words for the list: no code fences, no markup characters. */
+function plainText(text: string): string {
+  return text
+    .replace(/```[\w+-]*/g, " ")
+    .replace(/\[\d+ images? attached\]/g, " ")
+    .replace(/[`*_#>|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function summarize(conversation: StoredConversation, match?: string): ConversationSummary {
   const newest = conversation.turns[conversation.turns.length - 1]?.content ?? "";
-  const preview = newest.replace(/\s+/g, " ").trim();
+  const preview = plainText(newest);
   return {
     id: conversation.id,
     title: conversation.title,
@@ -265,6 +279,7 @@ function summarize(conversation: StoredConversation, match?: string): Conversati
     updatedAt: conversation.updatedAt,
     pinned: conversation.pinned,
     archived: conversation.archived,
+    ...(conversation.model ? { model: conversation.model } : {}),
     turnCount: conversation.turns.length,
     preview: preview.length > 140 ? `${preview.slice(0, 139)}…` : preview,
     ...(match ? { match } : {})
@@ -412,7 +427,7 @@ export function getConversation(key: string, conversationId: string): (Conversat
 export function updateConversation(
   key: string,
   conversationId: string,
-  change: { title?: string; pinned?: boolean; archived?: boolean }
+  change: { title?: string; pinned?: boolean; archived?: boolean; model?: string | null }
 ): ConversationSummary | null {
   const conversation = listFor(key).find((entry) => entry.id === conversationId);
   if (!conversation) return null;
@@ -425,6 +440,9 @@ export function updateConversation(
   }
   if (typeof change.pinned === "boolean") conversation.pinned = change.pinned;
   if (typeof change.archived === "boolean") conversation.archived = change.archived;
+  // null goes back to the usual model; the route has already checked the name.
+  if (change.model === null) delete conversation.model;
+  else if (typeof change.model === "string") conversation.model = change.model;
   saveToDisk();
   return summarize(conversation);
 }
