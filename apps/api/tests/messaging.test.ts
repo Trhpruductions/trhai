@@ -19,10 +19,19 @@ const { availableTools, runTool } = await import("../src/services/agentTools.js"
 const { approvesTheSend, describePendingAction, isAffirmative, resetPendingConfirmations } = await import("../src/services/pendingConfirmation.js");
 const { runAssistantOrchestrator } = await import("../src/services/orchestrator.js");
 
-/** A link opener that records what it was asked to open and opens nothing. */
+/**
+ * A link opener and a clipboard that record what they were given and touch
+ * nothing - a test must never open an app or overwrite the real clipboard.
+ */
 function recorder(opens = true) {
   const opened: string[] = [];
-  return { opened, open: async (url: string) => { opened.push(url); return opens; } };
+  const copied: string[] = [];
+  return {
+    opened,
+    copied,
+    open: async (url: string) => { opened.push(url); return opens; },
+    copy: async (text: string) => { copied.push(text); return true; }
+  };
 }
 
 /** A stand-in for nodemailer's transport: records the mail, or fails the way a server does. */
@@ -123,24 +132,24 @@ test("sending reaches another person, so every message waits for a yes", () => {
 });
 
 test("a call is held for approval and nothing is opened until then", async () => {
-  const { opened, open } = recorder();
+  const { opened, open, copy } = recorder();
   const held = await runTool({ name: "send_text", arguments: { to: "555-010-0123", message: "Running late" } },
-    { memories: [], knowledge: [], messaging: { open, phoneLink: "linked" as const } });
+    { memories: [], knowledge: [], messaging: { open, copy, phoneLink: "linked" as const } });
   assert.equal(held.ok, false);
   assert.equal(held.needsConfirmation, true);
   assert.deepEqual(opened, [], "nothing goes anywhere before the user says yes");
 
   const approved = await runTool({ name: "send_text", arguments: { to: "555-010-0123", message: "Running late" } },
-    { memories: [], knowledge: [], confirmedActions: new Set(["send_text"]), messaging: { open, phoneLink: "linked" as const } });
+    { memories: [], knowledge: [], confirmedActions: new Set(["send_text"]), messaging: { open, copy, phoneLink: "linked" as const } });
   assert.equal(approved.ok, true);
   assert.deepEqual(opened, ["sms:5550100123?body=Running%20late"]);
   assert.match(approved.content, /press \*\*Send\*\*/, "it says plainly that the text is ready, not that it was sent");
 });
 
 test("a message that could only fail goes back to the model instead of being held", async () => {
-  const { opened, open } = recorder();
+  const { opened, open, copy } = recorder();
   const toAName = await runTool({ name: "send_text", arguments: { to: "mom", message: "hi" } },
-    { memories: [], knowledge: [], messaging: { open, phoneLink: "linked" as const } });
+    { memories: [], knowledge: [], messaging: { open, copy, phoneLink: "linked" as const } });
   assert.equal(toAName.ok, false);
   assert.equal(toAName.needsConfirmation, undefined, "not held: there is nothing to approve");
   assert.match(toAName.content, /"mom" is not a phone number/);
@@ -154,9 +163,9 @@ test("a message that could only fail goes back to the model instead of being hel
 });
 
 test("with no phone linked, a text is not offered for approval: the user hears why first", async () => {
-  const { opened, open } = recorder();
+  const { opened, open, copy } = recorder();
   const result = await runTool({ name: "send_text", arguments: { to: "5550100123", message: "hi" } },
-    { memories: [], knowledge: [], messaging: { open, phoneLink: "not-linked" } });
+    { memories: [], knowledge: [], messaging: { open, copy, phoneLink: "not-linked" } });
   assert.equal(result.ok, false);
   assert.equal(result.needsConfirmation, undefined, "nothing to approve: it could not go");
   assert.match(result.content, /no phone is linked/);
@@ -170,15 +179,15 @@ test("Phone Link counts as ready only with a phone linked to it", () => {
   assert.equal(phoneLinkStatus(local, "win32"), "missing");
   const app = path.join(local, "Packages", "Microsoft.YourPhone_8wekyb3d8bbwe");
   mkdirSync(path.join(app, "LocalState", "StartMenu"), { recursive: true });
-  assert.equal(phoneLinkStatus(local, "win32"), "not-linked", "installed and never linked - the machine this was built on");
+  assert.equal(phoneLinkStatus(local, "win32"), "not-linked", "installed and never linked");
   mkdirSync(path.join(app, "LocalCache", "Indexed", "0b6c0d1e-device"), { recursive: true });
   assert.equal(phoneLinkStatus(local, "win32"), "linked");
 });
 
 test("a scheduled run cannot send, approved or not", async () => {
-  const { opened, open } = recorder();
+  const { opened, open, copy } = recorder();
   const result = await runTool({ name: "send_text", arguments: { to: "5550100123", message: "hi" } },
-    { memories: [], knowledge: [], unattended: true, confirmedActions: new Set(["send_text"]), messaging: { open, phoneLink: "linked" as const } });
+    { memories: [], knowledge: [], unattended: true, confirmedActions: new Set(["send_text"]), messaging: { open, copy, phoneLink: "linked" as const } });
   assert.equal(result.ok, false);
   assert.match(result.content, /nobody to approve/);
   assert.deepEqual(opened, []);
@@ -186,22 +195,26 @@ test("a scheduled run cannot send, approved or not", async () => {
 
 // ------------------------------------------------------------- texts
 
-test("a text opens in Phone Link addressed and written, and says so honestly when it cannot", async () => {
-  const { opened, open } = recorder();
-  const ready = await sendText({ to: "+1 555 010 0123", message: "On my way" }, { open, phoneLink: "linked" as const });
+test("a text goes to Phone Link addressed and written, and onto the clipboard in case it is not filled in", async () => {
+  const { opened, copied, open, copy } = recorder();
+  const ready = await sendText({ to: "+1 555 010 0123", message: "On my way" }, { open, copy, phoneLink: "linked" as const });
   assert.equal(ready.ok, true);
   assert.equal(ready.via, "phone-link");
   assert.equal(opened[0], "sms:+15550100123?body=On%20my%20way");
+  assert.deepEqual(copied, ["On my way"], "an approved message is never one to type out again");
   assert.match(ready.content, /\+1 \(555\) 010-0123/);
+  assert.match(ready.content, /paste it/);
 
-  const noPhoneLink = await sendText({ to: "5550100123", message: "hi" }, { open, phoneLink: "not-linked" as const });
+  const noPhoneLink = await sendText({ to: "5550100123", message: "hi" }, { open, copy, phoneLink: "not-linked" as const });
   assert.equal(noPhoneLink.ok, false);
   assert.match(noPhoneLink.content, /Nothing was sent/);
   assert.match(noPhoneLink.content, /Phone Link/);
+  assert.equal(copied.length, 1, "nothing is copied for a text that cannot go");
 
-  const failed = await sendText({ to: "5550100123", message: "hi" }, { open: async () => false, phoneLink: "linked" as const });
+  const failed = await sendText({ to: "5550100123", message: "hi" }, { open: async () => false, copy: async () => true, phoneLink: "linked" as const });
   assert.equal(failed.ok, false);
-  assert.match(failed.content, /Nothing was sent/);
+  assert.match(failed.content, /nothing was sent/i);
+  assert.match(failed.content, /copied/);
 });
 
 // ------------------------------------------------------------- email
@@ -371,8 +384,8 @@ const reworded = {
 test("yes sends exactly the message that was shown, without asking the model again", async () => {
   resetPendingConfirmations();
   resetEmailAccountForTests();
-  const { opened, open } = recorder();
-  const messaging = { open, phoneLink: "linked" as const };
+  const { opened, open, copy } = recorder();
+  const messaging = { open, copy, phoneLink: "linked" as const };
   await withScriptedModel([textCall, { message: { content: "I've sent it!" } }, reworded], async (chats) => {
     const asked = await runAssistantOrchestrator({
       mode: "general", sessionId: "send-1", userMessage: "text 555-010-0123 that I'm running 10 minutes late", messaging
@@ -389,11 +402,11 @@ test("yes sends exactly the message that was shown, without asking the model aga
     assert.deepEqual(opened, ["sms:5550100123?body=Running%2010%20minutes%20late%2C%20sorry!"],
       "the approved words to the approved number, not a fresh call's");
     assert.equal(chats.length, chatsBeforeYes, "the model was not asked again");
-    assert.match(sent.assistantMessage, /Phone Link is open with your text to \(555\) 010-0123/);
+    assert.match(sent.assistantMessage, /Your text to \(555\) 010-0123 went to Phone Link/);
 
     const again = await runAssistantOrchestrator({ mode: "general", sessionId: "send-1", userMessage: "yes", messaging });
     assert.equal(opened.length, 1, "one yes sends one message");
-    assert.doesNotMatch(again.assistantMessage, /Phone Link is open/);
+    assert.doesNotMatch(again.assistantMessage, /went to Phone Link/);
   });
 });
 
@@ -402,7 +415,7 @@ test("a model that only says 'Understood.' is told to make the message, once", a
   const { server, baseUrl, chats } = await scriptedOllama([{ message: { content: "Understood." } }, textCall, { message: { content: "Ready." } }]);
   try {
     const result = await runAgent({ baseUrl, model: "llama3.2", modelFromEnv: true, timeoutMs: 4000 },
-      "text 555-010-0123 that I'm running late", { memories: [], knowledge: [], messaging: { open: async () => true, phoneLink: "linked" as const } });
+      "text 555-010-0123 that I'm running late", { memories: [], knowledge: [], messaging: { open: async () => true, copy: async () => true, phoneLink: "linked" as const } });
     assert.equal(result.ok, true);
     if (!result.ok) return;
     assert.equal(result.awaitingConfirmation?.tool, "send_text", "the second try made the message, held for a yes");
@@ -436,8 +449,8 @@ test("a model that only says 'Understood.' is told to make the message, once", a
 
 test("no drops the message, and 'send it' sends one", async () => {
   resetPendingConfirmations();
-  const { opened, open } = recorder();
-  const messaging = { open, phoneLink: "linked" as const };
+  const { opened, open, copy } = recorder();
+  const messaging = { open, copy, phoneLink: "linked" as const };
   await withScriptedModel([textCall, { message: { content: "Ready." } }], async () => {
     await runAssistantOrchestrator({ mode: "general", sessionId: "send-2", userMessage: "text 555-010-0123 that I'm running late", messaging });
     const declined = await runAssistantOrchestrator({ mode: "general", sessionId: "send-2", userMessage: "no", messaging });

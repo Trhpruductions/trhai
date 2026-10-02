@@ -25,6 +25,8 @@ export type SendOutcome = { ok: boolean; content: string; via?: "phone-link" | "
 export type MessagingDeps = {
   /** Opens a link with this machine's handler for it. True when something opened. */
   open?: (url: string) => Promise<boolean>;
+  /** Puts text on the clipboard. True when it got there. */
+  copy?: (text: string) => Promise<boolean>;
   /** Whether Phone Link is here, with a phone linked, to send texts. */
   phoneLink?: PhoneLinkStatus;
   /** The saved email account; null for none. Read from the store when left out. */
@@ -98,12 +100,10 @@ export type PhoneLinkStatus = "linked" | "not-linked" | "missing";
  * Whether Phone Link can send a text from this PC: installed, and with a phone
  * linked to it.
  *
- * Installed is not enough. On the machine this was built on, Phone Link was
- * there and registered for sms: links, and opening one did nothing at all -
- * no phone had ever been linked, so there was nothing to send through, and the
- * hand-off reported success while nothing appeared. A linked phone leaves its
- * data under LocalCache\Indexed, one folder per device; an unlinked install has
- * no such folder.
+ * Installed is not enough: with no phone linked there is nothing to send
+ * through, and the user should hear that before approving a text rather than
+ * after. A linked phone leaves its data under LocalCache\Indexed, one folder
+ * per device; an install that was never linked has no such folder.
  */
 export function phoneLinkStatus(localAppData = process.env.LOCALAPPDATA, platform: string = process.platform): PhoneLinkStatus {
   if (platform !== "win32" || !localAppData) return "missing";
@@ -223,15 +223,54 @@ export async function sendText(args: Record<string, unknown>, deps: MessagingDep
   if (link.length > maxLinkLength) {
     return { ok: false, content: "Nothing was sent - that text is too long to hand to Phone Link. Shorten it and ask again." };
   }
-  const opened = await (deps.open ?? openWithSystem)(link);
-  return opened
-    ? {
-      ok: true,
-      via: "phone-link",
-      content: `Phone Link is open with your text to ${formatPhoneNumber(number)} written and ready - press **Send** `
-        + "there and it goes from your phone."
+  // On the clipboard as well as in the link. Phone Link does not start a new
+  // message from a link on every setup - on the PC this was built on, with a
+  // phone linked, opening one showed nothing - and a message the user has just
+  // approved should never be one they have to type out again.
+  const [opened, copied] = await Promise.all([
+    (deps.open ?? openWithSystem)(link),
+    (deps.copy ?? copyToClipboard)(message)
+  ]);
+  const who = formatPhoneNumber(number);
+  if (!opened) {
+    return {
+      ok: false,
+      content: copied
+        ? `Phone Link could not be opened, so nothing was sent. The message is copied - open Phone Link, start a message to ${who} and paste it (Ctrl+V).`
+        : "Nothing was sent - Phone Link could not be opened."
+    };
+  }
+  return {
+    ok: true,
+    via: "phone-link",
+    content: `Your text to ${who} went to Phone Link - press **Send** there and it goes from your phone.`
+      + (copied
+        ? ` It's also copied: if Phone Link didn't start a new message, open Messages, start one to ${who} and paste it (Ctrl+V).`
+        : "")
+  };
+}
+
+/**
+ * Puts text on the clipboard, for a message to paste wherever the hand-off
+ * fell short. Through stdin, never the command line, so nothing in the
+ * message is ever read as part of a command.
+ */
+export function copyToClipboard(value: string): Promise<boolean> {
+  const [command, args]: [string, string[]] | [null, never[]] = process.platform === "win32"
+    ? ["powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      "[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())"]]
+    : process.platform === "darwin" ? ["pbcopy", []] : [null, []];
+  if (!command) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(command, args, { windowsHide: true, stdio: ["pipe", "ignore", "ignore"] });
+      child.once("error", () => resolve(false));
+      child.once("exit", (code) => resolve(code === 0));
+      child.stdin?.end(value, "utf8");
+    } catch {
+      resolve(false);
     }
-    : { ok: false, content: "Nothing was sent - Phone Link could not be opened." };
+  });
 }
 
 /** Why the server refused or could not be reached, with what to do about it. */
