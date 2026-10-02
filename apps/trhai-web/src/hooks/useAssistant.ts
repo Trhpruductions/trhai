@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBaseUrl, sessionId as resolveSessionId } from "../lib/api";
-import { applyResponseStyle } from "@ascend/shared";
+import { applyAgentDisclaimer, applyResponseStyle } from "@ascend/shared";
 import { readStoredPersonality } from "../lib/personality";
 import { readActiveAgent } from "../lib/agents";
 
@@ -254,7 +254,13 @@ export function useAssistant() {
       const finished: ChatMessage = {
         id: replyId,
         role: "assistant",
-        text: applyResponseStyle(answered, readStoredPersonality(window.localStorage)),
+        // And the active agent's, the same way and never twice: the Doctor
+        // agent says "Not a substitute for care" of itself, and its replies
+        // never did.
+        text: applyAgentDisclaimer(
+          applyResponseStyle(answered, readStoredPersonality(window.localStorage)),
+          readActiveAgent(window.localStorage)
+        ),
         at: Date.now(),
         strategy: data.strategy as string | undefined,
         model: data.model as string | undefined,

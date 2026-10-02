@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { applyResponseStyle } from "../src/personalities.js";
 import {
   activateAgent,
   activeAgent,
   agentById,
   allAgents,
+  applyAgentDisclaimer,
   emptyMarketplaceState,
   formatInstalls,
   installAgent,
@@ -160,4 +162,25 @@ test("agents carrying professional-advice risk say so in their description", () 
       `${id} must not present itself as a professional`
     );
   }
+});
+
+test("those agents' replies carry a caveat, not only their descriptions", () => {
+  // Live: the Doctor agent, asked what to ask at an appointment about
+  // recurring headaches, answered with no caveat at all.
+  for (const id of ["lawyer", "doctor", "financial-advisor"]) {
+    assert.ok(agentById(id)?.mandatoryDisclaimer, `${id} has no caveat`);
+  }
+  const others = allAgents().filter((agent) => !["lawyer", "doctor", "financial-advisor"].includes(agent.id));
+  assert.ok(others.every((agent) => !agent.mandatoryDisclaimer), "a caveat is for the roles that need one");
+
+  const doctor = agentById("doctor");
+  const reply = applyAgentDisclaimer("Ask how often they come back.", doctor);
+  assert.match(reply, /^Ask how often they come back\.\n\nThis is general information, not medical advice/);
+  // Never twice - including when the Medical personality already added the same words.
+  assert.equal(applyAgentDisclaimer(reply, doctor), reply);
+  const withPersonality = applyResponseStyle("Ask how often they come back.", "medical");
+  assert.equal(applyAgentDisclaimer(withPersonality, doctor), withPersonality);
+  // No agent, or one without a caveat, changes nothing.
+  assert.equal(applyAgentDisclaimer("Hello.", null), "Hello.");
+  assert.equal(applyAgentDisclaimer("Hello.", agentById("programmer")), "Hello.");
 });
