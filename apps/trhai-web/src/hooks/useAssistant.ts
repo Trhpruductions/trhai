@@ -27,6 +27,8 @@ export type ChatMessage = {
    * the same; this is what lets the screen offer the answer as a button.
    */
   pendingConfirmation?: { tool: string; verb: string; target: string };
+  /** How many images were sent with this message. */
+  images?: number;
   /**
    * True while this reply is still being written.
    *
@@ -104,14 +106,17 @@ export function useAssistant() {
     return () => { cancelled = true; };
   }, []);
 
-  const send = useCallback(async (input: string) => {
+  const send = useCallback(async (input: string, images: Array<{ name: string; data: string }> = []) => {
     const text = input.trim();
     if (!text || busy.current) return;
     busy.current = true;
     const myGeneration = ++generation.current;
     const stillCurrent = () => generation.current === myGeneration;
 
-    const userTurn: ChatMessage = { id: crypto.randomUUID(), role: "user", text, at: Date.now() };
+    const userTurn: ChatMessage = {
+      id: crypto.randomUUID(), role: "user", text, at: Date.now(),
+      ...(images.length > 0 ? { images: images.length } : {})
+    };
     setMessages((prior) => [...prior, userTurn]);
     setStatus({ state: "thinking" });
 
@@ -168,7 +173,9 @@ export function useAssistant() {
         // a change in the settings rail applies to the very next message.
         body: JSON.stringify({
           message: text, sessionId: session.current, history, mode: "general",
-          agentId: readActiveAgent(window.localStorage)?.id
+          agentId: readActiveAgent(window.localStorage)?.id,
+          // Shown to the vision model on the API; never stored there.
+          ...(images.length > 0 ? { images } : {})
         }),
         // Aborting closes the connection, which the API notices and uses to
         // stop the model. Without it, stopping would only hide the reply while

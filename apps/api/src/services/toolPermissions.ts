@@ -83,6 +83,9 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // Reads a document - from the knowledge base, or a file the read rules
   // allow - and asks the local model about it. Changes nothing.
   summarize_document: 1,
+  // Reads an image file the read rules allow and shows it to the local
+  // vision model. Changes nothing.
+  look_at_image: 1,
 
   // 2 — creates or changes something. Bounded by the workspace on its own, or
   // by the machine-access switch when that has been granted.

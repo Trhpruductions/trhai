@@ -31,6 +31,8 @@ import { elisionIn, fileView, fitsOneRead, maxToolResultTokens, shortenToTokens 
 import { messageProblem, sendEmail, sendingTools, sendText, type MessagingDeps } from "./messaging.js";
 import { extractDocumentText, isDocumentPath, maxDocumentBytes } from "./documentText.js";
 import { readableAtOnce, summarizeLongText, type GenerateText } from "./summarize.js";
+import { imageKind, lookAtImages, maxImageBytes, type VisionImage, type VisionResult } from "./vision.js";
+import { readLocalModelConfig } from "./localModel.js";
 import { describeTelemetry, readFreeSpace, readGpuHeadroom, readTelemetry, readTopMemoryPrograms } from "./systemTelemetry.js";
 import { fetchWebPage } from "./webFetch.js";
 import { webSearch } from "./webSearch.js";
@@ -233,6 +235,8 @@ export type ToolContext = {
    * Injected like authorApp; absent means there is no model to ask here.
    */
   generateText?: GenerateText;
+  /** Asks the vision model about images; the real local one when absent. See vision.ts. */
+  vision?: (images: VisionImage[], question: string) => Promise<VisionResult>;
   /**
    * Overridable so a test can exercise fetch_url's dispatch without a real
    * network call — real fetchWebPage, with its own SSRF and size/timeout
@@ -360,6 +364,24 @@ export const toolDefinitions: ToolDefinition[] = [
           title: { type: "string", description: "The document title, as listed." }
         },
         required: ["title"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "look_at_image",
+      description:
+        "Look at an image file on this machine - a screenshot, a photo, a scanned page - and answer a question "
+        + "about it, reading any text in it. Use this whenever a request is about what an image shows; you "
+        + "cannot see images any other way.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "The image's path: PNG, JPEG, GIF, WebP or BMP." },
+          question: { type: "string", description: "What to find out about the image. Optional - it is described if left out." }
+        },
+        required: ["path"]
       }
     }
   },
@@ -1130,7 +1152,7 @@ export function availableTools(
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
     schedules?: boolean; video?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
-    messaging?: boolean; summaries?: boolean; readers?: boolean;
+    messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1154,6 +1176,7 @@ export function availableTools(
   const allowMessaging = options.messaging ?? true;
   const allowSummaries = options.summaries ?? true;
   const allowReaders = options.readers ?? true;
+  const allowImages = options.images ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1184,6 +1207,8 @@ export function availableTools(
     // got the file's start and end, and wrote a confident summary of a
     // document it had not read.
     if (!allowReaders && (name === "read_file" || name === "read_document")) return false;
+    // Only when the request is about an image; see mentionsAnImage.
+    if (!allowImages && name === "look_at_image") return false;
     return true;
   });
 }
@@ -1680,6 +1705,37 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         ok: true,
         content: matches.map((entry) => `- ${entry.memory.body}`).join("\n")
       };
+    }
+
+    // An image on disk, shown to the vision model; see vision.ts. The chat
+    // model cannot see, so this is the only honest way to answer about one.
+    case "look_at_image": {
+      const target = requireString(call.arguments.path);
+      if (!target) return { ok: false, content: "look_at_image needs the path of an image." };
+      const verdict = resolveForAccess(target, {
+        granted: commandsArmed() && !context.unattended,
+        intent: "read",
+        insideWorkspace: resolveInWorkspace
+      });
+      if (!verdict.ok) return { ok: false, content: verdict.reason };
+      let data: Buffer;
+      try {
+        const info = statSync(verdict.path);
+        if (info.isDirectory()) return { ok: false, content: `"${target}" is a folder, not an image.` };
+        if (info.size > maxImageBytes) return { ok: false, content: `"${path.basename(verdict.path)}" is larger than ${maxImageBytes / 1024 / 1024} MB.` };
+        data = readFileSync(verdict.path);
+      } catch {
+        return { ok: false, content: explainMiss(`There is no file at "${target}".`, target) };
+      }
+      if (!imageKind(data)) {
+        return { ok: false, content: `"${path.basename(verdict.path)}" is not an image (PNG, JPEG, GIF, WebP or BMP). Use read_file for a text file.` };
+      }
+      const question = requireString(call.arguments.question) ?? "";
+      const look = context.vision ?? ((images: VisionImage[], asked: string) => lookAtImages(images, asked, readLocalModelConfig()));
+      const seen = await look([{ name: path.basename(verdict.path), data }], question);
+      if (!seen.ok) return { ok: false, content: seen.reason };
+      noteFileTouched(context.sessionId, target);
+      return { ok: true, content: `What ${path.basename(verdict.path)} shows (from the vision model, ${seen.model}):\n${seen.text}` };
     }
 
     // The whole of a long document, read in sections; see summarize.ts. Read
@@ -2672,6 +2728,12 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         insideWorkspace: resolveInWorkspace
       });
       if (!verdict.ok) return { ok: false, content: verdict.reason };
+
+      // An image is not text. Said with the tool that can see it, because a
+      // refusal is read as the next instruction.
+      if (/\.(?:png|jpe?g|gif|webp|bmp)$/i.test(verdict.path)) {
+        return { ok: false, content: `"${path.basename(verdict.path)}" is an image, not text. Use look_at_image to see what it shows.` };
+      }
 
       // A PDF, Word or PowerPoint file is read for its text. It was refused as
       // binary, so "what does report.pdf say" had nothing to answer from.

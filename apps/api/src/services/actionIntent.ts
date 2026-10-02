@@ -490,6 +490,16 @@ const verbToSomeone = new RegExp(
 );
 
 /**
+ * Whether a request is about an image - a screenshot, a photo, a .png - so
+ * look_at_image is worth offering. It loads a second model, so it is not
+ * offered to requests that have nothing to look at.
+ */
+export function mentionsAnImage(message: string): boolean {
+  return /\b(?:image|images|picture|pictures|photo|photos|screenshot|screenshots|screen shot|scanned|png|jpe?g|gif|webp|bmp)\b|\.(?:png|jpe?g|gif|webp|bmp)\b/i
+    .test(message ?? "");
+}
+
+/**
  * Whether a request asks for a summary - of a document, a file, a report -
  * so summarize_document is worth offering. It reads every part of a long
  * document through the model, which takes a while, so it is not offered to a
