@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { viewFromHash, type ViewId } from "../views";
+import { detailFromHash, hashFor, viewFromHash, type ViewId } from "../views";
 
 // Where the user is in TRH AI, and the shell's own open/closed state.
 //
@@ -11,7 +11,8 @@ import { viewFromHash, type ViewId } from "../views";
 
 type Nav = {
   view: ViewId;
-  go: (view: ViewId) => void;
+  /** Open a view - and, given a detail, somewhere within it ("#files/app2"). */
+  go: (view: ViewId, detail?: string | null) => void;
   /** The sidebar in its icon-only form. */
   slim: boolean;
   setSlim: (slim: boolean) => void;
@@ -45,14 +46,15 @@ export function NavProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("hashchange", read);
   }, []);
 
-  const go = useCallback((next: ViewId) => {
+  const go = useCallback((next: ViewId, detail?: string | null) => {
     setPaletteOpen(false);
-    if (viewFromHash(window.location.hash) === next) {
+    // Already exactly there - the same view, the same place in it: no new entry.
+    if (viewFromHash(window.location.hash) === next && detailFromHash(window.location.hash) === (detail || null)) {
       setView(next);
       return;
     }
     // A history entry per workspace, so Back returns to the last one.
-    window.location.hash = next === "home" ? "home" : next;
+    window.location.hash = hashFor(next, detail);
   }, []);
 
   const setSlim = useCallback((next: boolean) => {

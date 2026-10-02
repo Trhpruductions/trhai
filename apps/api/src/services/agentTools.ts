@@ -1411,7 +1411,7 @@ const searchMaxFiles = 4000;
 const searchMaxFileBytes = 512_000;
 
 /** A recursive, case-insensitive plain-text search; see the search_files tool. */
-function searchFiles(
+export function searchFiles(
   root: string,
   pattern: string,
   extension: string | null
@@ -1486,9 +1486,9 @@ function searchFiles(
  */
 const appManifestName = ".vexora-app.json";
 
-type AppManifest = { request: string; title: string; changes: string[] };
+export type AppManifest = { request: string; title: string; changes: string[] };
 
-function readAppManifest(project: string): AppManifest | null {
+export function readAppManifest(project: string): AppManifest | null {
   const read = readWorkspaceFile(`${project}/${appManifestName}`);
   if (!read.ok) return null;
   try {

@@ -462,3 +462,213 @@ export function listDirectoryAt(absolutePath: string, maxDepth = 3): WorkspaceEn
   // almost always what they mean.
   return found.sort((a, b) => b.modifiedAt - a.modifiedAt);
 }
+
+// ---- the Files workspace ---------------------------------------------------
+//
+// listWorkspace walks the whole tree and keeps the newest 200, which answers
+// "what did TRHAI just build" and nothing else: with seventy-odd projects in
+// the workspace, a folder view built on it would silently miss most of them.
+// These read one folder at a time, as it is opened, so nothing is left out
+// without saying so.
+
+export type DirectoryEntry = {
+  name: string;
+  /** Relative to the workspace root, with forward slashes. */
+  path: string;
+  directory: boolean;
+  bytes: number;
+  modifiedAt: number;
+  /** How many entries a folder holds, when it could be read. */
+  items?: number;
+};
+
+/** More than this in one folder is cut, and said to be. */
+export const maxDirectoryEntries = 1_000;
+
+/** Folders skipped by name search, as search_files skips them: dependencies and build output. */
+const searchSkippedFolders = new Set(["node_modules", ".git", "dist", ".next", "build", "coverage", ".cache"]);
+
+/** An absolute path inside the workspace, as the workspace-relative path the API speaks. */
+export function workspaceRelative(full: string): string {
+  return path.relative(path.resolve(workspaceRoot()), full).split(path.sep).join("/");
+}
+
+/**
+ * One folder's contents, folders first, then by name as a person sorts them
+ * ("item2" before "item10"). "missing" and "not-a-folder" are answers, not
+ * errors; null is a path outside the workspace, refused.
+ */
+export function listDirectory(subdirectory = "."):
+  | { kind: "ok"; entries: DirectoryEntry[]; truncated: boolean }
+  | { kind: "missing" } | { kind: "not-a-folder" } | null {
+  const target = resolveInWorkspace(subdirectory);
+  if (!target) return null;
+  ensureRoot();
+
+  let names: string[];
+  try {
+    if (!statSync(target).isDirectory()) return { kind: "not-a-folder" };
+    names = readdirSync(target);
+  } catch {
+    return { kind: "missing" };
+  }
+
+  const entries: DirectoryEntry[] = [];
+  for (const name of names) {
+    if (entries.length >= maxDirectoryEntries) break;
+    const full = path.join(target, name);
+    const relative = workspaceRelative(full);
+    // A link that leads out of the workspace is not listed: its size and date
+    // are facts about somewhere this app does not show.
+    if (!resolveInWorkspace(relative)) continue;
+    let info: ReturnType<typeof statSync>;
+    try {
+      info = statSync(full);
+    } catch {
+      continue;
+    }
+    const entry: DirectoryEntry = { name, path: relative, directory: info.isDirectory(), bytes: info.isDirectory() ? 0 : info.size, modifiedAt: info.mtimeMs };
+    if (entry.directory) {
+      try {
+        entry.items = readdirSync(full).length;
+      } catch {
+        // Unreadable: the folder is still listed, without a count.
+      }
+    }
+    entries.push(entry);
+  }
+
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  entries.sort((a, b) => Number(b.directory) - Number(a.directory) || collator.compare(a.name, b.name));
+  return { kind: "ok", entries, truncated: names.length > entries.length && entries.length >= maxDirectoryEntries };
+}
+
+/** Files and folders whose name contains `query`, anywhere under `subdirectory`; newest first. */
+export function findByName(subdirectory: string, query: string, limit = 100): { entries: DirectoryEntry[]; truncated: boolean } | null {
+  const target = resolveInWorkspace(subdirectory);
+  if (!target) return null;
+  ensureRoot();
+  const needle = query.trim().toLowerCase();
+  if (!needle) return { entries: [], truncated: false };
+
+  const found: DirectoryEntry[] = [];
+  let walked = 0;
+  let truncated = false;
+  const walk = (directory: string) => {
+    if (truncated) return;
+    let names: string[];
+    try {
+      names = readdirSync(directory);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (truncated) return;
+      if (walked >= maxWalkedEntries) {
+        truncated = true;
+        return;
+      }
+      walked += 1;
+      const full = path.join(directory, name);
+      let info: ReturnType<typeof statSync>;
+      try {
+        info = statSync(full);
+      } catch {
+        continue;
+      }
+      if (name.toLowerCase().includes(needle)) {
+        found.push({ name, path: workspaceRelative(full), directory: info.isDirectory(), bytes: info.isDirectory() ? 0 : info.size, modifiedAt: info.mtimeMs });
+        if (found.length >= limit) {
+          truncated = true;
+          return;
+        }
+      }
+      if (info.isDirectory() && !searchSkippedFolders.has(name) && resolveInWorkspace(workspaceRelative(full))) walk(full);
+    }
+  };
+  walk(target);
+  return { entries: found.sort((a, b) => b.modifiedAt - a.modifiedAt), truncated };
+}
+
+/**
+ * Media a page may show from the workspace: pictures, sound, video. Nothing a
+ * browser would run - no HTML, no SVG, which can carry script - so serving one
+ * can never execute anything in the API's own origin.
+ */
+const mediaTypes: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+  ".bmp": "image/bmp", ".ico": "image/x-icon",
+  ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+  ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".m4a": "audio/mp4"
+};
+
+export function mediaTypeOf(relativePath: string): string | null {
+  return mediaTypes[path.extname(relativePath).toLowerCase()] ?? null;
+}
+
+/** The file behind a media preview, or why there is none. */
+export function workspaceMedia(relativePath: string):
+  | { ok: true; absolutePath: string; contentType: string }
+  | { ok: false; status: 400 | 404 | 415; reason: string } {
+  const target = resolveInWorkspace(relativePath);
+  if (!target) return { ok: false, status: 400, reason: "That path is outside the workspace." };
+  const contentType = mediaTypeOf(relativePath);
+  if (!contentType) return { ok: false, status: 415, reason: "Only pictures, sound and video are shown this way." };
+  try {
+    if (!statSync(target).isFile()) return { ok: false, status: 404, reason: "There is no file there." };
+  } catch {
+    return { ok: false, status: 404, reason: "There is no file there." };
+  }
+  return { ok: true, absolutePath: target, contentType };
+}
+
+/**
+ * When anything inside a folder last changed: the newest file's time, not the
+ * folder's own, which only moves when an entry is added or removed directly in
+ * it - a rebuilt app rewrites its files in place and the folder never notices.
+ * Dependencies and build output are skipped, and the walk is bounded.
+ */
+export function newestChange(subdirectory: string, maxEntries = 500): number | null {
+  const target = resolveInWorkspace(subdirectory);
+  if (!target) return null;
+  let newest: number | null = null;
+  let seen = 0;
+  const walk = (directory: string) => {
+    let names: string[];
+    try {
+      names = readdirSync(directory);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (seen >= maxEntries) return;
+      seen += 1;
+      const full = path.join(directory, name);
+      let info: ReturnType<typeof statSync>;
+      try {
+        info = statSync(full);
+      } catch {
+        continue;
+      }
+      if (info.isDirectory()) {
+        if (!searchSkippedFolders.has(name)) walk(full);
+      } else if (newest === null || info.mtimeMs > newest) {
+        newest = info.mtimeMs;
+      }
+    }
+  };
+  walk(target);
+  return newest;
+}
+
+/** A workspace file's size and when it last changed, or null if it cannot be read. */
+export function fileFacts(relativePath: string): { bytes: number; modifiedAt: number } | null {
+  const target = resolveInWorkspace(relativePath);
+  if (!target) return null;
+  try {
+    const info = statSync(target);
+    return info.isFile() ? { bytes: info.size, modifiedAt: info.mtimeMs } : null;
+  } catch {
+    return null;
+  }
+}

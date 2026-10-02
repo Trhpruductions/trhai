@@ -37,6 +37,7 @@ const loaders: Record<ViewId, ReturnType<typeof dynamic>> = {
   voice: dynamic(() => import("../views/VoiceView").then((module) => module.VoiceView), { loading: ViewLoading }),
   memory: dynamic(() => import("../views/MemoryView").then((module) => module.MemoryView), { loading: ViewLoading }),
   files: dynamic(() => import("../views/FilesView").then((module) => module.FilesView), { loading: ViewLoading }),
+  code: dynamic(() => import("../views/CodeView").then((module) => module.CodeView), { loading: ViewLoading }),
   tasks: dynamic(() => import("../views/TasksView").then((module) => module.TasksView), { loading: ViewLoading }),
   tools: dynamic(() => import("../views/ToolsView").then((module) => module.ToolsView), { loading: ViewLoading }),
   system: dynamic(() => import("../views/SystemView").then((module) => module.SystemView), { loading: ViewLoading }),
