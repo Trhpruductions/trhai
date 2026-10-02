@@ -30,6 +30,7 @@ import {
   speakableText, type Agent, type PersonalityId
 } from "@ascend/shared";
 import { chooseAgent, readActiveAgent } from "../lib/agents";
+import { readDismissedRendering, renderingKey, writeDismissedRendering } from "../lib/renderingDismissal";
 import { AgentPicker } from "../components/AgentPicker";
 import "./dash.css";
 import "./trhai.css";
@@ -216,7 +217,9 @@ export default function DashboardPage() {
   const [tools, setTools] = useState<number | null>(null);
   const [capabilities, setCapabilities] = useState<CapabilityInfo | null>(null);
   const [rendering, setRendering] = useState<RenderingView | null>(null);
-  const [dismissedRenderingName, setDismissedRenderingName] = useState<string | null>(null);
+  // Hydrated from storage below, so a dismissed rendering stays dismissed
+  // across reloads; see renderingDismissal.ts.
+  const [dismissedRendering, setDismissedRendering] = useState<string | null>(null);
   const [memories, setMemories] = useState<{ total: number; pinned: number } | null>(null);
   const [documents, setDocuments] = useState<number | null>(null);
   const [schedules, setSchedules] = useState<ScheduleView[] | null>(null);
@@ -306,6 +309,7 @@ export default function DashboardPage() {
     const chosen = personalityById(storedId);
     const installed = readActiveAgent(window.localStorage);
     setAgent(installed);
+    setDismissedRendering(readDismissedRendering(window.localStorage));
     // The agent and personality are no longer displayed here - the card that
     // showed them went with the surfaces. Both still take effect: the prompts
     // below come from whichever is active, and useAssistant reads the stored
@@ -960,7 +964,7 @@ export default function DashboardPage() {
                 </section>
               ) : null}
 
-              {rendering && rendering.name !== dismissedRenderingName ? (
+              {rendering && renderingKey(rendering) !== dismissedRendering ? (
                 <section className="trh-render" aria-label={`Rendering: ${rendering.title}`}>
                   <header className="trh-render-head">
                     <span className="trh-render-kind">{rendering.kind === "diagram" ? "◇ DIAGRAM" : "▢ MOCKUP"}</span>
@@ -970,7 +974,11 @@ export default function DashboardPage() {
                       className="trh-render-close"
                       aria-label="Dismiss rendering"
                       title="Dismiss and return to the core"
-                      onClick={() => setDismissedRenderingName(rendering.name)}
+                      onClick={() => {
+                        const key = renderingKey(rendering);
+                        setDismissedRendering(key);
+                        writeDismissedRendering(window.localStorage, key);
+                      }}
                     >×</button>
                   </header>
                   <iframe
