@@ -48,6 +48,134 @@
 .os-chat-empty { padding-top: 10vh; }
 .os-chat-empty .os-starters { margin-top: var(--os-3); }
 
+/* The chat workspace: every conversation down the side, the open one beside it.
+   The list stays put while the conversation scrolls. */
+.os-chat-shell {
+  display: grid;
+  grid-template-columns: minmax(250px, 290px) minmax(0, 1fr);
+  gap: var(--os-5);
+  align-items: start;
+  padding: var(--os-5) var(--os-6) var(--os-6);
+  min-width: 0;
+}
+.os-chat-shell > .os-view { padding: 0; min-width: 0; }
+
+.os-convos {
+  position: sticky;
+  top: var(--os-5);
+  height: calc(100dvh - var(--os-topbar) - 170px);
+  min-height: 300px;
+  border-radius: var(--os-r-lg);
+  border: 1px solid var(--os-line);
+  background: var(--os-surface);
+  backdrop-filter: var(--os-blur);
+  -webkit-backdrop-filter: var(--os-blur);
+  box-shadow: var(--os-inner);
+  overflow: hidden;
+}
+.os-convos-inner { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.os-convos-head { display: grid; gap: var(--os-2); padding: var(--os-3); border-bottom: 1px solid var(--os-line); }
+.os-convos-new { width: 100%; }
+.os-convos-search {
+  display: flex;
+  align-items: center;
+  gap: var(--os-2);
+  height: 34px;
+  padding: 0 4px 0 var(--os-3);
+  border-radius: var(--os-r-md);
+  border: 1px solid var(--os-line-2);
+  background: rgba(5, 9, 18, 0.6);
+  color: var(--os-text-3);
+}
+.os-convos-search:focus-within { border-color: var(--os-accent-line); }
+.os-convos-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--os-text); font: var(--os-fs-sm)/1 var(--os-font-body); outline: none; }
+.os-convos-search .os-btn-icon { width: 26px; min-height: 26px; }
+/* Scrolls down only: a pixel of rounding in a row's width otherwise brings
+   up a sideways scrollbar under the list. */
+.os-convos-list { overflow: hidden auto; padding: var(--os-2); display: grid; align-content: start; gap: var(--os-3); }
+.os-convos-group h4 { margin: var(--os-1) var(--os-2) 4px; }
+.os-convos-group ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.os-convos-empty { margin: var(--os-4) var(--os-3); color: var(--os-text-3); font-size: var(--os-fs-sm); line-height: 1.5; }
+.os-convos-foot { padding: var(--os-2) var(--os-3); border-top: 1px solid var(--os-line); }
+
+.os-convo { position: relative; border-radius: var(--os-r-md); }
+.os-convo-open {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "title when" "sub sub";
+  gap: 2px var(--os-2);
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--os-r-md);
+  background: transparent;
+  color: var(--os-text-2);
+  text-align: left;
+  cursor: pointer;
+}
+.os-convo-open:hover:not(:disabled) { background: var(--os-surface-hover); color: var(--os-text); }
+.os-convo-open:disabled { cursor: not-allowed; opacity: 0.55; }
+.os-convo.open .os-convo-open { background: var(--os-accent-soft); border-color: var(--os-accent-line); color: var(--os-text); }
+.os-convo-title { grid-area: title; display: flex; align-items: center; gap: 6px; min-width: 0; font: 500 var(--os-fs-sm)/1.3 var(--os-font-body); }
+.os-convo-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-convo-pin { color: var(--os-accent-hi); flex: none; }
+.os-convo-when { grid-area: when; align-self: center; font-size: var(--os-fs-2xs); color: var(--os-text-3); }
+.os-convo-sub { grid-area: sub; font-size: var(--os-fs-xs); color: var(--os-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-convo-sub.match { color: var(--os-text-2); white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* A row's actions float over its end on hover or focus - and stay visible on
+   the open one where there is no hover (touch screens). */
+.os-convo-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--os-r-md);
+  background: var(--os-surface-solid);
+  box-shadow: var(--os-shadow-2);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--os-fast) var(--os-ease);
+}
+.os-convo:hover .os-convo-actions, .os-convo:focus-within .os-convo-actions { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .os-convo.open .os-convo-actions { opacity: 1; pointer-events: auto; } }
+.os-convo-actions .os-btn-icon { width: 28px; min-height: 28px; }
+.os-convo-rename { padding: 4px; }
+.os-convo-rename .os-input { width: 100%; }
+.os-convo-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--os-2); padding: 6px 10px 10px; font-size: var(--os-fs-xs); color: var(--os-text-2); }
+
+.os-chat-list-toggle, .os-convos-scrim { display: none; }
+
+/* Narrower: the list slides in over the conversation when asked for. */
+@media (max-width: 1100px) {
+  .os-chat-shell { grid-template-columns: minmax(0, 1fr); }
+  .os-chat-list-toggle { display: inline-flex; }
+  .os-convos {
+    position: fixed;
+    z-index: 35;
+    top: calc(var(--os-topbar) + 8px);
+    bottom: 12px;
+    left: calc(var(--os-sidebar-slim) + 8px);
+    width: min(320px, calc(100vw - var(--os-sidebar-slim) - 24px));
+    height: auto;
+    background: rgba(8, 13, 25, 0.97);
+    box-shadow: var(--os-shadow-3);
+    /* Clear of the window entirely when closed, and out of the tab order:
+       hidden only after the slide out has finished. */
+    transform: translateX(calc(-100% - var(--os-sidebar-slim) - 40px));
+    visibility: hidden;
+    transition: transform var(--os-med) var(--os-ease), visibility 0s linear var(--os-med);
+  }
+  .os-chat-shell.list-open .os-convos { transform: none; visibility: visible; transition-delay: 0s; }
+  .os-chat-shell.list-open .os-convos-scrim { display: block; position: fixed; inset: 0; z-index: 34; background: rgba(2, 4, 9, 0.5); }
+}
+@media (max-width: 640px) {
+  .os-chat-shell { padding: var(--os-4) var(--os-4) var(--os-5); }
+  .os-convos { left: 8px; width: calc(100vw - 16px); bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+}
+
 .os-msg { display: flex; gap: var(--os-3); animation: os-enter var(--os-med) var(--os-ease) both; min-width: 0; }
 .os-msg.user { justify-content: flex-end; }
 .os-msg-bubble {

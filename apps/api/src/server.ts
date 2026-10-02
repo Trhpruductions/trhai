@@ -7,7 +7,10 @@ import { runAssistantOrchestrator } from "./services/orchestrator.js";
 import type { AgentLens } from "./services/agentTools.js";
 import { clearActivity, getActivity } from "./services/agentActivity.js";
 import { normalizeAssistHistory } from "./services/assistContext.js";
-import { appendTurn, clearConversation, listTurns } from "./services/conversationStore.js";
+import {
+  appendTurn, cleanTitle, clearConversation, currentConversationId, deleteConversation, dropLastExchange, getConversation,
+  isConversationId, listConversations, listTurns, resolveConversation, updateConversation
+} from "./services/conversationStore.js";
 import {
   forgetAllMemories,
   forgetMemory,
@@ -361,15 +364,47 @@ function readTurnContext(req: express.Request, message: string) {
   const memoryContext = sessionId ? retrieveSessionMemories(sessionId, memoryCandidateLimit) : [];
 
   const clientHistory = normalizeAssistHistory(req.body?.history);
+  const conversationId = requestedConversation(req);
   // Fall back to the stored transcript when the client sends none — that is
   // what lets a fresh browser continue an existing conversation.
   const history = clientHistory.length > 0 || !sessionId
     ? clientHistory
     : normalizeAssistHistory(
-      listTurns(sessionId).map((turn) => ({ role: turn.role, content: turn.content }))
+      listTurns(sessionId, undefined, conversationId).map((turn) => ({ role: turn.role, content: turn.content }))
     );
 
-  return { sessionId, savedMemories, memoryContext, history };
+  return { sessionId, savedMemories, memoryContext, history, conversationId };
+}
+
+/**
+ * The conversation a chat turn belongs to, as the client named it - a new
+ * chat's id before its first message, or one picked from the list. Absent
+ * means the one used most recently, which is all there was before
+ * conversations could be told apart.
+ */
+function requestedConversation(req: express.Request): string | undefined {
+  return isConversationId(req.body?.conversationId) ? req.body.conversationId : undefined;
+}
+
+/**
+ * Records one finished exchange in its conversation, and says which
+ * conversation that was. A regenerated answer replaces the exchange it
+ * re-asks rather than following it - and only after the new answer exists,
+ * so a failed retry loses nothing.
+ */
+function recordExchange(
+  req: express.Request,
+  sessionId: string,
+  message: string,
+  result: { assistantMessage: string; strategy?: string; model?: string }
+): string {
+  const conversationId = resolveConversation(sessionId, requestedConversation(req)).id;
+  if (req.body?.regenerate === true) dropLastExchange(sessionId, conversationId, message);
+  appendTurn(sessionId, "user", userTurnText(message, req), undefined, conversationId);
+  // The assistant turn carries how it was produced, so a reloaded transcript
+  // still shows whether an answer was quoted or generated.
+  appendTurn(sessionId, "assistant", result.assistantMessage, { strategy: result.strategy, model: result.model }, conversationId);
+  return conversationId;
 }
 
 export function createApp() {
@@ -486,7 +521,7 @@ export function createApp() {
       const history = clientHistory.length > 0 || !sessionId
         ? clientHistory
         : normalizeAssistHistory(
-          listTurns(sessionId).map((turn) => ({ role: turn.role, content: turn.content }))
+          listTurns(sessionId, undefined, requestedConversation(req)).map((turn) => ({ role: turn.role, content: turn.content }))
         );
 
       const result = await runAssistantOrchestrator({
@@ -581,24 +616,16 @@ export function createApp() {
       });
 
       // Recorded after a successful reply so a failed request leaves no orphan turn.
-      if (sessionId) {
-        appendTurn(sessionId, "user", userTurnText(message, req));
-        // The assistant turn carries how it was produced, so a reloaded
-        // transcript still shows whether an answer was quoted or generated.
-        appendTurn(sessionId, "assistant", result.assistantMessage, {
-          strategy: result.strategy,
-          // Present only when the permission gate refused something. The
-          // client renders a confirmation dialog from it.
-          ...(result.pendingConfirmation ? { pendingConfirmation: result.pendingConfirmation } : {}),
-          model: result.model
-        });
-      }
+      const conversationId = sessionId ? recordExchange(req, sessionId, message, result) : null;
 
       res.json({
         data: {
           assistantMessage: result.assistantMessage,
           model: result.model,
           mode,
+          // Which conversation this exchange was recorded in - the id a new
+          // chat's first message created, or the one it continued.
+          conversationId,
           // Report what was actually used so the client can label provenance
           // from the server's behaviour rather than from what it hoped to send.
           // Both counts mean "actually used in the reply", not "sent to the model".
@@ -809,18 +836,110 @@ export function createApp() {
     return sessionId;
   }
 
+  // The current conversation - the one used most recently - or a named one.
+  // What the app reads on load; conversationId says which it was, so the
+  // next message continues it.
   app.get("/v1/assist/conversation", (req, res) => {
     const sessionId = requireSessionId(req.query?.sessionId, res, req);
     if (!sessionId) return;
 
-    res.json({ data: { turns: listTurns(sessionId) }, traceId: "trace-local" });
+    const asked = req.query?.conversationId;
+    const named = isConversationId(asked) ? asked : undefined;
+    res.json({
+      data: {
+        turns: listTurns(sessionId, undefined, named),
+        conversationId: named ?? currentConversationId(sessionId)
+      },
+      traceId: "trace-local"
+    });
   });
 
   app.delete("/v1/assist/conversation", (req, res) => {
     const sessionId = requireSessionId(req.query?.sessionId ?? req.body?.sessionId, res, req);
     if (!sessionId) return;
 
-    res.json({ data: { cleared: clearConversation(sessionId) }, traceId: "trace-local" });
+    const named = req.query?.conversationId ?? req.body?.conversationId;
+    res.json({
+      data: { cleared: clearConversation(sessionId, isConversationId(named) ? named : undefined) },
+      traceId: "trace-local"
+    });
+  });
+
+  // ---- Conversations ------------------------------------------------------
+  //
+  // The list behind the chat workspace: every conversation this account (or
+  // this browser, signed out) has had, to search, rename, pin, archive and
+  // delete. Keyed exactly like the transcript, so one caller never sees
+  // another's - a conversation that is not yours is simply not found.
+
+  function noSuchConversation(res: express.Response): void {
+    res.status(404).json({ code: "NOT_FOUND", message: "There is no such conversation.", traceId: "trace-local" });
+  }
+
+  app.get("/v1/conversations", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId, res, req);
+    if (!sessionId) return;
+
+    const query = typeof req.query?.q === "string" ? req.query.q.slice(0, 200) : undefined;
+    const archived = req.query?.archived === "1" || req.query?.archived === "true";
+    res.json({ data: { conversations: listConversations(sessionId, { query, archived }) }, traceId: "trace-local" });
+  });
+
+  app.get("/v1/conversations/:conversationId", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId, res, req);
+    if (!sessionId) return;
+
+    const conversation = isConversationId(req.params.conversationId)
+      ? getConversation(sessionId, req.params.conversationId)
+      : null;
+    if (!conversation) {
+      noSuchConversation(res);
+      return;
+    }
+    res.json({ data: { conversation }, traceId: "trace-local" });
+  });
+
+  app.patch("/v1/conversations/:conversationId", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId ?? req.body?.sessionId, res, req);
+    if (!sessionId) return;
+
+    const body = req.body ?? {};
+    const title = body.title === undefined ? undefined : cleanTitle(body.title);
+    const invalid = (body.title !== undefined && !title)
+      || (body.pinned !== undefined && typeof body.pinned !== "boolean")
+      || (body.archived !== undefined && typeof body.archived !== "boolean");
+    if (invalid) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: "title must be non-empty text; pinned and archived must be true or false",
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    const updated = isConversationId(req.params.conversationId)
+      ? updateConversation(sessionId, req.params.conversationId, {
+        ...(title ? { title } : {}),
+        ...(typeof body.pinned === "boolean" ? { pinned: body.pinned } : {}),
+        ...(typeof body.archived === "boolean" ? { archived: body.archived } : {})
+      })
+      : null;
+    if (!updated) {
+      noSuchConversation(res);
+      return;
+    }
+    res.json({ data: { conversation: updated }, traceId: "trace-local" });
+  });
+
+  app.delete("/v1/conversations/:conversationId", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId ?? req.body?.sessionId, res, req);
+    if (!sessionId) return;
+
+    if (!isConversationId(req.params.conversationId) || !deleteConversation(sessionId, req.params.conversationId)) {
+      noSuchConversation(res);
+      return;
+    }
+    res.json({ data: { deleted: true }, traceId: "trace-local" });
   });
 
   /**
@@ -1177,23 +1296,20 @@ export function createApp() {
         })
       );
 
+      let conversationId: string | null = null;
       if (sessionId) {
-        appendTurn(sessionId, "user", userTurnText(message, req));
         // Provenance goes on the assistant turn for the same reason it does
         // on the unstreamed route: a reloaded transcript still has to show
         // whether an answer was quoted or generated.
-        appendTurn(sessionId, "assistant", result.assistantMessage, {
-          strategy: result.strategy,
-          model: result.model
-        });
+        conversationId = recordExchange(req, sessionId, message, result);
         clearActivity(sessionId);
         reportStages(sessionId);
       }
 
       // The whole result, so a client never has to reassemble the reply from
-      // the tokens it happened to receive.
+      // the tokens it happened to receive - and which conversation it is now in.
       finished = true;
-      send("done", result);
+      send("done", { ...result, conversationId });
     } catch (error) {
       // An error mid-stream cannot be a status code — the headers are long
       // gone — so it is an event the client can render as a failed turn.
