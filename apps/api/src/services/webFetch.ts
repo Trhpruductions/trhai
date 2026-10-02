@@ -135,6 +135,9 @@ export function extractReadableText(html: string): { title: string; text: string
   const title = titleMatch ? decodeEntities(titleMatch[1]).trim().replace(/\s+/g, " ") : "";
 
   const withoutNoise = html
+    // The title is returned on its own. Left in, it also opened the text -
+    // "Example Domain This domain is for use in..." - read twice.
+    .replace(/<title[^>]*>[\s\S]*?<\/title>/gi, " ")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
@@ -283,6 +286,71 @@ export async function fetchRawPage(
   }
 
   return { ok: false, reason: "That page redirected too many times." };
+}
+
+/** A link a reader can follow: its words, and where it goes. */
+export type PageLink = { text: string; url: string };
+
+/**
+ * The links in a page, made absolute, in the order they appear: web links
+ * only (no mailto:, javascript:, data:), one per address, each with words to
+ * show - a link with no text is an icon, and nothing a reader can read.
+ */
+export function extractLinks(html: string, baseUrl: string, limit = 80): PageLink[] {
+  const links: PageLink[] = [];
+  const seen = new Set<string>();
+  const pattern = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(html)) !== null && links.length < limit) {
+    const href = decodeEntities(match[1] ?? match[2] ?? match[3] ?? "").trim();
+    let url: URL;
+    try {
+      url = new URL(href, baseUrl);
+    } catch {
+      continue;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+    url.hash = "";
+    const text = decodeEntities(match[4].replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, 140);
+    if (!text || seen.has(url.href)) continue;
+    seen.add(url.href);
+    links.push({ text, url: url.href });
+  }
+  return links;
+}
+
+/** How much of a page a person reading it is given - far more than the model's share. */
+export const maxReadCharacters = 60_000;
+
+export type PageReading =
+  | { ok: true; url: string; title: string; text: string; truncated: boolean; links: PageLink[] }
+  | { ok: false; reason: string };
+
+/**
+ * A page for a person to read: the same fetch as fetch_url, behind the same
+ * checks on where it may go, with more of the text and the links in it, so
+ * the Browser workspace can follow them. Text only - nothing on the page runs.
+ */
+export async function readWebPage(
+  rawUrl: string,
+  fetchImpl: typeof fetch = fetch,
+  lookup: typeof dnsLookup = dnsLookup
+): Promise<PageReading> {
+  const raw = await fetchRawPage(rawUrl, fetchImpl, lookup);
+  if (!raw.ok) return raw;
+
+  const { title, text } = extractReadableText(raw.body);
+  if (!text) return { ok: false, reason: "That page had no readable text." };
+
+  const truncated = text.length > maxReadCharacters;
+  return {
+    ok: true,
+    url: raw.url,
+    title: title || new URL(raw.url).hostname,
+    text: truncated ? `${text.slice(0, maxReadCharacters)}…` : text,
+    truncated,
+    links: extractLinks(raw.body, raw.url)
+  };
 }
 
 /**

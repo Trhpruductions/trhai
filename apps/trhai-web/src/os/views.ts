@@ -7,7 +7,7 @@
 
 export type ViewId =
   | "home" | "chat" | "voice"
-  | "memory" | "files"
+  | "memory" | "files" | "browser"
   | "code" | "tasks" | "tools"
   | "system" | "network" | "settings";
 
@@ -45,6 +45,11 @@ export const views: ViewDef[] = [
   {
     id: "files", label: "Files", group: "Knowledge", blurb: "TRH AI's workspace on this PC - browse it, search it, preview anything in it.",
     icon: "M4 7a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z", keywords: "workspace folder documents browse search preview images video"
+  },
+  {
+    id: "browser", label: "Browser", group: "Knowledge", blurb: "Search the web and read pages as text, without leaving TRH AI.",
+    icon: "M12 3.5a8.5 8.5 0 1 1 0 17 8.5 8.5 0 0 1 0-17ZM3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5s1.2-6.2 3.6-8.5Z",
+    keywords: "web internet search read page url link website duckduckgo"
   },
   {
     id: "code", label: "Code", group: "Work", blurb: "The apps TRH AI has built - run them, see them live, read their code - and every command it has run.",

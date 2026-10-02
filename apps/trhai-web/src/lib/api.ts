@@ -25,6 +25,22 @@ export function requestHeaders(extra: Record<string, string> = {}): Record<strin
 }
 
 /**
+ * Why the API refused, in its own words when it gave any.
+ *
+ * POST and PUT always passed the API's message on; GET, PATCH and DELETE
+ * replaced it with the status code. So the Browser, refused a page on this
+ * PC, said "The service answered with 400." when the API had said "This
+ * machine's own address cannot be fetched." - the reason was sent, and
+ * thrown away a step before the screen.
+ */
+async function refusal(response: Response): Promise<string> {
+  const payload = await response.json().catch(() => null) as { message?: unknown } | null;
+  return typeof payload?.message === "string" && payload.message.trim()
+    ? payload.message
+    : `The service answered with ${response.status}.`;
+}
+
+/**
  * A GET against the local API, never throwing.
  *
  * Every caller here needs the same thing: the real data, or a plain reason it
@@ -35,7 +51,7 @@ export function requestHeaders(extra: Record<string, string> = {}): Record<strin
 export async function apiGet<T>(path: string): Promise<ApiResult<T>> {
   try {
     const response = await fetch(`${apiBaseUrl}${path}`, { headers: requestHeaders() });
-    if (!response.ok) return { ok: false, reason: `The service answered with ${response.status}.` };
+    if (!response.ok) return { ok: false, reason: await refusal(response) };
     const payload = await response.json();
     return { ok: true, data: (payload?.data ?? payload) as T };
   } catch {
@@ -67,8 +83,8 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiResul
       headers: requestHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body)
     });
+    if (!response.ok) return { ok: false, reason: await refusal(response) };
     const payload = await response.json().catch(() => null);
-    if (!response.ok) return { ok: false, reason: `The service answered with ${response.status}.` };
     return { ok: true, data: (payload?.data ?? payload) as T };
   } catch {
     return { ok: false, reason: "Could not reach the local service." };
@@ -95,7 +111,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<ApiResult<
 export async function apiDelete(path: string): Promise<ApiResult<void>> {
   try {
     const response = await fetch(`${apiBaseUrl}${path}`, { method: "DELETE", headers: requestHeaders() });
-    if (!response.ok) return { ok: false, reason: `The service answered with ${response.status}.` };
+    if (!response.ok) return { ok: false, reason: await refusal(response) };
     return { ok: true, data: undefined };
   } catch {
     return { ok: false, reason: "Could not reach the local service." };
