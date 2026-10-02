@@ -89,6 +89,12 @@ export function defaultWorkspaceRoot(): string {
 
 /** Nothing bigger than this is read back; a model cannot use it and it crowds out the exchange. */
 export const maxReadBytes = 100_000;
+/**
+ * How much of a file read_file opens. More than it shows: a long file is shown
+ * as its start and end with the middle left out, and the lines in between are
+ * reached by asking for them - so they have to be within reach.
+ */
+export const maxOpenedBytes = 5_000_000;
 /** A cap on what a single write may produce. */
 export const maxWriteBytes = 500_000;
 /** Enough to be useful, small enough that a listing stays readable. */
@@ -351,7 +357,7 @@ export function writeWorkspaceFile(relativePath: string, content: string): Write
  * the same size cap, the same binary detection, the same truncation notice, so
  * a file outside the workspace behaves exactly like one inside it.
  */
-export function readFileAt(absolutePath: string): ReadResult {
+export function readFileAt(absolutePath: string, maxBytes = maxReadBytes): ReadResult {
   if (!existsSync(absolutePath)) return { ok: false, reason: `There is no file at "${absolutePath}".` };
 
   let info: ReturnType<typeof statSync>;
@@ -365,11 +371,11 @@ export function readFileAt(absolutePath: string): ReadResult {
 
   try {
     const raw = readFileSync(absolutePath);
-    const content = raw.subarray(0, maxReadBytes).toString("utf8");
+    const content = raw.subarray(0, maxBytes).toString("utf8");
     if (looksBinary(content)) {
       return { ok: false, reason: `"${absolutePath}" looks like a binary file, so it was not read.` };
     }
-    return { ok: true, content, truncated: raw.byteLength > maxReadBytes };
+    return { ok: true, content, truncated: raw.byteLength > maxBytes };
   } catch {
     return { ok: false, reason: `"${absolutePath}" could not be read.` };
   }
