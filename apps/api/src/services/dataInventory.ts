@@ -1,7 +1,7 @@
-import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { dataRoot } from "./dataDirectory.js";
-import { dataKeyLocation } from "./protectedJson.js";
+import { dataKeyLocation, parseProtectedJson, protectedJsonLooksEncrypted, writeProtectedJsonFile } from "./protectedJson.js";
 import { workspaceRoot } from "./workspace.js";
 
 // What TRH AI keeps on this PC, file by file, for Settings > Data & privacy:
@@ -45,6 +45,55 @@ export function looksEncrypted(file: string): boolean {
   } finally {
     if (handle !== null) closeSync(handle);
   }
+}
+
+/**
+ * Every store in the data folder still held as plain JSON, rewritten encrypted.
+ *
+ * Found 2026-10-02: accounts.json had been plain since August. Its store
+ * writes encrypted, but only on a sign-in or an account change, and none had
+ * happened since - signed out, it is never even read. preferences.json and
+ * command-arm.json were the same. A store that is not saved again is never
+ * encrypted, so this does it at startup, for every one.
+ *
+ * A file is replaced only once its encrypted copy has been read back and
+ * matches what was there. Backups are left exactly as they are: whether to
+ * keep a plain copy is the user's call, not this sweep's.
+ */
+export function encryptPlainStores(directory: string = dataRoot()): { encrypted: string[]; failed: Array<{ name: string; reason: string }> } {
+  const encrypted: string[] = [];
+  const failed: Array<{ name: string; reason: string }> = [];
+  let names: string[] = [];
+  try {
+    names = readdirSync(directory);
+  } catch {
+    // No folder yet: nothing has been saved.
+  }
+  for (const name of names.sort()) {
+    if (!name.endsWith(".json") || /backup/i.test(name)) continue;
+    const file = path.join(directory, name);
+    try {
+      if (!statSync(file).isFile() || looksEncrypted(file)) continue;
+    } catch {
+      continue;
+    }
+    const temp = `${file}.encrypting.tmp`;
+    try {
+      const text = readFileSync(file, "utf8");
+      if (protectedJsonLooksEncrypted(text)) continue;
+      const value = JSON.parse(text) as unknown;
+      writeProtectedJsonFile(temp, value);
+      if (JSON.stringify(parseProtectedJson(readFileSync(temp, "utf8"))) !== JSON.stringify(value)) {
+        throw new Error("the encrypted copy did not read back the same");
+      }
+      renameSync(temp, file);
+      encrypted.push(name);
+    } catch (error) {
+      rmSync(temp, { force: true });
+      failed.push({ name, reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { encrypted, failed };
 }
 
 export function dataInventory(): { directory: string; keyFile: string; workspace: string; files: DataFile[] } {
