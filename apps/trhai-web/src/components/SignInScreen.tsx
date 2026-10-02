@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { CoreGL } from "./CoreGL";
 import { ParticleField } from "./ParticleField";
 import type { CoreState } from "./Core";
 import { apiBaseUrl } from "../lib/api";
@@ -263,35 +262,32 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
   }[mode];
 
   return (
-    <div className={`gate${leaving ? " leaving" : ""}`}>
-      <ParticleField state={coreState} className="gate-particles" />
-
+    <div className={`gate gate-auth${leaving ? " leaving" : ""}`}>
       <main className="gate-signin">
-        <section className="gate-hero" aria-label="TRH AI">
-          <div className="gate-core" style={{ width: 260, height: 260 }}>
-            <svg className="gate-rings" viewBox="0 0 100 100" aria-hidden="true">
-              <circle className="gate-ring-1" cx="50" cy="50" r="49" />
-              <circle className="gate-ring-2" cx="50" cy="50" r="45" />
-            </svg>
-            <CoreGL state={coreState} size={260} />
-            <div className="gate-core-mark" aria-hidden="true">
-              <span style={{ fontSize: 24 }}>TRH</span>
-              <em style={{ fontSize: 13 }}>AI</em>
-            </div>
+        {/* The key art, framed on its own half. It is drawn around one centred
+            globe; spread across the whole screen, that globe landed between
+            the two columns, half under the card and beside a second core in
+            the hero. Framed here, it is this screen's only core. */}
+        <section className="gate-visual" aria-label="TRH AI">
+          <ParticleField state={coreState} className="gate-particles" />
+          <div className="gate-brand">
+            <p className="gate-wordmark">TRH AI</p>
+            <p className="gate-tagline">LIVING INTELLIGENCE SYSTEM</p>
           </div>
-          <p className="gate-wordmark">TRH AI</p>
-          <p className="gate-tagline">LIVING INTELLIGENCE SYSTEM</p>
-          <p className="gate-hero-lead">
-            Your own assistant, running on your own machine. It builds apps, reads your files, remembers what
-            matters, and answers from what you have told it.
-          </p>
-          <ul className="gate-points">
-            <li><Icon name="screen" />Runs entirely on this PC - nothing leaves it</li>
-            <li><Icon name="brain" />Your memory follows your account between browsers</li>
-            <li><Icon name="shield" />No API keys, no subscription, no cloud account</li>
-          </ul>
+          <div className="gate-visual-copy">
+            <p className="gate-hero-lead">
+              Your own assistant, running on your own machine. It builds apps, reads your files, remembers what
+              matters, and answers from what you have told it.
+            </p>
+            <ul className="gate-points">
+              <li><Icon name="screen" />Runs entirely on this PC - nothing leaves it</li>
+              <li><Icon name="brain" />Your memory follows your account between browsers</li>
+              <li><Icon name="shield" />No API keys, no subscription, no cloud account</li>
+            </ul>
+          </div>
         </section>
 
+        <div className="gate-form-side">
         <div className="gate-card-slot">
         <section className="gate-card" aria-labelledby={`${ids}-title`}>
           <span className="gate-cut tr" aria-hidden="true" />
@@ -433,6 +429,7 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
 
           <div className="gate-fine"><Icon name="lock" />Stored encrypted on this machine · Nothing leaves it</div>
         </section>
+        </div>
         </div>
       </main>
     </div>
