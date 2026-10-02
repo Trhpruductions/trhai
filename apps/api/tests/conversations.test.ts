@@ -179,6 +179,14 @@ test("deleting removes one; clearing without an id removes the current one", asy
   assert.deepEqual(listConversations("k"), []);
 });
 
+test("the list's preview is plain words, not markup", () => {
+  resetConversations();
+  const c = id();
+  appendTurn("k", "user", "hello world in python", undefined, c);
+  appendTurn("k", "assistant", "```python\nprint(\"Hello, World!\")\n```\n**Done.**", undefined, c);
+  assert.equal(listConversations("k")[0].preview, "print(\"Hello, World!\") Done.");
+});
+
 test("conversation ids are checked, not trusted", () => {
   for (const bad of ["", "short", "../../etc/passwd", "has space in it", "a".repeat(65), 42, null, { id: "x" }]) {
     assert.equal(isConversationId(bad), false, String(bad));

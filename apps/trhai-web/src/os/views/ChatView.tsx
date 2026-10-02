@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Markdown } from "../../components/Markdown";
 import type { ChatMessage } from "../../hooks/useAssistant";
+import { apiGet } from "../../lib/api";
 import { Icon } from "../ui/Icon";
 import { ViewFrame } from "../ui/ViewFrame";
 import { useAssistantState, useConversations } from "../state/assistant";
@@ -90,6 +91,72 @@ function Message({ message, last, onConfirm, onRegenerate }: {
   );
 }
 
+type ModelOption = { name: string; parameterSize: string | null };
+
+const shortName = (model: string) => model.replace(/:latest$/, "");
+
+/**
+ * Which model answers this conversation. The installed chat models, with the
+ * usual one first; the choice stays with the conversation. Without a model
+ * server answering there is nothing to choose, so it shows what the system
+ * reports instead.
+ */
+function ModelPicker() {
+  const { conversationModel, chooseModel } = useConversations();
+  const { busy } = useAssistantState();
+  const { modelName } = useSystem();
+  const [catalogue, setCatalogue] = useState<{ models: ModelOption[]; defaultModel: string | null } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiGet<{ models: ModelOption[]; defaultModel: string | null }>("/v1/models").then((result) => {
+      if (!cancelled && result.ok) setCatalogue(result.data);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!catalogue || catalogue.models.length === 0) {
+    return <span className={`os-chip ${modelName ? "accent" : "warn"}`}>{modelName ?? "No model"}</span>;
+  }
+
+  // A conversation whose model has since been uninstalled is answered by the
+  // usual one, so that is what the picker says.
+  const installed = catalogue.models.some((model) => model.name === conversationModel);
+  const value = conversationModel && installed && conversationModel !== catalogue.defaultModel ? conversationModel : "";
+  return (
+    <label className="os-model-pick" data-tip="Which model answers this conversation" data-tip-pos="below">
+      <select value={value} disabled={busy} aria-label="Model for this conversation" onChange={(event) => chooseModel(event.target.value || null)}>
+        <option value="">{catalogue.defaultModel ? `${shortName(catalogue.defaultModel)} · default` : "Default model"}</option>
+        {catalogue.models.filter((model) => model.name !== catalogue.defaultModel).map((model) => (
+          <option key={model.name} value={model.name}>{shortName(model.name)}{model.parameterSize ? ` · ${model.parameterSize}` : ""}</option>
+        ))}
+      </select>
+      <Icon name="chevronDown" size={13} />
+    </label>
+  );
+}
+
+const thousands = (tokens: number) => (tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens));
+
+/**
+ * How full the model's context window was for the newest reply a model wrote:
+ * the prompt as the API measured it before sending - the rules, the tools,
+ * the memories and the recent messages, not just what is on screen.
+ */
+function ContextMeter({ messages }: { messages: ChatMessage[] }) {
+  const measured = [...messages].reverse().find((message) => message.role === "assistant" && message.context)?.context;
+  if (!measured) return null;
+  const share = Math.min(1, measured.promptTokens / measured.windowTokens);
+  const percent = Math.round(share * 100);
+  const detail = `About ${thousands(measured.promptTokens)} of ${thousands(measured.windowTokens)} tokens in context for the last reply`;
+  return (
+    <span className={`os-context${share >= 0.85 ? " warn" : ""}`} data-tip={detail} data-tip-pos="below" aria-label={detail}>
+      <span className="os-context-bar" aria-hidden="true"><span style={{ width: `${percent}%` }} /></span>
+      <span className="os-mono">{percent}%</span>
+    </span>
+  );
+}
+
 /** The name the API gives a conversation from its first question, before the list has it. */
 function provisionalTitle(messages: ChatMessage[]): string {
   const asked = messages.find((message) => message.role === "user")?.text.split(/\r?\n/)[0]?.trim() ?? "";
@@ -100,7 +167,7 @@ function provisionalTitle(messages: ChatMessage[]): string {
 export function ChatView() {
   const { messages, busy, status, send, restored, ask, screenShareable, regenerate } = useAssistantState();
   const { conversationId, conversations, deleteConversation, newConversation } = useConversations();
-  const { modelName, online } = useSystem();
+  const { online } = useSystem();
   const [listOpen, setListOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const end = useRef<HTMLDivElement>(null);
@@ -149,7 +216,8 @@ export function ChatView() {
             <button type="button" className="os-btn os-btn-sm os-chat-list-toggle" aria-expanded={listOpen} onClick={() => setListOpen(!listOpen)}>
               <Icon name="panel" size={14} />Conversations
             </button>
-            <span className={`os-chip ${modelName ? "accent" : "warn"}`}>{modelName ?? "No model"}</span>
+            <ContextMeter messages={messages} />
+            <ModelPicker />
             <button type="button" className="os-btn os-btn-sm" disabled={busy || fresh} onClick={newConversation}>
               <Icon name="plus" size={14} />New
             </button>

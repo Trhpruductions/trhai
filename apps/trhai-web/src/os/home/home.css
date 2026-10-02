@@ -163,8 +163,13 @@
 .os-markdown p { margin: 0 0 0.6em; }
 .os-markdown p:last-child { margin-bottom: 0; }
 .os-markdown code { font-family: var(--os-font-mono); font-size: 0.92em; padding: 1px 5px; border-radius: 4px; background: rgba(128, 168, 255, 0.1); }
-.os-markdown pre { margin: 0.6em 0; padding: var(--os-3); border-radius: var(--os-r-md); background: rgba(3, 6, 12, 0.8); border: 1px solid var(--os-line); overflow-x: auto; }
+.os-markdown pre:not(.md-pre) { margin: 0.6em 0; padding: var(--os-3); border-radius: var(--os-r-md); background: rgba(3, 6, 12, 0.8); border: 1px solid var(--os-line); overflow-x: auto; }
 .os-markdown pre code { padding: 0; background: none; }
+/* A code block (Markdown's CodeBlock) is one framed box: its language and copy
+   button across the top, the code below - not a box inside a box. */
+.os-markdown .md-block { margin: 0.6em 0; border: 1px solid var(--os-line-2); border-radius: var(--os-r-md); background: rgba(3, 6, 12, 0.8); }
+.os-markdown .md-block-head { background: rgba(59, 212, 255, 0.07); border-bottom: 1px solid var(--os-line); }
+.os-markdown .md-pre { padding: var(--os-3); background: transparent; }
 .os-markdown ul, .os-markdown ol { margin: 0.4em 0 0.6em; padding-left: 1.3em; }
 .os-markdown a { color: var(--os-accent-hi); }
 .os-markdown blockquote { margin: 0.5em 0; padding: 0.2em 0.9em; border-left: 3px solid var(--os-accent-line); color: var(--os-text-2); }

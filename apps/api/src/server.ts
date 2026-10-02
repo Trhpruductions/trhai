@@ -11,6 +11,8 @@ import {
   appendTurn, cleanTitle, clearConversation, currentConversationId, deleteConversation, dropLastExchange, getConversation,
   isConversationId, listConversations, listTurns, resolveConversation, updateConversation
 } from "./services/conversationStore.js";
+import { isModelName, listChatModels } from "./services/modelCatalog.js";
+import { takeContextUse } from "./services/contextUse.js";
 import {
   forgetAllMemories,
   forgetMemory,
@@ -206,6 +208,7 @@ function buildAssistInput(
     sessionId: sessionId ?? undefined,
     history,
     agent: agentFromRequest(req),
+    model: chosenModel(req),
     memoryContext: memoryContext.map((entry) => ({
       id: entry.id,
       title: entry.title,
@@ -354,6 +357,9 @@ function reportStages(sessionId: string): void {
 
 function readTurnContext(req: express.Request, message: string) {
   const sessionId = resolveMemoryKey(req, normalizeSessionId(req.body?.sessionId));
+  // A measurement left by an earlier request that failed must not be reported
+  // as this one's.
+  if (sessionId) takeContextUse(sessionId);
   // A new request starts a fresh trace. The panel is for watching the work
   // happening now; keeping every step since the browser opened would bury the
   // one that matters at the moment it matters most.
@@ -386,6 +392,11 @@ function requestedConversation(req: express.Request): string | undefined {
   return isConversationId(req.body?.conversationId) ? req.body.conversationId : undefined;
 }
 
+/** The model the conversation asked for, if it named a plausible one. Checked, not trusted. */
+function chosenModel(req: express.Request): string | undefined {
+  return isModelName(req.body?.model) ? req.body.model : undefined;
+}
+
 /**
  * Records one finished exchange in its conversation, and says which
  * conversation that was. A regenerated answer replaces the exchange it
@@ -398,7 +409,12 @@ function recordExchange(
   message: string,
   result: { assistantMessage: string; strategy?: string; model?: string }
 ): string {
-  const conversationId = resolveConversation(sessionId, requestedConversation(req)).id;
+  const conversation = resolveConversation(sessionId, requestedConversation(req));
+  const conversationId = conversation.id;
+  // The model it was asked with becomes the conversation's own, so it follows
+  // the conversation to another browser. Saved only when it changes.
+  const model = chosenModel(req);
+  if (model && conversation.model !== model) updateConversation(sessionId, conversationId, { model });
   if (req.body?.regenerate === true) dropLastExchange(sessionId, conversationId, message);
   appendTurn(sessionId, "user", userTurnText(message, req), undefined, conversationId);
   // The assistant turn carries how it was produced, so a reloaded transcript
@@ -511,6 +527,9 @@ export function createApp() {
       // the anonymous session id. Without either we skip memory entirely rather
       // than pooling callers into a shared bucket.
       const sessionId = resolveMemoryKey(req, normalizeSessionId(req.body?.sessionId));
+      // A measurement left by an earlier request that failed must not be
+      // reported as this one's.
+      if (sessionId) takeContextUse(sessionId);
       const savedMemories = sessionId ? recordMemoriesFromMessage(sessionId, message) : [];
       // Widen the candidate set: the composer scores for relevance, so limiting to
       // the 5 newest would hide the one memory that actually answers the question.
@@ -530,6 +549,7 @@ export function createApp() {
         sessionId: sessionId ?? undefined,
         history,
         agent: agentFromRequest(req),
+        model: chosenModel(req),
         memoryContext: memoryContext.map((entry) => ({
           id: entry.id,
           title: entry.title,
@@ -626,6 +646,9 @@ export function createApp() {
           // Which conversation this exchange was recorded in - the id a new
           // chat's first message created, or the one it continued.
           conversationId,
+          // How full the model's context window was, as measured when the
+          // prompt was sent. Null when no model was asked.
+          context: sessionId ? takeContextUse(sessionId) : null,
           // Report what was actually used so the client can label provenance
           // from the server's behaviour rather than from what it hoped to send.
           // Both counts mean "actually used in the reply", not "sent to the model".
@@ -845,10 +868,13 @@ export function createApp() {
 
     const asked = req.query?.conversationId;
     const named = isConversationId(asked) ? asked : undefined;
+    const conversationId = named ?? currentConversationId(sessionId);
     res.json({
       data: {
         turns: listTurns(sessionId, undefined, named),
-        conversationId: named ?? currentConversationId(sessionId)
+        conversationId,
+        // The conversation's own model, so the app shows and keeps using it.
+        model: conversationId ? getConversation(sessionId, conversationId)?.model ?? null : null
       },
       traceId: "trace-local"
     });
@@ -907,11 +933,12 @@ export function createApp() {
     const title = body.title === undefined ? undefined : cleanTitle(body.title);
     const invalid = (body.title !== undefined && !title)
       || (body.pinned !== undefined && typeof body.pinned !== "boolean")
-      || (body.archived !== undefined && typeof body.archived !== "boolean");
+      || (body.archived !== undefined && typeof body.archived !== "boolean")
+      || (body.model !== undefined && body.model !== null && !isModelName(body.model));
     if (invalid) {
       res.status(400).json({
         code: "INVALID_REQUEST",
-        message: "title must be non-empty text; pinned and archived must be true or false",
+        message: "title must be non-empty text; pinned and archived must be true or false; model must be a model name or null",
         traceId: "trace-local"
       });
       return;
@@ -921,7 +948,9 @@ export function createApp() {
       ? updateConversation(sessionId, req.params.conversationId, {
         ...(title ? { title } : {}),
         ...(typeof body.pinned === "boolean" ? { pinned: body.pinned } : {}),
-        ...(typeof body.archived === "boolean" ? { archived: body.archived } : {})
+        ...(typeof body.archived === "boolean" ? { archived: body.archived } : {}),
+        // null goes back to the usual model.
+        ...(body.model !== undefined ? { model: body.model as string | null } : {})
       })
       : null;
     if (!updated) {
@@ -998,6 +1027,13 @@ export function createApp() {
   // What the assistant can currently do. The client shows a live indicator from
   // this, because whether a model is answering changes what the app is capable
   // of and the user should not have to discover that by asking a question.
+  // The models a conversation can be answered by - installed, and able to
+  // hold a conversation - and which one answers when it names none.
+  app.get("/v1/models", async (_req, res) => {
+    const { models, defaultModel, reason } = await listChatModels(readLocalModelConfig());
+    res.json({ data: { models, defaultModel, ...(reason ? { reason } : {}) }, traceId: "trace-local" });
+  });
+
   app.get("/v1/assist/model", async (_req, res) => {
     const availability = await checkAvailability(readLocalModelConfig());
 
@@ -1307,9 +1343,10 @@ export function createApp() {
       }
 
       // The whole result, so a client never has to reassemble the reply from
-      // the tokens it happened to receive - and which conversation it is now in.
+      // the tokens it happened to receive - which conversation it is now in,
+      // and how full the model's context window was when it was asked.
       finished = true;
-      send("done", { ...result, conversationId });
+      send("done", { ...result, conversationId, context: sessionId ? takeContextUse(sessionId) : null });
     } catch (error) {
       // An error mid-stream cannot be a status code — the headers are long
       // gone — so it is an event the client can render as a failed turn.

@@ -30,6 +30,11 @@ export type ChatMessage = {
   /** How many images were sent with this message. */
   images?: number;
   /**
+   * How full the model's context window was when it wrote this reply, as the
+   * API measured the prompt it sent. Absent when no model wrote it.
+   */
+  context?: { promptTokens: number; windowTokens: number };
+  /**
    * True while this reply is still being written.
    *
    * The text is real — it is what the model has produced so far — but it is
@@ -55,6 +60,8 @@ export type ConversationSummary = {
   updatedAt: string;
   pinned: boolean;
   archived: boolean;
+  /** The model picked for this conversation; absent means the usual one. */
+  model?: string;
   turnCount: number;
   preview: string;
   /** Where a search matched, when it was inside the conversation rather than its title. */
@@ -70,6 +77,11 @@ const conversationKey = "trhai.chat.conversation.v1";
 
 function isConversationId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9-]{8,64}$/.test(value);
+}
+
+function isContextUse(value: unknown): value is { promptTokens: number; windowTokens: number } {
+  const use = value as { promptTokens?: unknown; windowTokens?: unknown } | null;
+  return Boolean(use) && typeof use?.promptTokens === "number" && typeof use?.windowTokens === "number" && use.windowTokens > 0;
 }
 
 function readOpenConversation(): string | null {
@@ -132,6 +144,17 @@ export function useAssistant() {
    */
   const [conversationId, setConversationId] = useState<string | null>(null);
   const openConversationRef = useRef<string | null>(null);
+  /**
+   * The model this conversation is answered by, or null for the usual one.
+   * Kept when starting a new chat: a choice is a preference, not a property
+   * of one conversation only.
+   */
+  const [conversationModel, setConversationModel] = useState<string | null>(null);
+  const modelRef = useRef<string | null>(null);
+  const applyModel = useCallback((model: string | null) => {
+    modelRef.current = model;
+    setConversationModel(model);
+  }, []);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const listFilter = useRef<ConversationFilter>({});
   const listGeneration = useRef(0);
@@ -199,6 +222,7 @@ export function useAssistant() {
           if (!superseded()) {
             setMessages(restoredMessages(conversation.turns ?? []));
             adopt(conversation.id);
+            applyModel(typeof conversation.model === "string" ? conversation.model : null);
           }
           return;
         }
@@ -209,6 +233,7 @@ export function useAssistant() {
       const turns: StoredTurnPayload[] = payload?.data?.turns ?? [];
       if (turns.length > 0) setMessages(restoredMessages(turns));
       adopt(isConversationId(payload?.data?.conversationId) ? payload.data.conversationId : null);
+      if (typeof payload?.data?.model === "string") applyModel(payload.data.model);
     };
     open()
       .catch(() => { /* a fresh session has no transcript to restore, and that is fine */ })
@@ -218,7 +243,7 @@ export function useAssistant() {
         void loadConversations();
       });
     return () => { cancelled = true; };
-  }, [adopt, loadConversations]);
+  }, [adopt, applyModel, loadConversations]);
 
   const send = useCallback(async (
     input: string,
@@ -314,6 +339,8 @@ export function useAssistant() {
           message: text, sessionId: session.current, history, mode: "general",
           conversationId: conversation,
           ...(regenerating ? { regenerate: true } : {}),
+          // The conversation's own model; the API uses the usual one without it.
+          ...(modelRef.current ? { model: modelRef.current } : {}),
           agentId: readActiveAgent(window.localStorage)?.id,
           // Shown to the vision model on the API; never stored there.
           ...(images.length > 0 ? { images } : {})
@@ -426,6 +453,7 @@ export function useAssistant() {
         strategy: data.strategy as string | undefined,
         model: data.model as string | undefined,
         toolsUsed: data.toolsUsed as ChatMessage["toolsUsed"],
+        ...(isContextUse(data.context) ? { context: data.context } : {}),
         ...(isPendingConfirmation(data.pendingConfirmation) ? { pendingConfirmation: data.pendingConfirmation } : {})
       };
 
@@ -535,12 +563,13 @@ export function useAssistant() {
       setMessages(restoredMessages(conversation.turns ?? []));
       setStatus({ state: "idle" });
       adopt(conversation.id);
+      applyModel(typeof conversation.model === "string" ? conversation.model : null);
     } catch {
       // Left on the conversation already open.
     }
-  }, [adopt, loadConversations]);
+  }, [adopt, applyModel, loadConversations]);
 
-  const changeConversation = useCallback(async (id: string, change: { title?: string; pinned?: boolean; archived?: boolean }) => {
+  const changeConversation = useCallback(async (id: string, change: { title?: string; pinned?: boolean; archived?: boolean; model?: string | null }) => {
     try {
       const response = await fetch(`${apiBaseUrl}/v1/conversations/${encodeURIComponent(id)}`, {
         method: "PATCH",
@@ -572,6 +601,17 @@ export function useAssistant() {
     void loadConversations();
   }, [loadConversations, newConversation]);
 
+  /**
+   * Which model answers this conversation from now on (null: the usual one).
+   * Saved on the conversation when it exists; a new chat's choice goes with
+   * its first message instead.
+   */
+  const chooseModel = useCallback((model: string | null) => {
+    applyModel(model);
+    const open = openConversationRef.current;
+    if (open && messages.length > 0) void changeConversation(open, { model });
+  }, [applyModel, changeConversation, messages.length]);
+
   /** Deletes the conversation on screen - what "clear" meant when there was only one. */
   const clear = useCallback(async () => {
     const open = openConversationRef.current;
@@ -586,6 +626,7 @@ export function useAssistant() {
   return {
     messages, status, restored, sessionId: session.current, send, stop, clear, regenerate,
     conversationId, conversations, loadConversations, newConversation, openConversation,
-    renameConversation, pinConversation, archiveConversation, deleteConversation
+    renameConversation, pinConversation, archiveConversation, deleteConversation,
+    conversationModel, chooseModel
   };
 }

@@ -148,6 +148,45 @@
 
 .os-chat-list-toggle, .os-convos-scrim { display: none; }
 
+/* The conversation's model, as a chip that opens the choice. */
+.os-model-pick { position: relative; display: inline-flex; align-items: center; color: var(--os-accent-hi); }
+.os-model-pick select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 28px;
+  max-width: 230px;
+  padding: 0 28px 0 12px;
+  border-radius: var(--os-r-pill);
+  border: 1px solid var(--os-accent-line);
+  background: var(--os-accent-soft);
+  color: var(--os-accent-hi);
+  font: 500 var(--os-fs-xs)/1 var(--os-font-mono);
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.os-model-pick select:hover:not(:disabled) { border-color: var(--os-accent); }
+.os-model-pick select:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.os-model-pick select:disabled { opacity: 0.55; cursor: not-allowed; }
+.os-model-pick option { background: var(--os-surface-solid); color: var(--os-text); }
+.os-model-pick svg { position: absolute; right: 10px; pointer-events: none; }
+
+/* How full the context window was for the last reply. */
+.os-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--os-r-pill);
+  border: 1px solid var(--os-line-2);
+  color: var(--os-text-2);
+  font-size: var(--os-fs-xs);
+}
+.os-context-bar { width: 44px; height: 4px; border-radius: 2px; background: rgba(128, 168, 255, 0.15); overflow: hidden; }
+.os-context-bar span { display: block; height: 100%; border-radius: 2px; background: var(--os-accent); transition: width var(--os-slow) var(--os-ease); }
+.os-context.warn { border-color: rgba(255, 182, 72, 0.45); color: var(--os-warn); }
+.os-context.warn .os-context-bar span { background: var(--os-warn); }
+
 /* Narrower: the list slides in over the conversation when asked for. */
 @media (max-width: 1100px) {
   .os-chat-shell { grid-template-columns: minmax(0, 1fr); }
