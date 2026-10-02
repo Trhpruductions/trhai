@@ -489,6 +489,17 @@ const verbToSomeone = new RegExp(
   "i"
 );
 
+/**
+ * Whether a request asks for a summary - of a document, a file, a report -
+ * so summarize_document is worth offering. It reads every part of a long
+ * document through the model, which takes a while, so it is not offered to a
+ * request that only wants to look at something.
+ */
+export function wantsASummary(message: string): boolean {
+  return /\b(?:summari[sz]e|summari[sz]ing|summary|summaries|tl;?dr|key points|main points|key takeaways|takeaways|the gist|gist of|recap of|overview of|boil (?:it|this|that) down|sum (?:it|this|that) up)\b/i
+    .test(message ?? "");
+}
+
 export function wantsToSendAMessage(message: string): boolean {
   const text = message ?? "";
   return sendOrder.test(text) || verbToSomeone.test(text);

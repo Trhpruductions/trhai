@@ -14,7 +14,7 @@ import {
   correctionFor, inventsAReading, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { asksAboutMachineState, asksForAReading, asksToStartSomething, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
+import { asksAboutMachineState, asksForAReading, asksToStartSomething, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -307,6 +307,7 @@ export const systemPrompt = [
   "documents, their schedule. You cannot know these. Use a tool:",
   "- search_memory for anything they have told you.",
   "- search_documents, list_documents, read_document for anything written down.",
+  "- summarize_document to summarize a whole document or file, however long - it reads every part.",
   "- system_status for how this computer is doing: processor load, memory in use, the graphics",
   "  card, free disk space, network speed, uptime. Those are real readings - report them as",
   "  given, and never run a command or guess to get them.",
@@ -1656,6 +1657,10 @@ export async function runAgent(
         // Texting or emailing someone, when that is what was asked - and
         // never on a run with nobody there to approve the message.
         messaging: wantsToSendAMessage(question) && !unattended,
+        // Summarizing a whole document, when a summary is what was asked for -
+        // and then only that way: see readers in availableTools.
+        summaries: wantsASummary(question),
+        readers: !wantsASummary(question),
         // A request about a knowledge document, with no file named, does not get
         // the workspace file writers — so "save a document called X" reaches
         // write_document instead of writing an X.txt file. Nor does a pure web
