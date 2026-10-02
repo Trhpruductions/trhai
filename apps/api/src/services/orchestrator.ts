@@ -18,6 +18,7 @@ import { asksAboutTheScreen, planProject } from "@ascend/shared";
 import { asksForAReading, classifyIntent, wantsASummary, wantsToStopAnApp, wantsWebSearch } from "./actionIntent.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
+import { archiveIfInterrupted, recordFinishedTask, runTrackedTask, stepsSince } from "./taskHistory.js";
 import {
   approvesTheSend,
   clearPendingConfirmation,
@@ -533,7 +534,11 @@ export async function runAssistantOrchestrator(
     // agent and its tools. Recording here rather than on every turn keeps the
     // store to things there is actually something to resume, instead of
     // filing a "task" for every greeting.
+    const attemptStartedAt = new Date().toISOString();
     if (input.sessionId && !resuming) {
+      // The task this replaces, if it never finished, goes into the history
+      // as interrupted rather than being overwritten without a trace.
+      archiveIfInterrupted(input.sessionId);
       recordTask(input.sessionId, {
         request: effectiveMessage,
         taskType: detectTaskType(effectiveMessage),
@@ -541,14 +546,14 @@ export async function runAssistantOrchestrator(
       });
     }
 
-    const generated = await answerWithLocalModel(
+    const generated = await runTrackedTask(input.sessionId, attemptStartedAt, () => answerWithLocalModel(
       { ...input, userMessage: effectiveMessage, ...(impliedFile ? { impliedFile: impliedFile.file } : {}) },
       known,
       question,
       // Authorised for this turn only, and only for the exact tool the user
       // was asked about. An approval does not become a standing permission.
       approving ? new Set([approving.tool]) : undefined
-    );
+    ));
 
     // The gate refused something. Hold the offer open so the user's "yes"
     // has a specific action to attach to, rather than being read as blanket
@@ -562,7 +567,7 @@ export async function runAssistantOrchestrator(
     }
 
     if (input.sessionId) {
-      updateTask(input.sessionId, generated
+      const ended = updateTask(input.sessionId, generated
         ? {
           status: "succeeded",
           // Names only: the task store is a record of what ran, not the
@@ -574,6 +579,7 @@ export async function runAssistantOrchestrator(
         // ran — so it stays resumable and says why, rather than being recorded
         // as a failure or quietly dropped.
         : { status: "blocked", error: "No local model was available to run this." });
+      if (ended) recordFinishedTask(input.sessionId, ended, stepsSince(input.sessionId, attemptStartedAt));
     }
 
     // Read back rather than reconstructed, so what the dialog offers is

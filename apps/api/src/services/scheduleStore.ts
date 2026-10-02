@@ -82,9 +82,28 @@ export type Schedule = {
   lastDetail: string | null;
 };
 
+/**
+ * One run of a schedule, as it went.
+ *
+ * lastStatus and lastDetail say how the latest run went and nothing about the
+ * one before, so a schedule that failed on Tuesday and worked on Wednesday
+ * looked as if it had always worked. These are each run in turn.
+ */
+export type ScheduleRun = {
+  /** When it started; for a missed run, when it was due. */
+  at: string;
+  status: ScheduleRunStatus;
+  detail: string | null;
+  /** Measured once the run reported back. Absent for a missed or unfinished run. */
+  durationMs?: number;
+};
+
 export const maxSchedules = 50;
 export const maxPromptLength = 500;
 export const maxDetailLength = 400;
+export const maxRunsKept = 20;
+const maxRunDetailLength = 200;
+const startedDetail = "Started. If this is still showing, the run did not finish.";
 
 /**
  * How late a daily schedule may fire and still be worth firing.
@@ -188,12 +207,18 @@ export function dueVerdict(schedule: Schedule, now: Date): DueVerdict {
 
 // ---- persistence -----------------------------------------------------------
 
-type PersistedShape = { version: 1; schedules: Schedule[] };
+/** `runs` is optional so a file written before it existed still loads. */
+type PersistedShape = { version: 1; schedules: Schedule[]; runs?: Array<{ id: string; runs: ScheduleRun[] }> };
 
 const scheduleFilePath = process.env.ASSIST_SCHEDULE_FILE
   ?? dataFile("assist-schedules.json");
 
 let schedules: Schedule[] = [];
+/**
+ * Each schedule's runs, newest first. Kept beside the schedules rather than
+ * on them, so the list every screen polls stays the size it was.
+ */
+const runsById = new Map<string, ScheduleRun[]>();
 let loaded = false;
 let persistenceEnabled = process.env.ASSIST_SCHEDULE_PERSIST !== "off";
 let lastPersistError: string | null = null;
@@ -226,6 +251,17 @@ function withAction(entry: Schedule): Schedule {
   return { ...entry, action: { kind: "ask", prompt: entry.prompt } };
 }
 
+const runStatuses: ScheduleRunStatus[] = ["ok", "failed", "missed", "interrupted"];
+
+function isRun(value: unknown): value is ScheduleRun {
+  if (!value || typeof value !== "object") return false;
+  const run = value as Partial<ScheduleRun>;
+  return typeof run.at === "string"
+    && runStatuses.includes(run.status as ScheduleRunStatus)
+    && (run.detail === null || typeof run.detail === "string")
+    && (run.durationMs === undefined || typeof run.durationMs === "number");
+}
+
 function loadFromDisk(): void {
   if (loaded) return;
   loaded = true;
@@ -235,6 +271,11 @@ function loadFromDisk(): void {
     const parsed = readProtectedJsonFile(scheduleFilePath) as Partial<PersistedShape>;
     if (Array.isArray(parsed.schedules)) {
       schedules = parsed.schedules.filter(isSchedule).map(withAction);
+    }
+    for (const entry of Array.isArray(parsed.runs) ? parsed.runs : []) {
+      if (!entry || typeof entry.id !== "string" || !Array.isArray(entry.runs)) continue;
+      if (!schedules.some((schedule) => schedule.id === entry.id)) continue;
+      runsById.set(entry.id, entry.runs.filter(isRun).slice(0, maxRunsKept));
     }
   } catch {
     // A corrupt file must never take the API down; start clean instead.
@@ -247,7 +288,11 @@ const persistAttempts = 3;
 function saveToDisk(): void {
   if (!persistenceEnabled) return;
 
-  const payload: PersistedShape = { version: 1, schedules };
+  const payload: PersistedShape = {
+    version: 1,
+    schedules,
+    runs: [...runsById.entries()].map(([id, runs]) => ({ id, runs }))
+  };
   const tempPath = `${scheduleFilePath}.tmp`;
 
   let lastError: unknown = null;
@@ -334,8 +379,20 @@ export function removeSchedule(id: string): boolean {
   const next = schedules.filter((entry) => entry.id !== id);
   if (next.length === schedules.length) return false;
   schedules = next;
+  runsById.delete(id);
   saveToDisk();
   return true;
+}
+
+/** A schedule's runs, newest first; null when there is no such schedule. */
+export function listScheduleRuns(id: string): ScheduleRun[] | null {
+  loadFromDisk();
+  if (!schedules.some((entry) => entry.id === id)) return null;
+  return (runsById.get(id) ?? []).map((run) => ({ ...run }));
+}
+
+function logRun(id: string, run: ScheduleRun): void {
+  runsById.set(id, [run, ...(runsById.get(id) ?? [])].slice(0, maxRunsKept));
 }
 
 /** Record what a run did and move the schedule on to its next occurrence. */
@@ -364,8 +421,11 @@ export function claimRun(id: string, now = new Date()): Schedule | null {
   if (!target) return null;
 
   target.lastStatus = "interrupted";
-  target.lastDetail = "Started. If this is still showing, the run did not finish.";
+  target.lastDetail = startedDetail;
   target.nextDueAt = nextDueAfter(target.cadence, now).toISOString();
+  // Logged as interrupted for the same reason: recordRun turns it into the
+  // real outcome, and a run that never reports back stays saying so.
+  logRun(id, { at: now.toISOString(), status: "interrupted", detail: startedDetail });
   saveToDisk();
   return { ...target };
 }
@@ -379,6 +439,20 @@ export function recordRun(
   loadFromDisk();
   const target = schedules.find((entry) => entry.id === id);
   if (!target) return null;
+
+  const runDetail = detail.trim().slice(0, maxRunDetailLength) || null;
+  const claimed = runsById.get(id)?.[0];
+  if (status === "missed") {
+    // Logged at the time it was due, which is the time it is missing from.
+    logRun(id, { at: target.nextDueAt, status, detail: runDetail });
+  } else if (claimed && claimed.status === "interrupted" && claimed.durationMs === undefined && claimed.detail === startedDetail) {
+    // The run claimRun started: finished now, with how long it took.
+    claimed.status = status;
+    claimed.detail = runDetail;
+    claimed.durationMs = Math.max(0, now.getTime() - new Date(claimed.at).getTime());
+  } else {
+    logRun(id, { at: now.toISOString(), status, detail: runDetail });
+  }
 
   // A missed run is not a run: it moves the schedule on and is noted, but
   // lastRunAt keeps pointing at the last time this actually did something.
@@ -394,8 +468,17 @@ export function recordRun(
 
 export function resetSchedules(): void {
   schedules = [];
+  runsById.clear();
   loaded = true;
   saveToDisk();
+}
+
+/** Test seam: drop in-process state and read the file again, as a restart would. */
+export function reloadSchedulesFromDisk(): void {
+  schedules = [];
+  runsById.clear();
+  loaded = false;
+  loadFromDisk();
 }
 
 export function setSchedulePersistence(enabled: boolean): void {
