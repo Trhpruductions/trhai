@@ -5,20 +5,50 @@
 
 .os-big-reading { font-size: var(--os-fs-2xl); color: var(--os-text); }
 
-.os-tool-grid { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--os-2); }
-.os-tool-grid li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+/* ----------------------------------------------------------------- tools */
+
+/* Each tool a card: what it does, how much it may do, whether it can run. */
+.os-tool-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--os-2); align-items: start; }
+.os-tool { display: grid; gap: 6px; padding: var(--os-3); border-radius: var(--os-r-md); border: 1px solid var(--os-line); background: rgba(8, 13, 25, 0.55); min-width: 0; }
+.os-tool.attention { border-color: rgba(255, 182, 72, 0.35); }
+.os-tool.open { grid-column: 1 / -1; border-color: var(--os-line-3); }
+.os-tool-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: var(--os-2);
-  padding: var(--os-2) var(--os-3);
-  border-radius: var(--os-r-md);
-  border: 1px solid var(--os-line);
-  background: rgba(8, 13, 25, 0.5);
-  font-size: var(--os-fs-sm);
-  min-width: 0;
+  align-items: center;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--os-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.os-tool-grid li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-tool-head:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 3px; border-radius: var(--os-r-sm); }
+.os-tool.open .os-hist-chevron { transform: rotate(180deg); }
+.os-tool-names { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--os-2); min-width: 0; }
+.os-tool-names strong { font-size: var(--os-fs-md); font-weight: 600; }
+.os-tool-names .os-mono { font-size: var(--os-fs-xs); overflow-wrap: anywhere; }
+.os-tool-summary { margin: 0; color: var(--os-text-2); font-size: var(--os-fs-sm); line-height: 1.45; }
+.os-tool-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.os-tool-note { margin: 0; color: var(--os-text-3); font-size: var(--os-fs-xs); line-height: 1.45; }
+.os-tool-note.warn { color: var(--os-warn); }
+.os-tool-usage { margin: 0; color: var(--os-text-3); font-size: var(--os-fs-xs); }
+.os-tool-detail { display: grid; gap: var(--os-3); padding-top: var(--os-2); border-top: 1px solid var(--os-line); }
+.os-tool-facts { margin: 0; display: grid; gap: 6px; font-size: var(--os-fs-sm); }
+.os-tool-facts div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: var(--os-2); }
+.os-tool-facts dt { color: var(--os-text-3); }
+.os-tool-facts dd { margin: 0; color: var(--os-text-2); overflow-wrap: anywhere; }
+.os-tool-instructions { display: grid; gap: 6px; }
+.os-tool-instructions p { margin: 0; padding: var(--os-2) var(--os-3); border-radius: var(--os-r-md); border: 1px solid var(--os-line); background: rgba(5, 9, 18, 0.5); color: var(--os-text-2); font-size: var(--os-fs-sm); line-height: 1.5; }
+@media (max-width: 640px) { .os-tool-facts div { grid-template-columns: minmax(0, 1fr); gap: 0; } }
+
+/* The permission ladder, rung by rung. */
+.os-levels { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--os-3); }
+.os-levels li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--os-2); }
+.os-levels p { flex-basis: 100%; margin: 0; color: var(--os-text-2); font-size: var(--os-fs-sm); line-height: 1.45; }
 
 /* ------------------------------------------------------------------ memory */
 

@@ -49,7 +49,7 @@ function outcomeOf(run: CommandRun): { word: string; tone: string } {
 // polling every three seconds into a column nobody could see - and since the
 // rails start closed, that was the normal state of the app. The countdown it
 // drives is only meaningful while visible anyway.
-export function CommandAccess({ active = true }: { active?: boolean }) {
+export function CommandAccess({ active = true, onChange }: { active?: boolean; onChange?: () => void }) {
   const [state, setState] = useState<CommandState | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -79,6 +79,8 @@ export function CommandAccess({ active = true }: { active?: boolean }) {
     try {
       await apiPost(state.armed ? "/v1/commands/disarm" : "/v1/commands/arm", {});
       await read();
+      // What depends on the switch - the Tool center's run_command - reads again now.
+      onChange?.();
     } finally {
       setBusy(false);
     }
