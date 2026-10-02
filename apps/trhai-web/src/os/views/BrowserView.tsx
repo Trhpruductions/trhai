@@ -11,6 +11,7 @@ import { ViewFrame } from "../ui/ViewFrame";
 import { useAssistantState } from "../state/assistant";
 import { useNav } from "../state/nav";
 import { useNotify } from "../state/notify";
+import { detailFromHash } from "../views";
 import "./views.css";
 
 // The web, read as text. A search goes to DuckDuckGo through TRH AI's service
@@ -81,6 +82,24 @@ export function BrowserView() {
     if (there) setInput(visitText(there));
   };
   const goTo = (next: Visit) => move(visit(history, next));
+
+  // Something to look up, sent in the address (#browser/<words or a site>) -
+  // from the command palette. Taken once, then dropped from the address so a
+  // reload does not search it again.
+  useEffect(() => {
+    const take = () => {
+      const detail = detailFromHash(window.location.hash);
+      if (!detail) return;
+      window.history.replaceState(null, "", "#browser");
+      const next: Visit = looksLikeUrl(detail) ? { kind: "page", url: normalizeUrl(detail) } : { kind: "search", query: detail };
+      setTyped(null);
+      setHistory((prior) => visit(prior, next));
+      setInput(visitText(next));
+    };
+    take();
+    window.addEventListener("hashchange", take);
+    return () => window.removeEventListener("hashchange", take);
+  }, []);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
