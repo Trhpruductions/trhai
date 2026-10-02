@@ -1,71 +1,10 @@
 "use client";
 
-import "./panels.css";
-
-// Panels the workspaces share - the health checks on System, what memory
-// holds on Memory - each filled from a real source. The work TRH AI is doing
-// moved to the Task center (lib/taskCenter.ts), with the rule that was
-// written here: no progress bars, because nothing in the agent knows how far
-// through a request it is.
-
-export type HealthRow = { label: string; state: string; ok: boolean | null };
-
-/**
- * Overall health, as a fraction of the checks that actually passed.
- *
- * The reference shows a fixed 100%. This counts: four of five subsystems
- * reachable reads 80%, and the row that failed is right underneath saying
- * which one. A dial permanently at 100% is decoration — it cannot tell you
- * anything, because it never moves.
- */
-export function SystemOverview({ rows }: { rows: HealthRow[] }) {
-  const known = rows.filter((row) => row.ok !== null);
-  const passing = known.filter((row) => row.ok).length;
-  const health = known.length === 0 ? null : Math.round((passing / known.length) * 100);
-
-  const radius = 26;
-  const circumference = 2 * Math.PI * radius;
-  const filled = health === null ? 0 : circumference * (health / 100);
-  const tone = health === null ? "unknown" : health === 100 ? "ok" : health >= 60 ? "warn" : "danger";
-
-  return (
-    <section className="hud-panel">
-      {/* "Health checks", not "System overview": the gauges panel owns that
-          name now, and two panels with one label is a screen that cannot be
-          talked about. This one lists the individual checks and what each
-          returned, which is what it has always actually shown. */}
-      <span className="hud-label">Health checks</span>
-      <div className="overview">
-        <div className={`health health-${tone}`}>
-          <svg viewBox="0 0 64 64" aria-hidden="true">
-            <circle className="health-track" cx="32" cy="32" r={radius} />
-            {health !== null ? (
-              <circle
-                className="health-fill" cx="32" cy="32" r={radius}
-                strokeDasharray={`${filled} ${circumference - filled}`}
-                transform="rotate(-90 32 32)"
-              />
-            ) : null}
-          </svg>
-          <span className="health-value">{health === null ? "—" : `${health}%`}</span>
-          <span className="health-word">health</span>
-        </div>
-
-        <dl className="overview-rows">
-          {rows.map((row) => (
-            <div key={row.label}>
-              <dt>{row.label}</dt>
-              <dd className={row.ok === null ? "" : row.ok ? "ok" : "danger"}>
-                {row.state}
-                <span className={`overview-dot${row.ok ? " on" : row.ok === false ? " off" : ""}`} aria-hidden="true" />
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </div>
-    </section>
-  );
-}
+// What memory holds, for the Memory workspace, filled from a real source.
+// The health checks now live in the System workspace, and the work TRH AI is
+// doing in the Task center (lib/taskCenter.ts), with the rule that was written
+// here: no progress bars, because nothing in the agent knows how far through
+// a request it is.
 
 export function MemoryStatus({
   entries, pinned, documents, workspaceBytes, workspaceFiles

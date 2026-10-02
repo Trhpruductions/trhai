@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import type { HealthRow } from "../../components/CommandPanels";
 import { useSystem } from "./system";
 import { useVoice } from "./assistant";
 
@@ -9,6 +8,9 @@ import { useVoice } from "./assistant";
 // showed, each from a real answer. A row still being checked counts neither
 // way; "stability" is the share of decided checks that passed, a number that
 // drops when something breaks rather than a dial pinned near 100%.
+
+/** One check of one part of TRH AI: its name, what it found, and whether that is good. */
+export type HealthRow = { label: string; state: string; ok: boolean | null };
 
 export type ModuleState = "online" | "standby" | "offline";
 

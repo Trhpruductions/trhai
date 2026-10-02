@@ -123,6 +123,9 @@ import {
 import { readAppManifest, searchFiles } from "./services/agentTools.js";
 import { checkUrlShape, readWebPage } from "./services/webFetch.js";
 import { webSearch } from "./services/webSearch.js";
+import { internetCheck, networkInterfaces, ollamaRuntime, serviceStatus, unloadModel } from "./services/runtimeStatus.js";
+import { persistenceFailures } from "./services/persistenceHealth.js";
+import { lockedProtectedFiles } from "./services/protectedJson.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -1301,6 +1304,59 @@ export function createApp() {
       return;
     }
     res.json({ data: { flow: saved }, traceId: "trace-local" });
+  });
+
+  // TRH AI's own service and the model runtime under it: the process, what it
+  // listens on, the models Ollama has in memory now and where, and any store
+  // that cannot be saved or read. For the System workspace.
+  app.get("/v1/system/runtime", async (_req, res) => {
+    const config = readLocalModelConfig();
+    res.json({
+      data: {
+        service: serviceStatus(),
+        ollama: { baseUrl: config.baseUrl, ...(await ollamaRuntime(config.baseUrl)) },
+        stores: { failing: persistenceFailures(), locked: lockedProtectedFiles() }
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  // Free a model's memory now - the graphics card's, mostly - instead of when
+  // its keep-alive runs out. The next request that needs it loads it again.
+  app.post("/v1/system/models/unload", async (req, res) => {
+    const name = req.body?.name;
+    if (!isModelName(name)) {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "Name a model to unload.", traceId: "trace-local" });
+      return;
+    }
+    const outcome = await unloadModel(readLocalModelConfig().baseUrl, name);
+    if (!outcome.ok) {
+      res.status(502).json({ code: "UNLOAD_FAILED", message: outcome.reason, traceId: "trace-local" });
+      return;
+    }
+    res.json({ data: { unloaded: name }, traceId: "trace-local" });
+  });
+
+  // This PC's network as TRH AI sees it: its addresses, what the service
+  // listens on and whether that reaches beyond this PC, the model runtime's
+  // address, and the apps TRH AI has running with their ports.
+  app.get("/v1/network", async (_req, res) => {
+    const config = readLocalModelConfig();
+    const ollama = await ollamaRuntime(config.baseUrl);
+    res.json({
+      data: {
+        interfaces: networkInterfaces(),
+        service: serviceStatus().listening,
+        ollama: { baseUrl: config.baseUrl, reachable: ollama.reachable },
+        apps: listRunningApps().map((running) => ({ project: running.project, port: running.port, url: running.url }))
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  // One measured check that the internet answers, when asked - never on a timer.
+  app.post("/v1/network/check", async (_req, res) => {
+    res.json({ data: await internetCheck(), traceId: "trace-local" });
   });
 
   // Live hardware readings for the dashboard rings. Measured per request
