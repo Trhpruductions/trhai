@@ -585,8 +585,10 @@ test("a build clarification merged across turns reaches the agent whole", async 
 
     assert.equal(result.strategy, "generated");
 
+    // The last user message is the question; the turns before it are the
+    // conversation, which the model now sees as well.
     const firstRequest = received[0] as { messages: Array<{ role: string; content: string }> };
-    const user = firstRequest.messages.find((message) => message.role === "user");
+    const user = firstRequest.messages.filter((message) => message.role === "user").at(-1);
     assert.match(user?.content ?? "", /Build me something to help my business/);
     assert.match(user?.content ?? "", /customers with email, phone and company/);
   });

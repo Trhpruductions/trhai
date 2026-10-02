@@ -177,6 +177,29 @@ export function isListAppsRequest(message: unknown): boolean {
   return text !== null && listAppsPatterns.some((pattern) => pattern.test(text));
 }
 
+/**
+ * "list the files in my workspace", "what's in my workspace" - the top of the
+ * workspace, nothing deeper.
+ *
+ * Went to the model, which listed the workspace and then, in the same reply
+ * that already held the right answer, asked to list calculator/ as well - and
+ * answered with the calculator's five files as "the files in your workspace".
+ * Another run said it was "not able to view or process files" with the listing
+ * in hand. A listing is not a judgement call.
+ */
+const listWorkspacePatterns = [
+  /^(?:list|show(?: me)?|display|see) (?:all )?(?:of )?(?:the |my )?(?:files|folders|files and folders|folders and files|contents|everything) (?:in|inside|of) (?:my |the )?workspace(?: folder)?$/,
+  /^(?:list|show(?: me)?|display) (?:my |the )?workspace(?: files| folder| folders| contents)?$/,
+  /^what(?:'s| is) (?:in|inside) (?:my |the )?workspace(?: folder)?$/,
+  /^what (?:files|folders|files and folders) (?:are|do i have) (?:there )?(?:in|inside) (?:my |the )?workspace$/,
+  /^what (?:files|folders|files and folders) do i have$/
+];
+
+export function isListWorkspaceRequest(message: unknown): boolean {
+  const text = plain(message);
+  return text !== null && listWorkspacePatterns.some((pattern) => pattern.test(text));
+}
+
 // Cancelling and pausing schedules, decided here for the same reason as forget
 // and pin: the model cannot be trusted with it. "cancel my daily reminder"
 // answered "Got it." and cancelled nothing; "turn off the 9am reminder" called
@@ -279,9 +302,14 @@ const ordinals: Record<string, number> = {
 export function parseNthThingRequest(message: unknown): number | null {
   const text = plain(message);
   if (!text) return null;
-  const found = text.match(
-    /^what (?:was|is|were) the (first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|1st|2nd|3rd|4th|5th|last|latest|previous) (?:thing|message|question|request|fact) (?:i|that i) (?:told|asked|said|sent|typed|gave)(?: you| to you)?(?: about)?$/
-  );
+  const position = "(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|1st|2nd|3rd|4th|5th|last|latest|previous)";
+  // "what was the first thing I asked you", and the two shorter ways of
+  // saying it. "What did I ask you first?" went to the model, which searched
+  // the transcript for "first question", found nothing, and answered that the
+  // question it was answering had been the first.
+  const found = text.match(new RegExp(`^what (?:was|is|were) the ${position} (?:thing|message|question|request|fact) (?:i|that i) (?:told|asked|said|sent|typed|gave)(?: you| to you)?(?: about)?$`))
+    ?? text.match(new RegExp(`^what (?:was|is|were) my (?:very )?${position} (?:message|question|request|ask)$`))
+    ?? text.match(new RegExp(`^what did i (?:ask|say|tell|type|send)(?: you| to you)?(?: at)? (?:the )?(?:very )?(first|1st)$`));
   if (!found) return null;
   const word = found[1];
   if (word === "last" || word === "latest" || word === "previous") return -1;

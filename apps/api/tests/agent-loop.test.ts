@@ -13,9 +13,9 @@ import path from "node:path";
 const testWorkspace = mkdtempSync(path.join(tmpdir(), "ascend-agent-"));
 process.env.ASCEND_WORKSPACE = testWorkspace;
 import {
-  describeAgentLens, describeToolCall, echoesAReport, executionKindForTool, explainGatedTool, gatedToolCall,
-  isBareRefusal, looksLikeBareToolCall, looksLikeRawToolCalls, parseTextToolCalls, runAgent, systemPrompt,
-  wroteWhatWasAsked
+  describeAgentLens, describeToolCall, echoesAReport, echoesToolTemplate, executionKindForTool, explainGatedTool,
+  gatedToolCall, isBareRefusal, looksLikeBareToolCall, looksLikeRawToolCalls, parseTextToolCalls, recentTurns, runAgent,
+  systemPrompt, unwrapPseudoReply, wroteWhatWasAsked
 } from "../src/services/agentLoop.js";
 import { availableTools, runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
 import { mentionsDocument, namesAFilePath } from "../src/services/actionIntent.js";
@@ -3151,8 +3151,13 @@ test("a sum is offered the calculator and not the shell", async () => {
     const offered = await offeredFor("convert 5 miles to kilometers");
     assert.ok(offered.includes("calculate"));
     assert.ok(!offered.includes("run_command"));
-    // A question the machine answers keeps it.
-    assert.ok((await offeredFor("how much free space is on drive D?")).includes("run_command"));
+    // A question the shell answers keeps it...
+    assert.ok((await offeredFor("is anything listening on port 4000?")).includes("run_command"));
+    // ...and one the machine's own readings answer gets those instead: see the
+    // system_status tests.
+    const disk = await offeredFor("how much free space is on drive D?");
+    assert.ok(disk.includes("system_status"));
+    assert.ok(!disk.includes("run_command"));
   } finally {
     if (!wasArmed) disarmCommands();
   }
@@ -3167,4 +3172,189 @@ test("a request that only reads is not offered the document writers", async () =
   }
   // Asked to keep one, it still can.
   assert.ok((await offeredFor("read notes.txt and save a summary as a document called Notes Summary")).includes("write_document"));
+});
+
+// ---- Follow-ups: the model sees the conversation -----------------------------
+
+test("the last few turns go to the model, before the question and without repeating it", () => {
+  const conversation = [
+    { role: "user" as const, content: "What's the capital of Australia?" },
+    { role: "assistant" as const, content: "The capital of Australia is Canberra." },
+    // The client sends the message being answered as the last turn of its history.
+    { role: "user" as const, content: "And roughly how many people live there?" }
+  ];
+
+  assert.deepEqual(recentTurns(conversation, ["And roughly how many people live there?"]), [
+    { role: "user", content: "What's the capital of Australia?" },
+    { role: "assistant", content: "The capital of Australia is Canberra." }
+  ]);
+  assert.deepEqual(recentTurns(undefined, ["hello"]), []);
+});
+
+test("only the most recent turns go, each cut to a readable length", () => {
+  const conversation = Array.from({ length: 10 }, (_, index) => ({
+    role: (index % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+    content: index === 9 ? "x".repeat(3000) : `turn ${index}`
+  }));
+
+  const sent = recentTurns(conversation, ["the next question"]);
+  assert.equal(sent.length, 6);
+  assert.equal(sent[0].content, "turn 4", "the oldest turns are the ones dropped");
+  assert.ok(sent[5].content.length < 900, "a long turn is cut, not sent whole");
+  assert.match(sent[5].content, /\[\.\.\.\]$/);
+});
+
+test("a follow-up reaches the model with the turn it follows", async () => {
+  // Live: "And roughly how many people live there?" was answered "I don't have
+  // access to current population data for any specific location" - the model
+  // never saw that "there" was Canberra.
+  const { server, baseUrl, received } = await fakeModel([answer("About 470,000 people live in Canberra.")]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "And roughly how many people live there?", {
+      ...context,
+      conversation: [
+        { role: "user", content: "What's the capital of Australia?" },
+        { role: "assistant", content: "The capital of Australia is Canberra." }
+      ]
+    });
+
+    assert.equal(result.ok, true);
+    const sent = (received[0] as { messages: Array<{ role: string; content: string }> }).messages;
+    assert.deepEqual(sent.map((message) => message.role), ["system", "user", "assistant", "user"]);
+    assert.match(sent[2].content, /Canberra/);
+    assert.equal(sent[3].content, "And roughly how many people live there?", "the question comes last");
+  } finally {
+    server.close();
+  }
+});
+
+test("a request to reshape the last answer gets nothing that writes", async () => {
+  // Live: "Make that answer one sentence." saved a document called
+  // daily-log.txt reading "Today was a productive day."
+  const offered = await offeredFor("Make that answer one sentence.");
+  for (const writer of ["write_document", "write_file", "edit_file", "build_app", "remember", "add_schedule", "run_command"]) {
+    assert.ok(!offered.includes(writer), `${writer} was offered`);
+  }
+  // Asking for a file is a different request.
+  assert.ok((await offeredFor("make that into a file called summary.txt")).includes("write_file"));
+});
+
+test("a reply that is the tool-calling template is corrected, not shown", async () => {
+  // Verbatim, the whole reply to "Make that answer one sentence."
+  const template = "For each function call, return a json object with function name and arguments within {} "
+    + "with NO other text. Do not include any backticks or ```json.";
+  const { server, baseUrl, received } = await fakeModel([answer(template), answer("Canberra is the capital of Australia.")]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "Make that answer one sentence.", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.text, "Canberra is the capital of Australia.");
+    const told = ((received[1] as { messages: Array<{ content: string }> }).messages.at(-1)?.content) ?? "";
+    assert.match(told, /not an answer/);
+    assert.match(told, /Make that answer one sentence\./, "the question goes with the correction");
+  } finally {
+    server.close();
+  }
+});
+
+test("a template echoed twice is a failure, never the reply", async () => {
+  const template = "For each function call, return a json object with function name and arguments within <tool_call></tool_call> tags.";
+  const { server, baseUrl } = await fakeModel([answer(template), answer(template)]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "hello again", context);
+    assert.equal(result.ok, false);
+  } finally {
+    server.close();
+  }
+});
+
+test("echoesToolTemplate knows the template and nothing else", () => {
+  assert.equal(echoesToolTemplate("For each function call, return a json object with function name and arguments"), true);
+  assert.equal(echoesToolTemplate("You are provided with function signatures within <tools></tools> XML tags"), true);
+  assert.equal(echoesToolTemplate("Each function returns a JSON object with the result."), false);
+  assert.equal(echoesToolTemplate("Canberra is the capital."), false);
+});
+
+test("an invented tool's input is not passed off as its answer", async () => {
+  // Live, the whole answer to "translate 'good morning' to Spanish" was "good
+  // morning": the text the invented tool was meant to translate.
+  const pseudo = '{"name": "translate", "arguments": {"text": "good morning", "to_language": "Spanish"}}';
+  assert.equal(unwrapPseudoReply(pseudo, ["translate 'good morning' to Spanish"]), pseudo);
+  // Words lifted from the request without quotes count the same.
+  assert.equal(unwrapPseudoReply('{"name": "translate", "arguments": {"text": "thank you very much"}}',
+    ["translate thank you very much into French"]), '{"name": "translate", "arguments": {"text": "thank you very much"}}');
+  // An answer in costume is still unwrapped, including a one-word one the
+  // question happens to contain.
+  assert.equal(unwrapPseudoReply('{"name": "respond", "arguments": {"text": "Buenos días."}}',
+    ["translate 'good morning' to Spanish"]), "Buenos días.");
+  assert.equal(unwrapPseudoReply('{"name": "answer", "arguments": {"answer": "Canberra"}}',
+    ["is the capital Canberra or Sydney?"]), "Canberra");
+
+  const { server, baseUrl, received } = await fakeModel([answer(pseudo), answer("Buenos días.")]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "translate 'good morning' to Spanish", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.text, "Buenos días.");
+    const told = ((received[1] as { messages: Array<{ content: string }> }).messages.at(-1)?.content) ?? "";
+    assert.match(told, /There is no tool called translate/);
+  } finally {
+    server.close();
+  }
+});
+
+// ---- system_status: the machine's own readings -------------------------------
+
+const readings = async () => ({
+  cpu: { model: "Test CPU", cores: 16, speedMhz: 4200, fraction: 0.27, detail: "27% across 16 cores", unavailable: null },
+  memory: { fraction: 0.57, detail: "18.2 / 31.9 GB", unavailable: null },
+  gpu: {
+    name: "NVIDIA GeForce RTX 4060 Ti", fraction: 0.12, detail: "12% busy", unavailable: null,
+    vram: { fraction: 0.74, detail: "5.9 / 8.0 GB", unavailable: null },
+    temperatureC: 48, clockMhz: 2535, powerWatts: null
+  },
+  cloud: { services: [], detail: "" },
+  disk: { fraction: 0.5, detail: "1.82 / 3.64 TB", unavailable: null },
+  network: { fraction: null, detail: "", unavailable: "Measuring…", receivedBytesPerSecond: null, sentBytesPerSecond: null },
+  uptimeSeconds: 3 * 86400 + 4 * 3600 + 120,
+  takenAt: new Date(0).toISOString()
+});
+
+test("system_status reports the readings it was given, and leaves out what was not read", async () => {
+  const result = await runTool({ name: "system_status", arguments: {} }, { ...context, readTelemetry: readings });
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /Processor: 27% busy across 16 cores \(Test CPU\)\./);
+  assert.match(result.content, /Memory: 18\.2 \/ 31\.9 GB in use \(57%\)\./);
+  assert.match(result.content, /NVIDIA GeForce RTX 4060 Ti, 12% busy, video memory 5\.9 \/ 8\.0 GB \(74%\), 48°C\./);
+  assert.match(result.content, /(?:Drive [A-Z]:|Disk [^:]*:) [\d.]+ (?:GB|TB) free of [\d.]+ (?:GB|TB)/, "the workspace's own drive, really measured");
+  assert.match(result.content, /Up for: 3 days 4 hours\./);
+  // No power reading and no network rate yet: neither is mentioned, let alone invented.
+  assert.doesNotMatch(result.content, /\bW\b|Network/);
+});
+
+test("system_status is offered for questions about the machine, and only those", async () => {
+  for (const question of ["what's my CPU usage right now?", "how much RAM am I using?", "how hot is my GPU?",
+    "how much free space is on drive C?", "how long has my computer been on?"]) {
+    assert.ok((await offeredFor(question)).includes("system_status"), question);
+  }
+  for (const question of ["what's in your memory?", "what's the temperature in Paris?", "write a haiku about autumn"]) {
+    assert.ok(!(await offeredFor(question)).includes("system_status"), question);
+  }
+});
+
+test("a reading question does not get the shell, but a question about programs still does", async () => {
+  // Live: "what's my CPU usage right now?" ran wmic, which this Windows no
+  // longer has, and sent the user to Task Manager.
+  const wasArmed = commandsArmed();
+  armCommands();
+  try {
+    assert.ok(!(await offeredFor("what's my CPU usage right now?")).includes("run_command"));
+    assert.ok((await offeredFor("which process is using the most RAM?")).includes("run_command"));
+  } finally {
+    if (!wasArmed) disarmCommands();
+  }
 });

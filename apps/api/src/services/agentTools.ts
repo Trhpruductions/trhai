@@ -22,9 +22,11 @@ import {
   readFileAt,
   readWorkspaceFile,
   resolveInWorkspace,
+  workspaceRoot,
   writeFileAt,
   writeWorkspaceFile
 } from "./workspace.js";
+import { describeTelemetry, readFreeSpace, readTelemetry } from "./systemTelemetry.js";
 import { fetchWebPage } from "./webFetch.js";
 import { webSearch } from "./webSearch.js";
 import { renderMockupPrompt, extractRendering, findRenderFault, saveRendering, inferKind, type RenderKind } from "./renderMockup.js";
@@ -227,6 +229,11 @@ export type ToolContext = {
    * supplied.
    */
   searchWeb?: typeof webSearch;
+  /**
+   * Reads the machine, injected the same way so a test can give system_status
+   * known readings - the real readTelemetry, the dashboard's own, otherwise.
+   */
+  readTelemetry?: typeof readTelemetry;
   /**
    * Asks the local model to write an application, for requests that are not one
    * of the two shapes the templates cover.
@@ -456,8 +463,9 @@ export const toolDefinitions: ToolDefinition[] = [
     function: {
       name: "search_conversation",
       description:
-        "Search what has already been said in this conversation. Use this when the user refers "
-        + "back to something earlier that was never saved to memory.",
+        "Search what has already been said in this conversation, further back than the last few "
+        + "messages you can already see. Use this when the user refers back to something earlier "
+        + "that was never saved to memory.",
       parameters: {
         type: "object",
         properties: {
@@ -711,6 +719,26 @@ export const toolDefinitions: ToolDefinition[] = [
         "The current date and time on the user's machine. Use this for anything involving today, "
         + "now, or how long ago something was — you cannot know it otherwise.",
       parameters: { type: "object", properties: {}, required: [] }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "system_status",
+      description:
+        "Live readings from this computer: processor load, memory in use, the graphics card (load, "
+        + "video memory, temperature, power), free disk space, network speed and how long it has been on. "
+        + "Use it for any question about how busy, hot or full the machine is - not run_command.",
+      parameters: {
+        type: "object",
+        properties: {
+          drive: {
+            type: "string",
+            description: "A drive letter such as C or D, when the question is about one drive's space."
+          }
+        },
+        required: []
+      }
     }
   },
   {
@@ -1012,13 +1040,15 @@ const webTools = new Set(["fetch_url", "web_search"]);
 const renderTools = new Set(["render_mockup"]);
 /** Offered only when the request mentions the time or the date; see mentionsTime. */
 const timeTools = new Set(["current_datetime"]);
+/** Offered only when the request is about the machine's own readings; see asksAboutMachineState. */
+const statusTools = new Set(["system_status"]);
 
 export function availableTools(
   armed: boolean,
   options: {
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
-    schedules?: boolean; video?: boolean; documents?: boolean;
+    schedules?: boolean; video?: boolean; documents?: boolean; status?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1037,6 +1067,7 @@ export function availableTools(
   const allowSchedules = options.schedules ?? true;
   const allowVideo = options.video ?? true;
   const allowDocumentWrites = options.documents ?? true;
+  const allowStatus = options.status ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1055,6 +1086,7 @@ export function availableTools(
     if (!allowSchedules && scheduleTools.has(name)) return false;
     if (!allowVideo && videoTools.has(name)) return false;
     if (!allowDocumentWrites && documentWritingTools.has(name)) return false;
+    if (!allowStatus && statusTools.has(name)) return false;
     return true;
   });
 }
@@ -2645,6 +2677,20 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
           hour: "2-digit", minute: "2-digit"
         })} (local time on the user's machine)`
       };
+    }
+
+    case "system_status": {
+      // The same readings the dashboard shows, from the same code; nothing is
+      // estimated. The disk is the one asked about, or the workspace's drive.
+      const asked = typeof call.arguments.drive === "string" ? call.arguments.drive.trim().replace(/[:\\/\s]+$/, "") : "";
+      const letter = process.platform === "win32" && /^[a-z]$/i.test(asked) ? asked.toUpperCase() : "";
+      const diskPath = letter ? `${letter}:\\` : workspaceRoot();
+      const [telemetry, space] = await Promise.all([
+        (context.readTelemetry ?? readTelemetry)(),
+        readFreeSpace(diskPath)
+      ]);
+      const label = letter ? `${letter}:` : path.parse(diskPath).root.replace(/[\\/]+$/, "") || diskPath;
+      return { ok: true, content: describeTelemetry(telemetry, { label, space }) };
     }
 
     case "fetch_url": {

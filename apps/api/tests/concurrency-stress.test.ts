@@ -30,6 +30,12 @@ const { createApp } = await import("../src/server.js");
 async function startTestServer() {
   const app = createApp();
   const server = app.listen(0);
+  // Longer than a burst takes on a loaded machine. Node closes a keep-alive
+  // socket after 5s idle; when the writes ran slow (6.6s, with the rest of the
+  // suite running), the client reused a socket the server had just closed and
+  // the listing after the burst failed with ECONNRESET - the harness failing,
+  // not a lost write.
+  server.keepAliveTimeout = 30_000;
   await once(server, "listening");
   const { port } = server.address() as AddressInfo;
   return {
@@ -147,13 +153,18 @@ test("concurrent writes across different sessions never leak into each other", a
 
   try {
     const sessions = ["a", "b", "c"].map((name) => `stress-${name}-${runKey}`);
-    await Promise.all(sessions.flatMap((sessionId) =>
-      Array.from({ length: 20 }, (_, index) =>
+    // Interleaved across the three sessions, a dozen in flight at a time - the
+    // same bound as the tests above, for the same reason.
+    const writes = Array.from({ length: 20 }, (_, index) => sessions.map((sessionId) => ({ sessionId, index }))).flat();
+    const inFlight = 12;
+    for (let start = 0; start < writes.length; start += inFlight) {
+      await Promise.all(writes.slice(start, start + inFlight).map(({ sessionId, index }) =>
         fetch(`${baseUrl}/v1/tasks`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionId, title: `${sessionId}-${index}` })
-        }))));
+        })));
+    }
 
     // Session isolation is a privacy property, not just a correctness one:
     // sessions are how this app keeps one person's notes out of another's.

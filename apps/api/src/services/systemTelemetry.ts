@@ -431,6 +431,94 @@ export async function readNetwork(): Promise<SystemTelemetry["network"]> {
   };
 }
 
+/** Free and total bytes on the volume holding `path`, or null when it cannot be measured. */
+export async function readFreeSpace(path: string): Promise<{ free: number; total: number } | null> {
+  try {
+    const stats = await statfs(path);
+    const total = stats.bsize * Number(stats.blocks);
+    const free = stats.bsize * Number(stats.bavail);
+    return Number.isFinite(total) && total > 0 && Number.isFinite(free) ? { free, total } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One size, in the unit that reads at a glance: "412.3 GB", "1.64 TB". */
+export function formatSize(bytes: number): string {
+  const terabyte = 1024 ** 4;
+  return bytes >= terabyte ? `${(bytes / terabyte).toFixed(2)} TB` : `${formatGigabytes(bytes)} GB`;
+}
+
+/** "3 days 4 hours", "2 hours 5 minutes", "12 minutes". */
+export function formatUptime(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const unit = (count: number, name: string) => `${count} ${name}${count === 1 ? "" : "s"}`;
+  if (days > 0) return hours > 0 ? `${unit(days, "day")} ${unit(hours, "hour")}` : unit(days, "day");
+  if (hours > 0) return minutes > 0 ? `${unit(hours, "hour")} ${unit(minutes, "minute")}` : unit(hours, "hour");
+  return unit(minutes, "minute");
+}
+
+/**
+ * The readings, as sentences the assistant can answer from.
+ *
+ * Asked "what's my CPU usage right now?", the model had no way to read it: it
+ * ran `wmic`, which this Windows no longer has, and answered with directions to
+ * Task Manager; another time it ran a PowerShell counter and answered
+ * "approximately 0.265625". Asked how much RAM was in use, it listed the
+ * biggest processes and never gave the total. The dashboard was showing all of
+ * it from this file the whole time.
+ *
+ * A reading that could not be taken says so and why. Nothing here is filled in
+ * to make a sentence complete: a temperature the card did not report is left
+ * out rather than guessed.
+ */
+export function describeTelemetry(
+  telemetry: SystemTelemetry,
+  disk: { label: string; space: { free: number; total: number } | null }
+): string {
+  const percent = (fraction: number) => `${Math.round(fraction * 100)}%`;
+  // The reasons are written as sentences for the dashboard; here they follow a dash.
+  const why = (reason: string | null, fallback: string) => {
+    const text = (reason ?? fallback).trim().replace(/[.!]+$/, "");
+    return `${text.charAt(0).toLowerCase()}${text.slice(1)}.`;
+  };
+  const { cpu, memory, gpu, network } = telemetry;
+  const lines: string[] = [];
+
+  lines.push(cpu.fraction === null
+    ? `Processor: no reading - ${why(cpu.unavailable, "it could not be measured just now")}`
+    : `Processor: ${percent(cpu.fraction)} busy across ${cpu.cores} cores (${cpu.model}).`);
+
+  lines.push(memory.fraction === null
+    ? `Memory: no reading - ${why(memory.unavailable, "it could not be measured")}`
+    : `Memory: ${memory.detail} in use (${percent(memory.fraction)}).`);
+
+  if (gpu.fraction === null || !gpu.name) {
+    lines.push(`Graphics card: no reading - ${why(gpu.unavailable, "it did not answer")}`);
+  } else {
+    const parts = [`${percent(gpu.fraction)} busy`];
+    if (gpu.vram && gpu.vram.fraction !== null) parts.push(`video memory ${gpu.vram.detail} (${percent(gpu.vram.fraction)})`);
+    if (gpu.temperatureC !== null) parts.push(`${Math.round(gpu.temperatureC)}°C`);
+    if (gpu.powerWatts !== null) parts.push(`drawing ${Math.round(gpu.powerWatts)} W`);
+    lines.push(`Graphics card: ${gpu.name}, ${parts.join(", ")}.`);
+  }
+
+  // "Drive D:" on Windows, "Disk /:" elsewhere - never "Disk D::".
+  const where = disk.label.endsWith(":") ? `Drive ${disk.label}` : `Disk ${disk.label}:`;
+  lines.push(disk.space
+    ? `${where} ${formatSize(disk.space.free)} free of ${formatSize(disk.space.total)} `
+      + `(${percent((disk.space.total - disk.space.free) / disk.space.total)} used).`
+    : `${where} no reading - that drive could not be measured.`);
+
+  if (network.receivedBytesPerSecond !== null && network.sentBytesPerSecond !== null) {
+    lines.push(`Network: ${network.detail.replace(/\s+/g, " ")}.`);
+  }
+  lines.push(`Up for: ${formatUptime(telemetry.uptimeSeconds)}.`);
+  return lines.join("\n");
+}
+
 /** How long the two CPU samples are spaced. Long enough to be a real rate. */
 const cpuWindowMs = 250;
 

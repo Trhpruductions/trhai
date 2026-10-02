@@ -416,6 +416,46 @@ export function mentionsVideo(message: string): boolean {
 }
 
 /**
+ * A request to reshape something already said - "make that answer one
+ * sentence", "say it more simply", "translate that to French" - so nothing
+ * that writes is offered.
+ *
+ * The answer is a rewrite of the last reply, in the reply. Live, "Make that
+ * answer one sentence." saved a document called daily-log.txt reading "Today
+ * was a productive day." Asking for a file, a save or an app is a different
+ * request and keeps its tools.
+ */
+export function reshapesAnEarlierReply(message: string): boolean {
+  const text = (message ?? "").toLowerCase().trim();
+  if (!text || namesAFilePath(text) || mentionsDocument(text)) return false;
+  if (/\b(?:file|files|save|saved|document|write|store|app|project|website|page|folder|schedule|remind)\b/.test(text)) return false;
+  return /^(?:(?:please|can you|could you|now|ok(?:ay)?|and)\s+)*(?:make|turn|put|rewrite|rephrase|reword|shorten|simplify|summari[sz]e|condense|expand|translate|say|explain|repeat)\s+(?:that|this|it|your (?:last )?(?:answer|reply|response))\b/.test(text)
+    || (/\b(?:that|your|the last) (?:answer|reply|response)\b/.test(text)
+      && /\b(?:shorter|longer|simpler|one sentence|one line|bullets?|bullet points|plain(?:er)? (?:english|words)|again|briefly)\b/.test(text));
+}
+
+/**
+ * Whether a request asks how the machine itself is doing - processor, memory,
+ * graphics card, disk space, network, uptime - so system_status is worth
+ * offering.
+ *
+ * "memory" on its own is the assistant's memory ("what's in your memory"), so
+ * it counts only as RAM wording: memory usage, how much memory, free memory.
+ * A temperature counts only next to a part of the computer, or "what's the
+ * temperature" would be answered with the graphics card's.
+ */
+export function asksAboutMachineState(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  return /\b(?:cpu|processor|ram|vram|gpu|graphics card|video card|uptime|bandwidth)\b/.test(text)
+    || /\bmemory (?:usage|use|used|in use|left|free|available|load|pressure)\b|\b(?:free|available|used|system) memory\b|\bhow much memory\b/.test(text)
+    || /\b(?:disk|drive|storage|ssd|hdd)\b[^.?!]*\b(?:space|free|full|left|used|capacity)\b|\b(?:space|free|full|capacity)\b[^.?!]*\b(?:disk|drive|ssd|hdd)\b|\b(?:free|disk|storage) space\b|\bspace (?:left|free|remaining)\b/.test(text)
+    || /\bhow long (?:has|have) (?:my |the |this )?(?:pc|computer|machine|system|laptop)\b|\b(?:pc|computer|machine|system|laptop) (?:been )?(?:up|on) for\b/.test(text)
+    || /\bhow(?:'s| is) my (?:pc|computer|machine|system|laptop)\b|\b(?:system|computer|pc|machine) (?:status|load|usage|health|performance|stats)\b/.test(text)
+    || /\b(?:network|internet|connection) (?:speed|usage|traffic|throughput)\b|\b(?:download|upload) (?:speed|rate)\b/.test(text)
+    || /\b(?:pc|computer|machine|laptop|system)\b[^.?!]*\b(?:temp|temps|temperature|hot)\b|\bhow hot is my\b/.test(text);
+}
+
+/**
  * Whether a request has anything to do with the time or the date, so
  * current_datetime is worth offering. The date is in the system prompt in
  * any case; this stops the clock being read twice on a question about ports.

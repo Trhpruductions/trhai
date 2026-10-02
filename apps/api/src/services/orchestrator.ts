@@ -4,7 +4,8 @@ import { isCodeWork } from "./machinePaths.js";
 import { pickAuthorModel } from "./appAuthor.js";
 import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
-import type { AgentLens } from "./agentTools.js";
+import { runTool, type AgentLens } from "./agentTools.js";
+import { workspaceRoot } from "./workspace.js";
 import { changesSomething } from "./toolPermissions.js";
 import { convertUnits } from "./unitConversion.js";
 import type { RunningApp, StartResult } from "./appRunner.js";
@@ -26,7 +27,8 @@ import {
   type PendingConfirmation
 } from "./pendingConfirmation.js";
 import {
-  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, isListAppsRequest, parseForgetRequest, parseNthThingRequest, parsePinRequest,
+  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, isListAppsRequest, isListWorkspaceRequest, parseForgetRequest,
+  parseNthThingRequest, parsePinRequest,
   parseRemoveScheduleRequest, parseToggleScheduleRequest
 } from "./memoryRequests.js";
 import { matchMemories } from "./factWording.js";
@@ -230,6 +232,10 @@ export async function runAssistantOrchestrator(
   // "what apps have I built" - a workspace listing, off the model.
   const apps = resolveListApps(input, approving, effectiveMessage);
   if (apps) return apps;
+
+  // "list the files in my workspace" - the same, for everything at the top.
+  const workspaceListing = await resolveListWorkspace(approving, effectiveMessage);
+  if (workspaceListing) return workspaceListing;
 
   // "delete the recipe box app" - a destructive folder removal, confirm-then-do.
   const deletingApp = resolveDeleteApp(input, approving, effectiveMessage);
@@ -683,6 +689,30 @@ function resolveListApps(
   const runningCount = apps.filter((app) => app.running).length;
   const tail = runningCount > 0 ? `\n\n${runningCount} running now.` : "\n\nNone are running - say \"run the <name> app\" to start one.";
   return deterministicResult(effectiveMessage, `Your apps (${apps.length}):\n${lines}${more}${tail}`, "list");
+}
+
+/**
+ * "list the files in my workspace" - the top of the workspace, read here
+ * rather than left to the model; see isListWorkspaceRequest. The listing is
+ * list_files' own, so it reads exactly as the model would have been shown it.
+ */
+async function resolveListWorkspace(
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): Promise<OrchestratorResult | null> {
+  if (approving || !isListWorkspaceRequest(effectiveMessage)) return null;
+
+  const listed = await runTool({ name: "list_files", arguments: {} }, { memories: [], knowledge: [] });
+  if (!listed.ok) return deterministicResult(effectiveMessage, listed.content, "list");
+
+  // The tool's closing note is addressed to the model ("pass recursive:
+  // true"); the person reading this gets the plain version instead.
+  const listing = listed.content.replace(/\n\n\[top level only;[^\]]*\]$/, "");
+  const count = listing.split("\n").filter((line) => line.startsWith("- ")).length;
+  return deterministicResult(effectiveMessage,
+    `Your workspace (${workspaceRoot()}) has ${count} item${count === 1 ? "" : "s"} at the top level:\n${listing}`
+      + "\n\nAsk what is in any of these folders to see inside it.",
+    "list");
 }
 
 /**
