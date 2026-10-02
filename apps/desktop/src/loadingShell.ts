@@ -1,4 +1,25 @@
-<!doctype html>
+// What the desktop window shows while the local services come up.
+//
+// The window opens before the web app is listening - the API, the model
+// server and the interface are all started alongside it - so this is the
+// first thing anyone sees when TRH AI opens. It was a plain grey box headed
+// "Vexora AI" with a sentence of status, from an earlier version of the app;
+// it now matches the loading screen the interface itself shows next, so
+// opening the app reads as one continuous start rather than two products.
+//
+// Self-contained on purpose: it is written to a file and loaded from disk, so
+// it can reference nothing over the network, and nothing here may depend on
+// the services it is waiting for.
+
+/** Text, safe to place in HTML. The reasons are ours, but an URL can carry anything. */
+export function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+  })[character] ?? character);
+}
+
+export function loadingShellHtml(reason: string, details?: string): string {
+  return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -63,11 +84,10 @@
     <h1>TRH AI</h1>
     <p class="tag">LIVING INTELLIGENCE SYSTEM</p>
     <div class="bar" aria-hidden="true"></div>
-    <p class="status"><span class="spinner" aria-hidden="true"></span>Starting TRH AI</p>
-    <p class="details">Waiting for the interface and the local service to come up. This window opens it on its own as soon as it is ready.</p>
+    <p class="status"><span class="spinner" aria-hidden="true"></span>${escapeHtml(reason)}</p>
+    ${details ? `<p class="details">${escapeHtml(details)}</p>` : ""}
   </main>
   <p class="foot">Runs entirely on this machine</p>
-  <p id="meta" class="foot" style="bottom:36px"></p>
-  <script src="./renderer.js"></script>
 </body>
-</html>
+</html>`;
+}

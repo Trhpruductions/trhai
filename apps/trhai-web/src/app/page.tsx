@@ -32,6 +32,8 @@ import {
 import { chooseAgent, readActiveAgent } from "../lib/agents";
 import { readDismissedRendering, renderingKey, writeDismissedRendering } from "../lib/renderingDismissal";
 import { AgentPicker } from "../components/AgentPicker";
+import { AppGate, useAccount } from "../components/AppGate";
+import { AccountPanel } from "../components/AccountPanel";
 import "./dash.css";
 import "./trhai.css";
 
@@ -94,7 +96,21 @@ const historyLength = 30;
 
 /** Where the rail choice is remembered. */
 
-export default function DashboardPage() {
+/**
+ * The app: the loading screen and sign-in first, then the dashboard. See
+ * AppGate - the dashboard is not mounted until the gate opens, so every
+ * request it makes is already the signed-in account's.
+ */
+export default function Page() {
+  return (
+    <AppGate>
+      <Dashboard />
+    </AppGate>
+  );
+}
+
+function Dashboard() {
+  const accountControls = useAccount();
   // Whether the split work view is open.
   //
   // Opened by real work, not by intent. The backlog asks for "coding intent
@@ -804,7 +820,12 @@ export default function DashboardPage() {
     }
   ];
 
-  const nameUpper = identity ? (displayName(identity.username) || "USER").toUpperCase() : "…";
+  // The signed-in account's name when there is one; otherwise the account this
+  // machine is logged in as, read from the OS rather than assumed.
+  const signedIn = accountControls.account;
+  const nameUpper = signedIn
+    ? signedIn.displayName.toUpperCase()
+    : identity ? (displayName(identity.username) || "USER").toUpperCase() : "…";
 
   return (
     <div className={`trh trh-${core} trh-view-${view}${attentive ? " trh-attentive" : ""}`}>
@@ -830,8 +851,8 @@ export default function DashboardPage() {
 
         <div className="trh-user">
           <div className="trh-user-text">
-            <span className="trh-user-name">USER: {nameUpper}</span>
-            <span className="trh-user-tier">OWNER ACCESS</span>
+            <span className="trh-user-name" title={signedIn ? signedIn.email : undefined}>USER: {nameUpper}</span>
+            <span className="trh-user-tier">{signedIn ? "SIGNED IN" : "OWNER ACCESS"}</span>
           </div>
           <span className="trh-avatar" aria-hidden="true">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>
@@ -1230,6 +1251,11 @@ export default function DashboardPage() {
               ) : null}
               {view === "settings" ? (
                 <>
+                  <AccountPanel
+                    account={accountControls.account}
+                    onSignOut={() => void accountControls.signOut()}
+                    onSignIn={accountControls.openSignIn}
+                  />
                   <VoicePicker
                     choice={speech.voice}
                     voices={speech.installedVoices}

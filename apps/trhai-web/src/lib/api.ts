@@ -7,9 +7,22 @@
 // a tested orchestration layer to satisfy a tech-stack wishlist would be the
 // wrong kind of rebuild.
 
+import { currentAuthHeaders } from "./auth";
+
 export const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; reason: string };
+
+/**
+ * Headers for a request, with the signed-in account's token when there is one.
+ *
+ * Read per request, never captured: signing in or out changes the very next
+ * call. Without it the API keys memory, documents and the conversation to this
+ * browser's anonymous session id, and an account follows nobody anywhere.
+ */
+export function requestHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return { ...extra, ...currentAuthHeaders() };
+}
 
 /**
  * A GET against the local API, never throwing.
@@ -21,7 +34,7 @@ export type ApiResult<T> = { ok: true; data: T } | { ok: false; reason: string }
  */
 export async function apiGet<T>(path: string): Promise<ApiResult<T>> {
   try {
-    const response = await fetch(`${apiBaseUrl}${path}`);
+    const response = await fetch(`${apiBaseUrl}${path}`, { headers: requestHeaders() });
     if (!response.ok) return { ok: false, reason: `The service answered with ${response.status}.` };
     const payload = await response.json();
     return { ok: true, data: (payload?.data ?? payload) as T };
@@ -34,7 +47,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<ApiResult
   try {
     const response = await fetch(`${apiBaseUrl}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: requestHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body)
     });
     const payload = await response.json().catch(() => null);
@@ -51,7 +64,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiResul
   try {
     const response = await fetch(`${apiBaseUrl}${path}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: requestHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body)
     });
     const payload = await response.json().catch(() => null);
@@ -66,7 +79,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<ApiResult<
   try {
     const response = await fetch(`${apiBaseUrl}${path}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: requestHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body)
     });
     const payload = await response.json().catch(() => null);
@@ -81,7 +94,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<ApiResult<
 
 export async function apiDelete(path: string): Promise<ApiResult<void>> {
   try {
-    const response = await fetch(`${apiBaseUrl}${path}`, { method: "DELETE" });
+    const response = await fetch(`${apiBaseUrl}${path}`, { method: "DELETE", headers: requestHeaders() });
     if (!response.ok) return { ok: false, reason: `The service answered with ${response.status}.` };
     return { ok: true, data: undefined };
   } catch {
