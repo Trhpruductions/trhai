@@ -1,4 +1,4 @@
-import type { LocalModelConfig } from "./localModel.js";
+import { modelOptions, type LocalModelConfig } from "./localModel.js";
 import { availableTools, runTool, verifiedDetail, type AgentLens, type ToolContext, type ToolCall } from "./agentTools.js";
 import { commandsArmed } from "./commandRunner.js";
 import { readStream, toLines } from "./streamReader.js";
@@ -1513,6 +1513,10 @@ export async function runAgent(
             // a caller that cannot show them, and the unstreamed path is the
             // one every existing test exercises.
             stream: Boolean(onToken),
+            // The window the whole prompt fits in. Without it Ollama ran the
+            // model at 4,096 tokens and cut every longer prompt from the front,
+            // rules first - see defaultContextTokens.
+            options: modelOptions(config),
             // Withheld while disarmed rather than offered and refused: a
             // model that can see run_command will reason about it and try to
             // talk its way into it; one that never sees it cannot.
