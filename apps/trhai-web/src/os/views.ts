@@ -8,7 +8,7 @@
 export type ViewId =
   | "home" | "chat" | "voice"
   | "memory" | "files" | "browser"
-  | "code" | "tasks" | "tools"
+  | "code" | "tasks" | "automation" | "tools"
   | "system" | "network" | "settings";
 
 export type ViewGroup = "Command" | "Knowledge" | "Work" | "System";
@@ -58,6 +58,10 @@ export const views: ViewDef[] = [
   {
     id: "tasks", label: "Tasks", group: "Work", blurb: "What TRH AI is working on, what runs on a schedule, everything it has finished - and your to-dos.",
     icon: "M4 7h4M4 12h4M4 17h4M12 6l2 2 4-4M12 12h7M12 17h7", keywords: "todo work jobs queue history schedule reminders running failed"
+  },
+  {
+    id: "automation", label: "Automation", group: "Work", blurb: "A flow of checks, conditions and waits - dry-run it, run it, put it on a schedule.",
+    icon: "M5 4.5h5v5H5zM14 14.5h5v5h-5zM7.5 9.5v3a2 2 0 0 0 2 2H14M16.5 4.5v7", keywords: "flow automate workflow steps if wait script check schedule"
   },
   {
     id: "tools", label: "Tools", group: "Work", blurb: "Everything TRH AI can do, and how much each is allowed.",
