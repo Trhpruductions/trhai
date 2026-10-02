@@ -27,8 +27,12 @@ export type ExecutionEvent = {
 
 /** How often to re-read while work is in flight. */
 const activeMs = 400;
-/** And when nothing is running - slow enough to be nearly free. */
-const idleMs = 2500;
+/**
+ * And when nothing is running. Ten seconds: nothing reaches this log between
+ * replies except work started elsewhere for the same account, and the moment a
+ * reply starts here the fast rate takes over.
+ */
+const idleMs = 10_000;
 
 export function useExecutionEvents(busy: boolean) {
   const [events, setEvents] = useState<ExecutionEvent[]>([]);
