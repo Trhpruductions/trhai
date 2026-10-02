@@ -27,3 +27,11 @@ process.env.TRHAI_ARM_FILE = path.join(
   mkdtempSync(path.join(tmpdir(), "trhai-test-arm-")),
   "command-arm.json"
 );
+
+// The same for the machine's app data, where installed apps and devices leave
+// their traces - Phone Link's linked phone, for one. The CI runner has none of
+// it and a developer's PC has plenty, so a test whose stand-in missed a code
+// path passed here, on the real phone, and failed only in CI (#58). An empty
+// folder makes every run see what CI sees; a test that needs a device says so
+// with a stand-in. (The data-key store already keeps to a temp file in tests.)
+process.env.LOCALAPPDATA = mkdtempSync(path.join(tmpdir(), "trhai-test-localappdata-"));
