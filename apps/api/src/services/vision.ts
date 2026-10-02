@@ -15,8 +15,6 @@ export const defaultVisionModel = "qwen2.5vl:3b";
 
 /** The most images looked at in one turn. */
 export const maxImagesPerTurn = 4;
-/** The vision model's window: a large screenshot and an answer, and no more. */
-export const visionContextTokens = 8192;
 /** How long the vision model stays loaded after it is used or warmed. */
 export const visionKeepAlive = "15m";
 /** The largest image read, decoded. The web client shrinks big ones before sending. */
@@ -43,6 +41,94 @@ export function imageKind(bytes: Uint8Array): "png" | "jpeg" | "gif" | "webp" | 
     && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return "webp";
   if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) return "bmp";
   return null;
+}
+
+/**
+ * An image's width and height, read from its header, or null when the header
+ * cannot be read. Only the header: nothing here decodes pixels.
+ */
+export function imageSize(bytes: Uint8Array): { width: number; height: number } | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const has = (length: number) => bytes.length >= length;
+  switch (imageKind(bytes)) {
+    case "png":
+      return has(24) ? { width: view.getUint32(16), height: view.getUint32(20) } : null;
+    case "gif":
+      return has(10) ? { width: view.getUint16(6, true), height: view.getUint16(8, true) } : null;
+    case "bmp":
+      return has(26) ? { width: Math.abs(view.getInt32(18, true)), height: Math.abs(view.getInt32(22, true)) } : null;
+    case "webp":
+      return webpSize(bytes, view);
+    case "jpeg":
+      return jpegSize(bytes, view);
+    default:
+      return null;
+  }
+}
+
+/** The frame header's size: the first SOF segment, after any number of other segments. */
+function jpegSize(bytes: Uint8Array, view: DataView): { width: number; height: number } | null {
+  let offset = 2;
+  while (offset + 9 <= bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    const marker = bytes[offset + 1];
+    // Padding, and markers that stand alone without a length.
+    if (marker === 0xff) { offset += 1; continue; }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) { offset += 2; continue; }
+    // SOF0-SOF15, less the three in that range that are not frames.
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return { height: view.getUint16(offset + 5), width: view.getUint16(offset + 7) };
+    }
+    offset += 2 + view.getUint16(offset + 2);
+  }
+  return null;
+}
+
+/** WebP keeps its size in a different place in each of its three encodings. */
+function webpSize(bytes: Uint8Array, view: DataView): { width: number; height: number } | null {
+  if (bytes.length < 30) return null;
+  const chunk = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15]);
+  if (chunk === "VP8X") {
+    const uint24 = (at: number) => bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16);
+    return { width: uint24(24) + 1, height: uint24(27) + 1 };
+  }
+  if (chunk === "VP8 ") return { width: view.getUint16(26, true) & 0x3fff, height: view.getUint16(28, true) & 0x3fff };
+  if (chunk === "VP8L") {
+    const bits = view.getUint32(21, true);
+    return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+  }
+  return null;
+}
+
+/**
+ * Roughly the tokens one image costs the vision model: one per 28x28 pixels,
+ * up to the most it ever spends on one image - it shrinks anything larger.
+ * Measured with qwen2.5vl, the default: 1280x720 took 1,196, 1920x1080 took
+ * 2,691, and 3840x2160 took 4,080. An image whose size cannot be read counts
+ * as the most.
+ */
+export function imageTokens(size: { width: number; height: number } | null): number {
+  const most = 4096;
+  if (!size || size.width <= 0 || size.height <= 0) return most;
+  return Math.min(Math.max(1, Math.round(size.width / 28)) * Math.max(1, Math.round(size.height / 28)), most);
+}
+
+/**
+ * The window to load the vision model with: the smallest that fits these
+ * images, the instructions, the question and a full answer - reading out a
+ * dense screenshot runs long.
+ *
+ * One image always fits 8K, the common case and the one the warm-up loads,
+ * since a different window makes Ollama load the model again. Several large
+ * ones did not: measured, three 1080p screenshots filled an 8K window to its
+ * last 81 tokens and the answer miscounted them, and four were refused
+ * outright. 16K costs 0.3 GB more than 8K on the card, so it is used only when
+ * the images need it.
+ */
+export function visionWindowFor(images: VisionImage[]): number {
+  const answerRoom = 2048;
+  const needed = images.reduce((total, image) => total + imageTokens(imageSize(image.data)), 0) + answerRoom;
+  return [8192, 16384].find((window) => needed <= window) ?? 32768;
 }
 
 /**
@@ -127,13 +213,36 @@ export async function warmVisionModel(
     const response = await fetcher(`${config.baseUrl}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: found.model, keep_alive: visionKeepAlive, options: { num_ctx: visionContextTokens } }),
+      // The window a one-image question asks for, so that question finds the
+      // model already loaded as it needs it.
+      body: JSON.stringify({ model: found.model, keep_alive: visionKeepAlive, options: { num_ctx: visionWindowFor([]) } }),
       signal: AbortSignal.timeout(300_000)
     });
     return response.ok;
   } catch {
     return false;
   }
+}
+
+/**
+ * The message in an Ollama error body. It nests: the runner's own JSON comes
+ * back as a string inside Ollama's, so the useful sentence is two levels down.
+ */
+function ollamaError(body: string): string {
+  let text = body.trim();
+  for (let depth = 0; depth < 3; depth += 1) {
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
+      const inner = typeof parsed.error === "string" ? parsed.error
+        : parsed.error && typeof parsed.error === "object" ? JSON.stringify(parsed.error)
+          : typeof parsed.message === "string" ? parsed.message : null;
+      if (inner === null) break;
+      text = inner.trim();
+    } catch {
+      break;
+    }
+  }
+  return text.split("\n")[0].slice(0, 200);
 }
 
 /** Asks the vision model about one or more images. Never throws. */
@@ -171,12 +280,7 @@ export async function lookAtImages(
       body: JSON.stringify({
         model,
         stream: false,
-        // Room for a large screenshot - the model spends roughly a token per
-        // 28x28 pixels, so a 1080p image is about 2,600 tokens - and no more:
-        // on an 8 GB card shared with the chat model, every gigabyte of
-        // cache spills the image encoder toward system memory. Measured: a
-        // small receipt took three minutes to read with 16K and a full card.
-        options: { num_ctx: visionContextTokens },
+        options: { num_ctx: visionWindowFor(images) },
         // Kept loaded for a while, so the next image is answered in seconds
         // rather than after another cold load.
         keep_alive: visionKeepAlive,
@@ -190,7 +294,10 @@ export async function lookAtImages(
       signal: AbortSignal.timeout(Math.max(config.timeoutMs, 300_000))
     });
     if (!response.ok) {
-      const detail = (await response.text().catch(() => "")).split("\n")[0].slice(0, 200);
+      const detail = ollamaError(await response.text().catch(() => ""));
+      if (/exceeds the available context size/i.test(detail)) {
+        return { ok: false, reason: "Those images are too large together for the vision model to take in at once. Try fewer of them, or smaller ones." };
+      }
       return { ok: false, reason: `The vision model (${model}) answered ${response.status}${detail ? `: ${detail}` : ""}.` };
     }
     const payload = await response.json() as { message?: { content?: unknown } };

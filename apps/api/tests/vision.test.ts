@@ -15,8 +15,8 @@ for (const [name, file] of [["MEMORY", "memory"], ["CONVERSATION", "conversation
 process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 
 const {
-  defaultVisionModel, describeQuestion, findVisionModel, imageKind, lookAtImages, maxImagesPerTurn, parseImages,
-  visionContextTokens, visionKeepAlive, warmVisionModel
+  defaultVisionModel, describeQuestion, findVisionModel, imageKind, imageSize, imageTokens, lookAtImages, maxImagesPerTurn,
+  parseImages, visionKeepAlive, visionWindowFor, warmVisionModel
 } = await import("../src/services/vision.js");
 const { runTool, availableTools } = await import("../src/services/agentTools.js");
 const { mentionsAnImage } = await import("../src/services/actionIntent.js");
@@ -75,6 +75,75 @@ test("images in a chat turn are read from base64 or a data URL, and anything mal
   assert.deepEqual(parseImages(undefined), []);
 });
 
+// Headers only: the size is all imageSize reads, and these carry just enough
+// of each format to say it.
+const pngOf = (width: number, height: number) => {
+  const bytes = Buffer.from(png);
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return bytes;
+};
+const jpegOf = (width: number, height: number) => Buffer.from([
+  0xff, 0xd8,
+  // An APP0 segment first, as in nearly every real JPEG: the size is further in.
+  0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+  0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 0xff, width >> 8, width & 0xff, 0x03, 0x01, 0x22, 0x00
+]);
+const webpOf = (chunk: "VP8X" | "VP8 " | "VP8L", width: number, height: number) => {
+  const bytes = Buffer.alloc(30);
+  bytes.write("RIFF", 0);
+  bytes.write("WEBP", 8);
+  bytes.write(chunk, 12);
+  if (chunk === "VP8X") {
+    bytes.writeUIntLE(width - 1, 24, 3);
+    bytes.writeUIntLE(height - 1, 27, 3);
+  } else if (chunk === "VP8 ") {
+    bytes.writeUInt16LE(width, 26);
+    bytes.writeUInt16LE(height, 28);
+  } else {
+    bytes[20] = 0x2f;
+    bytes.writeUInt32LE(((height - 1) << 14) | (width - 1), 21);
+  }
+  return bytes;
+};
+
+test("an image's size is read from its header, in every format it can arrive in", () => {
+  assert.deepEqual(imageSize(pngOf(1920, 1080)), { width: 1920, height: 1080 });
+  assert.deepEqual(imageSize(jpegOf(4032, 3024)), { width: 4032, height: 3024 }, "a phone photo");
+  const gif = Buffer.from("GIF89a\u0000\u0000\u0000\u0000", "latin1");
+  gif.writeUInt16LE(640, 6);
+  gif.writeUInt16LE(480, 8);
+  assert.deepEqual(imageSize(gif), { width: 640, height: 480 });
+  const bmp = Buffer.alloc(26);
+  bmp.write("BM", 0);
+  bmp.writeInt32LE(800, 18);
+  bmp.writeInt32LE(-600, 22);
+  assert.deepEqual(imageSize(bmp), { width: 800, height: 600 }, "a top-down BMP stores its height negative");
+  assert.deepEqual(imageSize(webpOf("VP8X", 2560, 1440)), { width: 2560, height: 1440 });
+  assert.deepEqual(imageSize(webpOf("VP8 ", 1280, 720)), { width: 1280, height: 720 });
+  assert.deepEqual(imageSize(webpOf("VP8L", 300, 200)), { width: 300, height: 200 });
+  assert.equal(imageSize(jpeg), null, "a JPEG cut off before its frame header");
+  assert.equal(imageSize(Buffer.from("%PDF-1.4")), null);
+});
+
+test("the window grows with the images, so several screenshots still leave room to answer", () => {
+  // The token counts measured with qwen2.5vl, within a few percent.
+  assert.equal(imageTokens({ width: 1280, height: 720 }), 1196);
+  assert.equal(imageTokens({ width: 1920, height: 1080 }), 2691);
+  assert.equal(imageTokens({ width: 3840, height: 2160 }), 4096, "the model shrinks anything larger");
+  assert.equal(imageTokens(null), 4096, "a size that cannot be read counts as the most");
+
+  const shot = { name: "shot.png", data: pngOf(1920, 1080) };
+  assert.equal(visionWindowFor([]), 8192);
+  assert.equal(visionWindowFor([shot]), 8192);
+  assert.equal(visionWindowFor([{ name: "4k.png", data: pngOf(3840, 2160) }]), 8192, "any one image fits 8K");
+  assert.equal(visionWindowFor([shot, shot]), 8192);
+  assert.equal(visionWindowFor([shot, shot, shot]), 16384, "measured: three filled 8K to its last 81 tokens");
+  assert.equal(visionWindowFor([shot, shot, shot, shot]), 16384, "measured: four were refused at 8K");
+  const unreadable = { name: "odd.jpg", data: jpeg };
+  assert.equal(visionWindowFor([unreadable, unreadable, unreadable, unreadable]), 32768, "the most images at the most each still fit");
+});
+
 // ------------------------------------------------------------- the vision model
 
 test("the named vision model is used when it is installed, and any vision model otherwise", async () => {
@@ -96,8 +165,7 @@ test("the image and the question go to the vision model together", async () => {
     model: string; keep_alive: string; options: { num_ctx: number }; messages: Array<{ role: string; content: string; images?: string[] }>
   };
   assert.equal(body.model, defaultVisionModel);
-  assert.ok(visionContextTokens >= 8192, "room for a large screenshot");
-  assert.equal(body.options.num_ctx, visionContextTokens);
+  assert.equal(body.options.num_ctx, 8192, "one image fits the smallest window");
   assert.equal(body.keep_alive, visionKeepAlive, "stays loaded for the next image");
   assert.match(body.messages[0].content, /Read any text in an image exactly as written/);
   assert.equal(body.messages[1].content, "What setting is switched on?");
@@ -119,6 +187,23 @@ test("what stops it from looking is said plainly", async () => {
   const refused = await lookAtImages([{ name: "a.png", data: png }], "hi", config, { fetcher: fakeOllama([defaultVisionModel], { status: 500 }).fetcher });
   assert.equal(refused.ok, false);
 
+  // The body Ollama really sent when four screenshots overflowed an 8K window:
+  // the runner's error, as a JSON string inside Ollama's own JSON.
+  const overflow = JSON.stringify({ error: JSON.stringify({ error: {
+    code: 400, message: "request (10804 tokens) exceeds the available context size (8192 tokens), try increasing it",
+    type: "exceed_context_size_error", n_prompt_tokens: 10804, n_ctx: 8192
+  } }) });
+  const tooBig = await lookAtImages([{ name: "a.png", data: png }], "hi", config, {
+    fetcher: (async (url: string) => url.endsWith("/api/tags")
+      ? new Response(JSON.stringify({ models: [{ name: defaultVisionModel }] }), { status: 200 })
+      : new Response(overflow, { status: 400 })) as unknown as typeof fetch
+  });
+  assert.equal(tooBig.ok, false);
+  if (!tooBig.ok) {
+    assert.match(tooBig.reason, /too large together.*fewer of them, or smaller ones/);
+    assert.doesNotMatch(tooBig.reason, /[{}]/, "plain words, not the JSON it came in");
+  }
+
   const notAnImage = await lookAtImages([{ name: "notes.txt", data: Buffer.from("hello") }], "hi", config, { fetcher: fakeOllama([defaultVisionModel]).fetcher });
   assert.equal(notAnImage.ok, false);
   if (!notAnImage.ok) assert.match(notAnImage.reason, /not an image/);
@@ -137,7 +222,7 @@ test("the vision model can be loaded before the question arrives, answering noth
   assert.equal(body.keep_alive, visionKeepAlive);
   // Ollama reloads a model asked for with a different window, which would
   // throw the warm-up away and pay for the load twice.
-  assert.equal(body.options.num_ctx, visionContextTokens, "the same window the question will ask for");
+  assert.equal(body.options.num_ctx, visionWindowFor([{ name: "shot.png", data: png }]), "the window a one-image question asks for");
 
   assert.equal(await warmVisionModel(config, { fetcher: fakeOllama(["qwen2.5-coder:7b"]).fetcher }), false, "no vision model to load");
   const down = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
