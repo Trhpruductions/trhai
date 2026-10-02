@@ -24,7 +24,8 @@ const about: Array<[RegExp, string]> = [
   [/^tool-usage\.json$/, "How often each tool has run - counts and times only"],
   [/^assist-flow\.json$/, "The automation flow"],
   [/^preferences\.json$/, "Preferences"],
-  [/^command-arm\.json$/, "The machine-access switch"]
+  [/^command-arm\.json$/, "The machine-access switch"],
+  [/^network-access\.json$/, "The key other devices need, when they are let in"]
 ];
 
 function describe(name: string): string {

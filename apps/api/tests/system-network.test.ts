@@ -61,12 +61,23 @@ test("an address that accepts other machines is told from one that does not", ()
 });
 
 test("the service reports itself as it runs, and what it actually listens on", () => {
-  noteListening({ address: "::", family: "IPv6", port: 4123 });
+  noteListening([{ address: "127.0.0.1", family: "IPv4", port: 4123 }, { address: "::1", family: "IPv6", port: 4123 }]);
   const status = serviceStatus();
   assert.equal(status.pid, process.pid);
   assert.equal(status.node, process.version);
   assert.ok(status.rssBytes > 0 && status.uptimeSeconds >= 0);
-  assert.deepEqual(status.listening, { address: "::", family: "IPv6", port: 4123, fromNetwork: true });
+  assert.deepEqual(status.listening, {
+    port: 4123,
+    addresses: [{ address: "127.0.0.1", family: "IPv4" }, { address: "::1", family: "IPv6" }],
+    keyRequired: false,
+    fromNetwork: false
+  });
+
+  // Let in from the network, it says so - and that the key is asked for.
+  noteListening([{ address: "::", family: "IPv6", port: 4123 }], { keyRequired: true });
+  assert.deepEqual(serviceStatus().listening, {
+    port: 4123, addresses: [{ address: "::", family: "IPv6" }], keyRequired: true, fromNetwork: true
+  });
 });
 
 test("what Ollama holds in memory and has installed is read from Ollama", async () => {

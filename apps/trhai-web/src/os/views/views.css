@@ -123,6 +123,10 @@
 .os-leaves strong { color: var(--os-text); }
 .os-addresses { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--os-2); }
 .os-addresses li { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+/* The key on its own line under its label: 32 characters beside it crowded
+   the label onto two lines at phone width. */
+.os-services li.os-access-row { grid-template-columns: auto minmax(0, 1fr); row-gap: 2px; }
+.os-access-key { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
 
 /* ------------------------------------------------------------ automation */
 

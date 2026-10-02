@@ -1,29 +1,66 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import { connect, type AddressInfo } from "node:net";
+import os, { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 // A workspace of its own; appRunner resolves projects under it.
 const workspace = mkdtempSync(path.join(tmpdir(), "ascend-run-"));
 process.env.ASCEND_WORKSPACE = workspace;
 
-const { startApp, stopApp, listRunningApps, listBuiltApps, removeBuiltApp, resetRunningApps, projectFolderName } = await import("../src/services/appRunner.js");
+const { startApp, stopApp, listRunningApps, listBuiltApps, removeBuiltApp, resetRunningApps, projectFolderName, loopbackPreload } = await import("../src/services/appRunner.js");
 const { runTool } = await import("../src/services/agentTools.js");
 
-/** A zero-dependency server that answers /health on the port it is told, like a generated app. */
-function writeApp(name: string, opts: { health?: boolean } = {}): string {
+/**
+ * A zero-dependency server that answers /health on the port it is told, like a
+ * generated app. `host: null` listens the way every generated app did before
+ * the generator named an address: on none, which Node takes as every address.
+ */
+function writeApp(name: string, opts: { health?: boolean; host?: string | null } = {}): string {
   const dir = path.join(workspace, name);
   mkdirSync(dir, { recursive: true });
   const health = opts.health === false
     ? 'res.writeHead(404); res.end("no");'
     : 'if (req.url === "/health") { res.writeHead(200); res.end("ok"); return; } res.writeHead(200); res.end("hello from ' + name + '");';
+  const host = opts.host === undefined ? "127.0.0.1" : opts.host;
   writeFileSync(path.join(dir, "server.js"),
     'const http = require("node:http");\n'
     + 'const port = Number(process.env.PORT ?? 4400);\n'
-    + 'http.createServer((req, res) => { ' + health + ' }).listen(port, "127.0.0.1");\n',
+    + 'http.createServer((req, res) => { ' + health + ' }).listen(' + (host === null ? "port" : `port, ${JSON.stringify(host)}`) + ');\n',
     "utf8");
   return name;
+}
+
+/** This PC's address on its network - what another device would connect to - or null on a machine with none. */
+function networkAddress(): string | null {
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("169.254.")) return entry.address;
+    }
+  }
+  return null;
+}
+
+/** Whether a TCP connection to host:port is accepted. */
+function connects(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ host, port });
+    socket.setTimeout(5000);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => resolve(false));
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
 }
 
 test.afterEach(() => resetRunningApps());
@@ -55,7 +92,7 @@ test("a built app is started on a free port and answers over its URL", async () 
   assert.equal(started.ok, true, started.ok ? "" : started.reason);
   if (!started.ok) return;
 
-  assert.match(started.app.url, /^http:\/\/localhost:\d+$/);
+  assert.match(started.app.url, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.equal(started.app.project, "plant-tracker");
   assert.ok(started.app.port > 0);
 
@@ -143,7 +180,7 @@ test("run_app starts the named app and returns its URL", async () => {
     { memories: [], knowledge: [], launchApp: (p) => startApp(p), stopApp: (p) => stopApp(p) }
   );
   assert.equal(result.ok, true, result.content);
-  assert.match(result.content, /tool-app.*running.*http:\/\/localhost:\d+/);
+  assert.match(result.content, /tool-app.*running.*http:\/\/127\.0\.0\.1:\d+/);
 });
 
 test("run_app without a launcher says so instead of pretending", async () => {
@@ -199,7 +236,7 @@ test("run_app reopens a running app referred to loosely, rather than failing to 
     { memories: [], knowledge: [], launchApp: (p) => startApp(p), stopApp: (p) => stopApp(p), runningApps: () => listRunningApps() }
   );
   assert.equal(result.ok, true, result.content);
-  assert.match(result.content, /simple-todo-list-app.*running.*http:\/\/localhost:\d+/);
+  assert.match(result.content, /simple-todo-list-app.*running.*http:\/\/127\.0\.0\.1:\d+/);
 });
 
 test("build_app launches what it builds when a launcher is wired", async () => {
@@ -216,7 +253,7 @@ test("build_app launches what it builds when a launcher is wired", async () => {
     }
   );
   assert.equal(result.ok, true, result.content);
-  assert.match(result.content, /running live at http:\/\/localhost:\d+/);
+  assert.match(result.content, /running live at http:\/\/127\.0\.0\.1:\d+/);
 });
 
 test("listBuiltApps enumerates workspace apps and marks which are running", async () => {
@@ -234,7 +271,7 @@ test("listBuiltApps enumerates workspace apps and marks which are running", asyn
   assert.deepEqual(names, [...names].sort((a, b) => a.localeCompare(b)), "the list is sorted");
   const beta = apps.find((a) => a.name === "beta-notes");
   assert.equal(beta?.running, true, "the running one is marked running");
-  assert.match(beta?.url ?? "", /http:\/\/localhost:\d+/, "running app carries its url");
+  assert.match(beta?.url ?? "", /http:\/\/127\.0\.0\.1:\d+/, "running app carries its url");
   const alpha = apps.find((a) => a.name === "alpha-tracker");
   assert.equal(alpha?.running, false, "a built-but-stopped app is listed and not running");
   assert.equal(alpha?.url, null);
@@ -263,7 +300,69 @@ test("run_app starts a built-but-stopped app referred to loosely", async () => {
     }
   );
   assert.equal(result.ok, true, result.content);
-  assert.match(result.content, /kanban-board-xyz.*running.*http:\/\/localhost:\d+/);
+  assert.match(result.content, /kanban-board-xyz.*running.*http:\/\/127\.0\.0\.1:\d+/);
+});
+
+// ---------------------------------------------------------------------------
+// Keeping a running app on this PC.
+
+test("an app that names no address is kept on this PC, and opened at 127.0.0.1", async () => {
+  // How every generated server.js listened before the generator named an
+  // address - and most of the workspace still does.
+  writeApp("old-style-app", { host: null });
+  const started = await startApp("old-style-app");
+  assert.equal(started.ok, true, started.ok ? "" : started.reason);
+  if (!started.ok) return;
+  assert.match(started.app.url, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.equal((await fetch(`${started.app.url}/health`)).ok, true);
+  const outside = networkAddress();
+  if (!outside) return;
+  // The control: a server on every address answers there, so the refusal
+  // below is the app's binding, not a network path that never worked.
+  const control = createServer();
+  control.listen(0);
+  await once(control, "listening");
+  try {
+    assert.equal(await connects(outside, (control.address() as AddressInfo).port), true, "the control connects");
+  } finally {
+    control.close();
+  }
+  assert.equal(await connects(outside, started.app.port), false, `${outside}:${started.app.port} must refuse`);
+});
+
+test("the preload gives 127.0.0.1 to every listen() that names no address of its own", async () => {
+  const script = path.join(workspace, "listen-forms.cjs");
+  const outside = networkAddress();
+  writeFileSync(script, [
+    'const http = require("node:http");',
+    "const forms = [",
+    "  (server, done) => server.listen(0, done),",
+    '  (server, done) => server.listen(0, "0.0.0.0", done),',
+    '  (server, done) => server.listen(0, "::", done),',
+    '  (server, done) => server.listen(0, "localhost", done),',
+    "  (server, done) => server.listen({ port: 0 }, done),",
+    '  (server, done) => server.listen({ port: 0, host: "::" }, done),',
+    "  (server, done) => server.listen(done),",
+    "  (server, done) => server.listen(0, 511, done),",
+    ...(outside ? [`  (server, done) => server.listen(0, ${JSON.stringify(outside)}, done),`] : []),
+    "];",
+    "(async () => {",
+    "  const bound = [];",
+    "  for (const form of forms) {",
+    "    const server = http.createServer();",
+    "    await new Promise((resolve) => form(server, resolve));",
+    "    bound.push(server.address().address);",
+    "    server.close();",
+    "  }",
+    "  console.log(JSON.stringify(bound));",
+    "})();"
+  ].join("\n"), "utf8");
+
+  const { stdout } = await promisify(execFile)(process.execPath, ["--require", loopbackPreload, script], { encoding: "utf8" });
+  const bound = JSON.parse(stdout) as string[];
+  assert.deepEqual(bound.slice(0, 8), Array(8).fill("127.0.0.1"));
+  // An address named outright is the app's own choice, and is left alone.
+  if (outside) assert.equal(bound[8], outside);
 });
 
 test("removeBuiltApp deletes a built app's folder and refuses to escape the workspace", async () => {
