@@ -40,6 +40,7 @@ const loaders: Record<ViewId, ReturnType<typeof dynamic>> = {
   browser: dynamic(() => import("../views/BrowserView").then((module) => module.BrowserView), { loading: ViewLoading }),
   code: dynamic(() => import("../views/CodeView").then((module) => module.CodeView), { loading: ViewLoading }),
   tasks: dynamic(() => import("../views/TasksView").then((module) => module.TasksView), { loading: ViewLoading }),
+  automation: dynamic(() => import("../views/AutomationView").then((module) => module.AutomationView), { loading: ViewLoading }),
   tools: dynamic(() => import("../views/ToolsView").then((module) => module.ToolsView), { loading: ViewLoading }),
   system: dynamic(() => import("../views/SystemView").then((module) => module.SystemView), { loading: ViewLoading }),
   network: dynamic(() => import("../views/NetworkView").then((module) => module.NetworkView), { loading: ViewLoading }),

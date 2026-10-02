@@ -282,7 +282,7 @@ type When = "daily" | "weekdays" | "interval";
 function NewScheduleForm({ onDone }: { onDone: (created: boolean) => void }) {
   const { notify } = useNotify();
   const [name, setName] = useState("");
-  const [what, setWhat] = useState<"ask" | "remind">("ask");
+  const [what, setWhat] = useState<"ask" | "remind" | "flow">("ask");
   const [text, setText] = useState("");
   const [when, setWhen] = useState<When>("daily");
   const [time, setTime] = useState("09:00");
@@ -293,13 +293,13 @@ function NewScheduleForm({ onDone }: { onDone: (created: boolean) => void }) {
   const cadence = cadenceFrom(when === "interval"
     ? { kind: "interval", every: Number(every), unit }
     : { kind: "daily", time, weekdaysOnly: when === "weekdays" });
-  const ready = Boolean(name.trim() && text.trim() && cadence) && !saving;
+  const ready = Boolean(name.trim() && (what === "flow" || text.trim()) && cadence) && !saving;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!ready || !cadence) return;
     setSaving(true);
-    const action = what === "ask" ? { kind: "ask", prompt: text.trim() } : { kind: "remind", text: text.trim() };
+    const action = what === "flow" ? { kind: "flow" } : what === "ask" ? { kind: "ask", prompt: text.trim() } : { kind: "remind", text: text.trim() };
     const result = await apiPost<{ schedule: ScheduleView }>("/v1/schedules", { name: name.trim(), action, cadence });
     setSaving(false);
     if (!result.ok) {
@@ -315,18 +315,22 @@ function NewScheduleForm({ onDone }: { onDone: (created: boolean) => void }) {
       <label className="os-field">
         <span className="os-label">Name</span>
         <input className="os-input" value={name} onChange={(event) => setName(event.target.value)} maxLength={120}
-          placeholder={what === "ask" ? "Morning summary" : "Stretch break"} autoFocus />
+          placeholder={what === "ask" ? "Morning summary" : what === "flow" ? "Nightly checks" : "Stretch break"} autoFocus />
       </label>
       <div className="os-field">
         <span className="os-label" id="sched-what">What it does</span>
         <div className="os-choice" role="radiogroup" aria-labelledby="sched-what">
-          {([["ask", "Ask TRH AI"], ["remind", "Remind me"]] as const).map(([id, label]) => (
+          {([["ask", "Ask TRH AI"], ["remind", "Remind me"], ["flow", "Run the saved flow"]] as const).map(([id, label]) => (
             <button key={id} type="button" role="radio" aria-checked={what === id} className={what === id ? "on" : ""} onClick={() => setWhat(id)}>{label}</button>
           ))}
         </div>
-        <input className="os-input" value={text} onChange={(event) => setText(event.target.value)} maxLength={500}
-          aria-label={what === "ask" ? "What to ask" : "What to remind you"}
-          placeholder={what === "ask" ? "Summarise what changed in my workspace since yesterday" : "Stand up and stretch"} />
+        {what === "flow" ? (
+          <span className="os-faint os-small">Runs the flow saved in Automation, as it is when the time comes.</span>
+        ) : (
+          <input className="os-input" value={text} onChange={(event) => setText(event.target.value)} maxLength={500}
+            aria-label={what === "ask" ? "What to ask" : "What to remind you"}
+            placeholder={what === "ask" ? "Summarise what changed in my workspace since yesterday" : "Stand up and stretch"} />
+        )}
       </div>
       <div className="os-field">
         <span className="os-label" id="sched-when">When</span>
@@ -353,7 +357,7 @@ function NewScheduleForm({ onDone }: { onDone: (created: boolean) => void }) {
         {!cadence ? <span className="os-small os-warn-text">{when === "interval" ? "Somewhere from 1 minute to 24 hours." : "Pick a time of day."}</span> : null}
       </div>
       <p className="os-faint os-small os-sched-note">
-        It runs on this PC while TRH AI is running. This window does not need to be open.{what === "ask" ? " Each answer is kept in the run log." : " It shows as a notification."}
+        It runs on this PC while TRH AI is running. This window does not need to be open.{what === "ask" ? " Each answer is kept in the run log." : what === "flow" ? " What each step did is kept in the run log." : " It shows as a notification."}
       </p>
       <div className="os-sched-form-actions">
         <button type="submit" className="os-btn os-btn-primary" disabled={!ready}><Icon name="clock" size={15} />{saving ? "Saving…" : "Save schedule"}</button>
