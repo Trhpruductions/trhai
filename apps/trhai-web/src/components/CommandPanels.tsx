@@ -2,21 +2,11 @@
 
 import "./panels.css";
 
-// The right-hand column of the command centre.
-//
-// Each panel matches one from the reference design and is filled from a real
-// source. Two of them are deliberately not what the reference shows, and both
-// for the same reason:
-//
-// ACTIVE TASKS has no progress bars. The reference shows "Project Analysis
-// 72%", and nothing in this system knows how far through a request it is —
-// a bar filling to 72% would be an animation with a number written on it.
-// What is real is the status: planned, executing, succeeded, failed, blocked.
-//
-// CONNECTED SERVICES is empty, and says so. The reference shows VS Code,
-// GitHub, Discord, OpenAI and YouTube tiles. This build talks to none of
-// them; drawing their logos would claim five integrations that do not exist,
-// on the screen whose whole job is telling you what is actually running.
+// Panels the workspaces share - the health checks on System, what memory
+// holds on Memory - each filled from a real source. The work TRH AI is doing
+// moved to the Task center (lib/taskCenter.ts), with the rule that was
+// written here: no progress bars, because nothing in the agent knows how far
+// through a request it is.
 
 export type HealthRow = { label: string; state: string; ok: boolean | null };
 
@@ -73,59 +63,6 @@ export function SystemOverview({ rows }: { rows: HealthRow[] }) {
           ))}
         </dl>
       </div>
-    </section>
-  );
-}
-
-export type AgentTask = {
-  id: string;
-  status: "planned" | "executing" | "succeeded" | "failed" | "blocked";
-  request: string;
-  taskType: string;
-  toolsUsed: string[];
-  error?: string;
-  updatedAt: string;
-};
-
-const statusWords: Record<AgentTask["status"], string> = {
-  planned: "Queued",
-  executing: "Running",
-  succeeded: "Done",
-  failed: "Failed",
-  blocked: "Blocked"
-};
-
-export function ActiveTasks({ tasks }: { tasks: AgentTask[] | null }) {
-  return (
-    <section className="hud-panel">
-      <span className="hud-label">Active tasks</span>
-      {tasks === null ? (
-        <p className="faint">Checking…</p>
-      ) : tasks.length === 0 ? (
-        <p className="faint">Nothing running. Ask something and it appears here.</p>
-      ) : (
-        <ul className="tasks">
-          {tasks.map((task) => (
-            <li key={task.id} className={`task task-${task.status}`}>
-              <div className="task-head">
-                <span className="task-request" title={task.request}>{task.request}</span>
-                <span className="task-status">{statusWords[task.status]}</span>
-              </div>
-              {/* Tools that genuinely ran, in order. This is the closest thing
-                  to progress that is actually true — it is a record of work
-                  done, not an estimate of work remaining. */}
-              {task.toolsUsed.length > 0 ? (
-                <div className="task-tools">
-                  {task.toolsUsed.map((tool, index) => (
-                    <span key={`${tool}-${index}`} className="task-tool">{tool.replace(/_/g, " ")}</span>
-                  ))}
-                </div>
-              ) : null}
-              {task.error ? <p className="task-error">{task.error}</p> : null}
-            </li>
-          ))}
-        </ul>
-      )}
     </section>
   );
 }

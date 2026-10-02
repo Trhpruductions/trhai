@@ -43,7 +43,11 @@ export const icons = {
   archive: "M3.5 5h17v4h-17zM5.5 9v10h13V9M10 13h4",
   pencil: "M4 20h4.5L19 9.5l-4.5-4.5L4 15.5V20ZM13 6.5l4.5 4.5",
   panel: "M3.5 5h17v14h-17zM9.5 5v14",
-  message: "M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z"
+  message: "M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z",
+  play: "M8 5.5v13l10.5-6.5L8 5.5Z",
+  pause: "M9 5.5v13M15 5.5v13",
+  clock: "M12 3.5a8.5 8.5 0 1 1 0 17 8.5 8.5 0 0 1 0-17ZM12 7.5V12l3 2",
+  log: "M5 6.5h14M5 10.5h14M5 14.5h9M5 18.5h6"
 } as const;
 
 export type IconName = keyof typeof icons;

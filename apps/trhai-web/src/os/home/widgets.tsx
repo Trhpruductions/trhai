@@ -140,7 +140,9 @@ export function TasksWidget({ expanded }: { expanded: boolean }) {
   const { go } = useNav();
   const open = tasks?.filter((task) => !task.done) ?? [];
   const done = tasks?.filter((task) => task.done).length ?? 0;
-  const running = agentTasks?.filter((task) => task.status === "executing").length ?? 0;
+  // Running is what the API measures. A task left "executing" by a restart
+  // stopped long ago, and counting it here showed work that was not happening.
+  const running = agentTasks?.filter((task) => task.running).length ?? 0;
   const failed = agentTasks?.filter((task) => task.status === "failed" || task.status === "blocked").length ?? 0;
   const succeeded = agentTasks?.filter((task) => task.status === "succeeded").length ?? 0;
   return (

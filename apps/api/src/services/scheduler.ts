@@ -122,6 +122,24 @@ async function runSchedule(id: string, name: string, action: ScheduleAction): Pr
   }
 }
 
+/** Whether this schedule is running in this process right now. */
+export function isScheduleRunning(id: string): boolean {
+  return inFlight.has(id);
+}
+
+/**
+ * Run a schedule now, on request, the way the timer would - claimed, logged
+ * and guarded against a second copy of itself. Not awaited: the caller learns
+ * that it started, and the run's outcome lands in its log like any other.
+ */
+export function runScheduleNow(id: string): "started" | "running" | "missing" {
+  const schedule = listSchedules().find((entry) => entry.id === id);
+  if (!schedule) return "missing";
+  if (inFlight.has(id)) return "running";
+  void runSchedule(schedule.id, schedule.name, schedule.action);
+  return "started";
+}
+
 /** One pass over every schedule. Exported so a test can drive it directly. */
 export async function tick(now = new Date()): Promise<void> {
   for (const schedule of listSchedules()) {

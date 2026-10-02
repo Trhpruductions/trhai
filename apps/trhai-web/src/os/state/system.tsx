@@ -4,8 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { apiGet, sessionId } from "../../lib/api";
 import { emptySeries, pushSample, type Series } from "../../lib/telemetryHistory";
 import { readDismissedRendering, renderingKey, writeDismissedRendering } from "../../lib/renderingDismissal";
-import type { AgentTask } from "../../components/CommandPanels";
-import type { TaskItem } from "../../components/TaskList";
+import type { AgentTask, TaskItem } from "../../lib/taskCenter";
 import { useNotify } from "./notify";
 
 // What TRH AI knows about the machine and its own services, read from the
@@ -30,6 +29,8 @@ export type Identity = { username: string; hostname: string; platform: string };
 export type ScheduleView = {
   id: string; name?: string; enabled: boolean; cadenceLabel?: string; actionLabel?: string;
   nextDueAt?: string; lastRunAt?: string | null; lastStatus?: string | null; lastDetail?: string | null; createdAt?: string;
+  /** Running in the API right now. */
+  running?: boolean;
 };
 export type CapabilityTool = { name: string; level: number; levelLabel: string; description?: string };
 export type CapabilityInfo = { tools: CapabilityTool[]; videoRendering?: boolean; web?: boolean; codeExecution?: boolean; model?: string | null };

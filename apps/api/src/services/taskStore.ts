@@ -230,6 +230,27 @@ export function getResumableTask(key: string, now: Date = new Date()): StoredTas
   return task;
 }
 
+/**
+ * Sessions with a task running in this process right now, counted.
+ *
+ * In memory on purpose. "executing" is stored, and outlives a restart that
+ * the work itself did not, so on its own it cannot tell work in progress from
+ * work that died with the last process. This can: it starts empty in every
+ * process, and only a run genuinely under way holds a count here. A count
+ * rather than a flag, so two tabs running at once cannot clear each other.
+ */
+const running = new Map<string, number>();
+
+export function markTaskRunning(key: string, isRunning: boolean): void {
+  const count = (running.get(key) ?? 0) + (isRunning ? 1 : -1);
+  if (count > 0) running.set(key, count);
+  else running.delete(key);
+}
+
+export function isTaskRunning(key: string): boolean {
+  return (running.get(key) ?? 0) > 0;
+}
+
 export function clearTask(key: string): boolean {
   loadFromDisk();
   if (!taskByKey.has(key)) return false;

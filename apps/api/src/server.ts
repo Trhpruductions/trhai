@@ -80,16 +80,20 @@ import {
   describeCadence,
   isCadence,
   isScheduleAction,
+  listScheduleRuns,
   listSchedules,
   schedulePersistenceError,
   removeSchedule,
-  setScheduleEnabled
+  setScheduleEnabled,
+  type Schedule
 } from "./services/scheduleStore.js";
+import { isScheduleRunning, runScheduleNow } from "./services/scheduler.js";
 import { listRunningApps, listBuiltApps, removeBuiltApp, startApp, stopApp } from "./services/appRunner.js";
 import { listRenderings, latestRendering } from "./services/renderMockup.js";
 import { getFlow, saveFlow } from "./services/flowStore.js";
 import { readTelemetry, readIdentity } from "./services/systemTelemetry.js";
-import { getTask } from "./services/taskStore.js";
+import { getResumableTask, getTask, isTaskRunning } from "./services/taskStore.js";
+import { clearFinishedTasks, forgetFinishedTask, listFinishedTasks, maxFinishedPerSession } from "./services/taskHistory.js";
 import { clearEvents, listEvents } from "./services/executionLog.js";
 import { finishStages, getStage, stageLabels } from "./services/reasoningStage.js";
 import { snapshot, toPrometheus } from "./services/metrics.js";
@@ -138,6 +142,16 @@ function resolveMemoryKey(req: express.Request, sessionId: string | null): strin
   const account = accountForToken(bearerToken(req.headers.authorization));
   if (account) return `user:${account.id}`;
   return sessionId;
+}
+
+/** A schedule as the screens see it: its words, and whether it is running now. */
+function scheduleView(schedule: Schedule) {
+  return {
+    ...schedule,
+    cadenceLabel: describeCadence(schedule.cadence),
+    actionLabel: describeAction(schedule.action),
+    running: isScheduleRunning(schedule.id)
+  };
 }
 
 /** Client-supplied cadence, or undefined to let the voice's default stand. */
@@ -1232,11 +1246,7 @@ export function createApp() {
   app.get("/v1/schedules", (_req, res) => {
     res.json({
       data: {
-        schedules: listSchedules().map((schedule) => ({
-          ...schedule,
-          cadenceLabel: describeCadence(schedule.cadence),
-          actionLabel: describeAction(schedule.action)
-        })),
+        schedules: listSchedules().map(scheduleView),
         // Whether the last write to disk failed.
         //
         // scheduleStore has recorded this since it was written and nothing ever
@@ -1402,9 +1412,13 @@ export function createApp() {
   // Not the same as /v1/agent-tasks, which records one request and whether it
   // succeeded. This is the individual steps inside it — the thing that makes
   // a long build watchable rather than merely pending.
+  //
+  // Read under the same key the work is filed under. This took the raw
+  // sessionId, while the orchestrator files a signed-in user's steps under
+  // their account - so for anyone signed in, the trace was always empty.
   app.get("/v1/execution", (req, res) => {
-    const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : "";
-    res.json({ data: { events: listEvents(sessionId) }, traceId: "trace-local" });
+    const key = resolveMemoryKey(req, normalizeSessionId(req.query?.sessionId));
+    res.json({ data: { events: listEvents(key ?? undefined) }, traceId: "trace-local" });
   });
 
   // Apps that build_app built and run_app started, running right now. The web
@@ -1474,19 +1488,47 @@ export function createApp() {
   // ticking towards a number nobody measured. There is no percentage here on
   // purpose: nothing in the loop knows how far through a request it is, and
   // a bar filling to 72% would be an animation, not a measurement.
+  //
+  // Under the same key the orchestrator files it under - see /v1/execution,
+  // which had the same mismatch. `running` is whether this process is working
+  // on it right now: a stored "executing" outlives a restart that the work did
+  // not. `resumable` is whether "continue" would pick it up.
   app.get("/v1/agent-tasks", (req, res) => {
-    const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : "";
-    if (!sessionId) {
-      res.status(400).json({
-        code: "INVALID_REQUEST",
-        message: "sessionId is required",
-        traceId: "trace-local"
-      });
+    const key = requireSessionId(req.query?.sessionId, res, req);
+    if (!key) return;
+
+    const task = getTask(key);
+    res.json({
+      data: {
+        tasks: task ? [{ ...task, running: isTaskRunning(key), resumable: getResumableTask(key) !== null }] : []
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  // The work that has finished, newest first, each with the steps it took.
+  // Its own route rather than part of the one above, which every screen
+  // polls every few seconds and which should stay one task long.
+  app.get("/v1/agent-tasks/history", (req, res) => {
+    const key = requireSessionId(req.query?.sessionId, res, req);
+    if (!key) return;
+    res.json({ data: { history: listFinishedTasks(key), limit: maxFinishedPerSession }, traceId: "trace-local" });
+  });
+
+  app.delete("/v1/agent-tasks/history", (req, res) => {
+    const key = requireSessionId(req.query?.sessionId, res, req);
+    if (!key) return;
+    res.json({ data: { cleared: clearFinishedTasks(key) }, traceId: "trace-local" });
+  });
+
+  app.delete("/v1/agent-tasks/history/:taskId", (req, res) => {
+    const key = requireSessionId(req.query?.sessionId, res, req);
+    if (!key) return;
+    if (!forgetFinishedTask(key, req.params.taskId)) {
+      res.status(404).json({ code: "NOT_FOUND", message: "That task is not in the history", traceId: "trace-local" });
       return;
     }
-
-    const task = getTask(sessionId);
-    res.json({ data: { tasks: task ? [task] : [] }, traceId: "trace-local" });
+    res.status(204).end();
   });
 
   // The workspace, over HTTP.
@@ -1591,11 +1633,7 @@ export function createApp() {
       return;
     }
 
-    res.status(201).json({
-      data: { schedule: { ...schedule, cadenceLabel: describeCadence(schedule.cadence),
-          actionLabel: describeAction(schedule.action) } },
-      traceId: "trace-local"
-    });
+    res.status(201).json({ data: { schedule: scheduleView(schedule) }, traceId: "trace-local" });
   });
 
   app.patch("/v1/schedules/:scheduleId", (req, res) => {
@@ -1610,11 +1648,7 @@ export function createApp() {
       return;
     }
 
-    res.json({
-      data: { schedule: { ...schedule, cadenceLabel: describeCadence(schedule.cadence),
-          actionLabel: describeAction(schedule.action) } },
-      traceId: "trace-local"
-    });
+    res.json({ data: { schedule: scheduleView(schedule) }, traceId: "trace-local" });
   });
 
   app.delete("/v1/schedules/:scheduleId", (req, res) => {
@@ -1623,6 +1657,32 @@ export function createApp() {
       return;
     }
     res.status(204).end();
+  });
+
+  // Each run of one schedule, newest first: the log behind its last status.
+  app.get("/v1/schedules/:scheduleId/runs", (req, res) => {
+    const runs = listScheduleRuns(req.params.scheduleId);
+    if (!runs) {
+      res.status(404).json({ code: "NOT_FOUND", message: "Schedule not found", traceId: "trace-local" });
+      return;
+    }
+    res.json({ data: { runs }, traceId: "trace-local" });
+  });
+
+  // Run a schedule now rather than at its time - to try one out, or to have
+  // the nine o'clock summary at eight. Started, not awaited: the outcome is
+  // logged with its other runs. A paused schedule can still be run by hand.
+  app.post("/v1/schedules/:scheduleId/run", (req, res) => {
+    const outcome = runScheduleNow(req.params.scheduleId);
+    if (outcome === "missing") {
+      res.status(404).json({ code: "NOT_FOUND", message: "Schedule not found", traceId: "trace-local" });
+      return;
+    }
+    if (outcome === "running") {
+      res.status(409).json({ code: "ALREADY_RUNNING", message: "That schedule is running already", traceId: "trace-local" });
+      return;
+    }
+    res.status(202).json({ data: { started: true }, traceId: "trace-local" });
   });
 
   // Which tool the agent is running right now, for a client to poll while a
