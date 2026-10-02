@@ -168,6 +168,18 @@ const replaceWholeFile =
   /\b(?:overwrite|rewrite|re-write|redo|regenerate|start (?:it )?over|from scratch|replace (?:the |its |all (?:of )?(?:the |its )?)?(?:whole |entire )?(?:file|contents?|everything|text|code)|clear|empty|wipe|reset|truncate|trim|shorten|cut down|strip|simplify|convert|translate|transform|reformat|format|prettify|beautify|minify|uppercase|lowercase|capitali[sz]e|sort|reorder|only (?:say|says|contain|contains|have|has|keep)|just (?:say|says|contain|contains|have|has)|contains? only|nothing but|(?:delete|remove) (?:everything|all|most))\b/i;
 
 /**
+ * A request that only adds to a file - a line, a comment, an entry - rather
+ * than changing what is there.
+ *
+ * Nothing already in the file may go, whatever its size. Live: "add a line
+ * saying second note to the end of notes.txt" went to write_file with
+ * "\nsecond note", and the file's one line, "first note", was gone; the
+ * one-line exemption below let it through.
+ */
+const onlyAdds =
+  /\b(?:add|append|insert|prepend)\b[^.?!]{0,80}\b(?:line|lines|text|sentence|comment|comments|entry|entries|row|rows|item|items|note|paragraph)\b|\bto the (?:end|bottom|top|start|beginning) of\b/i;
+
+/**
  * Whether writing `next` over `current` would throw away most of what the
  * file says, when the request never asked for that.
  *
@@ -187,23 +199,18 @@ const replaceWholeFile =
  * line of the new text vouches for one line of the old, so a single "}" does
  * not keep every closing brace in a source file. A one-line file is left
  * alone: replacing a single line is an ordinary write.
- */
-/**
- * A request that only adds to a file - a line, a comment, an entry - rather
- * than changing what is there.
  *
- * Nothing already in the file may go, whatever its size. Live: "add a line
- * saying second note to the end of notes.txt" went to write_file with
- * "\nsecond note", and the file's one line, "first note", was gone; the
- * one-line exemption below let it through.
+ * `seenWhole` is false for a file too long to have been shown in one read
+ * (see contextBudget). Its middle was a note, so a write of everything the
+ * model saw still drops lines - up to two fifths of them for a file just over
+ * the limit, which is under the half that otherwise counts as gutting. For
+ * such a file nearly every line has to survive.
  */
-const onlyAdds =
-  /\b(?:add|append|insert|prepend)\b[^.?!]{0,80}\b(?:line|lines|text|sentence|comment|comments|entry|entries|row|rows|item|items|note|paragraph)\b|\bto the (?:end|bottom|top|start|beginning) of\b/i;
-
 export function replacesMostOf(
   current: string,
   next: string,
-  request: string | undefined
+  request: string | undefined,
+  seenWhole = true
 ): { before: number; kept: number } | null {
   const before = contentLines(current);
   const adding = onlyAdds.test(request ?? "") && !replaceWholeFile.test(request ?? "");
@@ -220,7 +227,10 @@ export function replacesMostOf(
     }
   }
 
-  if (adding ? kept === before.length : kept * 2 >= before.length) return null;
+  const enough = adding
+    ? kept === before.length
+    : seenWhole ? kept * 2 >= before.length : kept * 10 >= before.length * 9;
+  if (enough) return null;
   if (replaceWholeFile.test(request ?? "")) return null;
   return { before: before.length, kept };
 }

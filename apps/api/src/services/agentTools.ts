@@ -19,6 +19,7 @@ import { describeConfirmationNeeded, requiresConfirmation } from "./toolPermissi
 import {
   listDirectoryAt,
   listWorkspace,
+  maxOpenedBytes,
   readFileAt,
   readWorkspaceFile,
   resolveInWorkspace,
@@ -26,6 +27,7 @@ import {
   writeFileAt,
   writeWorkspaceFile
 } from "./workspace.js";
+import { elisionIn, fileView, fitsOneRead } from "./contextBudget.js";
 import { describeTelemetry, readFreeSpace, readGpuHeadroom, readTelemetry, readTopMemoryPrograms } from "./systemTelemetry.js";
 import { fetchWebPage } from "./webFetch.js";
 import { webSearch } from "./webSearch.js";
@@ -608,14 +610,17 @@ export const toolDefinitions: ToolDefinition[] = [
         "Read a file. Use it to look at code before changing or explaining it. Accepts a "
         + "workspace path, or a full path to anywhere on this machine such as "
         + "D:/projects/app/src/index.ts when machine access is on. Never answer questions about "
-        + "the contents of a file without reading it first.",
+        + "the contents of a file without reading it first. A long file shows its start and end "
+        + "and names the lines left out; pass start_line and end_line to read those lines.",
       parameters: {
         type: "object",
         properties: {
           path: {
             type: "string",
             description: "A workspace path, or a full path to a file anywhere on this machine."
-          }
+          },
+          start_line: { type: "number", description: "The first line to read, counting from 1. Optional." },
+          end_line: { type: "number", description: "The last line to read. Optional." }
         },
         required: ["path"]
       }
@@ -1131,6 +1136,12 @@ function requireString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+/** A line number, given as a number or as digits in a string; undefined otherwise. */
+function lineArgument(value: unknown): number | undefined {
+  const parsed = typeof value === "number" ? value : typeof value === "string" && /^\s*\d+\s*$/.test(value) ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : undefined;
+}
+
 /**
  * Run one tool call.
  *
@@ -1434,12 +1445,23 @@ async function launchLine(context: ToolContext, project: string): Promise<string
 function wouldGut(absolutePath: string, content: string, request: string | undefined): string | null {
   const current = readFileAt(absolutePath);
   if (!current.ok) return null;
-  const shrink = replacesMostOf(current.content, content, request);
+  const seenWhole = !current.truncated && fitsOneRead(current.content);
+  const shrink = replacesMostOf(current.content, content, request, seenWhole);
   if (!shrink) return null;
   return `${path.basename(absolutePath)} has ${shrink.before} line${shrink.before === 1 ? "" : "s"}, `
     + `and this would keep ${shrink.kept} of ${shrink.before === 1 ? "it" : "them"}. `
+    + (seenWhole ? "" : "It is longer than one read shows, so a write made from what was shown loses the lines left out. ")
     + "To add to it or change part of it, use edit_file: append for new lines at the end, or old_text with "
     + "new_text. Nothing was written.";
+}
+
+/** Why `content` must not be written, when it is a shortened view; see elisionIn. */
+function writesAShortenedView(content: string): string | null {
+  const elided = elisionIn(content);
+  return elided
+    ? `This has ${elided} in it: it is a shortened view, and writing it would put the note where the `
+      + "left-out lines belong. To change part of a file, use edit_file with old_text and new_text."
+    : null;
 }
 
 export async function runTool(call: ToolCall, context: ToolContext): Promise<ToolResult> {
@@ -2471,7 +2493,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       });
       if (!verdict.ok) return { ok: false, content: verdict.reason };
 
-      let result = readFileAt(verdict.path);
+      let result = readFileAt(verdict.path, maxOpenedBytes);
 
       // A bare filename means the project this session is working in.
       //
@@ -2488,7 +2510,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
             insideWorkspace: resolveInWorkspace
           });
           if (retry.ok) {
-            const second = readFileAt(retry.path);
+            const second = readFileAt(retry.path, maxOpenedBytes);
             if (second.ok) result = second;
           }
         }
@@ -2504,14 +2526,14 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       // then stopped. Naming the real path turns that into a recovery.
       if (!result.ok) return { ok: false, content: explainMiss(result.reason, target) };
 
-      // A truncated read says so. Answering about a file it has only partly
-      // seen, with no way for the reader to know, is the failure to avoid.
-      return {
-        ok: true,
-        content: result.truncated
-          ? `${result.content}\n\n[truncated - this file is longer than shown]`
-          : result.content
-      };
+      // A partial view says so, and which lines it left out. Answering about
+      // a file it has only partly seen, with no way for the reader to know, is
+      // the failure to avoid - and a long file shown whole pushed the rules out
+      // of the model's window instead (see contextBudget).
+      return fileView(result.content, {
+        start: lineArgument(call.arguments.start_line),
+        end: lineArgument(call.arguments.end_line)
+      }, !result.truncated);
     }
 
     case "write_file": {
@@ -2522,6 +2544,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       }
       const placeholder = placeholderIn(target, content);
       if (placeholder) return { ok: false, content: `${placeholder} Nothing was written.` };
+      const shortenedView = writesAShortenedView(content);
+      if (shortenedView) return { ok: false, content: `${shortenedView} Nothing was written.` };
 
       const verdict = resolveForAccess(target, {
         // As above: an unattended run stays in the workspace.
@@ -2570,6 +2594,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       }
       const placeholder = placeholderIn(target, addition ?? newText ?? "");
       if (placeholder) return { ok: false, content: `${placeholder} Nothing was changed.` };
+      const shortenedView = writesAShortenedView(addition ?? newText ?? "");
+      if (shortenedView) return { ok: false, content: `${shortenedView} Nothing was changed.` };
 
       // Read and write are checked separately with the same rule, so an edit
       // cannot reach anywhere a read or a write could not.

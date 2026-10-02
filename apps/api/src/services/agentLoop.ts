@@ -1,4 +1,5 @@
-import { modelOptions, type LocalModelConfig } from "./localModel.js";
+import { contextWindow, modelOptions, type LocalModelConfig } from "./localModel.js";
+import { estimateTokens, fitPromptToWindow, fitToolResult, promptBudgetTokens, requestTokens } from "./contextBudget.js";
 import {
   availableTools, driveNamedIn, readMachineStatus, runTool, verifiedDetail, type AgentLens, type ToolContext, type ToolCall
 } from "./agentTools.js";
@@ -1323,6 +1324,10 @@ export async function runAgent(
         : question
     }
   ];
+  // The rules and the question: the two messages that are never shortened to
+  // fit the window. Corrections later in the turn are user messages too, so
+  // the question is remembered by where it is, not found as the last one.
+  const neverShortened = [0, messages.length - 1];
 
   const toolsUsed: ToolOutcome[] = [];
   let awaitingConfirmation: { tool: string; arguments: Record<string, unknown> } | undefined;
@@ -1658,6 +1663,23 @@ export async function runAgent(
       })
       : [];
     const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));
+
+    // Measured before it is sent, and made to fit. Past the window Ollama
+    // cuts from the front without a word, and the front is the rules - so
+    // earlier results give way instead, saying what they left out.
+    const toolsTokens = offerTools ? estimateTokens(JSON.stringify(offeredTools)) : 0;
+    const budget = promptBudgetTokens(contextWindow(config));
+    const shortenedBy = fitPromptToWindow(messages, toolsTokens, budget, neverShortened);
+    const promptSize = requestTokens(messages, toolsTokens);
+    if (promptSize > budget) {
+      // Everything that could give has given. Said where someone looking at
+      // the log can see it, because what happens next is the silent cut.
+      console.warn(`[agent] the prompt is still ~${promptSize} tokens for a ${budget}-token budget after shortening; `
+        + "raise OLLAMA_NUM_CTX if replies start ignoring the rules");
+    } else if (process.env.ASSIST_DEBUG) {
+      console.log(`[agent] prompt ~${promptSize} of ${budget} tokens`
+        + (shortenedBy ? `, earlier results shortened by ~${shortenedBy} tokens` : ""));
+    }
 
     let response: ChatResponse;
     try {
@@ -2515,7 +2537,9 @@ export async function runAgent(
       if ((call.name === "fetch_url" || call.name === "web_search") && result.ok) webGathersDone += 1;
       // The failure text goes back unchanged. "Nothing matches X" is what stops
       // the model inventing an answer; softening it here would undo that.
-      messages.push({ role: "tool", content: result.content });
+      // Only its length is bounded, keeping the start and the end: see
+      // contextBudget.
+      messages.push({ role: "tool", content: fitToolResult(call.name, result.content) });
       if (process.env.ASSIST_DEBUG) {
         console.log(`[agent]   ${call.name} -> ${result.ok ? "ok" : "failed"}: ${JSON.stringify(result.content.slice(0, 200))}`);
       }
