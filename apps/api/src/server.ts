@@ -530,7 +530,7 @@ export function createApp(options: AppOptions = {}) {
     res.json({
       data: {
         email: describeEmailAccount(),
-        texts: { phoneLink: phoneLinkStatus() },
+        texts: { phoneLink: phoneLinkStatus(), phone: readPreferences().phone },
         providers: knownProviders.map(({ name, domains, passwordHelp }) => ({ name, domains, passwordHelp }))
       },
       traceId: "trace-local"
@@ -1996,7 +1996,13 @@ export function createApp(options: AppOptions = {}) {
 
   app.patch("/v1/preferences", (req, res) => {
     const personality = typeof req.body?.personality === "string" ? req.body.personality : undefined;
-    res.json({ data: updatePreferences({ personality }), traceId: "trace-local" });
+    // The phone linked in Phone Link: iphone, android, or null to say "not set".
+    const phone = req.body?.phone;
+    if (phone !== undefined && phone !== null && phone !== "iphone" && phone !== "android") {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "phone must be iphone, android or null.", traceId: "trace-local" });
+      return;
+    }
+    res.json({ data: updatePreferences({ personality, ...(phone !== undefined ? { phone } : {}) }), traceId: "trace-local" });
   });
 
   app.get("/v1/knowledge", (req, res) => {

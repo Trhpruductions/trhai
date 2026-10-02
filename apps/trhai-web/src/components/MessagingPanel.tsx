@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { apiDelete, apiGet, apiPost, apiPut } from "../lib/api";
-import { describeTexting, needsServer, providerHint, type EmailAccountView, type MessagingStatus } from "../lib/messaging";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../lib/api";
+import { describeTexting, needsServer, phoneChoices, providerHint, type EmailAccountView, type MessagingStatus, type PhoneKind } from "../lib/messaging";
 import "./personality.css";
 
 // Texts and email, in settings.
 //
-// Texts need nothing here: they open in Phone Link, which sends from the
-// user's own phone, so this only says whether Phone Link was found. Email
+// Texts go out from the user's own phone through Phone Link, so this says
+// whether Phone Link was found - and asks which phone is linked, because with
+// an iPhone a text cannot arrive in Phone Link already written. Email
 // sends from the user's own account once it is added - an address and an app
 // password, with the server filled in for the providers the API knows. The
 // password goes to the local API, which keeps it encrypted, and is never sent
@@ -37,7 +38,20 @@ export function MessagingPanel() {
   }, []);
 
   const email: EmailAccountView = status?.email ?? { configured: false };
-  const texting = describeTexting(status?.texts.phoneLink ?? "missing");
+  const phone = status?.texts.phone ?? null;
+  const texting = describeTexting(status?.texts.phoneLink ?? "missing", phone);
+
+  const choosePhone = async (next: PhoneKind) => {
+    setBusy(true);
+    setNote(null);
+    const result = await apiPatch<{ phone: PhoneKind | null }>("/v1/preferences", { phone: next });
+    setBusy(false);
+    if (!result.ok) {
+      setNote({ tone: "bad", text: result.reason });
+      return;
+    }
+    setStatus((prior) => (prior ? { ...prior, texts: { ...prior.texts, phone: result.data.phone } } : prior));
+  };
   const providers = status?.providers ?? [];
   const hint = providerHint(address, providers);
   const askServer = needsServer(address, providers);
@@ -110,6 +124,16 @@ export function MessagingPanel() {
             <span className={`messaging-dot ${texting.ready ? "ok" : "off"}`} aria-hidden="true" />
             <p className="persona-summary">{texting.text}</p>
           </div>
+          {status.texts.phoneLink === "linked" ? (
+            <div className="account-actions" role="group" aria-label="The phone linked in Phone Link">
+              {phoneChoices.map((choice) => (
+                <button key={choice.id} type="button" className={`account-button${phone === choice.id ? " primary" : ""}`}
+                  aria-pressed={phone === choice.id} disabled={busy} onClick={() => void choosePhone(choice.id)}>
+                  {choice.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           {email.configured && !editing ? (
             <>
