@@ -22,6 +22,12 @@ export type ChatMessage = {
   model?: string;
   toolsUsed?: Array<{ name: string; ok: boolean }>;
   /**
+   * An action this reply is waiting on a yes for - a text or an email to send,
+   * something to delete - as the API described it. The reply's own text says
+   * the same; this is what lets the screen offer the answer as a button.
+   */
+  pendingConfirmation?: { tool: string; verb: string; target: string };
+  /**
    * True while this reply is still being written.
    *
    * The text is real — it is what the model has produced so far — but it is
@@ -38,6 +44,12 @@ export type AssistantStatus =
   | { state: "executing"; tool: string; stage?: string }
   | { state: "success" }
   | { state: "error"; detail: string };
+
+function isPendingConfirmation(value: unknown): value is { tool: string; verb: string; target: string } {
+  const pending = value as { tool?: unknown; verb?: unknown; target?: unknown } | null;
+  return Boolean(pending) && typeof pending?.tool === "string" && typeof pending?.verb === "string"
+    && typeof pending?.target === "string";
+}
 
 const historyTurns = 8;
 /** How often to check which tool is running — see /v1/assist/activity. */
@@ -265,7 +277,8 @@ export function useAssistant() {
         at: Date.now(),
         strategy: data.strategy as string | undefined,
         model: data.model as string | undefined,
-        toolsUsed: data.toolsUsed as ChatMessage["toolsUsed"]
+        toolsUsed: data.toolsUsed as ChatMessage["toolsUsed"],
+        ...(isPendingConfirmation(data.pendingConfirmation) ? { pendingConfirmation: data.pendingConfirmation } : {})
       };
 
       setMessages((prior) => (prior.some((message) => message.id === replyId)

@@ -28,6 +28,7 @@ import {
   writeWorkspaceFile
 } from "./workspace.js";
 import { elisionIn, fileView, fitsOneRead } from "./contextBudget.js";
+import { messageProblem, sendEmail, sendingTools, sendText, type MessagingDeps } from "./messaging.js";
 import { describeTelemetry, readFreeSpace, readGpuHeadroom, readTelemetry, readTopMemoryPrograms } from "./systemTelemetry.js";
 import { fetchWebPage } from "./webFetch.js";
 import { webSearch } from "./webSearch.js";
@@ -218,6 +219,12 @@ export type ToolContext = {
   sessionId?: string;
   /** Overridable so a test can assert on a fixed clock. */
   now?: () => Date;
+  /**
+   * What sending a text or an email touches - the link opener, Phone Link, the
+   * saved email account, the SMTP connection - so a test can stand in for each.
+   * The real ones when absent.
+   */
+  messaging?: MessagingDeps;
   /**
    * Overridable so a test can exercise fetch_url's dispatch without a real
    * network call — real fetchWebPage, with its own SSRF and size/timeout
@@ -904,6 +911,45 @@ export const toolDefinitions: ToolDefinition[] = [
         required: ["description"]
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "send_text",
+      description:
+        "Send a text message to a phone number, from the user's own phone through Phone Link. "
+        + "Write the message the user asked for and call this; the user is shown it and approves it "
+        + "before anything is sent, so do not ask for permission first. Needs a real number: for "
+        + "someone named, find their number with search_memory or ask for it.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: { type: "string", description: "The phone number, for example 555-010-0123 or +44 20 7946 0123." },
+          message: { type: "string", description: "The text to send, exactly as it should arrive." }
+        },
+        required: ["to", "message"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "send_email",
+      description:
+        "Send an email from the user's own email account. Write the email the user asked for and call "
+        + "this; the user is shown it and approves it before anything is sent, so do not ask for "
+        + "permission first. Needs a real address: for someone named, find their address with "
+        + "search_memory or ask for it.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: { type: "string", description: "The address to send to; several may be separated by commas." },
+          subject: { type: "string", description: "The subject line." },
+          body: { type: "string", description: "The email itself, exactly as it should arrive." }
+        },
+        required: ["to", "subject", "body"]
+      }
+    }
   }
 ];
 
@@ -1056,6 +1102,7 @@ export function availableTools(
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
     schedules?: boolean; video?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
+    messaging?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1076,6 +1123,7 @@ export function availableTools(
   const allowDocumentWrites = options.documents ?? true;
   const allowStatus = options.status ?? true;
   const allowLaunch = options.launch ?? true;
+  const allowMessaging = options.messaging ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1096,6 +1144,8 @@ export function availableTools(
     if (!allowDocumentWrites && documentWritingTools.has(name)) return false;
     if (!allowStatus && statusTools.has(name)) return false;
     if (!allowLaunch && launchTools.has(name)) return false;
+    // Only when the request asks to text or email someone; see wantsToSendAMessage.
+    if (!allowMessaging && sendingTools.has(name)) return false;
     return true;
   });
 }
@@ -1506,6 +1556,14 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
         + "is only ever granted for working at the machine — it cannot be confirmed into being "
         + "here. Say what you would have run and why."
     };
+  }
+
+  // A message that could only fail goes back to be fixed rather than being
+  // held for the user to approve: "send this text to mom?" approved, and then
+  // refused because mom is not a phone number, is a question asked for nothing.
+  if (isRegistered && sendingTools.has(call.name)) {
+    const problem = messageProblem(call.name, call.arguments ?? {}, context.messaging);
+    if (problem) return { ok: false, content: problem };
   }
 
   const preAuthorised = call.name === "run_command" && commandsArmed();
@@ -2753,6 +2811,23 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
           hour: "2-digit", minute: "2-digit"
         })} (local time on the user's machine)`
       };
+    }
+
+    // Reached only once the user has approved this exact message: both are
+    // level 4, so the gate above holds the call and shows it first, and an
+    // approval replays the arguments that were shown. See messaging.ts.
+    case "send_text": {
+      if (context.unattended) {
+        return { ok: false, content: "Nothing was sent. A scheduled run has nobody to approve a message, so it cannot send one." };
+      }
+      return sendText(call.arguments ?? {}, context.messaging);
+    }
+
+    case "send_email": {
+      if (context.unattended) {
+        return { ok: false, content: "Nothing was sent. A scheduled run has nobody to approve a message, so it cannot send one." };
+      }
+      return sendEmail(call.arguments ?? {}, context.messaging);
     }
 
     case "system_status": {

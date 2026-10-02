@@ -17,6 +17,7 @@ import { classifyIntent, wantsToStopAnApp, wantsWebSearch } from "./actionIntent
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
 import {
+  approvesTheSend,
   clearPendingConfirmation,
   consumePendingConfirmation,
   describePendingAction,
@@ -26,6 +27,8 @@ import {
   recordPendingConfirmation,
   type PendingConfirmation
 } from "./pendingConfirmation.js";
+import { describeHeldMessage, sendingTools, type MessagingDeps } from "./messaging.js";
+import { describeEmailAccount } from "./emailAccount.js";
 import {
   isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, isListAppsRequest, isListWorkspaceRequest, isRunningAppsRequest,
   parseForgetRequest,
@@ -92,6 +95,8 @@ export type OrchestratorInput = {
   deleteDocument?: (id: string) => boolean;
   /** Pins or unpins a memory, for the "pin_memory" tool. */
   pinMemory?: (id: string, pinned: boolean) => boolean;
+  /** What sending an approved text or email touches; the real ones when absent. See messaging.ts. */
+  messaging?: MessagingDeps;
   /** Launches a built app so it runs live; see appRunner. Forwarded to run_app and build_app. */
   launchApp?: (project: string) => Promise<StartResult>;
   stopApp?: (project: string) => boolean;
@@ -170,7 +175,10 @@ export async function runAssistantOrchestrator(
   // trusting the word on its own. Checked before continuation because the
   // two overlap — "do it" is both — and answering a standing offer to delete
   // something is the more specific reading.
-  const approving = input.sessionId && isAffirmative(input.userMessage)
+  // "send it" counts too, but only for a message waiting to be sent: it must
+  // never approve a deletion. See approvesTheSend.
+  const approving = input.sessionId && (isAffirmative(input.userMessage)
+      || (approvesTheSend(input.userMessage) && sendingTools.has(getPendingConfirmation(input.sessionId)?.tool ?? "")))
     ? consumePendingConfirmation(input.sessionId)
     : null;
 
@@ -195,6 +203,10 @@ export async function runAssistantOrchestrator(
   if (resuming && input.sessionId) {
     updateTask(input.sessionId, { status: "executing" });
   }
+
+  // A text or an email the user has just approved, or turned down.
+  const sending = await resolveSendMessage(input, approving, effectiveMessage);
+  if (sending) return sending;
 
   // Forgetting is done here, deterministically, and never by the model.
   //
@@ -557,11 +569,20 @@ export async function runAssistantOrchestrator(
     }
 
     if (generated) {
+      // A message held for approval is shown as itself, word for word, and
+      // the model's own account of it is set aside: a model asked to repeat a
+      // message back can quietly reword it, and the approval has to be of the
+      // words that will actually go. Only this turn's own offer, never one
+      // left standing from earlier.
+      const heldMessage = nowPending && generated.awaitingConfirmation && sendingTools.has(nowPending.tool)
+        ? describeHeldMessage(nowPending.tool, nowPending.arguments, describeEmailAccount())
+        : null;
+      const text = heldMessage ?? generated.text;
       return {
         model: generated.model,
-        assistantMessage: generated.text,
+        assistantMessage: text,
         inputTokens: modelReply.inputTokens,
-        outputTokens: estimateTokens(generated.text),
+        outputTokens: estimateTokens(text),
         // A distinct strategy: this was written by a model, not quoted from
         // anything the user saved, and the client labels provenance from it.
         strategy: "generated",
@@ -581,6 +602,47 @@ export async function runAssistantOrchestrator(
   }
 
   return toResult(modelReply);
+}
+
+/**
+ * A text or an email the user has approved, sent; or one they turned down,
+ * dropped.
+ *
+ * Sent from the arguments that were held and shown, verbatim - the model is
+ * not asked again, because a fresh call after the "yes" could carry different
+ * words, a different number, or nothing at all, and what was approved would
+ * not be what went out.
+ */
+async function resolveSendMessage(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): Promise<OrchestratorResult | null> {
+  const sessionId = input.sessionId;
+  if (!sessionId) return null;
+  const reply = (text: string, strategy = "message") => deterministicResult(effectiveMessage, text, strategy);
+
+  if (approving && sendingTools.has(approving.tool)) {
+    const result = await runTool(
+      { name: approving.tool, arguments: approving.arguments },
+      {
+        memories: [],
+        knowledge: [],
+        sessionId,
+        request: approving.request,
+        confirmedActions: new Set([approving.tool]),
+        ...(input.messaging ? { messaging: input.messaging } : {})
+      }
+    );
+    return reply(result.content, result.ok ? "message" : "failed");
+  }
+  if (approving) return null;
+
+  if (isDecline(effectiveMessage) && sendingTools.has(getPendingConfirmation(sessionId)?.tool ?? "")) {
+    clearPendingConfirmation(sessionId);
+    return reply("Not sent. Nothing went out.");
+  }
+  return null;
 }
 
 /** A reply written here, by neither a model nor the composer. */

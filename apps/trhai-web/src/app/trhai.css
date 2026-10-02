@@ -229,6 +229,14 @@
 .trh-reply-text { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--c-ink); }
 .trh-reply-text p { margin: 0 0 8px; }
 .trh-reply-text p:last-child { margin-bottom: 0; }
+/* A held message or action, answered with a button rather than typed. */
+.trh-reply-confirm { display: flex; gap: 8px; margin-top: 12px; }
+.trh-reply-confirm button { height: 32px; padding: 0 16px; border-radius: 6px; cursor: pointer; font-family: var(--font-display); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease; }
+.trh-confirm-yes { border: 0; color: #03121e; background: linear-gradient(100deg, #56dcff, #38d0ff 55%, #2aa8f0); box-shadow: 0 0 14px rgba(56, 208, 255, 0.35); }
+.trh-confirm-yes:hover { box-shadow: 0 0 20px rgba(56, 208, 255, 0.55); }
+.trh-confirm-no { border: 1px solid var(--c-line-soft); background: transparent; color: var(--c-ink); }
+.trh-confirm-no:hover { border-color: var(--c-cyan); background: rgba(56, 208, 255, 0.08); }
+.trh-reply-text blockquote { margin: 0 0 8px; padding: 8px 12px; border-left: 2px solid var(--c-cyan); background: rgba(56, 208, 255, 0.06); border-radius: 0 6px 6px 0; }
 .trh-reply::-webkit-scrollbar { width: 6px; }
 .trh-reply::-webkit-scrollbar-thumb { background: var(--c-line); border-radius: 3px; }
 

@@ -470,6 +470,31 @@ export function asksToStartSomething(message: string): boolean {
 }
 
 /**
+ * Whether a request asks for a text or an email to be sent to someone, so
+ * send_text and send_email are worth offering.
+ *
+ * Narrow on purpose, because "text" and "email" are mostly nouns here: a text
+ * file, an email address, the message in an error. It takes an order to send
+ * one ("send mom a text", "shoot an email to the team"), or the verb with
+ * somebody after it ("text 555-010-0123", "email my boss", "text Sam saying I'm
+ * late"). Offering them is never sending: both are held for the user's
+ * approval of the exact message first.
+ */
+const notARecipient = "(?:file|files|box|editor|field|input|format|size|colou?r|string|area|block|wrap|search|address|addresses|account|accounts|inbox|server|settings|header|headers|client|app|thread|threads|chain|list|log|logs|queue|history|body|id)\\b";
+const sendOrder = /\b(?:send|shoot|fire\s+off|drop)\b[^.?!]{0,40}?\b(?:an?\s+)?(?:text|texts|sms|message|email|e-mail)\b(?!\s+(?:file|files|address|addresses|log|logs)\b)/i;
+const verbToSomeone = new RegExp(
+  "\\b(?:text|sms|e-?mail|message)\\s+(?!" + notARecipient + ")"
+  + "(?:my\\s+[a-z]+|mom|mum|dad|him|her|them|\\+?\\d[\\d\\s().-]{5,}\\d|[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+"
+  + "|(?:(?:the|my|our)\\s+)?[a-z]+\\s+(?:saying|that|to\\s+say|and\\s+(?:say|tell|ask|let)|about|asking|telling|letting))",
+  "i"
+);
+
+export function wantsToSendAMessage(message: string): boolean {
+  const text = message ?? "";
+  return sendOrder.test(text) || verbToSomeone.test(text);
+}
+
+/**
  * A request to reshape something already said - "make that answer one
  * sentence", "say it more simply", "translate that to French" - so nothing
  * that writes is offered.

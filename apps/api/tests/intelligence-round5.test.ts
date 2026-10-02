@@ -37,12 +37,10 @@ test("requests that were read as statements", () => {
 // ---------------------------------------------------------------------------
 // Things the app cannot do are said plainly, not improvised.
 
-test("email, messages, calls and purchases are declined at once", () => {
+test("chat apps, calls and purchases are declined at once", () => {
   const cases: Array<[string, RegExp]> = [
-    ["send an email to bob@example.com saying hi", /can't send email/],
-    ["email bob@example.com the report", /can't send email/],
-    ["text bob that I'm running late", /can't send messages/],
-    ["send a message to alice saying the build passed", /can't send messages/],
+    ["send a whatsapp message to bob saying hi", /can't send WhatsApp/],
+    ["dm alice that the build passed", /can't send WhatsApp, Telegram, Slack, Discord/],
     ["call bob", /can't make calls/],
     ["buy me a coffee", /can't buy/],
     ["book a table for two tonight", /can't buy or book/]
@@ -53,6 +51,17 @@ test("email, messages, calls and purchases are declined at once", () => {
     assert.match(reply.text, expected, message);
   }
   for (const message of ["call me Hank", "order the list by date", "book club is on thursdays", "text here is fine"]) {
+    assert.notEqual(composeReply({ mode: "general", message, memories: [], history: [] }).strategy, "cannot", message);
+  }
+});
+
+test("texts and email are no longer declined: they have tools now", () => {
+  for (const message of [
+    "send an email to bob@example.com saying hi",
+    "email bob@example.com the report",
+    "text bob that I'm running late",
+    "send a message to alice saying the build passed"
+  ]) {
     assert.notEqual(composeReply({ mode: "general", message, memories: [], history: [] }).strategy, "cannot", message);
   }
 });
