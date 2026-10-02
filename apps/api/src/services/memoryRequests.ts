@@ -178,6 +178,25 @@ export function isListAppsRequest(message: unknown): boolean {
 }
 
 /**
+ * "what apps are running?", "is anything running?" - the running ones only.
+ *
+ * Went to the model, which had the build reply in the conversation and named
+ * that app correctly - and then added "Welcome to TRHAI at localhost:3000",
+ * which was not running and had never been started.
+ */
+const runningAppsPatterns = [
+  /^(?:what|which) (?:apps|applications|servers|projects) are (?:running|up|live|on|open|started)(?: (?:now|right now|at the moment))?$/,
+  /^(?:list|show(?: me)?) (?:the |my |all )?(?:running|live|open|started) (?:apps|applications|servers)$/,
+  /^(?:is|are) (?:anything|any apps?|any of my apps) (?:running|up|live)(?: (?:now|right now))?$/,
+  /^what(?:'s| is) running(?: (?:now|right now))?$/
+];
+
+export function isRunningAppsRequest(message: unknown): boolean {
+  const text = plain(message);
+  return text !== null && runningAppsPatterns.some((pattern) => pattern.test(text));
+}
+
+/**
  * "list the files in my workspace", "what's in my workspace" - the top of the
  * workspace, nothing deeper.
  *

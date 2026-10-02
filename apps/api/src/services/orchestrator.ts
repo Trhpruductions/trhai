@@ -27,7 +27,8 @@ import {
   type PendingConfirmation
 } from "./pendingConfirmation.js";
 import {
-  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, isListAppsRequest, isListWorkspaceRequest, parseForgetRequest,
+  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, isListAppsRequest, isListWorkspaceRequest, isRunningAppsRequest,
+  parseForgetRequest,
   parseNthThingRequest, parsePinRequest,
   parseRemoveScheduleRequest, parseToggleScheduleRequest
 } from "./memoryRequests.js";
@@ -675,6 +676,15 @@ function resolveListApps(
   approving: PendingConfirmation | null,
   effectiveMessage: string
 ): OrchestratorResult | null {
+  // "what apps are running?" - read from the runner, not recalled; see
+  // isRunningAppsRequest.
+  if (!approving && input.runningApps && isRunningAppsRequest(effectiveMessage)) {
+    const running = input.runningApps();
+    return deterministicResult(effectiveMessage, running.length === 0
+      ? "No apps are running right now. Say \"run the <name> app\" to start one."
+      : `Running now (${running.length}):\n${running.map((app) => `- ${app.project} at ${app.url}`).join("\n")}`,
+    "list");
+  }
   if (approving || !input.listApps || !isListAppsRequest(effectiveMessage)) return null;
 
   const apps = input.listApps();
@@ -867,9 +877,12 @@ function resolveDeleteApp(
     if (!apps.some((app) => app.name === name)) {
       return reply(`There is no app called "${name}" any more, so nothing was deleted.`);
     }
+    // What to do next, not only that it failed: the usual cause is a server
+    // stopped a moment ago that has not let go of its files yet.
     return reply(input.deleteApp(name)
       ? `Deleted the app "${name}".`
-      : "The app could not be deleted, so nothing was changed.");
+      : `"${name}" could not be deleted, so nothing was changed. If it was running a moment ago its files `
+        + "may still be in use - ask again in a few seconds.");
   }
   if (approving) return null;
 
