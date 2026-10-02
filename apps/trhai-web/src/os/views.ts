@@ -47,8 +47,8 @@ export const views: ViewDef[] = [
     icon: "M4 7a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z", keywords: "workspace folder documents terminal"
   },
   {
-    id: "tasks", label: "Tasks", group: "Work", blurb: "Your to-do list and the work TRH AI has carried out.",
-    icon: "M4 7h4M4 12h4M4 17h4M12 6l2 2 4-4M12 12h7M12 17h7", keywords: "todo work jobs queue history"
+    id: "tasks", label: "Tasks", group: "Work", blurb: "What TRH AI is working on, what runs on a schedule, everything it has finished - and your to-dos.",
+    icon: "M4 7h4M4 12h4M4 17h4M12 6l2 2 4-4M12 12h7M12 17h7", keywords: "todo work jobs queue history schedule reminders running failed"
   },
   {
     id: "tools", label: "Tools", group: "Work", blurb: "Everything TRH AI can do, and how much each is allowed.",
