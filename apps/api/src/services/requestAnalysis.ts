@@ -244,6 +244,47 @@ const maxQualifierWords = 5;
  */
 const narrativeSubjects = new Set(["i", "we", "you", "he", "she", "they", "it", "my", "our"]);
 
+/** Openings that put the speaker, or something they have, in the subject. */
+const declarativeOpener =
+  /^(?:i|i'm|i've|i'd|i'll|im|ive|we|we're|we've|we'd|we'll|my|our|he|she|it|it's|its|they|they're|their|his|her|there's|there\s+(?:is|are|was|were))\b/i;
+
+/**
+ * A short subject and then a verb that says something about it: "The API runs
+ * on port 4000", "Postgres is our database", "Deploys happen on Fridays".
+ * No modals and no do-auxiliaries, which open as many requests as statements
+ * ("Name three things you can do").
+ */
+const subjectThenVerb =
+  /^(?:[\w'.-]+\s+){1,3}(?:is|are|was|were|isn't|aren't|wasn't|weren't|has|have|had|uses|use|runs|run|lives|live|works|work|means|mean|costs|cost|takes|take|needs|need|wants|want|likes|like|prefers|prefer|goes|go|gets|get|belongs|belong|sits|sit|starts|start|ends|end|happens|happen|depends|depend|stays|stay|comes|come|contains|contain|holds|hold)\b/i;
+
+/**
+ * Whether a message reads as telling something rather than asking for it.
+ *
+ * The composer answers a statement with a bare "Got it." - the right reply to
+ * "the api runs on port 4000" and the worst possible one to a request, which
+ * is left undone with nothing saying so. A statement used to be whatever did
+ * not open with a known command verb, and that list has been patched one word
+ * at a time for every request caught being acknowledged: summarise, fetch,
+ * convert, mock up. "Give me three tips for writing readable error messages"
+ * and "give me a name for my cat" were next. A message now has to look like a
+ * statement - the speaker as the subject, or a subject and a verb about it -
+ * to be filed as one; anything else goes on to be answered. The cheaper
+ * mistake, as the composer's own branch says: a statement treated as a
+ * request costs one generation, a request treated as a statement costs the
+ * work.
+ */
+export function looksDeclarative(message: string): boolean {
+  const text = (message ?? "").trim();
+  if (declarativeOpener.test(text)) return true;
+  // "Give it a go" and "tell them we need more time" have a subject-shaped
+  // word and a verb in the right places, and are still orders.
+  return !imperativeLead.test(text) && subjectThenVerb.test(text);
+}
+
+/** Verbs that open requests and are not on the command list the analysis uses. */
+const imperativeLead =
+  /^(?:give|tell|keep|let|pick|choose|try|put|bring|take|get|go|do|have|say|ask|call|name|think|consider|imagine|pretend|act|be|become|come|see|teach|walk|guide|lead|share|provide|offer|propose|brainstorm|invent|craft|compose|produce|predict|guess|rate|grade|score|critique|proofread|correct|spell|quiz|answer|respond|reply|continue|finish|complete|repeat|rephrase|paraphrase|reword|condense|extract|enumerate|categori[sz]e|classify|group|map|chart|graph|plot|justify|argue|prove|derive|recite)\b/i;
+
 /** True when a leading question word is followed by its subject, not an auxiliary. */
 export function narrativeAfterQuestionWord(message: string): boolean {
   const words = message.trim().toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);

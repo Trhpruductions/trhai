@@ -1154,6 +1154,36 @@ test("a real statement is still acknowledged", () => {
   assert.equal(reply.strategy, "acknowledge");
 });
 
+test("a request that opens with a verb nobody listed is answered, not acknowledged", () => {
+  // Verbatim, both answered "Got it." and nothing else: "give" was never on
+  // the command list, so each was filed as a statement. A statement now has to
+  // read as one before it gets that reply.
+  for (const request of [
+    "Give me three tips for writing readable error messages.",
+    "give me a name for my cat",
+    "Give it a go",
+    "Tell them we need more time",
+    "A haiku about rain"
+  ]) {
+    const reply = composeReply({ mode: "general", message: request, memories: [], history: [] });
+    assert.notEqual(reply.strategy, "acknowledge", `"${request}" was acknowledged instead of answered`);
+  }
+});
+
+test("things people tell the assistant are still acknowledged", () => {
+  for (const statement of [
+    "Postgres is our database",
+    "I prefer tabs over spaces",
+    "My dog's name is Rex",
+    "We deploy on Fridays",
+    "Deploys happen on Fridays",
+    "There is a staging server in rack 4"
+  ]) {
+    const reply = composeReply({ mode: "general", message: statement, memories: [], history: [] });
+    assert.equal(reply.strategy, "acknowledge", `"${statement}" should be acknowledged`);
+  }
+});
+
 test("\"continue\" with nothing running says so", () => {
   // The orchestrator resumes an unfinished task when there is one and leaves
   // the message alone when there is not - finished work is not resumable. That

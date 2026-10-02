@@ -1,6 +1,37 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { analyzeRequest, leadAfterQualifier, narrativeAfterQuestionWord } from "../src/services/requestAnalysis.js";
+import { analyzeRequest, leadAfterQualifier, looksDeclarative, narrativeAfterQuestionWord } from "../src/services/requestAnalysis.js";
+
+test("a statement reads as one: the speaker as subject, or a subject and a verb about it", () => {
+  for (const statement of [
+    "the api runs on port 4000",
+    "The API runs on port 4000 in development",
+    "Postgres is our database",
+    "I prefer tabs over spaces",
+    "my dog's name is Rex",
+    "we standardized on Postgres",
+    "Deploys happen on Fridays",
+    "there's a staging server in rack 4"
+  ]) {
+    assert.equal(looksDeclarative(statement), true, statement);
+  }
+});
+
+test("a request does not read as a statement, whatever verb it opens with", () => {
+  for (const request of [
+    "Give me three tips for writing readable error messages.",
+    "give me a name for my cat",
+    "Give it a go",
+    "Tell them we need more time",
+    "A haiku about rain",
+    "Three ideas for a team offsite",
+    // "Is" and "If" open with an "i" that is not the pronoun.
+    "Is this right",
+    "If the build fails, retry it"
+  ]) {
+    assert.equal(looksDeclarative(request), false, request);
+  }
+});
 
 for (const message of [
   "continue",

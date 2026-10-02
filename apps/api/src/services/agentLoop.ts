@@ -10,8 +10,8 @@ import {
   correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsTime, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
-import { analyzeRequest } from "./requestAnalysis.js";
+import { changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
+import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
@@ -858,23 +858,49 @@ export function unwrapPseudoReply(text: string): string {
   const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return text;
 
+  const whole = sentenceFromPseudoCall(trimmed);
+  if (whole) return whole;
+
+  // Several, one per line. Asked for three tips on error messages, the whole
+  // reply was three invented calls - write_clear_message, provide_context and
+  // a third - each carrying one tip as its message. The single-object path
+  // above cannot parse that, so the raw JSON was the answer the user saw.
+  const lines = trimmed.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length > 1) {
+    const sentences = lines.map(sentenceFromPseudoCall);
+    if (sentences.every((sentence): sentence is string => sentence !== null)) return sentences.join("\n\n");
+  }
+  return text;
+}
+
+/**
+ * The sentence inside one pseudo-call, or null when it is not one.
+ *
+ * The usual keys first. Failing those, an argument list holding exactly one
+ * string is that string, whatever the model called it: {"name": "tell_fact",
+ * "arguments": {"fact": "Octopuses have three hearts..."}} is a fact, and was
+ * dropped as an empty reply.
+ */
+function sentenceFromPseudoCall(candidate: string): string | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(trimmed);
+    parsed = JSON.parse(candidate);
   } catch {
-    return text;
+    return null;
   }
-  if (!parsed || typeof parsed !== "object") return text;
+  if (!parsed || typeof parsed !== "object") return null;
   const record = parsed as { name?: unknown; arguments?: unknown; parameters?: unknown };
-  if (typeof record.name !== "string") return text;
+  if (typeof record.name !== "string") return null;
   const args = (record.arguments ?? record.parameters) as Record<string, unknown> | undefined;
-  if (!args || typeof args !== "object") return text;
+  if (!args || typeof args !== "object") return null;
 
   for (const key of ["text", "message", "content", "reply", "response", "answer", "output"]) {
     const value = args[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }
-  return text;
+  const values = Object.values(args);
+  if (values.length === 1 && typeof values[0] === "string" && values[0].trim()) return values[0].trim();
+  return null;
 }
 
 /**
@@ -1161,7 +1187,15 @@ export async function runAgent(
   // classifyIntent.js in the source tree, three times, with placeholder code.
   // "what's my favorite color and my dog's name?" called update_document.
   // A question is answered; it is not a licence to write.
-  const onlyAsks = !intent.action && analyzeRequest(question).shape === "question";
+  //
+  // Nor is a request that is neither an order nor a statement of fact. "give
+  // me a name for my cat" has no verb the analysis knows, so it is filed as a
+  // "statement" - and as a statement it was offered every tool that writes.
+  // Live, it was answered by saving a daily 9am reminder, and on the next try
+  // by rendering a nineteen-second video called "Welcome, Whiskers!" into the
+  // workspace. It is asking for something, the same as a question is.
+  const shape = analyzeRequest(question).shape;
+  const onlyAsks = !intent.action && (shape === "question" || (shape === "statement" && !looksDeclarative(question)));
 
   // A request that names the file it wants written is not a request to
   // scaffold a project.
@@ -1409,6 +1443,10 @@ export async function runAgent(
         time: mentionsTime(question),
         // A visual is offered only when the request asks to see one.
         render: wantsRendering(question),
+        // And a schedule only when the request is about something recurring,
+        // and a video only when it mentions one.
+        schedules: mentionsScheduling(question),
+        video: mentionsVideo(question),
         // A request about a knowledge document, with no file named, does not get
         // the workspace file writers — so "save a document called X" reaches
         // write_document instead of writing an X.txt file. Nor does a pure web
