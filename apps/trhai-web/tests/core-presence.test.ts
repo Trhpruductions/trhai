@@ -121,6 +121,11 @@ test("the rail lights nothing until something has actually happened", () => {
   assert.equal(activeStage("idle", true), "ENGAGED");
 });
 
+test("reading the answer aloud is responding, not thinking", () => {
+  assert.equal(activeStage("speaking", true), "RESPONDING");
+  assert.equal(activeStage("thinking", true), "THINKING");
+});
+
 test("every rail word a state can produce is one the rail actually shows", () => {
   const produced = new Set(
     (["idle", "listening", "thinking", "speaking", "success", "error", "offline", ...workingStates] as const)

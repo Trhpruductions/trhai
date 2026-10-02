@@ -82,6 +82,51 @@ test("unreachable drains the colour", () => {
   assert.ok(offline.energy < visualForState("idle").energy);
 });
 
+test("the work effects stay inside the ranges the shader expects", () => {
+  for (const state of every) {
+    const { traffic, ripple, scan, glitch } = visualForState(state);
+    assert.ok(traffic >= 0 && traffic <= 1, `${state} traffic ${traffic}`);
+    assert.ok(ripple >= -1 && ripple <= 1, `${state} ripple ${ripple}`);
+    assert.ok(scan >= 0 && scan <= 1, `${state} scan ${scan}`);
+    assert.ok(glitch >= 0 && glitch <= 1, `${state} glitch ${glitch}`);
+  }
+});
+
+test("a voice going out sends rings out, and listening draws them in", () => {
+  assert.ok(visualForState("speaking").ripple > 0);
+  assert.ok(visualForState("listening").ripple < 0);
+  // Nothing is said or heard while working, so no rings then.
+  for (const state of ["thinking", "searching", "reading", "writing", "analysing", "executing"] as CoreState[]) {
+    assert.equal(visualForState(state).ripple, 0, `${state} sends rings`);
+  }
+});
+
+test("only a fault makes the drawing slip", () => {
+  for (const state of every) {
+    if (state === "error") assert.ok(visualForState(state).glitch > 0);
+    else assert.equal(visualForState(state).glitch, 0, `${state} glitches`);
+  }
+});
+
+test("nothing runs along the network when no work can be happening", () => {
+  // Signals are the network busy. A machine that cannot be reached, or work
+  // that has just failed, must not look busy.
+  assert.equal(visualForState("offline").traffic, 0);
+  assert.equal(visualForState("error").traffic, 0);
+  assert.ok(visualForState("idle").traffic < visualForState("thinking").traffic);
+  assert.equal(
+    Math.max(...every.map((state) => visualForState(state).traffic)),
+    visualForState("executing").traffic,
+    "something is busier than a running tool"
+  );
+});
+
+test("the sweep is for looking, not for talking", () => {
+  assert.equal(visualForState("searching").scan, 1);
+  assert.equal(visualForState("speaking").scan, 0);
+  assert.equal(visualForState("idle").scan, 0);
+});
+
 test("an unknown state falls back rather than rendering nothing", () => {
   assert.deepEqual(
     visualForState("not-a-state" as CoreState),

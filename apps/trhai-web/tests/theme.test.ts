@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { accents, defaultAccent, isAccent, readStoredAccent, themeBootScript, writeStoredAccent } from "../src/lib/theme.js";
+import {
+  accents, backdropModes, defaultAccent, defaultBackdrop, isAccent, readStoredAccent, readStoredBackdrop,
+  themeBootScript, writeStoredAccent, writeStoredBackdrop
+} from "../src/lib/theme.js";
 
 function memoryStorage() {
   const store = new Map<string, string>();
@@ -58,4 +61,31 @@ test("the boot script only ever writes one of the real accent values", () => {
   // the script has to end up unable to set an attribute value that isn't one
   // of these, which the valid.indexOf check enforces.
   assert.match(script, /valid\.indexOf\(a\)!==-1/);
+});
+
+// --- the background ---------------------------------------------------------
+
+test("the background starts as the living scene and a choice round-trips", () => {
+  const storage = memoryStorage();
+  assert.equal(readStoredBackdrop(storage), defaultBackdrop);
+  assert.equal(defaultBackdrop, "living");
+  writeStoredBackdrop(storage, "plain");
+  assert.equal(readStoredBackdrop(storage), "plain");
+});
+
+test("a corrupted or unreadable background choice falls back", () => {
+  const storage = memoryStorage();
+  storage.setItem("trhai.backdrop.v1", "javascript:alert(1)");
+  assert.equal(readStoredBackdrop(storage), defaultBackdrop);
+  const hostile = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
+  assert.equal(readStoredBackdrop(hostile), defaultBackdrop);
+  assert.doesNotThrow(() => writeStoredBackdrop(hostile, "still"));
+  assert.equal(readStoredBackdrop(undefined), defaultBackdrop);
+});
+
+test("the boot script only ever sets one of the real background modes", () => {
+  const script = themeBootScript();
+  for (const mode of backdropModes) assert.match(script, new RegExp(mode));
+  assert.match(script, /modes\.indexOf\(b\)!==-1/);
+  assert.match(script, /data-backdrop/);
 });

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Core, type CoreState } from "./Core";
+import { coreGlobeFraction } from "./coreGeometry";
 import { breathe, visualForState } from "./coreVisual";
 import "./coregl.css";
 
@@ -51,6 +52,13 @@ uniform float uAmplitude;
 uniform vec3  uColor;
 uniform vec3  uAccent;
 uniform float uAlive;
+/* What kind of work is going on (coreVisual), eased on the CPU like the rest:
+   signals along the network's links, rings leaving or arriving, a sweep round
+   the instrument, and the drawing slipping when something has failed. */
+uniform float uTraffic;
+uniform float uRipple;
+uniform float uScan;
+uniform float uGlitch;
 
 out vec4 fragColor;
 
@@ -60,6 +68,9 @@ const float TAU = 6.28318530718;
 const vec3 WARM = vec3(1.0, 0.56, 0.24);
 /* The sphere the network lives on, in cell units: about 140 points in all. */
 const float NET_SCALE = 3.2;
+/* The globe's radius as a share of the canvas. Shared with the page, which
+   lines the key art's own globe up exactly under this one (artPlacement.ts). */
+const float GLOBE = ${coreGlobeFraction.toFixed(4)};
 
 float hash21(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -73,6 +84,28 @@ vec3 hash33(vec3 p) {
   return fract((p.xxy + p.yxx) * p.zyx);
 }
 
+float hash31(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.zyx + 31.32);
+  return fract((p.x + p.y) * p.z);
+}
+
+/* Smooth value noise, for the light moving inside the globe. */
+float noise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash31(i);
+  float b = hash31(i + vec3(1.0, 0.0, 0.0));
+  float c = hash31(i + vec3(0.0, 1.0, 0.0));
+  float d = hash31(i + vec3(1.0, 1.0, 0.0));
+  float e = hash31(i + vec3(0.0, 0.0, 1.0));
+  float g = hash31(i + vec3(1.0, 0.0, 1.0));
+  float h = hash31(i + vec3(0.0, 1.0, 1.0));
+  float k = hash31(i + vec3(1.0, 1.0, 1.0));
+  return mix(mix(mix(a, b, f.x), mix(c, d, f.x), f.y), mix(mix(e, g, f.x), mix(h, k, f.x), f.y), f.z);
+}
+
 /* The globe's own frame: its axis leans toward the viewer, the way the art's
    does, and it turns about that axis by phase. */
 mat3 globeFrame(float phase) {
@@ -84,20 +117,41 @@ mat3 globeFrame(float phase) {
 }
 
 /* One link of the network, from a to b, following the sphere's surface.
-   Only neighbours are joined, as in the art: a long link fades out. */
-float link(vec3 q, vec3 a, vec3 b, float px) {
+   Only neighbours are joined, as in the art: a long link fades out.
+   x is the line itself, y a signal running along it. */
+vec2 link(vec3 q, vec3 a, vec3 b, float px, float time) {
+  /* Each link runs one way whichever end a pixel happens to be nearer -
+     otherwise the half of it nearer b would carry its signal backwards. */
+  if (dot(a, vec3(1.0, 57.0, 113.0)) > dot(b, vec3(1.0, 57.0, 113.0))) {
+    vec3 swap = a;
+    a = b;
+    b = swap;
+  }
   vec3 ab = b - a;
   float len = length(ab);
   float keep = smoothstep(1.25, 0.80, len);
-  if (keep <= 0.0) return 0.0;
+  if (keep <= 0.0) return vec2(0.0);
   float h = clamp(dot(q - a, ab) / (len * len), 0.0, 1.0);
   vec3 c = a + ab * h;
   c *= NET_SCALE / length(c);
   float d = length(q - c);
-  return keep * (1.0 - smoothstep(0.35 * px, 1.5 * px, d));
+  float line = keep * (1.0 - smoothstep(0.35 * px, 1.5 * px, d));
+
+  /* Only some links carry a signal at once - more as the work does - each at
+     its own pace from its own start. A sharp head and a long tail behind it,
+     so which way it is going reads at a glance. */
+  vec3 seed = hash33(a + b + 0.37);
+  if (seed.x >= uTraffic) return vec2(line, 0.0);
+  float head = fract(time * (0.22 + 0.5 * seed.y) + seed.z);
+  float behind = (head - h) * len;
+  float along = behind >= 0.0 ? exp(-behind * 6.0) : exp(behind * 55.0);
+  float across = 1.0 - smoothstep(0.0, 3.5 * px, d);
+  /* Faded in and out at the nodes, so a signal leaves and arrives rather than
+     appearing out of nothing. */
+  return vec2(line, keep * across * along * sin(head * 3.14159));
 }
 
-/* The network at one point of the sphere: x is links, y is nodes.
+/* The network at one point of the sphere: x is links, y is nodes, z signals.
    s is a unit vector in the globe's frame and px the size of a pixel there.
 
    Points come from a 3D cell field, each cell holding one, and only points
@@ -105,7 +159,7 @@ float link(vec3 q, vec3 a, vec3 b, float px) {
    pile their points onto it too. The four nearest are joined to each other,
    which draws every short link in full: wherever a link passes, both of its
    ends are among the four nearest points. */
-vec2 network(vec3 s, float px, float time) {
+vec3 network(vec3 s, float px, float time) {
   vec3 q = s * NET_SCALE;
   vec3 base = floor(q);
   vec3 p0 = vec3(0.0), p1 = vec3(0.0), p2 = vec3(0.0), p3 = vec3(0.0);
@@ -131,16 +185,16 @@ vec2 network(vec3 s, float px, float time) {
     }
   }
 
-  float lines = 0.0;
-  if (d1 < 1e2) lines = max(lines, link(q, p0, p1, px));
+  vec2 lines = vec2(0.0);
+  if (d1 < 1e2) lines = max(lines, link(q, p0, p1, px, time));
   if (d2 < 1e2) {
-    lines = max(lines, link(q, p0, p2, px));
-    lines = max(lines, link(q, p1, p2, px));
+    lines = max(lines, link(q, p0, p2, px, time));
+    lines = max(lines, link(q, p1, p2, px, time));
   }
   if (d3 < 1e2) {
-    lines = max(lines, link(q, p0, p3, px));
-    lines = max(lines, link(q, p1, p3, px));
-    lines = max(lines, link(q, p2, p3, px));
+    lines = max(lines, link(q, p0, p3, px, time));
+    lines = max(lines, link(q, p1, p3, px, time));
+    lines = max(lines, link(q, p2, p3, px, time));
   }
 
   /* Each node a hard dot with a small halo, twinkling on its own clock. */
@@ -151,7 +205,7 @@ vec2 network(vec3 s, float px, float time) {
       + exp(-d0 * d0 / (2.0 * pow(4.0 * px, 2.0))) * 0.45;
     nodes *= twinkle;
   }
-  return vec2(lines, nodes);
+  return vec3(lines.x, nodes, lines.y);
 }
 
 /* Distance to an ellipse, close enough for a hairline (Quilez's estimate). */
@@ -178,6 +232,17 @@ float band(float r, float radius, float thickness) {
 
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / min(uResolution.x, uResolution.y);
+
+  /* A fault: now and then, bands of the drawing slip sideways. Only now and
+     then - a constant shake reads as a broken GPU, not a failed task. */
+  if (uGlitch > 0.01) {
+    float slot = floor(uTime * 6.0);
+    float now = step(0.68, hash21(vec2(slot, 3.1)));
+    float row = floor(uv.y * 24.0);
+    float slip = (hash21(vec2(row, slot)) - 0.5) * step(0.55, hash21(vec2(row, slot + 9.0)));
+    uv.x += slip * 0.05 * uGlitch * now;
+  }
+
   float r = length(uv);
   float angle = atan(uv.y, uv.x);
 
@@ -200,7 +265,7 @@ void main() {
      through the near side, dimmer, which is what makes it read as a sphere of
      light rather than a picture of one. A real level swells it slightly - the
      voice moving the globe - and with no reading it only breathes. */
-  float R = 0.275 * (1.0 + 0.035 * amp + 0.006 * sin(t * 0.9));
+  float R = GLOBE * (1.0 + 0.035 * amp + 0.006 * sin(t * 0.9));
   float inDisc = 1.0 - smoothstep(R - 1.5 * pixel, R + 1.5 * pixel, r);
 
   vec2 onDisc = uv / R;
@@ -210,8 +275,8 @@ void main() {
     /* A pixel's size on the network's sphere, which grows toward the limb as
        the surface turns away - so links keep one width on screen. */
     float px = NET_SCALE * pixel / R / max(z, 0.22);
-    vec2 near = network(frame * vec3(onDisc, z), px, t);
-    vec2 far = network(frame * vec3(onDisc, -z), px, t);
+    vec3 near = network(frame * vec3(onDisc, z), px, t);
+    vec3 far = network(frame * vec3(onDisc, -z), px, t);
 
     /* Quieter in the middle, behind the TRH AI mark, so the mark stays legible. */
     float hush = mix(0.5, 1.0, smoothstep(0.08, 0.5, length(onDisc)));
@@ -219,6 +284,23 @@ void main() {
     col += linkColor * near.x * (0.85 + 0.55 * energy) * hush * inDisc;
     col += mix(uColor, vec3(1.0), 0.55) * near.y * (1.25 + 0.8 * energy + 1.3 * amp) * hush * inDisc;
     col += uColor * (far.x * 0.32 + far.y * 0.5) * hush * inDisc;
+
+    /* Signals: the brightest things on the network, nearly white at the head.
+       The far side's show through, dimmer, like everything else there. */
+    vec3 signalColor = mix(uAccent, vec3(1.0), 0.45);
+    col += signalColor * near.z * (1.5 + 1.2 * energy) * mix(0.65, 1.0, hush) * inDisc;
+    col += signalColor * far.z * 0.4 * hush * inDisc;
+
+    /* Light moving inside: a slow cloud sampled at three depths through the
+       globe, so it has volume and turns with it. Faint at rest; the work
+       thickens it and a voice brightens it. */
+    float cloud = 0.0;
+    for (int i = 0; i < 3; i++) {
+      vec3 p = frame * vec3(onDisc, (float(i) - 1.0) * 0.6 * z) * 1.7 + vec3(0.0, t * 0.05, t * 0.035);
+      cloud += noise3(p) * 0.62 + noise3(p * 2.1 + 4.3) * 0.38;
+    }
+    cloud = smoothstep(0.45, 0.85, cloud / 3.0);
+    col += mix(uColor, uAccent, cloud) * cloud * z * (0.12 + 0.26 * energy + 0.6 * amp) * hush * inDisc;
   }
 
   /* The limb: a sphere of light is brightest at its edge. */
@@ -302,6 +384,31 @@ void main() {
   col += uColor * exp(-abs(uv.x) * 90.0) * belowGlobe * (0.30 + 0.35 * energy + 0.4 * amp);
   col += mix(uColor, vec3(1.0), 0.5) * axisLine * belowGlobe * 0.9;
 
+  /* ---- rings: a voice going out, or sound coming in ---------------------
+     Three at a time, evenly spaced in their life. How bright they are follows
+     the real level, so silence sends nothing - only their spacing is a clock. */
+  if (abs(uRipple) > 0.01) {
+    float strength = abs(uRipple) * (0.2 + 1.5 * amp);
+    for (int k = 0; k < 3; k++) {
+      float life = fract(t * 0.38 + float(k) / 3.0);
+      float travel = uRipple > 0.0 ? life : 1.0 - life;
+      float radius = R * (1.05 + 0.82 * travel);
+      col += mix(uColor, uAccent, travel) * band(r, radius, 0.0035 + 0.008 * travel)
+        * sin(life * 3.14159) * (1.0 - 0.6 * travel) * strength;
+    }
+  }
+
+  /* ---- the sweep: looking for something ----------------------------------
+     A beam turning through the instrument's ring with a fading wake behind
+     it, as on a radar. Only while searching, reading or analysing. */
+  if (uScan > 0.01) {
+    float sweep = mod(t * 1.25, TAU);
+    float wake = mod(sweep - angle, TAU);
+    float annulus = smoothstep(R * 1.10, R * 1.16, r) * (1.0 - smoothstep(0.37, 0.40, r));
+    col += mix(uColor, uAccent, 0.5) * exp(-wake * 2.4) * annulus * uScan * 0.5;
+    col += mix(uColor, vec3(1.0), 0.5) * (1.0 - smoothstep(0.0, 1.5 * pixel, wake * r)) * annulus * uScan * 1.2;
+  }
+
   /* ---- particles -------------------------------------------------------
      Hashed from their own index, so radii, speeds and phases all differ with
      nothing stored per particle. uConverge moves the set in or out. */
@@ -357,10 +464,13 @@ void main() {
 
   /* Written premultiplied, with blending off: light adds to whatever is
      behind the canvas, and the globe's disc is filled dark enough to hide the
-     key art's own globe, which sits right behind this one on the dashboard -
-     two networks turning against each other read as noise. */
+     key art's own globe, which sits right behind this one on Home - two
+     networks turning against each other read as noise. The fill reaches a
+     little past the edge too, so the art's bright rim never shows as a second
+     outline beside this one's. */
   float glow = clamp(max(max(col.r, col.g), col.b) * 1.5, 0.0, 1.0);
-  float fill = inDisc * 0.88;
+  float rim = 1.0 - smoothstep(R * 1.015, R * 1.085, r);
+  float fill = max(inDisc * 0.88, rim * 0.78);
   vec3 deep = vec3(0.008, 0.024, 0.050);
   fragColor = vec4(col + deep * fill * (1.0 - glow), max(fill, glow));
 }
@@ -525,7 +635,11 @@ export function CoreGL({ state = "idle", size = 300, amplitude, load }: {
       amplitude: gl.getUniformLocation(program, "uAmplitude"),
       color: gl.getUniformLocation(program, "uColor"),
       accent: gl.getUniformLocation(program, "uAccent"),
-      alive: gl.getUniformLocation(program, "uAlive")
+      alive: gl.getUniformLocation(program, "uAlive"),
+      traffic: gl.getUniformLocation(program, "uTraffic"),
+      ripple: gl.getUniformLocation(program, "uRipple"),
+      scan: gl.getUniformLocation(program, "uScan"),
+      glitch: gl.getUniformLocation(program, "uGlitch")
     };
 
     gl.useProgram(program);
@@ -550,6 +664,10 @@ export function CoreGL({ state = "idle", size = 300, amplitude, load }: {
     let easedConverge = 0;
     let easedAmp = 0;
     let easedAlive = 1;
+    let easedTraffic = 0;
+    let easedRipple = 0;
+    let easedScan = 0;
+    let easedGlitch = 0;
     const easedColor = [0, 0, 0];
     const easedAccent = [0, 0, 0];
     let first = true;
@@ -621,6 +739,10 @@ export function CoreGL({ state = "idle", size = 300, amplitude, load }: {
         easedSpin = visual.spin;
         easedConverge = visual.converge;
         easedAlive = visual.alive;
+        easedTraffic = visual.traffic;
+        easedRipple = visual.ripple;
+        easedScan = visual.scan;
+        easedGlitch = visual.glitch;
         easedAmp = target;
         for (let i = 0; i < 3; i += 1) {
           easedColor[i] = visual.color[i];
@@ -632,6 +754,11 @@ export function CoreGL({ state = "idle", size = 300, amplitude, load }: {
         easedSpin = approach(easedSpin, visual.spin, rate(0.05));
         easedConverge = approach(easedConverge, visual.converge, rate(0.04));
         easedAlive = approach(easedAlive, visual.alive, rate(0.05));
+        easedTraffic = approach(easedTraffic, visual.traffic, rate(0.04));
+        easedRipple = approach(easedRipple, visual.ripple, rate(0.06));
+        easedScan = approach(easedScan, visual.scan, rate(0.05));
+        // A fault shows at once; recovering from one settles more slowly.
+        easedGlitch = approach(easedGlitch, visual.glitch, rate(visual.glitch > easedGlitch ? 0.3 : 0.04));
         // Amplitude tracks far faster: it is a live signal, and smoothing it
         // to match the colours would make the core lag the voice driving it.
         easedAmp = approach(easedAmp, target, rate(0.35));
@@ -654,6 +781,12 @@ export function CoreGL({ state = "idle", size = 300, amplitude, load }: {
       gl.uniform3f(uniforms.color, easedColor[0], easedColor[1], easedColor[2]);
       gl.uniform3f(uniforms.accent, easedAccent[0], easedAccent[1], easedAccent[2]);
       gl.uniform1f(uniforms.alive, easedAlive);
+      gl.uniform1f(uniforms.traffic, easedTraffic * (calm < 1 ? 0.6 : 1));
+      gl.uniform1f(uniforms.ripple, easedRipple);
+      gl.uniform1f(uniforms.scan, easedScan);
+      // No slipping at all under reduced motion: it is exactly the darting
+      // movement the preference asks to be spared.
+      gl.uniform1f(uniforms.glitch, calm < 1 ? 0 : easedGlitch);
 
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);

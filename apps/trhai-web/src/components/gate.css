@@ -60,14 +60,36 @@
   font-style: normal; font-family: var(--font-display); color: var(--g-cyan-bright); letter-spacing: 0.5em; text-indent: 0.5em;
 }
 
-.gate-rings { position: absolute; inset: -12%; width: 124%; height: 124%; pointer-events: none; overflow: visible; }
-.gate-rings circle { fill: none; stroke: var(--g-cyan); }
-.gate-ring-1 { stroke-opacity: 0.35; stroke-width: 1; stroke-dasharray: 3 9; animation: gate-spin 40s linear infinite; transform-origin: 50% 50%; }
-/* No drop-shadow on a spinning ring: a filter on something that animates is
-   redrawn every frame (see tests/motion-budget.test.ts). A brighter stroke
-   carries the glow instead. */
-.gate-ring-2 { stroke: var(--g-cyan-bright); stroke-opacity: 0.7; stroke-width: 1.4; stroke-dasharray: 90 30 12 30; animation: gate-spin 24s linear infinite reverse; transform-origin: 50% 50%; }
 @keyframes gate-spin { to { transform: rotate(360deg); } }
+
+/* The start-up screen stands its core on the key art's own globe. The art is
+   this screen's background at cover size, centred, so where its globe lands
+   follows from the window alone: --u is one pixel of the 1536x1024 art on this
+   screen, the globe sits at art (770, 411) with radius 128, and the core draws
+   its globe at 0.275 of its size (components/coreGeometry.ts) - hence a core
+   465.45 art-pixels square. Measured from the art; see os/shell/artPlacement.ts. */
+.gate-booting { --u: max(calc(100vw / 1536), calc(100vh / 1024)); }
+.gate-booting .gate-core {
+  position: absolute;
+  left: calc(50vw + 2 * var(--u) - 232.73 * var(--u));
+  top: calc(50vh - 101 * var(--u) - 232.73 * var(--u));
+  width: calc(465.45 * var(--u));
+  height: calc(465.45 * var(--u));
+  z-index: 1;
+}
+.gate-booting .gate-core > .coregl,
+.gate-booting .gate-core canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
+.gate-booting .gate-core-mark span { font-size: clamp(20px, calc(30 * var(--u)), 46px); }
+.gate-booting .gate-core-mark em { font-size: clamp(11px, calc(14 * var(--u)), 20px); }
+/* The checks stand below the globe, over the lit pedestal. */
+.gate-booting .gate-boot {
+  position: absolute;
+  left: 50%;
+  top: calc(50vh + 59 * var(--u));
+  transform: translateX(-50%);
+  padding-bottom: 24px;
+}
+.gate-booting .gate-boot .gate-wordmark { margin-top: 0; font-size: clamp(24px, calc(30 * var(--u)), 40px); }
 
 .gate-wordmark {
   margin: 0; font-family: var(--font-display); font-weight: 700; color: #fff;
@@ -384,8 +406,6 @@
 
 /* Slower, not stopped: the preference asks for less motion, not none. */
 @media (prefers-reduced-motion: reduce) {
-  .gate-ring-1 { animation-duration: 120s; }
-  .gate-ring-2 { animation-duration: 80s; }
   .gate-progress-track::after { animation-duration: 5s; }
   .gate-card::before { animation-duration: 18s; }
   .gate-alert { animation: none; }
