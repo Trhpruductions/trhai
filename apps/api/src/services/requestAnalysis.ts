@@ -179,6 +179,11 @@ const minTopicLength = 3;
 const maxTopics = 12;
 const vagueWordThreshold = 2;
 
+/** An equation or a sum - "3x + 7 = 31", "15% of 240", "sin(x)" - which carries its meaning in symbols, not words. */
+export function containsMath(text: string): boolean {
+  return /\d\s*[-+*/×÷^=]\s*[(\da-z]|[a-z]\s*[=^]\s*\d|\d\s*%|\b(?:sqrt|sin|cos|tan|log|ln)\s*\(/i.test(text ?? "");
+}
+
 /**
  * Light suffix normalization so "service" and "services" match. Full stemming
  * needs a library; this covers the plural/gerund cases that dominate real queries
@@ -469,8 +474,11 @@ const looksImperative =
     shape,
     questionType,
     topics,
-    // Short requests with almost no content words cannot be acted on well.
-    vague: topics.length < vagueWordThreshold,
+    // Short requests with almost no content words cannot be acted on well -
+    // unless the content is math, which is all symbols. "Solve for x: 3x + 7
+    // = 31" has one content word, and was answered with the build
+    // questionnaire (stack, deadline, audience) instead of x = 8.
+    vague: topics.length < vagueWordThreshold && !containsMath(text),
     action: shape === "command" ? verb : null,
     hasRequestMarker: looksImperative || requestMarkers.some((pattern) => pattern.test(text))
   };

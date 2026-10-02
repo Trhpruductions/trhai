@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createServer } from "node:http";
+import { once } from "node:events";
 
 // Requests that say everything outright - a text with its number and words, a
 // schedule with its days and time, a weekday for a date, a summary of a saved
@@ -24,6 +26,8 @@ const { daysAskedFor, parseReminderRequest, timeAskedFor } = await import("../sr
 const { tick } = await import("../src/services/scheduler.js");
 const { parseTextToolCalls } = await import("../src/services/agentLoop.js");
 const { readingsFor } = await import("../src/services/agentTools.js");
+const { analyzeRequest, containsMath } = await import("../src/services/requestAnalysis.js");
+const { runAgent } = await import("../src/services/agentLoop.js");
 const { answerWeekdayQuestion, parseDate } = await import("../src/services/dateMath.js");
 const { runTool } = await import("../src/services/agentTools.js");
 const { listSchedules, resetSchedules } = await import("../src/services/scheduleStore.js");
@@ -256,6 +260,53 @@ test("a reading question is answered from the readings, not by the model", async
     mode: "general", sessionId: "clear-reading-2", userMessage: "why is my computer using so much memory?", readTelemetry: readings
   });
   assert.notEqual(advice.strategy, "reading", "advice about a reading is still the model's");
+});
+
+// ------------------------------------------------------------- found by the evaluation
+
+test("an equation is content, not a vague request", async () => {
+  for (const math of ["Solve for x: 3x + 7 = 31", "15% of 240", "what's 2^10", "d/dx sin(x)"]) {
+    assert.equal(containsMath(math), true, math);
+  }
+  assert.equal(containsMath("make it better"), false);
+  assert.equal(analyzeRequest("Solve for x: 3x + 7 = 31").vague, false);
+  assert.equal(analyzeRequest("do it").vague, true, "a request with nothing in it still is");
+
+  const answered = await runAssistantOrchestrator({ mode: "general", sessionId: "clear-math", userMessage: "Solve for x: 3x + 7 = 31" });
+  assert.doesNotMatch(answered.assistantMessage, /I need a bit more to work with/, "not the build questionnaire");
+});
+
+test("words written for the reply are not offered to be saved as a document", async () => {
+  const offered: string[][] = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(chunk as Buffer));
+    request.on("end", () => {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      if (request.url?.startsWith("/api/chat")) {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { tools?: Array<{ function: { name: string } }> };
+        offered.push((body.tools ?? []).map((tool) => tool.function.name));
+        response.end(JSON.stringify({ model: "llama3.2:latest", message: { content: "Done." } }));
+        return;
+      }
+      response.end(JSON.stringify({ models: [{ name: "llama3.2:latest" }] }));
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const config = { baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, model: "llama3.2", modelFromEnv: true, timeoutMs: 4000 };
+  try {
+    await runAgent(config, "Write a two-sentence product description for a stainless steel water bottle.", { memories: [], knowledge: [] });
+    assert.ok(!offered[0].includes("write_document"), "a description is for the reply");
+    await runAgent(config, "Write up today's meeting and save it as a note.", { memories: [], knowledge: [] });
+    assert.ok(offered.at(-1)?.includes("write_document"), "saving is asked for");
+    await runAgent(config, "Add a line about the launch date to the Roadmap", {
+      memories: [], knowledge: [], documents: [{ id: "doc-1", title: "Roadmap", body: "Q1: beta." }]
+    });
+    assert.ok(offered.at(-1)?.includes("update_document") || offered.at(-1)?.includes("write_document"), "a saved document is named");
+  } finally {
+    server.close();
+  }
 });
 
 // ------------------------------------------------------------- weekdays

@@ -407,6 +407,15 @@ export function describeAgentLens(agent: AgentLens): string {
     + "This is an emphasis, not a new set of rules: everything above still holds, and the tools are the same.";
 }
 
+/** Whether a request names a document already saved - "add a line to the Roadmap". */
+export function namesASavedDocument(question: string, documents: ToolContext["documents"]): boolean {
+  const asked = question.toLowerCase();
+  return (documents ?? []).some((document) => {
+    const title = document.title.trim().toLowerCase();
+    return title.length >= 3 && asked.includes(title);
+  });
+}
+
 /**
  * The last few turns of the conversation, as messages the model can read.
  *
@@ -1693,9 +1702,15 @@ export async function runAgent(
         // and a video only when it mentions one.
         schedules: mentionsScheduling(question),
         video: mentionsVideo(question),
-        // A request that only reads does not write to the knowledge base
-        // either, unless it asks for something to be kept.
-        documents: intent.kind !== "read" || /\b(?:save|store|keep|record)\b/i.test(question),
+        // The knowledge base is written only when keeping something is asked
+        // for - "save", "note", "document" - or a saved document is named.
+        // "Write a two-sentence product description for a water bottle" asks
+        // for words in the reply: with write_document on offer, the model
+        // saved them as a document called "Stainless Steel Water Bottle" and
+        // the reply showed none of them.
+        documents: /\b(?:save|store|keep|record)\b/i.test(question)
+          || (intent.kind !== "read" && (/\b(?:documents?|docs?|notes?|knowledge)\b/i.test(question)
+            || namesASavedDocument(question, context.documents))),
         // The machine's own readings, when the question is about them.
         status: asksAboutMachineState(question),
         // Starting an app, when something was asked to start.
