@@ -29,6 +29,7 @@ import {
 } from "./pendingConfirmation.js";
 import { describeHeldMessage, sendingTools, type MessagingDeps } from "./messaging.js";
 import type { GenerateText } from "./summarize.js";
+import { lookAtImages, type VisionImage, type VisionResult } from "./vision.js";
 import { describeEmailAccount } from "./emailAccount.js";
 import {
   isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, isListAppsRequest, isListWorkspaceRequest, isRunningAppsRequest,
@@ -100,6 +101,10 @@ export type OrchestratorInput = {
   messaging?: MessagingDeps;
   /** One call to the local model with a prompt as written, for summarize_document. */
   generateText?: GenerateText;
+  /** Images sent with this turn, decoded. See resolveImages. */
+  images?: VisionImage[];
+  /** Asks the vision model about images; the real local one when absent. Injected for tests. */
+  vision?: (images: VisionImage[], question: string) => Promise<VisionResult>;
   /** Launches a built app so it runs live; see appRunner. Forwarded to run_app and build_app. */
   launchApp?: (project: string) => Promise<StartResult>;
   stopApp?: (project: string) => boolean;
@@ -210,6 +215,10 @@ export async function runAssistantOrchestrator(
   // A text or an email the user has just approved, or turned down.
   const sending = await resolveSendMessage(input, approving, effectiveMessage);
   if (sending) return sending;
+
+  // Images sent with the message go to the vision model with the question.
+  const looking = !approving && !resuming ? await resolveImages(input) : null;
+  if (looking) return looking;
 
   // Forgetting is done here, deterministically, and never by the model.
   //
@@ -646,6 +655,28 @@ async function resolveSendMessage(
     return reply("Not sent. Nothing went out.");
   }
   return null;
+}
+
+/**
+ * A message that came with images, answered by the vision model.
+ *
+ * The chat model reads text only; asked about a picture it cannot see, it
+ * would answer from the words alone - the one kind of invented answer this
+ * app exists to refuse. So the images and the question go to the vision
+ * model, and its answer is the reply. Without one installed, the reply says
+ * so and how to get one, rather than pretending to have looked.
+ */
+async function resolveImages(input: OrchestratorInput): Promise<OrchestratorResult | null> {
+  const images = input.images ?? [];
+  if (images.length === 0) return null;
+  const question = input.userMessage;
+  const look = input.vision ?? ((shown: VisionImage[], asked: string) => lookAtImages(shown, asked, readLocalModelConfig()));
+  if (input.sessionId) setActivity(input.sessionId, "look_at_image");
+  const seen = await look(images, question);
+  if (!seen.ok) {
+    return { ...deterministicResult(question, seen.reason, "failed"), model: "memory" };
+  }
+  return { ...deterministicResult(question, seen.text, "vision"), model: `ollama/${seen.model}` };
 }
 
 /** A reply written here, by neither a model nor the composer. */

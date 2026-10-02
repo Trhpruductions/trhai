@@ -91,6 +91,8 @@ test("the kind of work shows, so searching does not look like writing", () => {
   assert.equal(coreStateForTool("read_file"), "reading");
   assert.equal(coreStateForTool("list_files"), "reading");
   assert.equal(coreStateForTool("list_memories"), "reading");
+  assert.equal(coreStateForTool("summarize_document"), "reading");
+  assert.equal(coreStateForTool("look_at_image"), "reading");
   assert.equal(coreStateForTool("write_file"), "writing");
   assert.equal(coreStateForTool("write_document"), "writing");
   assert.equal(coreStateForTool("update_document"), "writing");

@@ -294,7 +294,15 @@
 .trh-mic-sub { font-size: 9.5px; letter-spacing: 0.22em; color: var(--c-faint); }
 
 /* ask */
-.trh-ask { display: flex; align-items: center; gap: 10px; width: min(560px, 90%); margin-top: 14px; }
+.trh-ask { position: relative; display: flex; align-items: center; gap: 10px; width: min(560px, 90%); margin-top: 14px; }
+/* Images waiting to go with the next message, as thumbnails in the row itself,
+   so the row never grows: a row above pushed the box under the footer. */
+.trh-attachment { position: relative; flex: none; margin: 0; width: 44px; height: 44px; border: 1px solid var(--c-cyan); border-radius: 4px; overflow: hidden; background: rgba(4, 10, 20, 0.7); box-shadow: 0 0 12px rgba(56, 208, 255, 0.2); }
+.trh-attachment img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.trh-attachment button { position: absolute; top: 1px; right: 1px; width: 17px; height: 17px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgba(4, 10, 20, 0.85); color: var(--c-ink); font-size: 12px; line-height: 1; cursor: pointer; }
+.trh-attachment button:hover { background: rgba(255, 107, 107, 0.85); }
+.trh-attach-note { position: absolute; left: 0; bottom: calc(100% + 6px); margin: 0; font-size: 12px; color: var(--c-mut); white-space: nowrap; }
+.trh-ask-field { min-width: 0; }
 .trh-ask-field {
   flex: 1; background: rgba(8, 16, 30, 0.85); border: 1px solid var(--c-line);
   border-radius: 4px; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));

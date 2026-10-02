@@ -37,6 +37,9 @@ import { AppGate, useAccount } from "../components/AppGate";
 import { AccountPanel } from "../components/AccountPanel";
 import { MessagingPanel } from "../components/MessagingPanel";
 import { DocumentsPanel } from "../components/DocumentsPanel";
+import {
+  acceptedImageTypes, defaultImageQuestion, maxAttachments, prepareImage, refuseImage, type Attachment
+} from "../lib/imageAttach";
 import "./dash.css";
 import "./trhai.css";
 
@@ -262,6 +265,10 @@ function Dashboard() {
   const [agent, setAgent] = useState<Agent | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  // Images waiting to go with the next message, and the picker VISION opens.
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachNote, setAttachNote] = useState<string | null>(null);
+  const imagePicker = useRef<HTMLInputElement>(null);
   // The core's box, measured, so the globe is drawn at the size CSS gave it.
   const coreBox = useRef<HTMLDivElement>(null);
   const coreWidth = useElementWidth(coreBox);
@@ -600,10 +607,43 @@ function Dashboard() {
 
   function ask(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || busy) return;
+    if ((!trimmed && attachments.length === 0) || busy) return;
     setDraft("");
     cues.play("send");
-    void send(trimmed);
+    const images = attachments.map(({ name, data }) => ({ name, data }));
+    for (const attachment of attachments) URL.revokeObjectURL(attachment.previewUrl);
+    setAttachments([]);
+    setAttachNote(null);
+    void send(trimmed || defaultImageQuestion, images);
+  }
+
+  // Images picked, pasted or dropped onto the centre, ready to send with the
+  // next message. See imageAttach.ts.
+  async function addImages(files: File[]) {
+    const images = files.filter((file) => file.type.startsWith("image/"));
+    if (images.length === 0) return;
+    const room = maxAttachments - attachments.length;
+    const refused = images.map(refuseImage).find(Boolean) ?? null;
+    const usable = images.filter((file) => !refuseImage(file)).slice(0, Math.max(0, room));
+    try {
+      const prepared = await Promise.all(usable.map(prepareImage));
+      setAttachments((prior) => [...prior, ...prepared].slice(0, maxAttachments));
+      setAttachNote(refused ?? (images.length > room ? `Up to ${maxAttachments} images can go with one message.` : null));
+      inputRef.current?.focus();
+      // The vision model loads while the question is typed rather than after
+      // Send. Nothing waits on it, and a failure here just means a slower look.
+      if (prepared.length > 0) void apiPost("/v1/vision/warm", {});
+    } catch {
+      setAttachNote("That image could not be read.");
+    }
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((prior) => {
+      const gone = prior.find((attachment) => attachment.id === id);
+      if (gone) URL.revokeObjectURL(gone.previewUrl);
+      return prior.filter((attachment) => attachment.id !== id);
+    });
   }
 
   const modelName = model?.available && model.model
@@ -798,9 +838,9 @@ function Dashboard() {
       icon: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M6 11a6 6 0 0 0 12 0M12 17v4" /></>
     },
     {
-      label: "VISION", live: false, enabled: false,
-      title: "No camera or vision input is connected on this machine.",
-      onClick: () => undefined,
+      label: "VISION", live: attachments.length > 0, enabled: !busy,
+      title: "Show TRH AI an image: pick one here, paste one into the box, or drop one on the core. Looked at on this PC.",
+      onClick: () => imagePicker.current?.click(),
       icon: <><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></>
     },
     {
@@ -947,7 +987,19 @@ function Dashboard() {
             </div>
 
             {/* ---------------------------------------------------- centre */}
-            <main className="trh-center">
+            <main
+              className="trh-center"
+              // An image dropped anywhere on the centre is attached to the next message.
+              onDragOver={(event) => {
+                if ([...event.dataTransfer.items].some((item) => item.kind === "file")) event.preventDefault();
+              }}
+              onDrop={(event) => {
+                const files = [...event.dataTransfer.files];
+                if (files.length === 0) return;
+                event.preventDefault();
+                void addImages(files);
+              }}
+            >
               <div className="trh-status-head">
                 <span className="trh-status-word">STATUS: <em className={`trh-${core}`}>{label.toUpperCase()}</em></span>
                 <span className="trh-status-sub">{busy ? "WORKING" : "AWAITING COMMAND"}</span>
@@ -1064,11 +1116,40 @@ function Dashboard() {
                 <span className="trh-mic-sub">{mic.supported ? "VOICE INTERACTION ENABLED" : "VOICE INPUT UNAVAILABLE"}</span>
               </div>
 
+              <input
+                ref={imagePicker}
+                type="file"
+                accept={acceptedImageTypes}
+                multiple
+                hidden
+                onChange={(event) => {
+                  const files = [...(event.target.files ?? [])];
+                  event.target.value = "";
+                  void addImages(files);
+                }}
+              />
+
               <div className="trh-ask">
+                {/* Inside the row, not above it: a row above pushed the box down
+                    under the footer, which then took the clicks meant for it. */}
+                {attachNote ? <p className="trh-attach-note" role="status">{attachNote}</p> : null}
+                {attachments.map((attachment) => (
+                  <figure key={attachment.id} className="trh-attachment">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL, not an optimisable asset */}
+                    <img src={attachment.previewUrl} alt={attachment.name} />
+                    <button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => removeAttachment(attachment.id)}>×</button>
+                  </figure>
+                ))}
                 <input
                   ref={inputRef}
                   className="trh-ask-field"
                   value={draft}
+                  onPaste={(event) => {
+                    const files = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
+                    if (files.length === 0) return;
+                    event.preventDefault();
+                    void addImages(files);
+                  }}
                   // The active agent, named where you type, so a change in how
                   // answers are pitched is never a mystery set three panels away.
                   placeholder={busy
@@ -1084,7 +1165,7 @@ function Dashboard() {
                 {busy ? (
                   <button type="button" className="trh-ask-go trh-ask-stop" onClick={stop} aria-label="Stop">■</button>
                 ) : (
-                  <button type="button" className="trh-ask-go" onClick={() => ask(draft)} disabled={!draft.trim()} aria-label="Send">
+                  <button type="button" className="trh-ask-go" onClick={() => ask(draft)} disabled={!draft.trim() && attachments.length === 0} aria-label="Send">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M12 5l7 7-7 7" /></svg>
                   </button>
                 )}

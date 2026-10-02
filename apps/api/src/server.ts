@@ -65,6 +65,7 @@ import { maxSynthesisCharacters, piperStatus, synthesize, type Cadence } from ".
 import { describeEmailAccount, knownProviders, readEmailAccount, removeEmailAccount, saveEmailAccount } from "./services/emailAccount.js";
 import { phoneLinkStatus, sendWithAccount } from "./services/messaging.js";
 import { extractDocumentText, maxDocumentBytes } from "./services/documentText.js";
+import { maxImagesPerTurn, parseImages, warmVisionModel } from "./services/vision.js";
 import path from "node:path";
 import { maxAudioBytes, requiredChannels, requiredSampleRate, transcribe, whisperStatus } from "./services/whisperTranscribe.js";
 import {
@@ -277,6 +278,7 @@ function buildAssistInput(
     deleteApp: (name: string) => removeBuiltApp(name),
     authorApp: authorAppWithModel,
     generateText: generateWithModel,
+    images: parseImages(req.body?.images),
     ...(onToken ? { onToken } : {}),
     ...(cancel ? { cancel } : {})
   };
@@ -307,6 +309,16 @@ async function authorAppWithModel(prompt: string) {
   const config = { ...base, model, timeoutMs: Math.max(base.timeoutMs, 300000) };
   const result = await generate(config, { question: prompt, context: [], rawPrompt: prompt });
   return result.ok ? { ok: true as const, text: result.text } : { ok: false as const, reason: result.reason };
+}
+
+/**
+ * The user's turn as the transcript keeps it: the words, and a note when
+ * images came with them. The images themselves are not stored - a reloaded
+ * conversation shows that one was sent, not the picture.
+ */
+function userTurnText(message: string, req: express.Request): string {
+  const count = Array.isArray(req.body?.images) ? Math.min(req.body.images.length, maxImagesPerTurn) : 0;
+  return count > 0 ? `${message}\n[${count} image${count === 1 ? "" : "s"} attached]` : message;
 }
 
 /**
@@ -379,7 +391,12 @@ export function createApp() {
     // in the app.
     exposedHeaders: ["X-Speech-Voice"]
   }));
-  app.use(express.json({ limit: "1mb" }));
+  // A chat turn may carry images, base64 in the body, far past the 1 MB every
+  // other route needs - so only the two chat routes get the larger allowance.
+  const smallJson = express.json({ limit: "1mb" });
+  const chatJson = express.json({ limit: "40mb" });
+  app.use((req, res, next) =>
+    (req.path === "/v1/assist" || req.path === "/v1/assist/stream" ? chatJson : smallJson)(req, res, next));
   app.use(morgan("tiny"));
 
   app.get("/health", (_req, res) => {
@@ -552,7 +569,8 @@ export function createApp() {
         listApps: () => listBuiltApps(),
         deleteApp: (name: string) => removeBuiltApp(name),
         authorApp: authorAppWithModel,
-        generateText: generateWithModel
+        generateText: generateWithModel,
+        images: parseImages(req.body?.images)
       }).finally(() => {
         // Whatever a client polling /v1/assist/activity mid-turn was told is
         // stale the instant this turn ends, success or failure alike.
@@ -564,7 +582,7 @@ export function createApp() {
 
       // Recorded after a successful reply so a failed request leaves no orphan turn.
       if (sessionId) {
-        appendTurn(sessionId, "user", message);
+        appendTurn(sessionId, "user", userTurnText(message, req));
         // The assistant turn carries how it was produced, so a reloaded
         // transcript still shows whether an answer was quoted or generated.
         appendTurn(sessionId, "assistant", result.assistantMessage, {
@@ -872,6 +890,25 @@ export function createApp() {
     });
   });
 
+  // Loads the vision model while the user is still typing a question about an
+  // image they just attached. The load is the slow part of looking - 73 s
+  // measured on a busy 8 GB card - and without this all of it happened after
+  // Send. One load at a time: attaching three images is one warm-up, not three.
+  //
+  // JSON only, though nothing is read from the body: a page on another site can
+  // send a plain-text POST here without asking first, and only a JSON one makes
+  // the browser check CORS before sending - which stops that page loading
+  // models on this machine.
+  let visionWarming: Promise<boolean> | null = null;
+  app.post("/v1/vision/warm", async (req, res) => {
+    if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) {
+      res.status(415).json({ message: "Send this as JSON." });
+      return;
+    }
+    visionWarming ??= warmVisionModel(readLocalModelConfig()).finally(() => { visionWarming = null; });
+    res.json({ data: { loaded: await visionWarming }, traceId: "trace-local" });
+  });
+
   // What the assistant can actually do, read from the same registry runTool
   // enforces — see systemCapabilities.ts. Existed only as prose inside a chat
   // reply before this: a "Security" screen showing real tools and real
@@ -1141,7 +1178,7 @@ export function createApp() {
       );
 
       if (sessionId) {
-        appendTurn(sessionId, "user", message);
+        appendTurn(sessionId, "user", userTurnText(message, req));
         // Provenance goes on the assistant turn for the same reason it does
         // on the unstreamed route: a reloaded transcript still has to show
         // whether an answer was quoted or generated.

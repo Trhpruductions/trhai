@@ -80,8 +80,11 @@ export function presence(
 export function coreStateForTool(tool: string): CoreState {
   // fetch_url, search_memory, search_documents, search_conversation.
   if (tool === "fetch_url" || tool.startsWith("search_")) return "searching";
-  // read_file, read_document, list_files, list_documents, list_memories.
-  if (tool.startsWith("read_") || tool.startsWith("list_")) return "reading";
+  // read_file, read_document, list_files, list_documents, list_memories - and
+  // summarize_document and look_at_image, which read too, just more of it.
+  if (tool.startsWith("read_") || tool.startsWith("list_") || tool === "summarize_document" || tool === "look_at_image") {
+    return "reading";
+  }
   // write_file, write_document, update_document, build_app.
   if (tool.startsWith("write_") || tool === "update_document" || tool === "build_app") return "writing";
   if (tool === "plan_app") return "analysing";
