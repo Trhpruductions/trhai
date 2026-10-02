@@ -91,6 +91,18 @@ export function isAffirmative(message: unknown): boolean {
 }
 
 /**
+ * "send it", approving a message that is waiting to be sent - and nothing
+ * else: it must never approve a deletion. Only as the whole reply, too:
+ * "send an email to dad instead" starts with "send", and reading that as a yes
+ * would send the very text it was meant to replace.
+ */
+const sendItPattern = /^(?:yes,?\s+)?send(?:\s+it|\s+(?:the\s+)?(?:text|email|message))?(?:\s+now)?[.!]*$/i;
+
+export function approvesTheSend(message: unknown): boolean {
+  return typeof message === "string" && sendItPattern.test(message.trim());
+}
+
+/**
  * Whether a message is the user turning down what was just offered.
  *
  * As narrow as the affirmative, and for the mirror-image reason: reading a
@@ -135,6 +147,16 @@ export function describePendingAction(pending: PendingConfirmation): {
       return pending.arguments?.all === true
         ? { verb: "Cancel every schedule", target: "all of them" }
         : { verb: "Cancel this schedule", target: argument("name") };
+    // The whole message as the target: what is approved is exactly what is sent.
+    case "send_text":
+      return { verb: `Send this text to ${argument("to")}`, target: argument("message") };
+    case "send_email": {
+      const subject = argument("subject");
+      return {
+        verb: `Send this email to ${argument("to")}`,
+        target: subject ? `Subject: ${subject}\n\n${argument("body")}` : argument("body")
+      };
+    }
     case "delete_app":
       if (pending.arguments?.clearStopped === true) {
         const count = pending.arguments?.count;

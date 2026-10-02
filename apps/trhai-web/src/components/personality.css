@@ -118,6 +118,16 @@
 .account-note.ok { color: #7fe7b8; }
 .account-note.bad { color: #ff9b9b; }
 
+/* Texts and email, beside the account. */
+.messaging-row { display: flex; align-items: flex-start; gap: 10px; }
+.messaging-row .persona-summary { margin: 0; }
+.messaging-dot { width: 8px; height: 8px; flex: none; margin-top: 5px; border-radius: 50%; background: var(--text-faint); }
+.messaging-dot.ok { background: #46e0a0; box-shadow: 0 0 8px rgba(70, 224, 160, 0.6); }
+.messaging-dot.off { background: transparent; border: 1px solid var(--text-faint); }
+.messaging-hint { margin: 0; font-size: 12px; line-height: 1.45; color: var(--accent-strong, #8be9ff); }
+.messaging-server { display: grid; grid-template-columns: 1fr 84px; gap: 8px; }
+.messaging-fine { margin: 0; font-size: 11.5px; line-height: 1.4; color: var(--text-faint); }
+
 /* The agent picker shares the personality panel's look; only the focus line's
    label is its own. */
 .agent-focus-label {

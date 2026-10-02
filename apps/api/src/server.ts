@@ -62,6 +62,8 @@ import {
   getPendingConfirmation
 } from "./services/pendingConfirmation.js";
 import { maxSynthesisCharacters, piperStatus, synthesize, type Cadence } from "./services/piperSpeech.js";
+import { describeEmailAccount, knownProviders, readEmailAccount, removeEmailAccount, saveEmailAccount } from "./services/emailAccount.js";
+import { phoneLinkStatus, sendWithAccount } from "./services/messaging.js";
 import { maxAudioBytes, requiredChannels, requiredSampleRate, transcribe, whisperStatus } from "./services/whisperTranscribe.js";
 import {
   addSchedule,
@@ -374,6 +376,52 @@ export function createApp() {
   // running window alone. This is the answer to "which one is this".
   app.get("/v1/build-info", (_req, res) => {
     res.json({ data: getBuildInfo(), traceId: "trace-local" });
+  });
+
+  // Texting and email: what is set up, and the user's own email account. The
+  // app password goes in and never comes back out - see emailAccount.ts.
+  app.get("/v1/messaging", (_req, res) => {
+    res.json({
+      data: {
+        email: describeEmailAccount(),
+        texts: { phoneLink: phoneLinkStatus() },
+        providers: knownProviders.map(({ name, domains, passwordHelp }) => ({ name, domains, passwordHelp }))
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  app.put("/v1/messaging/email", (req, res) => {
+    const saved = saveEmailAccount(req.body);
+    if (!saved.ok) {
+      res.status(400).json({ code: "INVALID_REQUEST", message: saved.message, traceId: "trace-local" });
+      return;
+    }
+    res.json({ data: { email: saved.account }, traceId: "trace-local" });
+  });
+
+  app.delete("/v1/messaging/email", (_req, res) => {
+    removeEmailAccount();
+    res.json({ data: { email: describeEmailAccount() }, traceId: "trace-local" });
+  });
+
+  // A test email to the account's own address - sent only when the user
+  // presses the button for it, and only to themselves.
+  app.post("/v1/messaging/email/test", async (_req, res) => {
+    const account = readEmailAccount();
+    if (!account) {
+      res.status(400).json({ code: "NOT_CONFIGURED", message: "No email account is saved yet.", traceId: "trace-local" });
+      return;
+    }
+    const result = await sendWithAccount(account, {
+      to: [account.address],
+      subject: "TRH AI can send email",
+      body: "This is a test from TRH AI on your PC. If it arrived, TRH AI can send email from this account."
+    });
+    res.json({
+      data: { ok: result.ok, message: result.ok ? `Sent a test email to ${account.address} - check your inbox.` : result.content },
+      traceId: "trace-local"
+    });
   });
 
   app.post("/v1/assist", async (req, res, next) => {

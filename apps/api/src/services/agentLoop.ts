@@ -1,5 +1,6 @@
 import { contextWindow, modelOptions, type LocalModelConfig } from "./localModel.js";
 import { estimateTokens, fitPromptToWindow, fitToolResult, promptBudgetTokens, requestTokens } from "./contextBudget.js";
+import { sendingTools } from "./messaging.js";
 import {
   availableTools, driveNamedIn, readMachineStatus, runTool, verifiedDetail, type AgentLens, type ToolContext, type ToolCall
 } from "./agentTools.js";
@@ -13,7 +14,7 @@ import {
   correctionFor, inventsAReading, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { asksAboutMachineState, asksForAReading, asksToStartSomething, mentionsTheMachine, wantsSomethingBuilt, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
+import { asksAboutMachineState, asksForAReading, asksToStartSomething, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -322,6 +323,9 @@ export const systemPrompt = [
   "- run_app starts a built app on a local port and returns its URL, so the user can open",
   "  and use it. build_app already launches what it builds; use run_app to start an app",
   "  again, or when the user says run, open or launch it. Never `npm start` through run_command.",
+  "- send_text and send_email when they ask you to text or email someone. Write the message",
+  "  they asked for and call the tool - they see it and approve it before anything is sent.",
+  "  You need the real number or address: search_memory for a person they name, or ask.",
   "- list_files, read_file, write_file for the workspace where those apps live.",
   "- run_command runs a real command on this machine and returns its real output. It only",
   "  appears when the user has switched command access on. Use it for anything outside the",
@@ -1347,6 +1351,7 @@ export async function runAgent(
   let correctedToolCredit = false;
   let correctedRetrieval = false;
   let correctedUnwrittenOrder = false;
+  let correctedUnsentMessage = false;
   let correctedNarratedCommand = false;
   let correctedInventedTool = false;
   let correctedTemplateEcho = false;
@@ -1648,6 +1653,9 @@ export async function runAgent(
         status: asksAboutMachineState(question),
         // Starting an app, when something was asked to start.
         launch: asksToStartSomething(question),
+        // Texting or emailing someone, when that is what was asked - and
+        // never on a run with nobody there to approve the message.
+        messaging: wantsToSendAMessage(question) && !unattended,
         // A request about a knowledge document, with no file named, does not get
         // the workspace file writers — so "save a document called X" reaches
         // write_document instead of writing an X.txt file. Nor does a pure web
@@ -2033,6 +2041,38 @@ export async function runAgent(
           model: typeof response.model === "string" ? response.model : config.model,
           toolsUsed,
           actionAudit: auditFor(toolsUsed.length > 0 ? "tool-called" : "prose")
+        };
+      }
+
+      // A text or an email asked for, and nothing made ready to send.
+      //
+      // Live, "text 555-010-0123 that this is a TRH AI test" was answered
+      // "Understood." with send_text on offer and nothing called - one run in
+      // four. Left alone, the user is told nothing about why no message came.
+      // A reply asking for what it needs ("What's her number?") is the right
+      // move and is left alone, and so is a call that was tried and refused:
+      // its reason is already in front of the model.
+      if (offeredNames.has("send_text") && !awaitingConfirmation
+        && !toolsUsed.some((used) => sendingTools.has(used.name))
+        && !/\?\s*$/.test(text.trim())) {
+        if (!correctedUnsentMessage) {
+          correctedUnsentMessage = true;
+          spendCorrection();
+          messages.push({
+            role: "user",
+            content: "You did not call send_text or send_email, so no message is ready to send. Write the "
+              + "message they asked for and call the tool now - they approve it before it goes. If the "
+              + "number or address is missing, ask for it instead."
+          });
+          continue;
+        }
+        return {
+          ok: true,
+          text: "I didn't get a message ready to send, so nothing went anywhere. Try again with who it's for - "
+            + "their number or email address - and what to say.",
+          model: typeof response.model === "string" ? response.model : config.model,
+          toolsUsed,
+          actionAudit: auditFor("no-tool-failure")
         };
       }
 

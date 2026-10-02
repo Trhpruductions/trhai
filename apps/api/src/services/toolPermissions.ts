@@ -128,7 +128,14 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // outright and cannot be confirmed into being, the tool is not offered to the
   // model at all while access is off, and every command is recorded with its
   // output and exit code whether it succeeded or not.
-  run_command: 3
+  run_command: 3,
+
+  // 4 — reaches another person. A message cannot be unsent, and it goes out
+  // under the user's own name and number, so each one is shown and approved:
+  // there is no switch that pre-authorises these the way machine access does
+  // for run_command, and an approval replays exactly the message that was shown.
+  send_text: 4,
+  send_email: 4
 };
 
 /**
@@ -168,7 +175,8 @@ export function requiresConfirmation(toolName: string): boolean {
  */
 export function describeConfirmationNeeded(toolName: string): string {
   const level = permissionLevelOf(toolName);
-  return `"${toolName}" is a ${permissionLabels[level]} action and needs the user's confirmation `
+  const label = permissionLabels[level];
+  return `"${toolName}" is ${/^[aeiou]/.test(label) ? "an" : "a"} ${label} action and needs the user's confirmation `
     + "before it can run. Nothing has been changed. Tell the user plainly what it would do and "
     + "ask them to confirm; do not attempt it another way.";
 }

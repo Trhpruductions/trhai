@@ -202,16 +202,18 @@ test("the final round withholds tools so an answer is forced", async () => {
 });
 
 test("a tool the model invented is refused without ending the conversation", async () => {
+  // send_email was the invented tool here until it became a real one; a fax
+  // machine is still safely imaginary.
   const { server, baseUrl } = await fakeModel([
-    toolCall("send_email", { to: "someone" }),
-    answer("I cannot send email.")
+    toolCall("send_fax", { to: "someone" }),
+    answer("I cannot send a fax.")
   ]);
 
   try {
-    const result = await runAgent(configFor(baseUrl), "Email someone", context);
+    const result = await runAgent(configFor(baseUrl), "Fax someone", context);
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    assert.match(result.text, /cannot send email/);
+    assert.match(result.text, /cannot send a fax/);
   } finally {
     server.close();
   }

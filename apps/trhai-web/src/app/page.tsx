@@ -35,6 +35,7 @@ import { readDismissedRendering, renderingKey, writeDismissedRendering } from ".
 import { AgentPicker } from "../components/AgentPicker";
 import { AppGate, useAccount } from "../components/AppGate";
 import { AccountPanel } from "../components/AccountPanel";
+import { MessagingPanel } from "../components/MessagingPanel";
 import "./dash.css";
 import "./trhai.css";
 
@@ -986,6 +987,23 @@ function Dashboard() {
                   ) : busy ? (
                     <p className="trh-reply-text faint">Working…</p>
                   ) : null}
+                  {/* The answer a held action is waiting for, as buttons. They
+                      send the same words the reply asks for, so typing "yes"
+                      and pressing Send are one path through the API. */}
+                  {!busy && replyFromThisRun && lastReply?.pendingConfirmation ? (() => {
+                    const sending = lastReply.pendingConfirmation.tool === "send_text"
+                      || lastReply.pendingConfirmation.tool === "send_email";
+                    return (
+                      <div className="trh-reply-confirm" role="group" aria-label={lastReply.pendingConfirmation.verb}>
+                        <button type="button" className="trh-confirm-yes" onClick={() => void send(sending ? "send it" : "yes")}>
+                          {sending ? "Send" : "Yes, go ahead"}
+                        </button>
+                        <button type="button" className="trh-confirm-no" onClick={() => void send("no")}>
+                          {sending ? "Don't send" : "No"}
+                        </button>
+                      </div>
+                    );
+                  })() : null}
                 </section>
               ) : null}
 
@@ -1260,6 +1278,7 @@ function Dashboard() {
                     onSignOut={() => void accountControls.signOut()}
                     onSignIn={accountControls.openSignIn}
                   />
+                  <MessagingPanel />
                   <VoicePicker
                     choice={speech.voice}
                     voices={speech.installedVoices}

@@ -454,6 +454,7 @@ export function buildCapabilityReply(localModel?: string): string {
     "- Build a working app from a description. \"Build a task tracker where projects have many tasks\" produces a real REST API with storage, validation and tests.",
     "- Render a short motion-graphics video locally. It scripts, narrates, renders and encodes on this machine, with no cloud renderer or API key.",
     "- Remember what you tell me. Just say it — I pick the facts out myself.",
+    "- Text someone from your phone through Phone Link, or email them from your own account. You see every message and say yes before it goes.",
     "- Answer from your documents. Add them under Knowledge and I'll quote the relevant passage back with its source.",
     "- Run flows you build under Automation, and keep your schedule under Calendar.",
     "",
@@ -468,15 +469,18 @@ export function buildCapabilityReply(localModel?: string): string {
   ].join("\n");
 }
 
-/** Requests for the services this app does not have, with the honest answer to each. */
+/**
+ * Requests for the services this app does not have, with the honest answer to each.
+ *
+ * Texts and email are not here any more: they go out through the user's own
+ * phone (Phone Link) and their own email account - see messaging.ts. The chat
+ * services are still out of reach, and say what can be done instead.
+ */
 const unsupportedActions: Array<{ pattern: RegExp; reply: string }> = [
   {
-    pattern: /^(?:please |can you |could you |would you )?(?:send|write and send|draft and send|shoot|forward|fire off) (?:an? |the |this |that |my )?(?:e-?mail|mail)\b|^(?:please )?e-?mail (?:\S+ )?(?:to|at|about)\b|^(?:please )?e-?mail \S+@\S+/i,
-    reply: "I can't send email. Nothing here is connected to a mail account - I run on this machine only. I can draft the message for you to send."
-  },
-  {
-    pattern: /^(?:please |can you |could you |would you )?(?:send|shoot|fire off) (?:an? |the |this |that |my )?(?:text|sms|message|dm|whatsapp|telegram|slack message|discord message)\b|^(?:please )?(?:text|dm|whatsapp|slack|imessage) \S+ (?:that|saying|about|to say|and)\b/i,
-    reply: "I can't send messages to people. Nothing here is connected to a messaging service. I can write the message for you to send."
+    pattern: /^(?:please |can you |could you |would you )?(?:send|shoot|fire off) (?:an? |the |this |that |my )?(?:dm|whatsapp|whatsapp message|telegram|telegram message|slack message|discord message|instagram message|snapchat)\b|^(?:please )?(?:dm|whatsapp|slack|discord) \S+ (?:that|saying|about|to say|and)\b/i,
+    reply: "I can't send WhatsApp, Telegram, Slack, Discord or other app messages - nothing here is connected to them. "
+      + "I can send a text from your phone through Phone Link, or an email from your account, if that helps."
   },
   {
     pattern: /^(?:please |can you |could you |would you )?(?:call|phone|ring|dial|facetime) (?!me\b|it\b|this\b|that\b)\S+/i,
@@ -526,8 +530,8 @@ export function composeReply(input: ComposerInput): ComposedReply {
   // Things this app cannot do, said plainly and at once. "send an email to
   // bob@example.com saying hi" was answered "Got it." - read as a statement
   // - and even as a request it would have gone to a model with no mail tool,
-  // to improvise with. There is no email, messaging, phone or payment here,
-  // and there will not be: the app is local and connects to nothing.
+  // to improvise with. Email and texts have tools now (send_email, send_text);
+  // chat apps, calls and payments still have nothing behind them.
   const unsupported = unsupportedActions.find((entry) => entry.pattern.test(message));
   if (unsupported) {
     return { text: unsupported.reply, strategy: "cannot", groundedOn: [], groundedOnHistory: 0 };
