@@ -64,6 +64,8 @@ import {
 import { maxSynthesisCharacters, piperStatus, synthesize, type Cadence } from "./services/piperSpeech.js";
 import { describeEmailAccount, knownProviders, readEmailAccount, removeEmailAccount, saveEmailAccount } from "./services/emailAccount.js";
 import { phoneLinkStatus, sendWithAccount } from "./services/messaging.js";
+import { extractDocumentText, maxDocumentBytes } from "./services/documentText.js";
+import path from "node:path";
 import { maxAudioBytes, requiredChannels, requiredSampleRate, transcribe, whisperStatus } from "./services/whisperTranscribe.js";
 import {
   addSchedule,
@@ -1468,6 +1470,49 @@ export function createApp() {
         document,
         // Disclosed so a silently shortened paste is visible rather than assumed intact.
         truncated: body.trim().length > maxDocumentChars
+      },
+      traceId: "trace-local"
+    });
+  });
+
+  // A document file - PDF, Word, PowerPoint or plain text - read on this
+  // machine and kept as a knowledge document. The file is the raw request body
+  // (application/octet-stream), so the JSON parser's 1 MB limit never sees it;
+  // the name and session ride in the query.
+  app.post("/v1/knowledge/import", express.raw({ type: "application/octet-stream", limit: maxDocumentBytes }), async (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId, res, req);
+    if (!sessionId) return;
+
+    const fileName = typeof req.query?.name === "string" ? path.basename(req.query.name).slice(0, 200) : "";
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0 || !fileName) {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "Send the file itself as the body, with its name.", traceId: "trace-local" });
+      return;
+    }
+
+    const extracted = await extractDocumentText(req.body, fileName);
+    if (!extracted.ok) {
+      res.status(422).json({ code: "UNREADABLE_DOCUMENT", message: extracted.reason, traceId: "trace-local" });
+      return;
+    }
+
+    const title = fileName.replace(/\.[a-z0-9]{1,5}$/i, "").replace(/[_]+/g, " ").trim() || fileName;
+    const document = addDocument(sessionId, {
+      id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title,
+      body: extracted.text
+    });
+    if (!document) {
+      res.status(422).json({ code: "UNREADABLE_DOCUMENT", message: "The document had no text to keep.", traceId: "trace-local" });
+      return;
+    }
+
+    res.status(201).json({
+      data: {
+        // The text stays on the server; the reply says what was kept, not all of it.
+        document: { id: document.id, title: document.title, createdAt: document.createdAt, characters: document.body.length },
+        kind: extracted.kind,
+        ...(extracted.pages ? { pages: extracted.pages } : {}),
+        truncated: extracted.text.length > maxDocumentChars
       },
       traceId: "trace-local"
     });

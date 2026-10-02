@@ -546,14 +546,21 @@ test("a missing document is refused with the titles that do exist", async () => 
   assert.match(result.content, /Onboarding/);
 });
 
-test("a long document is truncated and says so", async () => {
+test("a long document is shortened and says so", async () => {
+  // Shortened the way a long file is (see contextBudget): its start and end,
+  // with a note saying what was left out and how to find the rest.
+  const body = Array.from({ length: 1500 }, (_, i) => `Clause ${i + 1} sets out the terms for section ${i + 1}.`).join("\n");
   const result = await runTool(
     { name: "read_document", arguments: { title: "Long" } },
-    { ...richContext, documents: [{ id: "d3", title: "Long", body: "x".repeat(9000) }] }
+    { ...richContext, documents: [{ id: "d3", title: "Long", body }] }
   );
 
   assert.equal(result.ok, true);
-  assert.match(result.content, /truncated/);
+  assert.ok(result.content.length < body.length);
+  assert.match(result.content, /^"Long":\nClause 1 sets out/, "the start is kept");
+  assert.match(result.content, /Clause 1500 sets out the terms for section 1500\.$/, "and the end");
+  assert.match(result.content, /left out here to fit the model's working memory/);
+  assert.match(result.content, /search_documents/, "and says how to reach the middle");
 });
 
 test("writing a document reports what was actually written", async () => {

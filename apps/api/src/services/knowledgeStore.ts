@@ -43,7 +43,17 @@ export type KnowledgePassage = ScorableMemory & {
 
 /** Caps so an unauthenticated caller cannot grow storage without bound. */
 export const maxDocumentsPerSession = 25;
-export const maxDocumentChars = 20000;
+/**
+ * About sixty pages of dense text. It was 20,000 characters while documents
+ * were only ever pasted, which cut nearly any real PDF or Word file short.
+ */
+export const maxDocumentChars = 200_000;
+/**
+ * The longest passage offered to a reply. Text taken from a PDF often has no
+ * blank lines at all, and a whole page as one passage would bury the sentence
+ * that answers the question, and crowd the model's window besides.
+ */
+export const maxPassageChars = 1200;
 export const maxTrackedKnowledgeSessions = 500;
 /** How many passages are offered to a single reply. */
 export const knowledgeRetrievalLimit = 6;
@@ -125,6 +135,25 @@ function isHeadingLike(text: string): boolean {
 }
 
 /**
+ * A passage longer than maxPassageChars, cut into pieces at sentence ends -
+ * or at a space, or hard at the limit when a run of text has neither.
+ */
+export function splitLongPassage(text: string): string[] {
+  const pieces: string[] = [];
+  let rest = text;
+  while (rest.length > maxPassageChars) {
+    const window = rest.slice(0, maxPassageChars);
+    let cut = Math.max(window.lastIndexOf(". "), window.lastIndexOf("? "), window.lastIndexOf("! "));
+    if (cut < maxPassageChars / 2) cut = window.lastIndexOf(" ");
+    if (cut < maxPassageChars / 2) cut = maxPassageChars - 1;
+    pieces.push(rest.slice(0, cut + 1).trim());
+    rest = rest.slice(cut + 1).trim();
+  }
+  if (rest) pieces.push(rest);
+  return pieces;
+}
+
+/**
  * Split a document into passages on blank lines, then join a heading to the text
  * beneath it — a lone "## Rollback" matches a query about rollback but answers
  * nothing, so on its own it is a citation that tells the reader nothing.
@@ -145,7 +174,7 @@ export function chunkDocument(document: KnowledgeDocument): KnowledgePassage[] {
     merged.push(block);
   }
 
-  return merged.map((text, index) => ({
+  return merged.flatMap(splitLongPassage).map((text, index) => ({
     id: `${document.id}#${index}`,
     title: document.title,
     body: text,
