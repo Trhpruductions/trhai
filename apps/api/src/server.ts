@@ -121,6 +121,8 @@ import {
   workspaceRoot
 } from "./services/workspace.js";
 import { readAppManifest, searchFiles } from "./services/agentTools.js";
+import { checkUrlShape, readWebPage } from "./services/webFetch.js";
+import { webSearch } from "./services/webSearch.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -1717,6 +1719,38 @@ export function createApp() {
       },
       traceId: "trace-local"
     });
+  });
+
+  // The Browser workspace: the same search web_search runs, with more results
+  // for a person to choose from, and the same page fetch as fetch_url - behind
+  // the same checks on where it may go - with the page's text and its links.
+  app.get("/v1/web/search", async (req, res) => {
+    const query = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 300) : "";
+    if (!query) {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "Say what to search for.", traceId: "trace-local" });
+      return;
+    }
+    const outcome = await webSearch(query, undefined, 12);
+    if (!outcome.ok) {
+      res.status(502).json({ code: "SEARCH_FAILED", message: outcome.reason, traceId: "trace-local" });
+      return;
+    }
+    res.json({ data: { query: outcome.query, results: outcome.results }, traceId: "trace-local" });
+  });
+
+  app.get("/v1/web/read", async (req, res) => {
+    const url = typeof req.query.url === "string" ? req.query.url.trim() : "";
+    const shape = checkUrlShape(url);
+    if (!shape.ok) {
+      res.status(400).json({ code: "INVALID_REQUEST", message: shape.reason, traceId: "trace-local" });
+      return;
+    }
+    const page = await readWebPage(url);
+    if (!page.ok) {
+      res.status(502).json({ code: "READ_FAILED", message: page.reason, traceId: "trace-local" });
+      return;
+    }
+    res.json({ data: page, traceId: "trace-local" });
   });
 
   // A picture, a sound or a video from the workspace, for its preview. Media
