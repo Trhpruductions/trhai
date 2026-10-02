@@ -102,7 +102,9 @@ export function Sidebar() {
             type="button"
             className={`os-nav-item os-nav-more${inMore ? " active" : ""}`}
             aria-expanded={moreOpen}
-            aria-controls="os-more-sheet"
+            // Only while the sheet exists: pointing at an element that is not
+            // there is a broken reference for assistive technology.
+            aria-controls={moreOpen ? "os-more-sheet" : undefined}
             onClick={() => setMoreOpen(!moreOpen)}
           >
             <Icon name="grid" size={19} className="os-nav-icon" />

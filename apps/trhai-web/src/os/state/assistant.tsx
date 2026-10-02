@@ -140,11 +140,20 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const cues = useCues();
   const { notify } = useNotify();
   const { view, go } = useNav();
-  const { online } = useSystem();
+  const { online, refresh } = useSystem();
 
   const busy = status.state === "thinking" || status.state === "executing";
   const { core, label } = presence(status, mic.listening, speech.speaking, online);
   const executionEvents = useExecutionEvents(busy);
+  // A reply that has just finished is what changes the counts the rest of
+  // the app shows - a memory saved, a file written, a rendering made, a task
+  // done - so everything is read again the moment one ends, rather than
+  // waiting for the slower poll.
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (wasBusy.current && !busy) void refresh();
+    wasBusy.current = busy;
+  }, [busy, refresh]);
 
   // ---------------------------------------------------------------- activity
   const [log, setLog] = useState<ActivityEntry[]>([]);

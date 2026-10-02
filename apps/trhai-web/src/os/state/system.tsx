@@ -68,6 +68,8 @@ const SystemContext = createContext<SystemState | null>(null);
 /** Two minutes of readings at the four-second poll. */
 const historyLength = 30;
 const pollMs = 4000;
+/** The counts and the model's availability: they change when something is done, not by themselves. */
+const settledPollMs = 20_000;
 
 export function SystemProvider({ children }: { children: ReactNode }) {
   const { notify } = useNotify();
@@ -89,31 +91,47 @@ export function SystemProvider({ children }: { children: ReactNode }) {
   const [buildVersion, setBuildVersion] = useState("0.0.0");
   const [stt, setStt] = useState<TranscribeInfo | null>(null);
 
-  const readAll = useCallback(async () => {
+  // What moves by the second: the gauges, the work under way, the schedules
+  // that may be running. Read every four seconds while the window is visible.
+  const readLive = useCallback(async () => {
     const id = sessionId();
-    const [
-      modelResult, telemetryResult, capabilityResult, memoryResult, scheduleResult, filesResult, renderingResult,
-      knowledgeResult, taskResult, todoResult
-    ] = await Promise.all([
-      apiGet<ModelInfo>("/v1/assist/model"),
+    const [telemetryResult, taskResult, scheduleResult] = await Promise.all([
       apiGet<Telemetry>("/v1/system-telemetry"),
-      apiGet<CapabilityInfo>("/v1/capabilities"),
-      apiGet<{ memories: Array<{ pinned?: boolean }> }>(`/v1/assist/memory?sessionId=${id}`),
-      apiGet<{ schedules: ScheduleView[]; persistenceError?: string | null }>("/v1/schedules"),
-      apiGet<{ entries: Array<{ directory: boolean; bytes: number }> }>("/v1/files"),
-      apiGet<{ latest: RenderingView | null }>("/v1/renderings"),
-      apiGet<{ documents: unknown[] }>(`/v1/knowledge?sessionId=${id}`),
       apiGet<{ tasks: AgentTask[] }>(`/v1/agent-tasks?sessionId=${id}`),
-      apiGet<{ tasks: TaskItem[] }>(`/v1/tasks?sessionId=${id}`)
+      apiGet<{ schedules: ScheduleView[]; persistenceError?: string | null }>("/v1/schedules")
     ]);
-
-    setOnline(modelResult.ok);
-    if (modelResult.ok) setModel(modelResult.data);
+    // Whether the service answered at all - any of the three will do.
+    setOnline(telemetryResult.ok || taskResult.ok || scheduleResult.ok);
     // A reading that could not be taken is a hole, never the last number left
     // on screen as if it were current.
     const reading = telemetryResult.ok ? telemetryResult.data : null;
     setTelemetry(reading);
     setHistory((prior) => pushSample(prior, reading, historyLength));
+    if (taskResult.ok) setAgentTasks(taskResult.data.tasks);
+    if (scheduleResult.ok) {
+      setSchedules(scheduleResult.data.schedules);
+      setSchedulePersistError(scheduleResult.data.persistenceError ?? null);
+    }
+  }, []);
+
+  // What changes when something is done - a reply, a save - rather than by
+  // itself: counts, the model's availability, the latest rendering. These
+  // used to be read with the gauges every four seconds, which meant a walk of
+  // up to 5,000 workspace entries and two questions to Ollama, every four
+  // seconds, for figures that change a few times an hour. Now every twenty,
+  // and at once after anything that changes them - see refresh().
+  const readSettled = useCallback(async () => {
+    const id = sessionId();
+    const [modelResult, capabilityResult, memoryResult, filesResult, renderingResult, knowledgeResult, todoResult] = await Promise.all([
+      apiGet<ModelInfo>("/v1/assist/model"),
+      apiGet<CapabilityInfo>("/v1/capabilities"),
+      apiGet<{ memories: Array<{ pinned?: boolean }> }>(`/v1/assist/memory?sessionId=${id}`),
+      apiGet<{ entries: Array<{ directory: boolean; bytes: number }> }>("/v1/files"),
+      apiGet<{ latest: RenderingView | null }>("/v1/renderings"),
+      apiGet<{ documents: unknown[] }>(`/v1/knowledge?sessionId=${id}`),
+      apiGet<{ tasks: TaskItem[] }>(`/v1/tasks?sessionId=${id}`)
+    ]);
+    if (modelResult.ok) setModel(modelResult.data);
     if (capabilityResult.ok) setCapabilities(capabilityResult.data);
     if (renderingResult.ok) setRendering(renderingResult.data.latest);
     if (memoryResult.ok) {
@@ -123,30 +141,33 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       });
     }
     if (knowledgeResult.ok) setDocuments(knowledgeResult.data.documents.length);
-    if (scheduleResult.ok) {
-      setSchedules(scheduleResult.data.schedules);
-      setSchedulePersistError(scheduleResult.data.persistenceError ?? null);
-    }
     if (filesResult.ok) {
       const files = filesResult.data.entries.filter((entry) => !entry.directory);
       setWorkspace({ files: files.length, bytes: files.reduce((sum, entry) => sum + entry.bytes, 0) });
     }
-    if (taskResult.ok) setAgentTasks(taskResult.data.tasks);
     if (todoResult.ok) setTasksState(todoResult.data.tasks);
   }, []);
+
+  const readAll = useCallback(async () => {
+    await Promise.all([readLive(), readSettled()]);
+  }, [readLive, readSettled]);
 
   // Polling stops while the window is hidden and resumes with a fresh read.
   useEffect(() => {
     let poller: number | null = null;
+    let settledPoller: number | null = null;
     const start = () => {
       if (poller !== null) return;
       void readAll();
-      poller = window.setInterval(() => void readAll(), pollMs);
+      poller = window.setInterval(() => void readLive(), pollMs);
+      settledPoller = window.setInterval(() => void readSettled(), settledPollMs);
     };
     const stop = () => {
       if (poller === null) return;
       window.clearInterval(poller);
+      if (settledPoller !== null) window.clearInterval(settledPoller);
       poller = null;
+      settledPoller = null;
     };
     const onVisibility = () => (document.hidden ? stop() : start());
     if (!document.hidden) start();
@@ -155,7 +176,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       document.removeEventListener("visibilitychange", onVisibility);
       stop();
     };
-  }, [readAll]);
+  }, [readAll, readLive, readSettled]);
 
   // Constants of the machine and the install, asked once.
   useEffect(() => {
