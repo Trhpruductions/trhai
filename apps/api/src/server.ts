@@ -19,6 +19,7 @@ import {
   listForgottenFacts,
   getMemoryAudit,
   listSessionMemories,
+  maxMemoriesPerSession,
   memoryPersistenceError,
   recordMemoriesFromMessage,
   recordSingleMemory,
@@ -1018,8 +1019,29 @@ export function createApp() {
     res.json({
       data: {
         memories: listSessionMemories(sessionId),
-        audit: getMemoryAudit(sessionId, 20)
+        audit: getMemoryAudit(sessionId, 20),
+        // How many are kept; past it the oldest unpinned one makes room.
+        limit: maxMemoriesPerSession
       },
+      traceId: "trace-local"
+    });
+  });
+
+  // Remember something on purpose, from the Memory workspace - the same path
+  // the assistant's own "remember" tool takes, so a fact typed here and one
+  // said in chat are stored, deduplicated and audited the same way.
+  app.post("/v1/assist/memory", (req, res) => {
+    const sessionId = requireSessionId(req.body?.sessionId, res, req);
+    if (!sessionId) return;
+
+    const text = typeof req.body?.text === "string" ? req.body.text.replace(/\s+/g, " ").trim().slice(0, 500) : "";
+    const outcome = text ? recordSingleMemory(sessionId, text) : { status: "empty" as const };
+    if (outcome.status === "empty") {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "Say what to remember.", traceId: "trace-local" });
+      return;
+    }
+    res.status(outcome.status === "saved" ? 201 : 200).json({
+      data: outcome.status === "saved" ? { status: "saved", memory: outcome.memory } : { status: "duplicate" },
       traceId: "trace-local"
     });
   });
