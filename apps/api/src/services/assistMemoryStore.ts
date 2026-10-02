@@ -338,7 +338,12 @@ export type SaveOutcome =
  */
 export function recordSingleMemory(sessionKey: string, fact: string): SaveOutcome {
   loadFromDisk();
-  const candidates = extractMemoryCandidates(`remember that ${fact}`);
+  // What the words say about themselves first - "I prefer...", "never...",
+  // "my name is..." - so a preference told on purpose is still filed as a
+  // preference. Only when no rule recognises them does the plain "remember
+  // that" rule take them, as a fact.
+  const specific = extractMemoryCandidates(fact);
+  const candidates = specific.length > 0 ? specific : extractMemoryCandidates(`remember that ${fact}`);
   // A defensive fallback rather than a path exercised today: the
   // explicit-remember rule matches almost anything once it is framed as
   // "remember that X", and the only real caller (the remember tool) already
