@@ -456,6 +456,18 @@ export function asksAboutMachineState(message: string): boolean {
 }
 
 /**
+ * A question whose whole answer is a reading - "what's my CPU usage?", "how
+ * hot is my GPU?" - as opposed to advice about one ("how do I lower my CPU
+ * usage?", "is 80°C too hot?"), where numbers from general knowledge are part
+ * of a good answer.
+ */
+export function asksForAReading(message: string): boolean {
+  return asksAboutMachineState(message)
+    && !/\b(?:how (?:do|can|should|could|would) i|why|what (?:causes|should|can|could)|should i|tips?|ways? to|lower|reduce|improve|speed up|free up|fix|normal|safe|too (?:hot|high|much|full|slow|low)|worry|enough|upgrade|recommend|best)\b/i
+      .test(message ?? "");
+}
+
+/**
  * Whether a request has anything to do with the time or the date, so
  * current_datetime is worth offering. The date is in the system prompt in
  * any case; this stops the clock being read twice on a question about ports.

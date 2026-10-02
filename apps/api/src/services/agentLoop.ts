@@ -1,5 +1,7 @@
 import { modelOptions, type LocalModelConfig } from "./localModel.js";
-import { availableTools, runTool, verifiedDetail, type AgentLens, type ToolContext, type ToolCall } from "./agentTools.js";
+import {
+  availableTools, driveNamedIn, readMachineStatus, runTool, verifiedDetail, type AgentLens, type ToolContext, type ToolCall
+} from "./agentTools.js";
 import { commandsArmed } from "./commandRunner.js";
 import { readStream, toLines } from "./streamReader.js";
 import { enterStage, stageForTool } from "./reasoningStage.js";
@@ -7,10 +9,10 @@ import { beginEvent, endEvent, type ExecutionKind } from "./executionLog.js";
 import { stripFabricatedToolOutput } from "./fabricatedOutput.js";
 import {
   answerDirectly, claimsUnperformedMutation, claimsUnusedTool, contradictsToolRecord,
-  correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
+  correctionFor, inventsAReading, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { asksAboutMachineState, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
+import { asksAboutMachineState, asksForAReading, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -169,13 +171,19 @@ export const maxCallsPerRound = 4;
 export function narratesACommand(text: string): boolean {
   const trimmed = text.trim();
   // Starting a server is never something to run here; it is what the user
-  // does with the result.
-  if (/```[^`]*\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:start|dev|serve)\b|```[^`]*\bnode\s+(?:\S*[\\/])?(?:server|index|app)\.(?:m?js|cjs)\b/i.test(trimmed)) return false;
+  // does with the result. Fenced or inline.
+  if (/`[^`]*\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:start|dev|serve)\b|`[^`]*\bnode\s+(?:\S*[\\/])?(?:server|index|app)\.(?:m?js|cjs)\b/i.test(trimmed)) return false;
   if (/^run_command\s+\S/i.test(trimmed)) return true;
   // The code fence may sit a blank line below the sentence, so the span
   // between the verb and the fence allows newlines.
   return /\b(?:i(?:'ll| will| would| can| am going to)|let me|let's|we can|you can|to (?:check|see|find|get)[^.\n]{0,60})\b[^`\n]{0,80}\b(?:run|execute|use)\b[^`]{0,120}```[\s\S]*?```/i.test(trimmed)
-    || /^(?:run|execute)(?: the following| this)?(?: command)?:?\s*```[\s\S]*?```/im.test(trimmed);
+    || /^(?:run|execute)(?: the following| this)?(?: command)?:?\s*```[\s\S]*?```/im.test(trimmed)
+    // Inline, in a sentence. Asked "which process is using the most RAM?"
+    // with run_command on offer: "You can identify it by using the Task
+    // Manager or by running the command `tasklist /fi "MEMUSAGE gt 1024"` in
+    // Command Prompt." Only a span with a space, a flag or a path in it is a
+    // command; "the `calculate` tool" is a name.
+    || /\b(?:run|running|execute|executing|type|typing)\s+(?:the\s+)?(?:following\s+)?(?:command\s+)?`(?=[^`\n]*[\s\\/-])[^`\n]{2,200}`/i.test(trimmed);
 }
 
 /** Whether the request asks for something to be kept in memory. */
@@ -714,7 +722,23 @@ function looksLikeAShellCommand(rest: string): boolean {
   return /^(?:npm|npx|pnpm|yarn|node|git|python|py|pip|powershell|pwsh|cmd|dir|findstr|netstat|type|echo|cd|ls|cat|grep|curl|wget|docker|tsc|eslint|systeminfo|tasklist|taskkill|where|which|whoami|hostname|ipconfig|ping|del|mkdir|rmdir|copy|move|ren|set|start|explorer|code|dotnet|cargo|go|java|mvn|gradle|make|tree|wsl|bash|sh)\b/i.test(rest);
 }
 
+/** Whether a tool can be called with nothing at all. */
+function takesNoRequiredArguments(name: string): boolean {
+  const definition = availableTools(true).find((candidate) => candidate.function.name === name);
+  const required = (definition?.function.parameters as { required?: unknown } | undefined)?.required;
+  return Boolean(definition) && (!Array.isArray(required) || required.length === 0);
+}
+
 function parseBareCall(line: string, known: string[]): ToolCall | null {
+  // `system_status` - the name and nothing else, as the whole reply. Seen
+  // live for "which process is using the most RAM?", and shown to the user as
+  // the answer. A tool that needs nothing is called with nothing; one that
+  // needs arguments is not guessed at.
+  const bareName = /^`?([a-zA-Z_][a-zA-Z0-9_]*)`?\.?$/.exec(line.trim());
+  if (bareName && known.includes(bareName[1]) && takesNoRequiredArguments(bareName[1])) {
+    return { name: bareName[1], arguments: {} };
+  }
+
   // `fetch_url {"url":"https://news.ycombinator.com/"}}` - the name, a space,
   // and the arguments as JSON, with a stray brace. Seen live as the whole of
   // the user-facing reply. The name is the tool's own, the object its
@@ -1246,6 +1270,22 @@ export async function runAgent(
     hour: "2-digit", minute: "2-digit"
   });
 
+  // Read before the model answers, not left for it to fetch. With
+  // system_status on offer, "what's my CPU usage right now?" called nothing
+  // and was answered "45%"; "how hot is my GPU?" got "82 degrees Celsius".
+  // Every number was invented, in under a second. The real readings go in
+  // with the question, and an answer that still gives others is replaced
+  // below (see inventsAReading).
+  // The readings name the programs holding the most memory, so "which
+  // process is using the most RAM?" is answered from them too; processor use
+  // per program they do not have, which is why a question about programs
+  // keeps the shell (see readingOnly).
+  const aboutPrograms = /\b(?:process|processes|program|programs|apps?|application|applications|task manager|which|what(?:'s| is) using|using (?:the )?most)\b/i
+    .test(question);
+  const machineReadings = asksAboutMachineState(question)
+    ? await readMachineStatus(context, driveNamedIn(question))
+    : null;
+
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -1271,7 +1311,13 @@ export async function runAgent(
     },
     // What was said just before, so a follow-up has something to follow.
     ...recentTurns(context.conversation, [question, context.request ?? ""]),
-    { role: "user", content: question }
+    {
+      role: "user",
+      content: machineReadings
+        ? `${question}\n\nLive readings from this machine, taken just now. They are real: answer from them as `
+          + `given, and do not give any other number for this machine.\n${machineReadings}`
+        : question
+    }
   ];
 
   const toolsUsed: ToolOutcome[] = [];
@@ -1323,8 +1369,7 @@ export async function runAgent(
   // run_command in reach, the model ran wmic, which this Windows no longer
   // has, and sent the user to Task Manager. Which program is responsible still
   // needs the process list, and an order to run something keeps the shell.
-  const readingOnly = asksAboutMachineState(question) && !intent.action
-    && !/\b(?:process|processes|program|programs|apps?|application|applications|task manager|which|what(?:'s| is) using|using (?:the )?most)\b/i.test(question);
+  const readingOnly = asksAboutMachineState(question) && !intent.action && !aboutPrograms;
 
   // A request that names the file it wants written is not a request to
   // scaffold a project.
@@ -2117,6 +2162,21 @@ export async function runAgent(
       // and the opposite of what happened. Drop it so the tool's own success
       // line (appended by withMutationResults) is what the user reads.
       const reportedText = mutationResults.length > 0 && isBareRefusal(cleanedText) ? "" : cleanedText;
+
+      // A reading the machine did not give, on a question that only asked for
+      // one: the readings themselves are the answer instead. See
+      // inventsAReading; anything system_status returned counts as given.
+      if (machineReadings && asksForAReading(question)
+        && inventsAReading(reportedText, [machineReadings, ...readResults].join("\n"))) {
+        return {
+          ok: true,
+          text: `This is what this machine reports right now:\n${machineReadings}`,
+          model: typeof response.model === "string" ? response.model : config.model,
+          toolsUsed,
+          actionAudit: auditFor(toolsUsed.length > 0 ? "tool-called" : "prose")
+        };
+      }
+
       return {
         ok: true,
         // A held call the reply does not mention is a decision the user cannot

@@ -116,6 +116,123 @@ test("a reading that could not be taken says so, and why", () => {
   assert.doesNotMatch(text, /Processor: \d|Graphics card: [^n]/);
 });
 
+test("a reply's readings must be ones the machine gave", async () => {
+  const { inventsAReading } = await import("../src/services/contradictedClaims.js");
+  const readings = "Processor: 27% busy across 16 cores (Test CPU).\nMemory: 18.2 / 31.9 GB in use (57%).\n"
+    + "Graphics card: Test GPU, 12% busy, video memory 5.9 / 8.0 GB (74%), 48°C.\n"
+    + "Drive C: 1,645.85 GB free of 3.64 TB (55% used).\nUp for: 3 days 4 hours.";
+
+  // Verbatim inventions from the live run.
+  assert.equal(inventsAReading("The CPU usage on this machine is currently at 45%.", readings), true);
+  assert.equal(inventsAReading("The GPU temperature is currently at 82 degrees Celsius.", readings), true);
+  assert.equal(inventsAReading("Drive C has 250 GB of free space.", readings), true);
+  // Faithful, rounded or reworded.
+  assert.equal(inventsAReading("Your CPU is at 27% across 16 cores.", readings), false);
+  assert.equal(inventsAReading("About 6 GB of your 8 GB of video memory is in use, and it is at 48°C.", readings), false);
+  assert.equal(inventsAReading("Drive C has 1,645.85 GB free.", readings), false);
+  assert.equal(inventsAReading("It has been on for 3 days.", readings), false);
+  assert.equal(inventsAReading("Your machine is fairly quiet right now.", readings), false, "no number, nothing to check");
+});
+
+test("a reading is told apart from advice about one", async () => {
+  const { asksForAReading } = await import("../src/services/actionIntent.js");
+  for (const request of ["what's my CPU usage right now?", "how hot is my GPU?", "how much free space is on drive C?"]) {
+    assert.equal(asksForAReading(request), true, request);
+  }
+  for (const request of ["how do I lower my CPU usage?", "is my GPU too hot?", "why is my RAM so full?",
+    "what's the best way to free up disk space?"]) {
+    assert.equal(asksForAReading(request), false, request);
+  }
+});
+
+test("a drive named in a request is the one measured", async () => {
+  const { driveNamedIn } = await import("../src/services/agentTools.js");
+  assert.equal(driveNamedIn("how much free space is on drive C?"), "C");
+  assert.equal(driveNamedIn("is D: full?"), "D");
+  assert.equal(driveNamedIn("how full is E:\\games?"), "E");
+  assert.equal(driveNamedIn("how much free space do I have?"), "");
+  assert.equal(driveNamedIn("I drive a car"), "", "a verb, not a drive");
+});
+
+test("a GPU temperature comes with the card's own limit when the card reports one", () => {
+  // Live: "is my GPU too hot?" at 64°C got "Yes... consider shutting it down".
+  const telemetry = {
+    cpu: { model: "Test CPU", cores: 8, speedMhz: 0, fraction: 0.1, detail: "", unavailable: null },
+    memory: { fraction: 0.5, detail: "8.0 / 16.0 GB", unavailable: null },
+    gpu: {
+      name: "Test GPU", fraction: 0.2, detail: "", unavailable: null,
+      vram: null, temperatureC: 63, clockMhz: null, powerWatts: null
+    },
+    cloud: { services: [], detail: "" },
+    disk: { fraction: null, detail: "", unavailable: null },
+    network: { fraction: null, detail: "", unavailable: "Measuring…", receivedBytesPerSecond: null, sentBytesPerSecond: null },
+    uptimeSeconds: 60,
+    takenAt: new Date(0).toISOString()
+  };
+
+  assert.match(describeTelemetry(telemetry, { label: "C:", space: null }, 20),
+    /Graphics card: Test GPU, 20% busy, 63°C, which is 20°C below the point where the card starts slowing itself down to stay cool \(about 83°C\)\./);
+  // No margin reported, none implied.
+  assert.match(describeTelemetry(telemetry, { label: "C:", space: null }), /Graphics card: Test GPU, 20% busy, 63°C\.$/m);
+});
+
+test("a command offered for the user to run, inline, is caught", async () => {
+  const { narratesACommand } = await import("../src/services/agentLoop.js");
+  // Verbatim, with run_command on offer.
+  assert.equal(narratesACommand("The process using the most RAM is currently unknown. You can identify it by using the "
+    + "Task Manager or by running the command `tasklist /fi \"MEMUSAGE gt 1024\"` in Command Prompt."), true);
+  assert.equal(narratesACommand("To check, run `netstat -ano | findstr :4000` and look for LISTENING."), true);
+  // A tool's name, or how to start what was just built, is not that.
+  assert.equal(narratesACommand("I used the `calculate` tool for that."), false);
+  assert.equal(narratesACommand("Run `npm start` in the app's folder to launch it."), false);
+  assert.equal(narratesACommand("The setting is called `maxRetries`."), false);
+});
+
+test("memory is summed per program, whatever the locale writes its numbers with", async () => {
+  const { parsePs, parseTasklist } = await import("../src/services/systemTelemetry.js");
+  const tasklist = [
+    '"chrome.exe","1200","Console","1","1,240,920 K"',
+    '"chrome.exe","1300","Console","1","200.000 K"',
+    '"RustDedicated.exe","4100","Console","1","643 808 K"',
+    '"System Idle Process","0","Services","0","8 K"',
+    "not a row"
+  ].join("\r\n");
+  const programs = parseTasklist(tasklist);
+  assert.deepEqual(programs.map((program) => [program.name, program.processes]), [["chrome", 2], ["RustDedicated", 1], ["System Idle Process", 1]]);
+  assert.equal(programs[0].bytes, (1240920 + 200000) * 1024);
+
+  const ps = parsePs("node 51200\nnode 20480\npostgres 10240\n");
+  assert.deepEqual(ps.map((program) => [program.name, program.bytes / 1024, program.processes]), [["node", 71680, 2], ["postgres", 10240, 1]]);
+});
+
+test("the readings name the programs holding the most memory", () => {
+  const text = describeTelemetry({
+    cpu: { model: "Test CPU", cores: 8, speedMhz: 0, fraction: 0.1, detail: "", unavailable: null },
+    memory: { fraction: 0.5, detail: "8.0 / 16.0 GB", unavailable: null },
+    gpu: { name: null, fraction: null, detail: "", unavailable: "No NVIDIA GPU detected on this machine.", vram: null, temperatureC: null, clockMhz: null, powerWatts: null },
+    cloud: { services: [], detail: "" },
+    disk: { fraction: null, detail: "", unavailable: null },
+    network: { fraction: null, detail: "", unavailable: "Measuring…", receivedBytesPerSecond: null, sentBytesPerSecond: null },
+    uptimeSeconds: 60,
+    takenAt: new Date(0).toISOString()
+  }, { label: "C:", space: null }, null, [
+    { name: "chrome", bytes: 1.5 * 1024 ** 3, processes: 14 },
+    { name: "Code", bytes: 650 * 1024 ** 2, processes: 1 }
+  ]);
+  assert.match(text, /^Programs using the most memory: chrome 1\.5 GB \(14 processes\), Code 650\.0 MB\. Processor use per program is not measured here\.$/m);
+});
+
+test("a tool's bare name, as the whole reply, is a call when the tool needs nothing", async () => {
+  // Live, the whole reply to "which process is using the most RAM?" was
+  // "system_status", shown to the user as the answer.
+  const { parseTextToolCalls } = await import("../src/services/agentLoop.js");
+  assert.deepEqual(parseTextToolCalls("system_status"), [{ name: "system_status", arguments: {} }]);
+  assert.deepEqual(parseTextToolCalls("`current_datetime`"), [{ name: "current_datetime", arguments: {} }]);
+  // One that needs arguments is not guessed at, and a name in a sentence is prose.
+  assert.deepEqual(parseTextToolCalls("read_file"), []);
+  assert.deepEqual(parseTextToolCalls("I would use system_status for that."), []);
+});
+
 test("uptime reads as a person would say it", () => {
   assert.equal(formatUptime(59), "0 minutes");
   assert.equal(formatUptime(61), "1 minute");

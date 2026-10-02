@@ -292,6 +292,32 @@ export function narratesRetrievalOnly(text: string, toolsUsed: ToolOutcomeLike[]
   return narratesRetrieval.test(text.trim());
 }
 
+/**
+ * Whether a reply states a machine reading that the real readings do not
+ * contain.
+ *
+ * Seen live, each as the whole answer and with no tool called: "The CPU usage
+ * on this machine is currently at 45%." "You are using 32 GB of your 64 GB
+ * RAM." "The GPU temperature is currently at 82 degrees Celsius." "Drive C has
+ * 250 GB of free space." Every number was made up. A reading is a claim about
+ * hardware, and a plausible invented one cannot be told apart from a real one.
+ *
+ * Every quantity with a unit in the reply has to be one of the numbers in the
+ * readings, allowing for rounding ("about 6 GB" for 5.9). Only used on a
+ * question whose whole answer is a reading; see asksForAReading.
+ */
+export function inventsAReading(reply: string, readings: string): boolean {
+  // "1,645.85" is one number on both sides, not 1 and 645.85.
+  const plainNumbers = (text: string) => text.replace(/(\d),(\d{3})\b/g, "$1$2");
+  const known = [...plainNumbers(readings).matchAll(/\d+(?:\.\d+)?/g)].map((match) => Number(match[0]));
+  const said = plainNumbers(reply);
+  const quantities = [...said.matchAll(
+    /(\d+(?:\.\d+)?)\s*(?:%|percent|°|degrees|gb|tb|mb|gib|tib|gigabytes?|terabytes?|megabytes?|w\b|watts?|mhz|ghz|cores?|days?|hours?|minutes?)/gi
+  )].map((match) => Number(match[1]));
+  return quantities.some((value) => !known.some((reading) =>
+    Math.abs(reading - value) <= Math.max(0.051, Math.abs(reading) * 0.01) || Math.round(reading) === Math.round(value)));
+}
+
 /** What to tell the model when it reports having the answer instead of the answer. */
 export const stateTheResult =
   "You called a tool and it returned a result, but your reply only says that you "

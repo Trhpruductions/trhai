@@ -3346,6 +3346,54 @@ test("system_status is offered for questions about the machine, and only those",
   }
 });
 
+test("a question about the machine reaches the model with the real readings", async () => {
+  const { server, baseUrl, received } = await fakeModel([answer("Your processor is 27% busy.")]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what's my CPU usage right now?", { ...context, readTelemetry: readings });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.text, "Your processor is 27% busy.", "a faithful answer is kept as written");
+    const question = (received[0] as { messages: Array<{ role: string; content: string }> }).messages.at(-1)?.content ?? "";
+    assert.match(question, /^what's my CPU usage right now\?/);
+    assert.match(question, /Processor: 27% busy across 16 cores/);
+  } finally {
+    server.close();
+  }
+});
+
+test("an invented reading is replaced by the real ones", async () => {
+  // Verbatim from the live run, with system_status on offer and not called.
+  const { server, baseUrl } = await fakeModel([answer("You are using 32 GB of your 64 GB RAM, which is 49%.")]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "how much RAM am I using?", { ...context, readTelemetry: readings });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.match(result.text, /^This is what this machine reports right now:/);
+    assert.match(result.text, /Memory: 18\.2 \/ 31\.9 GB in use \(57%\)\./);
+    assert.doesNotMatch(result.text, /64 GB|49%/);
+  } finally {
+    server.close();
+  }
+});
+
+test("advice about the machine may use numbers of its own", async () => {
+  // Not a reading: a GPU's safe range is general knowledge, and replacing the
+  // advice with the readings would lose the answer.
+  const advice = "Most GPUs run safely up to about 83°C, so yours is fine.";
+  const { server, baseUrl } = await fakeModel([answer(advice)]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "is my GPU too hot?", { ...context, readTelemetry: readings });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.text, advice);
+  } finally {
+    server.close();
+  }
+});
+
 test("a reading question does not get the shell, but a question about programs still does", async () => {
   // Live: "what's my CPU usage right now?" ran wmic, which this Windows no
   // longer has, and sent the user to Task Manager.

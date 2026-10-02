@@ -431,6 +431,91 @@ export async function readNetwork(): Promise<SystemTelemetry["network"]> {
   };
 }
 
+/**
+ * How far the graphics card is below the temperature where it starts slowing
+ * itself down, in degrees, as the card reports it - or null.
+ *
+ * Asked "is my GPU too hot?" at 64°C, the model answered "Yes, your GPU is too
+ * hot... consider shutting it down" - wrong, and alarming. A temperature means
+ * little without the card's own limit, and the card knows its limit:
+ * nvidia-smi's temperature.gpu.tlimit is the margin to it. Asked separately
+ * from the dashboard's query, because a driver too old to know the field fails
+ * the whole query, and the dashboard's reading must not depend on it.
+ */
+export async function readGpuHeadroom(): Promise<number | null> {
+  const output = await new Promise<string | null>((resolve) => {
+    execFile("nvidia-smi", ["--query-gpu=temperature.gpu.tlimit", "--format=csv,noheader,nounits"],
+      { timeout: gpuTimeoutMs, windowsHide: true },
+      (error, stdout) => resolve(error ? null : stdout));
+  });
+  const value = Number.parseFloat(output?.split("\n").find((line) => line.trim())?.trim() ?? "");
+  return Number.isFinite(value) ? value : null;
+}
+
+export type ProgramMemory = { name: string; bytes: number; processes: number };
+
+/**
+ * `tasklist /fo csv /nh` rows, summed per program: chrome is dozens of
+ * processes and one answer. The size column is in K with the locale's own
+ * thousands separator ("1,240,920 K", "1.240.920 K"), so only its digits are
+ * kept.
+ */
+export function parseTasklist(output: string): ProgramMemory[] {
+  const totals = new Map<string, ProgramMemory>();
+  for (const line of output.split(/\r?\n/)) {
+    const fields = [...line.matchAll(/"([^"]*)"/g)].map((match) => match[1]);
+    if (fields.length < 5) continue;
+    const kilobytes = Number(fields[4].replace(/\D/g, ""));
+    if (!fields[0] || !Number.isFinite(kilobytes) || kilobytes <= 0) continue;
+    const name = fields[0].replace(/\.exe$/i, "");
+    const entry = totals.get(name.toLowerCase()) ?? { name, bytes: 0, processes: 0 };
+    entry.bytes += kilobytes * 1024;
+    entry.processes += 1;
+    totals.set(name.toLowerCase(), entry);
+  }
+  return [...totals.values()].sort((left, right) => right.bytes - left.bytes);
+}
+
+/** `ps -eo comm=,rss=` rows (resident size in KB), summed per program. */
+export function parsePs(output: string): ProgramMemory[] {
+  const totals = new Map<string, ProgramMemory>();
+  for (const line of output.split("\n")) {
+    const found = /^\s*(.+?)\s+(\d+)\s*$/.exec(line);
+    if (!found) continue;
+    const entry = totals.get(found[1]) ?? { name: found[1], bytes: 0, processes: 0 };
+    entry.bytes += Number(found[2]) * 1024;
+    entry.processes += 1;
+    totals.set(found[1], entry);
+  }
+  return [...totals.values()].sort((left, right) => right.bytes - left.bytes);
+}
+
+/**
+ * The programs holding the most memory right now, or null where they cannot
+ * be listed.
+ *
+ * Asked "which process is using the most RAM?", the model had the machine's
+ * totals and nothing per program, and answered that it was "not specified".
+ * The process list is the answer, read the same way every time.
+ */
+export async function readTopMemoryPrograms(limit = 5): Promise<ProgramMemory[] | null> {
+  const [command, args, parse] = process.platform === "win32"
+    ? ["tasklist", ["/fo", "csv", "/nh"], parseTasklist] as const
+    : ["ps", ["-eo", "comm=,rss="], parsePs] as const;
+  const output = await new Promise<string | null>((resolve) => {
+    execFile(command, [...args], { timeout: 4_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+      (error, stdout) => resolve(error ? null : stdout));
+  });
+  if (output === null) return null;
+  const programs = parse(output);
+  return programs.length > 0 ? programs.slice(0, limit) : null;
+}
+
+/** "1.2 GB", "643.8 MB": one program's memory, in the unit that reads at a glance. */
+export function formatProgramMemory(bytes: number): string {
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+}
+
 /** Free and total bytes on the volume holding `path`, or null when it cannot be measured. */
 export async function readFreeSpace(path: string): Promise<{ free: number; total: number } | null> {
   try {
@@ -476,7 +561,11 @@ export function formatUptime(seconds: number): string {
  */
 export function describeTelemetry(
   telemetry: SystemTelemetry,
-  disk: { label: string; space: { free: number; total: number } | null }
+  disk: { label: string; space: { free: number; total: number } | null },
+  /** The card's margin below its slow-down temperature; see readGpuHeadroom. */
+  gpuHeadroomC: number | null = null,
+  /** The programs holding the most memory; see readTopMemoryPrograms. */
+  topMemory: ProgramMemory[] | null = null
 ): string {
   const percent = (fraction: number) => `${Math.round(fraction * 100)}%`;
   // The reasons are written as sentences for the dashboard; here they follow a dash.
@@ -494,13 +583,23 @@ export function describeTelemetry(
   lines.push(memory.fraction === null
     ? `Memory: no reading - ${why(memory.unavailable, "it could not be measured")}`
     : `Memory: ${memory.detail} in use (${percent(memory.fraction)}).`);
+  if (topMemory && topMemory.length > 0) {
+    lines.push(`Programs using the most memory: ${topMemory.map((program) =>
+      `${program.name} ${formatProgramMemory(program.bytes)}${program.processes > 1 ? ` (${program.processes} processes)` : ""}`)
+      .join(", ")}. Processor use per program is not measured here.`);
+  }
 
   if (gpu.fraction === null || !gpu.name) {
     lines.push(`Graphics card: no reading - ${why(gpu.unavailable, "it did not answer")}`);
   } else {
     const parts = [`${percent(gpu.fraction)} busy`];
     if (gpu.vram && gpu.vram.fraction !== null) parts.push(`video memory ${gpu.vram.detail} (${percent(gpu.vram.fraction)})`);
-    if (gpu.temperatureC !== null) parts.push(`${Math.round(gpu.temperatureC)}°C`);
+    if (gpu.temperatureC !== null) {
+      parts.push(gpuHeadroomC !== null && gpuHeadroomC >= 0
+        ? `${Math.round(gpu.temperatureC)}°C, which is ${Math.round(gpuHeadroomC)}°C below the point where the card `
+          + `starts slowing itself down to stay cool (about ${Math.round(gpu.temperatureC + gpuHeadroomC)}°C)`
+        : `${Math.round(gpu.temperatureC)}°C`);
+    }
     if (gpu.powerWatts !== null) parts.push(`drawing ${Math.round(gpu.powerWatts)} W`);
     lines.push(`Graphics card: ${gpu.name}, ${parts.join(", ")}.`);
   }

@@ -26,7 +26,7 @@ import {
   writeFileAt,
   writeWorkspaceFile
 } from "./workspace.js";
-import { describeTelemetry, readFreeSpace, readTelemetry } from "./systemTelemetry.js";
+import { describeTelemetry, readFreeSpace, readGpuHeadroom, readTelemetry, readTopMemoryPrograms } from "./systemTelemetry.js";
 import { fetchWebPage } from "./webFetch.js";
 import { webSearch } from "./webSearch.js";
 import { renderMockupPrompt, extractRendering, findRenderFault, saveRendering, inferKind, type RenderKind } from "./renderMockup.js";
@@ -1089,6 +1089,35 @@ export function availableTools(
     if (!allowStatus && statusTools.has(name)) return false;
     return true;
   });
+}
+
+/**
+ * The machine's readings, as system_status reports them: the dashboard's own
+ * numbers from the same code, nothing estimated. The disk is the drive asked
+ * about (a letter, on Windows), or else the workspace's.
+ */
+export async function readMachineStatus(context: Pick<ToolContext, "readTelemetry">, drive = ""): Promise<string> {
+  const asked = drive.trim().replace(/[:\\/\s]+$/, "");
+  const letter = process.platform === "win32" && /^[a-z]$/i.test(asked) ? asked.toUpperCase() : "";
+  const diskPath = letter ? `${letter}:\\` : workspaceRoot();
+  // The card's margin and the process list only alongside the machine's own
+  // readings: a test's stand-in readings get nothing real mixed into them.
+  const real = !context.readTelemetry;
+  const [telemetry, space, headroom, topMemory] = await Promise.all([
+    (context.readTelemetry ?? readTelemetry)(),
+    readFreeSpace(diskPath),
+    real ? readGpuHeadroom() : Promise.resolve(null),
+    real ? readTopMemoryPrograms() : Promise.resolve(null)
+  ]);
+  const label = letter ? `${letter}:` : path.parse(diskPath).root.replace(/[\\/]+$/, "") || diskPath;
+  return describeTelemetry(telemetry, { label, space }, headroom, topMemory);
+}
+
+/** The drive letter a request names - "drive C", "C:" - or "" when it names none. */
+export function driveNamedIn(request: string): string {
+  // Not "a": "how far can I drive a car" names no drive, and A: is a floppy.
+  const found = /\bdrive\s+([b-z])(?![a-z])|\b([b-z]):(?:[\\/]|\s|$|\?)/i.exec(request ?? "");
+  return (found?.[1] ?? found?.[2] ?? "").toUpperCase();
 }
 
 /** How many results a search hands back before it stops being useful context. */
@@ -2680,17 +2709,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "system_status": {
-      // The same readings the dashboard shows, from the same code; nothing is
-      // estimated. The disk is the one asked about, or the workspace's drive.
-      const asked = typeof call.arguments.drive === "string" ? call.arguments.drive.trim().replace(/[:\\/\s]+$/, "") : "";
-      const letter = process.platform === "win32" && /^[a-z]$/i.test(asked) ? asked.toUpperCase() : "";
-      const diskPath = letter ? `${letter}:\\` : workspaceRoot();
-      const [telemetry, space] = await Promise.all([
-        (context.readTelemetry ?? readTelemetry)(),
-        readFreeSpace(diskPath)
-      ]);
-      const label = letter ? `${letter}:` : path.parse(diskPath).root.replace(/[\\/]+$/, "") || diskPath;
-      return { ok: true, content: describeTelemetry(telemetry, { label, space }) };
+      const drive = typeof call.arguments.drive === "string" ? call.arguments.drive : "";
+      return { ok: true, content: await readMachineStatus(context, drive) };
     }
 
     case "fetch_url": {
