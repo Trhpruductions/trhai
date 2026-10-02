@@ -6,6 +6,7 @@ import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { LocalModelConfig } from "../src/services/localModel.js";
 
 // A model per conversation, and how full the model's context window was -
 // the two things the chat header shows next to the conversation's name.
@@ -94,7 +95,7 @@ function fakeModel(reply: string) {
 test("the agent loop records the prompt it actually sent, against the window it ran with", async () => {
   const { server, baseUrl } = await fakeModel("Paris.");
   try {
-    const config = { baseUrl, model: "llama3.1:8b", modelFromEnv: true, timeoutMs: 4000 };
+    const config: LocalModelConfig = { baseUrl, model: "llama3.1:8b", modelFromEnv: true, timeoutMs: 4000 };
     const result = await runAgent(config, "What is the capital of France?", { memories: [], knowledge: [], sessionId: "ctx-session" });
     assert.equal(result.ok, true);
     const use = takeContextUse("ctx-session");
