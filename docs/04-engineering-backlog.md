@@ -135,7 +135,7 @@ Stories:
   - Output includes artifact snapshots.
   - Model output errors surfaced clearly.
 
-3. E5-S3 Patch verification harness
+3. E5-S3 Patch verification harness - PARTLY BUILT
 - Priority: P1
 - Points: 8
 - Owner: QA + Backend
@@ -143,6 +143,19 @@ Stories:
   - Optional test/lint command runs post-change.
   - Results attached to assistant response metadata.
   - Failure states include actionable next-step hints.
+- Built (PR #44, 1 October 2026) for apps in the workspace, which all ship a
+  dependency-free `smoke.js`: after every successful `edit_file`/`write_file`
+  inside one, `verifyAfterEdit` in `agentLoop.ts` re-runs that app's checks and
+  the reply says one of three things, naming the file - re-verified (N/N
+  passed), broke it (with the failing checks, or "no longer starts" plus the
+  one error line instead of a stack trace), or could not re-verify. The report
+  goes to the model inside the edit's own tool result, so it can fix what it
+  broke; a break the user asked for word for word is reported, not "repaired"
+  (PR #45). Recorded as a `verify` row in the execution log.
+- Not built: running an *external* project's own test or lint command after a
+  change (only the workspace apps' smoke checks run), and structured response
+  metadata - the result is in the reply text and the execution log, not in a
+  field of the response.
 
 ## Epic E6: Automation Engine and Connectors
 Goal: Reliable trigger-action workflows with safeguards.
