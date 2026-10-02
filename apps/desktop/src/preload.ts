@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld("ascendDesktop", {
   listProjectInventory: () => ipcRenderer.invoke("ascend:list-project-inventory"),
   listStorageDevices: () => ipcRenderer.invoke("ascend:list-storage-devices"),
   openPath: (targetPath: string) => ipcRenderer.invoke("ascend:open-path", targetPath),
+  // A picture of every screen, this window left out, for a question about
+  // what is on them. Takes nothing: the main process decides what is captured.
+  captureScreens: () => ipcRenderer.invoke("ascend:capture-screens"),
   // Named checks only. There is deliberately no way to send a command string
   // from here: the executable and its arguments live in the main process, and
   // this bridge carries a name the main process looks up. Renamed from

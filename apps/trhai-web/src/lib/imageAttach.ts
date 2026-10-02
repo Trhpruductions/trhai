@@ -1,8 +1,9 @@
 // Images attached to a chat message: picked, pasted or dropped, shrunk in the
 // browser if they are large, and sent with the message to the local API, which
-// shows them to the vision model. A 4K screenshot sent as it is would be tens
-// of megabytes of base64 and about ten thousand of the vision model's tokens;
-// at 1920 pixels on the long side text stays readable and it is a fraction.
+// shows them to the vision model. A large photo sent as it is would be
+// megabytes of base64 for detail the vision model throws away - it shrinks
+// anything past about 3 megapixels itself. At 1920 pixels on the long side text
+// stays readable, and a 1080p image costs the model 2,691 tokens, measured.
 
 export type Attachment = {
   id: string;
@@ -42,7 +43,7 @@ export function refuseImage(file: { name: string; type: string; size: number }):
   return null;
 }
 
-function blobToBase64(blob: Blob): Promise<string> {
+export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));

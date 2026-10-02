@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
 import { constants as fsConstants, existsSync, statSync, statfsSync } from "node:fs";
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell } from "electron";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -335,6 +335,46 @@ handleFromAppWindow("ascend:get-build-info", async () => {
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Failed to read build info." };
+  }
+});
+
+// A picture of every screen, for a question about what is on them. The page
+// asks for one only when the user asks about their screen or presses SCREEN;
+// the pictures go back to it in memory, and from there to the local API and
+// the local vision model. Nothing is written to disk.
+//
+// This window is left out of the picture. The question is about what the user
+// is looking at, and with the app in front the picture would otherwise be
+// mostly the app. setContentProtection is Windows' exclude-from-capture: the
+// window stays on screen and is simply absent from the image (and, for these
+// few hundred milliseconds, from any other capture - a stream's included).
+handleFromAppWindow("ascend:capture-screens", async (event) => {
+  const own = BrowserWindow.fromWebContents(event.sender);
+  try {
+    const displays = screen.getAllDisplays();
+    const primaryId = String(screen.getPrimaryDisplay().id);
+    // Physical pixels, up to the 2560 past which the vision model shrinks an
+    // image anyway. Each picture is fitted inside this box, its shape kept.
+    const largest = Math.max(...displays.map((display) =>
+      Math.round(Math.max(display.size.width, display.size.height) * display.scaleFactor)));
+    const side = Math.min(Number.isFinite(largest) && largest > 0 ? largest : 1920, 2560);
+    own?.setContentProtection(true);
+    // Long enough for the compositor to draw a frame without the window.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: side, height: side } });
+    const ordered = [...sources]
+      .filter((source) => !source.thumbnail.isEmpty())
+      .sort((a, b) => Number(b.display_id === primaryId) - Number(a.display_id === primaryId))
+      .slice(0, 4);
+    const screens = ordered.map((source, index) => ({
+      name: ordered.length === 1 ? "screen.jpg" : `screen ${index + 1}${source.display_id === primaryId ? " (main)" : ""}.jpg`,
+      data: source.thumbnail.toJPEG(90).toString("base64")
+    }));
+    return screens.length > 0 ? { ok: true, screens } : { ok: false, error: "no screen gave a picture" };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "the capture failed" };
+  } finally {
+    if (own && !own.isDestroyed()) own.setContentProtection(false);
   }
 });
 

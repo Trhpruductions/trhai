@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { AddressInfo } from "node:net";
+import { createServer } from "node:http";
 import { once } from "node:events";
 
 const dataDir = mkdtempSync(path.join(tmpdir(), "trhai-vision-"));
@@ -21,7 +22,7 @@ const {
 const { runTool, availableTools } = await import("../src/services/agentTools.js");
 const { mentionsAnImage } = await import("../src/services/actionIntent.js");
 const { permissionLevelOf } = await import("../src/services/toolPermissions.js");
-const { runAssistantOrchestrator } = await import("../src/services/orchestrator.js");
+const { runAssistantOrchestrator, screenNotShared } = await import("../src/services/orchestrator.js");
 const { createApp } = await import("../src/server.js");
 
 test.after(() => {
@@ -292,6 +293,71 @@ test("a message with images is answered by the vision model, not by a model that
     vision: async () => ({ ok: false as const, reason: "Seeing images needs a vision model, and none is installed in Ollama." })
   });
   assert.match(blind.assistantMessage, /needs a vision model/, "said, not guessed");
+});
+
+test("a question about the screen with no picture of it says how to share it, and guesses nothing", async () => {
+  const vision = recordingVision();
+  const unseen = await runAssistantOrchestrator({
+    mode: "general", sessionId: "screen-1", userMessage: "what's on my screen?", vision: vision.vision
+  });
+  assert.equal(unseen.assistantMessage, screenNotShared);
+  assert.deepEqual(vision.calls, [], "nothing was looked at, because nothing was there to look at");
+
+  const shown = await runAssistantOrchestrator({
+    mode: "general", sessionId: "screen-2", userMessage: "what's on my screen?",
+    images: [{ name: "screen.jpg", data: png }], vision: vision.vision
+  });
+  assert.equal(shown.assistantMessage, "A cat on a keyboard.");
+  assert.deepEqual(vision.calls, [{ names: ["screen.jpg"], question: "what's on my screen?" }]);
+});
+
+/** A stand-in Ollama that answers each chat request with the next scripted reply. */
+async function withScriptedModel<T>(replies: Array<Record<string, unknown>>, run: (chats: Array<Record<string, unknown>>) => Promise<T>): Promise<T> {
+  const chats: Array<Record<string, unknown>> = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(chunk as Buffer));
+    request.on("end", () => {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      if (request.url?.startsWith("/api/tags")) {
+        response.end(JSON.stringify({ models: [{ name: "llama3.2:latest" }] }));
+        return;
+      }
+      if (request.url?.startsWith("/api/chat")) {
+        chats.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        response.end(JSON.stringify({ model: "llama3.2:latest", ...replies[Math.min(chats.length - 1, replies.length - 1)] }));
+        return;
+      }
+      response.end(JSON.stringify({ model: "llama3.2:latest", response: "ok" }));
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const previous = process.env.OLLAMA_BASE_URL;
+  process.env.OLLAMA_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    return await run(chats);
+  } finally {
+    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
+    else process.env.OLLAMA_BASE_URL = previous;
+    server.close();
+  }
+}
+
+test("look_at_image called by the model uses the same vision model as the images route", async () => {
+  // Without this the loop's look_at_image ignored a stand-in and went to the
+  // real Ollama - here, the scripted one, which would have answered as if it
+  // had looked.
+  writeFileSync(path.join(workspace, "cat.png"), png);
+  const vision = recordingVision();
+  const lookCall = { message: { content: "", tool_calls: [{ function: { name: "look_at_image", arguments: { path: "cat.png" } } }] } };
+  await withScriptedModel([lookCall, { message: { content: "It shows a cat on a keyboard." } }], async () => {
+    const answered = await runAssistantOrchestrator({
+      mode: "general", sessionId: "vision-loop", userMessage: "what's in cat.png?", vision: vision.vision
+    });
+    assert.deepEqual(vision.calls, [{ names: ["cat.png"], question: "" }], "the stand-in looked, not the scripted model");
+    assert.match(answered.assistantMessage, /cat on a keyboard/);
+  });
 });
 
 test("the chat route takes a message with an image larger than other routes allow", async () => {

@@ -27,7 +27,7 @@ import { emptySeries, normalisedToPeak, pushSample, type Series } from "../lib/t
 import { readStoredPersonality, writeStoredPersonality } from "../lib/personality";
 import { defaultAccent, readStoredAccent, writeStoredAccent, type Accent } from "../lib/theme";
 import {
-  defaultPersonality, personalityById, readFlow,
+  asksAboutTheScreen, defaultPersonality, personalityById, readFlow,
   speakableText, type Agent, type PersonalityId
 } from "@ascend/shared";
 import { chooseAgent, readActiveAgent } from "../lib/agents";
@@ -40,6 +40,7 @@ import { DocumentsPanel } from "../components/DocumentsPanel";
 import {
   acceptedImageTypes, defaultImageQuestion, maxAttachments, prepareImage, refuseImage, type Attachment
 } from "../lib/imageAttach";
+import { canShareScreen, shareScreen } from "../lib/screenShare";
 import "./dash.css";
 import "./trhai.css";
 
@@ -269,6 +270,17 @@ function Dashboard() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachNote, setAttachNote] = useState<string | null>(null);
   const imagePicker = useRef<HTMLInputElement>(null);
+  // While the screen is being shared - the browser's prompt open, or the
+  // desktop app taking the picture.
+  const [sharing, setSharing] = useState(false);
+  // Whether this page can share the screen at all. Answered after mount: the
+  // server cannot know, and a SCREEN button rendered differently there would
+  // fail hydration for the whole tree.
+  const [screenShareable, setScreenShareable] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a browser capability, unknowable on the server
+    setScreenShareable(canShareScreen());
+  }, []);
   // The core's box, measured, so the globe is drawn at the size CSS gave it.
   const coreBox = useRef<HTMLDivElement>(null);
   const coreWidth = useElementWidth(coreBox);
@@ -607,7 +619,23 @@ function Dashboard() {
 
   function ask(text: string) {
     const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || busy) return;
+    if ((!trimmed && attachments.length === 0) || busy || sharing) return;
+    // A question about the screen with no picture of it: share the screen,
+    // then send the two together. The words stay in the box until then, so a
+    // cancelled share loses nothing - a spoken one is put there too.
+    if (attachments.length === 0 && asksAboutTheScreen(trimmed)) {
+      void addScreen().then((shots) => {
+        if (!shots) {
+          setDraft((existing) => (existing.trim() ? existing : trimmed));
+          return;
+        }
+        setDraft("");
+        cues.play("send");
+        for (const shot of shots) URL.revokeObjectURL(shot.previewUrl);
+        void send(trimmed, shots.map(({ name, data }) => ({ name, data })));
+      });
+      return;
+    }
     setDraft("");
     cues.play("send");
     const images = attachments.map(({ name, data }) => ({ name, data }));
@@ -635,6 +663,29 @@ function Dashboard() {
       if (prepared.length > 0) void apiPost("/v1/vision/warm", {});
     } catch {
       setAttachNote("That image could not be read.");
+    }
+  }
+
+  // A picture of the screen, for the next message; see screenShare.ts. Null
+  // when it was not shared, with the reason shown above the box.
+  async function addScreen(): Promise<Attachment[] | null> {
+    setSharing(true);
+    try {
+      const shared = await shareScreen();
+      if (!shared.ok) {
+        setAttachNote(shared.reason);
+        return null;
+      }
+      const room = Math.max(0, maxAttachments - attachments.length);
+      for (const extra of shared.shots.slice(room)) URL.revokeObjectURL(extra.previewUrl);
+      const shots = shared.shots.slice(0, room);
+      setAttachNote(shots.length < shared.shots.length ? `Up to ${maxAttachments} images can go with one message.` : null);
+      if (shots.length === 0) return null;
+      // The vision model loads while the question is typed.
+      void apiPost("/v1/vision/warm", {});
+      return shots;
+    } finally {
+      setSharing(false);
     }
   }
 
@@ -842,6 +893,20 @@ function Dashboard() {
       title: "Show TRH AI an image: pick one here, paste one into the box, or drop one on the core. Looked at on this PC.",
       onClick: () => imagePicker.current?.click(),
       icon: <><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></>
+    },
+    {
+      label: "SCREEN", live: sharing, enabled: !busy && !sharing && screenShareable,
+      title: screenShareable
+        ? "Show TRH AI your screen with the next message - or just ask \"what's on my screen?\". Taken only when you ask, looked at on this PC, never saved."
+        : "This browser can't share the screen",
+      onClick: () => {
+        void addScreen().then((shots) => {
+          if (!shots) return;
+          setAttachments((prior) => [...prior, ...shots].slice(0, maxAttachments));
+          inputRef.current?.focus();
+        });
+      },
+      icon: <><rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M8 20h8M12 16v4" /></>
     },
     {
       label: "MEMORY", live: view === "memory", enabled: true, title: "Open memory",
