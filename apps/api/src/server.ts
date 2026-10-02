@@ -61,6 +61,7 @@ import { pickAuthorModel } from "./services/appAuthor.js";
 import { readPreferences, updatePreferences } from "./services/preferences.js";
 import { getBuildInfo } from "./services/buildInfo.js";
 import { getSystemCapabilities, toolsByLevel } from "./services/systemCapabilities.js";
+import { describeTools, probeTools } from "./services/toolCenter.js";
 import { addTask, listTasks, removeTask, setTaskDone } from "./services/taskListStore.js";
 import {
   clearPendingConfirmation,
@@ -1112,6 +1113,18 @@ export function createApp() {
 
     res.json({
       data: { ...capabilities, groups: toolsByLevel(capabilities) },
+      traceId: "trace-local"
+    });
+  });
+
+  // The Tool center: every tool there is, including one switched off, with
+  // what it is for in plain words, whether it can run on this PC right now
+  // and why not, and how often it has run. /v1/capabilities stays what the
+  // model is offered this moment; this is the whole set, for a person.
+  app.get("/v1/tools", async (_req, res) => {
+    const probe = await probeTools();
+    res.json({
+      data: { tools: describeTools(probe), model: probe.model, machineAccess: probe.machineAccess },
       traceId: "trace-local"
     });
   });

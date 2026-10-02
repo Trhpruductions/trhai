@@ -44,6 +44,7 @@ import { explainMiss } from "./projectContext.js";
 import { activeProject, impliedFileFor, noteFileTouched, noteProjectTouched, withinActiveProject } from "./activeProject.js";
 import { applyEdit, describeEdit, placeholderIn, replacesMostOf } from "./fileEdit.js";
 import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
+import { recordToolUse } from "./toolUsage.js";
 import { enterStage } from "./reasoningStage.js";
 import {
   addSchedule, describeAction, describeCadence, listSchedules, type Cadence
@@ -1634,7 +1635,28 @@ function writesAShortenedView(content: string): string | null {
     : null;
 }
 
+/**
+ * Run one tool call, and count it.
+ *
+ * Every tool call in the app passes through here, so the Tool center's "last
+ * used" is true of every call rather than of the ones someone remembered to
+ * count. Only registered tools are counted: a name the model invented is not
+ * a tool, and has no row to count it in.
+ */
 export async function runTool(call: ToolCall, context: ToolContext): Promise<ToolResult> {
+  const started = Date.now();
+  const registered = toolDefinitions.some((definition) => definition.function.name === call.name);
+  try {
+    const result = await runToolUncounted(call, context);
+    if (registered) recordToolUse(call.name, result.needsConfirmation ? "held" : result.ok ? "ok" : "no-result", Date.now() - started);
+    return result;
+  } catch (error) {
+    if (registered) recordToolUse(call.name, "no-result", Date.now() - started);
+    throw error;
+  }
+}
+
+async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<ToolResult> {
   // The permission gate, applied once here rather than inside each handler.
   //
   // Every tool call in the app goes through this function, so this is the
