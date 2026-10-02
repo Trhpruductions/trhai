@@ -19,7 +19,7 @@ import {
 } from "../src/services/agentLoop.js";
 import { availableTools, runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
 import { mentionsDocument, namesAFilePath } from "../src/services/actionIntent.js";
-import type { LocalModelConfig } from "../src/services/localModel.js";
+import { defaultContextTokens, minimumContextTokens, type LocalModelConfig } from "../src/services/localModel.js";
 
 const at = new Date("2026-08-17T12:00:00Z").toISOString();
 
@@ -1226,6 +1226,47 @@ test("the current date is stated to the model, not left to a tool call", async (
     // The fixed clock in this context is 17 August 2026.
     assert.match(system?.content ?? "", /2026/);
     assert.match(system?.content ?? "", /never say the date is unknown/);
+  } finally {
+    server.close();
+  }
+});
+
+test("every request asks for a context window the whole prompt fits in", async () => {
+  // Ollama ran the model at its 4,096-token default, and the prompt - rules
+  // plus tool descriptions - is bigger than that. It was cut from the front on
+  // nearly every turn ("truncating input prompt limit=2050 prompt=4443"), so
+  // the model never saw its instructions.
+  const { server, baseUrl, received } = await fakeModel([
+    toolCall("current_datetime", {}),
+    answer("It is Monday.")
+  ]);
+
+  try {
+    await runAgent(configFor(baseUrl), "what day is it today?", context);
+
+    assert.equal(received.length, 2);
+    for (const request of received as Array<{ options?: { num_ctx?: number } }>) {
+      assert.equal(request.options?.num_ctx, defaultContextTokens, "each round, not only the first");
+    }
+    // The prompt this window has to hold, measured rather than assumed.
+    const firstRequest = received[0] as { messages: Array<{ content: string }>; tools?: unknown[] };
+    const promptChars = JSON.stringify(firstRequest.messages).length + JSON.stringify(firstRequest.tools ?? []).length;
+    assert.ok(promptChars / 3 < defaultContextTokens / 2,
+      `${promptChars} characters of prompt should leave at least half the window for results and the reply`);
+  } finally {
+    server.close();
+  }
+});
+
+test("a configured window is used, and one too small to hold the prompt is raised", async () => {
+  const { server, baseUrl, received } = await fakeModel([answer("Hello."), answer("Hello.")]);
+
+  try {
+    await runAgent({ ...configFor(baseUrl), contextTokens: 32768 }, "hello", context);
+    await runAgent({ ...configFor(baseUrl), contextTokens: 2048 }, "hello", context);
+
+    const windows = (received as Array<{ options?: { num_ctx?: number } }>).map((request) => request.options?.num_ctx);
+    assert.deepEqual(windows, [32768, minimumContextTokens]);
   } finally {
     server.close();
   }

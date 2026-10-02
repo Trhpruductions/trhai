@@ -35,13 +35,61 @@ export type LocalModelConfig = {
   modelFromEnv: boolean;
   /** How long to wait before giving up on a reply. */
   timeoutMs: number;
+  /**
+   * The context window to run the model with, in tokens. Optional so a config
+   * built by hand still works; contextWindow() supplies the default.
+   */
+  contextTokens?: number;
 };
+
+/**
+ * The context window every request asks for, unless OLLAMA_NUM_CTX says
+ * otherwise.
+ *
+ * Ollama runs a model with a 4,096-token window unless the request names one,
+ * and the assistant's own prompt is bigger than that: about 1,400 tokens of
+ * instructions and up to 5,000 of tool descriptions, before the question. A
+ * prompt that does not fit is not refused. It is cut, silently, keeping only
+ * the last half of the window, which is the end of the tool list and the
+ * question. Ollama's own log showed it on almost every turn ("truncating input
+ * prompt limit=2050 prompt=4443"), so the model answered without the rules,
+ * the date, the workspace or most of its tools. It invented a "translate" tool,
+ * reached for run_command because it was one of the few tools it could still
+ * see, and once echoed the tool-calling template back as its whole reply.
+ *
+ * 16,384 holds the prompt, a few rounds of tool results and the reply. On a
+ * 7B model the larger window costs about 0.7 GB more than the default.
+ */
+export const defaultContextTokens = 16384;
+/**
+ * Below this the prompt alone does not fit, so a smaller setting is raised to
+ * it: a window that cuts the instructions off is never what was meant.
+ */
+export const minimumContextTokens = 8192;
+
+export function contextWindow(config: Pick<LocalModelConfig, "contextTokens">): number {
+  const requested = config.contextTokens;
+  if (typeof requested !== "number" || !Number.isFinite(requested) || requested <= 0) return defaultContextTokens;
+  return Math.max(minimumContextTokens, Math.floor(requested));
+}
+
+/**
+ * The options sent with every request to the model.
+ *
+ * The same on every call, so the model is not reloaded between them: Ollama
+ * restarts a model whose window changes, and a different window for the agent
+ * and for app authoring would reload it on every switch.
+ */
+export function modelOptions(config: Pick<LocalModelConfig, "contextTokens">): { num_ctx: number } {
+  return { num_ctx: contextWindow(config) };
+}
 
 export function readLocalModelConfig(env: NodeJS.ProcessEnv = process.env): LocalModelConfig {
   return {
     baseUrl: (env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/+$/, ""),
     model: env.OLLAMA_MODEL ?? "vexora:latest",
     modelFromEnv: Boolean(env.OLLAMA_MODEL),
+    contextTokens: contextWindow({ contextTokens: env.OLLAMA_NUM_CTX ? Number(env.OLLAMA_NUM_CTX) : undefined }),
     // Local inference on CPU is slow, and the first request after a launch is
     // slower still: the model has to be read into memory before it can answer
     // anything, which for an 8B model is several gigabytes off disk.
@@ -273,7 +321,12 @@ export async function generate(
         // Streaming would let the UI show tokens as they arrive, but this API
         // returns one JSON reply per request, so a single response is simpler
         // and the client is not built for a stream yet.
-        body: JSON.stringify({ model: config.model, prompt: request.rawPrompt ?? buildPrompt(request), stream: false }),
+        body: JSON.stringify({
+          model: config.model,
+          prompt: request.rawPrompt ?? buildPrompt(request),
+          stream: false,
+          options: modelOptions(config)
+        }),
         signal
       }));
 

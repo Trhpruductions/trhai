@@ -5,7 +5,11 @@ import { AddressInfo } from "node:net";
 import {
   buildPrompt,
   checkAvailability,
+  contextWindow,
+  defaultContextTokens,
   generate,
+  minimumContextTokens,
+  modelOptions,
   pickModel,
   readLocalModelConfig,
   type LocalModelConfig, orderedCandidates } from "../src/services/localModel.js";
@@ -62,6 +66,26 @@ test("configuration is overridable and a trailing slash does not break the URL",
   assert.equal(config.baseUrl, "http://192.168.1.5:11434");
   assert.equal(config.model, "mistral");
   assert.equal(config.timeoutMs, 1234);
+});
+
+test("the context window defaults to one the assistant's prompt fits in", () => {
+  // Ollama's own default is 4,096 tokens, and the prompt is bigger than that:
+  // it was cut from the front on nearly every turn, rules first.
+  assert.equal(readLocalModelConfig({} as NodeJS.ProcessEnv).contextTokens, defaultContextTokens);
+  assert.ok(defaultContextTokens >= 16384);
+  assert.equal(contextWindow({}), defaultContextTokens, "a config built by hand gets it too");
+});
+
+test("the context window can be set, but never below what the prompt needs", () => {
+  const read = (value: string) => readLocalModelConfig({ OLLAMA_NUM_CTX: value } as NodeJS.ProcessEnv).contextTokens;
+
+  assert.equal(read("32768"), 32768);
+  // Smaller than the prompt is never what was meant: raised, not obeyed.
+  assert.equal(read("4096"), minimumContextTokens);
+  // Not a number at all is ignored rather than sent to the model as NaN.
+  assert.equal(read("lots"), defaultContextTokens);
+  assert.equal(read("0"), defaultContextTokens);
+  assert.deepEqual(modelOptions({ contextTokens: 20000.7 }), { num_ctx: 20000 });
 });
 
 test("no server at all is reported as unavailable, not as an error", async () => {
@@ -126,9 +150,12 @@ test("a server with nothing pulled says how to pull it", async () => {
 test("a generated answer comes back with the model that produced it", async () => {
   const { server, baseUrl } = await fakeOllama((url, body) => {
     assert.equal(url, "/api/generate");
-    const request = body as { model: string; stream: boolean; prompt: string };
+    const request = body as { model: string; stream: boolean; prompt: string; options?: { num_ctx?: number } };
     assert.equal(request.stream, false);
     assert.match(request.prompt, /Question: What is the capital of France\?/);
+    // The same window as the agent's requests, so switching between them does
+    // not make Ollama reload the model.
+    assert.equal(request.options?.num_ctx, defaultContextTokens);
     return { status: 200, payload: { model: "llama3.2:latest", response: "  Paris.  " } };
   });
 
