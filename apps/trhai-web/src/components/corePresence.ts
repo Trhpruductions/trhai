@@ -92,7 +92,7 @@ export function coreStateForTool(tool: string): CoreState {
 }
 
 /** The bottom rail. At most one is lit, and it is lit by real state. */
-export const stages = ["ENGAGED", "LISTENING", "THINKING", "EXECUTING", "COMPLETE"] as const;
+export const stages = ["ENGAGED", "LISTENING", "THINKING", "EXECUTING", "RESPONDING", "COMPLETE"] as const;
 
 /** Every core state that means a tool is genuinely mid-call. */
 export const workingStates: CoreState[] = ["searching", "reading", "writing", "analysing", "executing"];
@@ -102,7 +102,10 @@ export function activeStage(core: CoreState, hasConversation: boolean): string |
   // "engaged" — a conversation that existed a minute ago is not one now.
   if (core === "offline") return null;
   if (core === "listening") return "LISTENING";
-  if (core === "thinking" || core === "speaking") return "THINKING";
+  if (core === "thinking") return "THINKING";
+  // The answer is finished and being read out: lighting THINKING here claimed
+  // work that was no longer happening.
+  if (core === "speaking") return "RESPONDING";
   if (workingStates.includes(core)) return "EXECUTING";
   if (core === "success") return "COMPLETE";
   // "Engaged" means a conversation is genuinely under way, not merely that

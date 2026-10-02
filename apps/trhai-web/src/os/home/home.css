@@ -1,0 +1,255 @@
+/* Home - the command center. */
+
+.os-home { position: relative; padding-top: var(--os-2); }
+
+/* Its own row above the widgets, so it never sits on a widget's header. */
+.os-home-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--os-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-height: 30px;
+  margin-bottom: var(--os-2);
+}
+.os-hidden-tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--os-2);
+  padding: var(--os-3) var(--os-4);
+  border-radius: var(--os-r-lg);
+  border: 1px dashed var(--os-line-3);
+  margin-top: var(--os-8);
+}
+
+/* Widgets either side of the stage on a wide screen; under it otherwise. */
+.os-home-grid {
+  display: grid;
+  /* The side columns grow a little on very large screens, so the widgets keep
+     their proportion to the core rather than shrinking beside it. */
+  grid-template-columns: minmax(260px, clamp(330px, 15vw, 480px)) minmax(0, 1fr) minmax(260px, clamp(330px, 15vw, 480px));
+  grid-template-areas: "left stage right";
+  gap: var(--os-5);
+  align-items: start;
+}
+.os-home-zone { display: grid; gap: var(--os-4); align-content: start; min-height: 120px; min-width: 0; }
+.os-home-zone.left { grid-area: left; }
+.os-home-zone.right { grid-area: right; }
+.os-stage { grid-area: stage; }
+.os-home.editing .os-home-zone { padding: var(--os-2); border-radius: var(--os-r-lg); outline: 1px dashed var(--os-line-2); outline-offset: 4px; }
+.os-drop-hint { display: grid; place-items: center; min-height: 100px; border-radius: var(--os-r-lg); border: 1px dashed var(--os-line-3); color: var(--os-text-3); font-size: var(--os-fs-sm); }
+
+@media (max-width: 1440px) {
+  .os-home-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "stage stage" "left right";
+  }
+}
+@media (max-width: 860px) {
+  .os-home-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "left" "right"; }
+  .os-home-tools { justify-content: flex-start; }
+}
+
+/* ------------------------------------------------------------------ the stage */
+
+.os-stage {
+  display: grid;
+  justify-items: center;
+  gap: var(--os-4);
+  min-width: 0;
+  padding-top: var(--os-2);
+  /* The shade under the status words reaches past them on purpose; clipped
+     here so on a narrow screen it can never make the page scroll sideways. */
+  overflow-x: clip;
+}
+
+/* As large as the room allows: the key art is scaled so its globe matches
+   this one (Backdrop), so a bigger core is also what lets the art fill the
+   window. On a short window it keeps a usable size and Home scrolls instead. */
+.os-core-wrap {
+  position: relative;
+  width: min(100%, max(56vh, min(calc(100vh - 470px), 62vh)), 1240px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  transition: transform var(--os-slow) var(--os-ease);
+}
+.os-attentive .os-core-wrap { transform: scale(1.025); }
+.os-core-wrap > .coregl { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
+.os-core-wrap canvas { width: 100% !important; height: 100% !important; }
+
+.os-core-mark {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 0;
+  pointer-events: none;
+  font-family: var(--os-font-display);
+  text-shadow: 0 0 18px rgba(59, 212, 255, 0.45);
+}
+.os-core-mark span { font-size: clamp(22px, 3.4vw, 38px); font-weight: 700; letter-spacing: 0.22em; padding-left: 0.22em; }
+.os-core-mark em { font-style: normal; font-size: clamp(11px, 1.3vw, 15px); letter-spacing: 0.6em; padding-left: 0.6em; color: var(--os-accent-hi); }
+
+/* Over the lit scene: a soft shadow under the words keeps them readable on the
+   beam and the pedestal without boxing them in. */
+.os-status-block { position: relative; isolation: isolate; display: grid; justify-items: center; gap: var(--os-2); text-align: center; max-width: 640px; text-shadow: 0 1px 14px rgba(0, 0, 0, 0.75), 0 0 2px rgba(0, 0, 0, 0.6); }
+/* A pool of shade under the words, where they cross the pedestal's bright
+   rings. Soft-edged, so it reads as the scene being darker there, not a box. */
+.os-status-block::before {
+  content: "";
+  position: absolute;
+  inset: -30px -110px -26px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgba(2, 5, 12, 0.8), rgba(2, 5, 12, 0.55) 55%, rgba(2, 5, 12, 0));
+}
+.os-state-word {
+  margin: 0;
+  font-family: var(--os-font-display);
+  font-size: var(--os-fs-3xl);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1.1;
+  transition: color var(--os-med) var(--os-ease), text-shadow var(--os-med) var(--os-ease);
+}
+.os-state-word.idle { color: var(--os-text); }
+.os-state-word.listen, .os-state-word.speak { color: var(--os-accent-hi); text-shadow: 0 0 22px var(--os-accent-line); }
+.os-state-word.think, .os-state-word.work { color: #c3b9ff; text-shadow: 0 0 22px rgba(143, 128, 255, 0.4); }
+.os-state-word.ok { color: var(--os-ok); }
+.os-state-word.danger { color: var(--os-danger); }
+.os-state-word.off { color: var(--os-text-3); }
+.os-state-detail { margin: 0; color: var(--os-text-2); font-size: var(--os-fs-md); max-width: 60ch; overflow-wrap: anywhere; }
+
+.os-stages { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin: var(--os-1) 0 0; padding: 0; list-style: none; }
+.os-stages li {
+  position: relative;
+  padding: 4px 10px;
+  border-radius: var(--os-r-pill);
+  font: 500 var(--os-fs-2xs)/1.3 var(--os-font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--os-text-3);
+  border: 1px solid transparent;
+}
+.os-stages li.active { color: var(--os-accent-hi); border-color: var(--os-accent-line); background: var(--os-accent-soft); }
+
+.os-reply { width: min(760px, 100%); padding: var(--os-4) var(--os-5); display: grid; gap: var(--os-3); animation: os-enter var(--os-med) var(--os-ease) both; }
+.os-reply-asked { margin: 0; display: grid; gap: 2px; color: var(--os-text-2); font-size: var(--os-fs-sm); padding-bottom: var(--os-3); border-bottom: 1px solid var(--os-line); }
+.os-reply-body { display: grid; gap: var(--os-1); min-width: 0; max-height: 46vh; overflow-y: auto; }
+.os-confirm { display: flex; flex-wrap: wrap; gap: var(--os-2); }
+.os-reply-actions { display: flex; flex-wrap: wrap; gap: var(--os-1); padding-top: var(--os-2); border-top: 1px solid var(--os-line); }
+
+.os-starters { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--os-2); max-width: 720px; }
+.os-starter {
+  padding: 8px 14px;
+  border-radius: var(--os-r-pill);
+  border: 1px solid var(--os-line-2);
+  background: rgba(10, 16, 30, 0.55);
+  color: var(--os-text-2);
+  font: 500 var(--os-fs-sm)/1.2 var(--os-font-body);
+  cursor: pointer;
+  transition: border-color var(--os-fast) var(--os-ease), color var(--os-fast) var(--os-ease), background var(--os-fast) var(--os-ease);
+}
+.os-starter:hover:not(:disabled) { border-color: var(--os-accent-line); color: var(--os-text); background: var(--os-accent-soft); }
+.os-starter:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.os-render { width: min(760px, 100%); overflow: hidden; }
+.os-render-frame { display: block; width: 100%; height: min(420px, 50vh); border: 0; border-top: 1px solid var(--os-line); margin-top: var(--os-3); background: #fff; }
+
+/* The reply's markdown, readable on glass. */
+.os-markdown { color: var(--os-text); font-size: var(--os-fs-md); line-height: 1.6; overflow-wrap: anywhere; }
+.os-markdown p { margin: 0 0 0.6em; }
+.os-markdown p:last-child { margin-bottom: 0; }
+.os-markdown code { font-family: var(--os-font-mono); font-size: 0.92em; padding: 1px 5px; border-radius: 4px; background: rgba(128, 168, 255, 0.1); }
+.os-markdown pre { margin: 0.6em 0; padding: var(--os-3); border-radius: var(--os-r-md); background: rgba(3, 6, 12, 0.8); border: 1px solid var(--os-line); overflow-x: auto; }
+.os-markdown pre code { padding: 0; background: none; }
+.os-markdown ul, .os-markdown ol { margin: 0.4em 0 0.6em; padding-left: 1.3em; }
+.os-markdown a { color: var(--os-accent-hi); }
+.os-markdown blockquote { margin: 0.5em 0; padding: 0.2em 0.9em; border-left: 3px solid var(--os-accent-line); color: var(--os-text-2); }
+
+/* ------------------------------------------------------------------ widgets */
+
+.os-widget { animation: os-enter var(--os-slow) var(--os-ease) both; }
+.os-widget.editing { cursor: grab; }
+.os-widget.editing:active { cursor: grabbing; }
+.os-widget.pinned { border-color: var(--os-accent-line); }
+.os-widget-tools { display: flex; gap: 2px; flex: none; }
+.os-grip { color: var(--os-text-3); }
+
+.os-readings { display: grid; gap: var(--os-3); }
+.os-reading { display: grid; gap: 4px; }
+.os-reading-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--os-2); }
+.os-reading-value { font-size: var(--os-fs-md); color: var(--os-text); }
+.os-reading-note { font-size: var(--os-fs-xs); color: var(--os-text-3); }
+
+.os-trend { position: relative; width: 100%; color: var(--os-accent); }
+.os-trend.violet { color: var(--os-violet); }
+.os-trend.ok { color: var(--os-ok); }
+.os-trend.warn { color: var(--os-warn); }
+.os-trend.danger { color: var(--os-danger); }
+.os-trend svg { display: block; overflow: visible; }
+.os-trend-grid { stroke: rgba(128, 168, 255, 0.07); stroke-width: 1; }
+.os-trend-line { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.os-trend-stop-top { stop-color: currentColor; stop-opacity: 0.32; }
+.os-trend-stop-bottom { stop-color: currentColor; stop-opacity: 0; }
+.os-trend-tip { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+.os-trend-empty { display: grid; place-items: center; border-radius: var(--os-r-sm); background: rgba(128, 168, 255, 0.04); }
+.os-trend-empty span { font: 400 var(--os-fs-2xs)/1 var(--os-font-mono); color: var(--os-text-3); }
+
+.os-kv { margin: 0; display: grid; gap: 6px; padding-top: var(--os-2); border-top: 1px solid var(--os-line); }
+.os-kv div { display: flex; justify-content: space-between; gap: var(--os-3); font-size: var(--os-fs-sm); }
+.os-kv dt { color: var(--os-text-2); }
+.os-kv dd { margin: 0; color: var(--os-text); text-align: right; }
+
+.os-health { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: var(--os-4); align-items: center; }
+.os-health-ring { position: relative; width: 76px; height: 76px; display: grid; place-items: center; }
+.os-health-ring svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.os-ring-track { fill: none; stroke: rgba(128, 168, 255, 0.12); stroke-width: 5; }
+.os-ring-live { fill: none; stroke: var(--os-ok); stroke-width: 5; stroke-linecap: round; transition: stroke-dashoffset var(--os-slow) var(--os-ease); }
+.os-ring-live.warn { stroke: var(--os-warn); }
+.os-health-ring span { font-size: var(--os-fs-md); font-weight: 600; }
+.os-health-rows { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.os-health-rows li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: var(--os-2); align-items: center; font-size: var(--os-fs-sm); }
+
+.os-modules { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.os-modules li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: var(--os-2); align-items: center; font-size: var(--os-fs-sm); }
+.os-module-detail { grid-column: 2 / -1; color: var(--os-text-3); font-size: var(--os-fs-xs); margin-top: -4px; }
+
+.os-activity { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.os-activity li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "time source" "time text";
+  column-gap: var(--os-3);
+  padding: 6px 0 6px var(--os-3);
+  border-left: 2px solid var(--os-line-2);
+  animation: os-enter var(--os-med) var(--os-ease) both;
+}
+.os-activity li.ok { border-left-color: rgba(61, 220, 151, 0.6); }
+.os-activity li.accent { border-left-color: var(--os-accent-line); }
+.os-activity li.warn { border-left-color: rgba(255, 182, 72, 0.6); }
+.os-activity li.danger { border-left-color: rgba(255, 95, 115, 0.7); }
+.os-activity-time { grid-area: time; font-size: var(--os-fs-2xs); color: var(--os-text-3); padding-top: 1px; }
+.os-activity-source { grid-area: source; font: 500 var(--os-fs-2xs)/1.3 var(--os-font-mono); letter-spacing: 0.1em; color: var(--os-text-3); }
+.os-activity-text { grid-area: text; font-size: var(--os-fs-sm); color: var(--os-text); overflow-wrap: anywhere; }
+
+.os-tasks-widget { display: grid; gap: var(--os-3); justify-items: start; }
+.os-counts { width: 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--os-2); }
+.os-counts div { display: grid; gap: 2px; padding: var(--os-2); border-radius: var(--os-r-md); background: rgba(128, 168, 255, 0.05); text-align: center; }
+.os-counts strong { font-size: var(--os-fs-xl); font-weight: 600; }
+.os-counts span { font: 500 var(--os-fs-2xs)/1.2 var(--os-font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--os-text-3); }
+.os-counts .warn strong { color: var(--os-warn); }
+.os-todo-peek { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; width: 100%; }
+.os-todo-peek li { display: flex; gap: var(--os-2); align-items: center; font-size: var(--os-fs-sm); overflow-wrap: anywhere; }
+
+.os-upcoming { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--os-2); }
+.os-upcoming li { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name chip" "when chip"; column-gap: var(--os-2); align-items: center; }
+.os-upcoming-name { grid-area: name; font-size: var(--os-fs-sm); color: var(--os-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-upcoming li > .os-faint { grid-area: when; font-size: var(--os-fs-xs); }
+.os-upcoming .os-chip { grid-area: chip; }
+
+.os-voice-widget { display: grid; gap: var(--os-3); }
+.os-wave { display: flex; align-items: center; justify-content: center; gap: 3px; height: 34px; }
+.os-wave span { width: 3px; border-radius: 2px; background: linear-gradient(180deg, var(--os-accent-hi), var(--os-accent)); opacity: 0.85; transition: height 90ms linear; }

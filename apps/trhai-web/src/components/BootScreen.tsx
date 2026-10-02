@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { CoreGL } from "./CoreGL";
 import { ParticleField } from "./ParticleField";
 import type { CoreState } from "./Core";
+import { useElementWidth } from "../hooks/useElementWidth";
 import { apiBaseUrl } from "../lib/api";
 import { browserStores, readStoredAuth, type SignedInAccount } from "../lib/auth";
 import { bootProgress, checkService, checkTheRest, initialSteps, type BootState, type BootStep } from "../lib/boot";
@@ -43,6 +44,8 @@ export function BootScreen({ onReady }: { onReady: (result: BootResult) => void 
   const [version, setVersion] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   const finished = useRef(false);
+  const coreBox = useRef<HTMLDivElement>(null);
+  const coreWidth = useElementWidth(coreBox);
   // Read through a ref so a parent re-render cannot restart the checks.
   const ready = useRef(onReady);
   useEffect(() => { ready.current = onReady; }, [onReady]);
@@ -95,21 +98,18 @@ export function BootScreen({ onReady }: { onReady: (result: BootResult) => void 
   const current = steps.find((step) => step.state === "running");
 
   return (
-    <div className={`gate${leaving ? " leaving" : ""}`} role="status" aria-live="polite" aria-label="TRH AI is starting">
+    <div className={`gate gate-booting${leaving ? " leaving" : ""}`} role="status" aria-live="polite" aria-label="TRH AI is starting">
       <ParticleField state={core} className="gate-particles" />
-      <div className="gate-boot">
-        <div className="gate-core" style={{ width: 236, height: 236 }}>
-          <svg className="gate-rings" viewBox="0 0 100 100" aria-hidden="true">
-            <circle className="gate-ring-1" cx="50" cy="50" r="49" />
-            <circle className="gate-ring-2" cx="50" cy="50" r="45" />
-          </svg>
-          <CoreGL state={core} size={236} />
-          <div className="gate-core-mark" aria-hidden="true">
-            <span style={{ fontSize: 22 }}>TRH</span>
-            <em style={{ fontSize: 12 }}>AI</em>
-          </div>
+      {/* Standing exactly on the key art's own globe (gate.css), at its size,
+          so the start-up screen shows one globe rather than two. */}
+      <div className="gate-core" ref={coreBox}>
+        <CoreGL state={core} size={coreWidth ?? 420} />
+        <div className="gate-core-mark" aria-hidden="true">
+          <span>TRH</span>
+          <em>AI</em>
         </div>
-
+      </div>
+      <div className="gate-boot">
         <h1 className="gate-wordmark">TRH AI</h1>
         <p className="gate-tagline">LIVING INTELLIGENCE SYSTEM</p>
 

@@ -1,0 +1,55 @@
+/*
+ * The panels built for the previous dashboard, brought into the new design.
+ * They keep their own stylesheets; this only aligns the shared primitives
+ * with the system's glass - same radius, same surfaces, labels in the system
+ * face, no corner brackets - until each is rebuilt in its workspace.
+ */
+
+.os .hud-panel {
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-lg);
+  box-shadow: var(--os-inner), var(--os-shadow-2);
+  padding: var(--os-4);
+  gap: var(--os-3);
+}
+.os .hud-panel::before,
+.os .hud-panel::after { display: none; }
+@media (hover: hover) {
+  .os .hud-panel:hover { transform: none; border-color: var(--os-line-2); box-shadow: var(--os-inner), var(--os-shadow-2); }
+}
+
+.os .hud-label {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: var(--os-text-2);
+}
+
+.os .btn {
+  min-height: 34px;
+  padding: 0 var(--os-3);
+  border-radius: var(--os-r-md);
+  border-color: var(--os-line-2);
+  background: var(--os-surface-2);
+  font: 500 var(--os-fs-sm)/1 var(--os-font-body);
+}
+.os .btn:hover:not(:disabled) { background: var(--os-surface-hover); border-color: var(--os-line-3); }
+.os .btn-primary { background: var(--os-accent); border-color: var(--os-accent); color: #021019; font-weight: 600; }
+.os .btn-primary:hover:not(:disabled) { background: var(--os-accent-hi); box-shadow: none; }
+.os .btn-ghost { background: transparent; border-color: transparent; color: var(--os-text-2); }
+
+.os .field {
+  min-height: 36px;
+  padding: 0 var(--os-3);
+  border-color: var(--os-line-2);
+  background: rgba(5, 9, 18, 0.7);
+  font-size: var(--os-fs-md);
+}
+.os .field:focus-visible { border-color: var(--os-accent-line); box-shadow: 0 0 0 3px var(--os-accent-soft); }
+
+.os .chip { font: 500 var(--os-fs-2xs)/1.6 var(--os-font-mono); letter-spacing: 0.06em; }
+
+/* The work view brings its own two-pane layout; let it fill the workspace. */
+.os .os-files-host { min-height: 60vh; }

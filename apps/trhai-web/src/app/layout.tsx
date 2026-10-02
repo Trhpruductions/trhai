@@ -1,27 +1,31 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Orbitron } from "next/font/google";
+import { Geist, Geist_Mono, Orbitron, Oxanium } from "next/font/google";
 import { themeBootScript } from "../lib/theme";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 const orbitron = Orbitron({ variable: "--font-orbitron", subsets: ["latin"], weight: ["500", "700"] });
+// The system's display face: names, states and headings. Technical without
+// shouting; Geist carries everything that is read at length.
+const oxanium = Oxanium({ variable: "--font-oxanium", subsets: ["latin"], weight: ["400", "500", "600", "700"] });
 
 export const metadata: Metadata = {
-  title: "TRHAI",
-  description: "A local-first AI command centre."
+  title: "TRH AI",
+  description: "TRH AI - a living intelligence system that runs on this PC."
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${orbitron.variable} h-full`}
-      // The theme-boot script in <head> sets data-accent from localStorage
-      // before React hydrates, which the server has no way to know in
-      // advance. That one attribute is expected to differ on first paint —
-      // this is the documented pattern for exactly that, and it is scoped to
-      // <html> rather than being a blanket "ignore hydration issues here".
+      className={`${geistSans.variable} ${geistMono.variable} ${orbitron.variable} ${oxanium.variable} h-full`}
+      // The theme-boot script in <head> sets data-accent and data-backdrop
+      // from localStorage before React hydrates, which the server has no way
+      // to know in advance. Those attributes are expected to differ on first
+      // paint — this is the documented pattern for exactly that, and it is
+      // scoped to <html> rather than being a blanket "ignore hydration issues
+      // here".
       // Nothing else in the tree relies on it: the clocks that used to
       // mismatch now render nothing until mounted instead.
       suppressHydrationWarning

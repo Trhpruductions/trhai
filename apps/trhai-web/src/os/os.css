@@ -1,0 +1,435 @@
+/*
+ * TRH AI operating environment - the design system.
+ *
+ * One dark world, deliberately: deep black and near-black navy, an electric
+ * signal colour (the user's accent, cyan by default), a little violet for
+ * thought, and white used sparingly for what must be read. Depth comes from
+ * layered glass and shadow rather than from glow; glow is kept for live state.
+ *
+ * Every colour, size, radius and timing used by the shell and the workspaces
+ * is a token here. The older panels read the --bg-*, --line, --text and
+ * --accent names, so those are pointed at the same palette below and every
+ * screen agrees with every other.
+ */
+
+:root {
+  /* Surfaces, darkest first. */
+  --os-void: #030509;
+  --os-bg: #05080f;
+  --os-bg-2: #080d18;
+  --os-surface: rgba(12, 19, 34, 0.66);
+  --os-surface-2: rgba(17, 27, 47, 0.78);
+  --os-surface-solid: #0b1322;
+  --os-surface-hover: rgba(30, 46, 78, 0.55);
+  --os-scrim: rgba(2, 4, 9, 0.62);
+
+  /* Lines. */
+  --os-line: rgba(128, 168, 255, 0.11);
+  --os-line-2: rgba(128, 168, 255, 0.19);
+  --os-line-3: rgba(128, 168, 255, 0.32);
+
+  /* Text: one bright, two quieter. */
+  --os-text: #e8f1ff;
+  --os-text-2: #a7b7cf;
+  --os-text-3: #6e7f9c;
+
+  /* Signal colours. The accent follows the user's choice (theme.ts). */
+  --os-accent: #3bd4ff;
+  --os-accent-hi: #8ee9ff;
+  --os-accent-soft: rgba(59, 212, 255, 0.13);
+  --os-accent-line: rgba(59, 212, 255, 0.42);
+  --os-violet: #8f80ff;
+  --os-violet-soft: rgba(143, 128, 255, 0.14);
+
+  /* Meaning, never decoration. */
+  --os-ok: #3ddc97;
+  --os-ok-soft: rgba(61, 220, 151, 0.13);
+  --os-warn: #ffb648;
+  --os-warn-soft: rgba(255, 182, 72, 0.13);
+  --os-danger: #ff5f73;
+  --os-danger-soft: rgba(255, 95, 115, 0.13);
+  --os-info: #63a8ff;
+
+  /* Type. Display for names and states, body for reading, mono for data. */
+  --os-font-display: var(--font-oxanium), "Segoe UI", system-ui, sans-serif;
+  --os-font-body: var(--font-geist-sans), "Segoe UI", system-ui, sans-serif;
+  --os-font-mono: var(--font-geist-mono), "Cascadia Mono", Consolas, monospace;
+  --os-fs-2xs: 10.5px;
+  --os-fs-xs: 11.5px;
+  --os-fs-sm: 12.5px;
+  --os-fs-md: 14px;
+  --os-fs-lg: 16px;
+  --os-fs-xl: 19px;
+  --os-fs-2xl: 24px;
+  --os-fs-3xl: 32px;
+
+  /* Space, on a 4px step. */
+  --os-1: 4px;
+  --os-2: 8px;
+  --os-3: 12px;
+  --os-4: 16px;
+  --os-5: 20px;
+  --os-6: 24px;
+  --os-8: 32px;
+  --os-10: 40px;
+
+  --os-r-sm: 6px;
+  --os-r-md: 10px;
+  --os-r-lg: 14px;
+  --os-r-xl: 20px;
+  --os-r-pill: 999px;
+
+  --os-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --os-shadow-2: 0 14px 34px rgba(0, 0, 0, 0.42);
+  --os-shadow-3: 0 30px 80px rgba(0, 0, 0, 0.6);
+  --os-inner: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --os-glow: 0 0 22px rgba(59, 212, 255, 0.28);
+  --os-blur: blur(18px) saturate(135%);
+
+  --os-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --os-fast: 130ms;
+  --os-med: 240ms;
+  --os-slow: 480ms;
+
+  /* The shell's own dimensions. */
+  --os-sidebar: 236px;
+  --os-sidebar-slim: 68px;
+  --os-topbar: 58px;
+
+  /* The older panels' names, pointed at the same palette. */
+  --bg-0: var(--os-bg);
+  --bg-1: var(--os-surface-solid);
+  --bg-2: #101a2d;
+  --bg-3: #16233b;
+  --line-subtle: var(--os-line);
+  --line: var(--os-line-2);
+  --line-strong: var(--os-line-3);
+  --text: var(--os-text);
+  --text-muted: var(--os-text-2);
+  --text-faint: var(--os-text-3);
+  --accent: var(--os-accent);
+  --accent-strong: var(--os-accent-hi);
+  --accent-quiet: var(--os-accent-soft);
+  --ok: var(--os-ok);
+  --warn: var(--os-warn);
+  --danger: var(--os-danger);
+  --font-display: var(--os-font-display);
+  --font-body: var(--os-font-body);
+  --font-mono: var(--os-font-mono);
+}
+
+/* The accent the user chose (Settings > Appearance). */
+:root[data-accent="violet"] {
+  --os-accent: #a78bff;
+  --os-accent-hi: #cbbcff;
+  --os-accent-soft: rgba(167, 139, 255, 0.14);
+  --os-accent-line: rgba(167, 139, 255, 0.45);
+  --os-glow: 0 0 22px rgba(167, 139, 255, 0.3);
+}
+:root[data-accent="emerald"] {
+  --os-accent: #34d6a0;
+  --os-accent-hi: #86f2cb;
+  --os-accent-soft: rgba(52, 214, 160, 0.13);
+  --os-accent-line: rgba(52, 214, 160, 0.42);
+  --os-glow: 0 0 22px rgba(52, 214, 160, 0.26);
+}
+:root[data-accent="amber"] {
+  --os-accent: #ffbf4d;
+  --os-accent-hi: #ffd98f;
+  --os-accent-soft: rgba(255, 191, 77, 0.13);
+  --os-accent-line: rgba(255, 191, 77, 0.42);
+  --os-glow: 0 0 22px rgba(255, 191, 77, 0.26);
+}
+
+/* Motion is slowed, not stopped: some browsers report reduced motion where
+   nobody asked for it, and a frozen core reads as a broken one. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --os-fast: 60ms;
+    --os-med: 120ms;
+    --os-slow: 200ms;
+  }
+}
+
+/* ------------------------------------------------------------------ the shell */
+
+.os {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-columns: var(--os-sidebar) minmax(0, 1fr);
+  background: var(--os-bg);
+  color: var(--os-text);
+  font-family: var(--os-font-body);
+  font-size: var(--os-fs-md);
+  line-height: 1.5;
+  overflow: hidden;
+  transition: grid-template-columns var(--os-med) var(--os-ease);
+}
+.os.os-slim { grid-template-columns: var(--os-sidebar-slim) minmax(0, 1fr); }
+
+/* The room the system lives in - the key art and its living layer - is
+   shell/Backdrop.tsx and backdrop.css. */
+
+.os-main {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: var(--os-topbar) minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.os-workspace {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.os-workspace:focus { outline: none; }
+
+/* A workspace's own frame: a title row and the work. */
+.os-view {
+  display: grid;
+  gap: var(--os-5);
+  padding: var(--os-5) var(--os-6) var(--os-6);
+  min-height: 100%;
+  align-content: start;
+  animation: os-enter var(--os-slow) var(--os-ease) both;
+}
+.os-view-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--os-4);
+  flex-wrap: wrap;
+}
+.os-view-title { display: grid; gap: 2px; min-width: 0; }
+.os-view-title h1 {
+  margin: 0;
+  font-family: var(--os-font-display);
+  font-size: var(--os-fs-2xl);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-wrap: balance;
+}
+.os-view-title p { margin: 0; color: var(--os-text-2); font-size: var(--os-fs-md); max-width: 70ch; }
+.os-view-actions { display: flex; gap: var(--os-2); flex-wrap: wrap; align-items: center; }
+
+@keyframes os-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ------------------------------------------------------------------ primitives */
+
+.os-label {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-fs-2xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--os-text-3);
+}
+.os-mono { font-family: var(--os-font-mono); font-variant-numeric: tabular-nums; }
+.os-dim { color: var(--os-text-2); }
+.os-faint { color: var(--os-text-3); }
+
+/* Glass. Border, fill and shadow mark a thing as a separate object, so this
+   is for objects - not for every block on the screen. */
+.os-panel {
+  position: relative;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-lg);
+  box-shadow: var(--os-inner), var(--os-shadow-2);
+  backdrop-filter: var(--os-blur);
+  -webkit-backdrop-filter: var(--os-blur);
+  min-width: 0;
+}
+.os-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--os-3);
+  padding: var(--os-3) var(--os-4) 0;
+  min-height: 40px;
+}
+.os-panel-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--os-2);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--os-text-2);
+}
+.os-panel-body { padding: var(--os-3) var(--os-4) var(--os-4); min-width: 0; }
+
+.os-grid { display: grid; gap: var(--os-4); }
+.os-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.os-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .os-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .os-grid-2, .os-grid-3 { grid-template-columns: minmax(0, 1fr); } }
+
+/* Buttons. */
+.os-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--os-2);
+  min-height: 34px;
+  padding: 0 var(--os-3);
+  border-radius: var(--os-r-md);
+  border: 1px solid var(--os-line-2);
+  background: var(--os-surface-2);
+  color: var(--os-text);
+  font: 500 var(--os-fs-sm)/1 var(--os-font-body);
+  cursor: pointer;
+  transition: background var(--os-fast) var(--os-ease), border-color var(--os-fast) var(--os-ease),
+    transform var(--os-fast) var(--os-ease), color var(--os-fast) var(--os-ease);
+  white-space: nowrap;
+}
+.os-btn:hover:not(:disabled) { background: var(--os-surface-hover); border-color: var(--os-line-3); }
+.os-btn:active:not(:disabled) { transform: translateY(1px); }
+.os-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.os-btn svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.os-btn-primary { background: var(--os-accent); border-color: var(--os-accent); color: #021019; font-weight: 600; }
+.os-btn-primary:hover:not(:disabled) { background: var(--os-accent-hi); border-color: var(--os-accent-hi); }
+.os-btn-ghost { background: transparent; border-color: transparent; color: var(--os-text-2); }
+.os-btn-ghost:hover:not(:disabled) { color: var(--os-text); background: var(--os-surface-hover); border-color: transparent; }
+.os-btn-danger { border-color: rgba(255, 95, 115, 0.45); color: var(--os-danger); background: var(--os-danger-soft); }
+.os-btn-danger:hover:not(:disabled) { background: rgba(255, 95, 115, 0.22); border-color: var(--os-danger); }
+.os-btn-icon { width: 34px; padding: 0; }
+.os-btn-sm { min-height: 28px; padding: 0 var(--os-2); font-size: var(--os-fs-xs); border-radius: var(--os-r-sm); }
+.os-btn-sm.os-btn-icon { width: 28px; }
+.os-btn.on { border-color: var(--os-accent-line); background: var(--os-accent-soft); color: var(--os-accent-hi); }
+
+:where(.os) :focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+}
+
+/* Inputs. */
+.os-input {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 var(--os-3);
+  border-radius: var(--os-r-md);
+  border: 1px solid var(--os-line-2);
+  background: rgba(5, 9, 18, 0.7);
+  color: var(--os-text);
+  font: var(--os-fs-md)/1.4 var(--os-font-body);
+  transition: border-color var(--os-fast) var(--os-ease), box-shadow var(--os-fast) var(--os-ease);
+}
+.os-input::placeholder { color: var(--os-text-3); }
+.os-input:focus { outline: none; border-color: var(--os-accent-line); box-shadow: 0 0 0 3px var(--os-accent-soft); }
+
+/* Status: a dot and a word. The word is the information; the colour helps. */
+.os-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--os-text-3); }
+.os-dot.ok { background: var(--os-ok); box-shadow: 0 0 8px rgba(61, 220, 151, 0.55); }
+.os-dot.warn { background: var(--os-warn); box-shadow: 0 0 8px rgba(255, 182, 72, 0.5); }
+.os-dot.danger { background: var(--os-danger); box-shadow: 0 0 8px rgba(255, 95, 115, 0.55); }
+.os-dot.accent { background: var(--os-accent); box-shadow: 0 0 8px var(--os-accent-line); }
+.os-dot.live { animation: os-pulse 1.6s ease-in-out infinite; }
+@keyframes os-pulse { 50% { opacity: 0.45; } }
+
+.os-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: var(--os-r-pill);
+  border: 1px solid var(--os-line-2);
+  background: rgba(10, 16, 30, 0.6);
+  color: var(--os-text-2);
+  font: 500 var(--os-fs-2xs)/1 var(--os-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.os-chip.ok { color: var(--os-ok); border-color: rgba(61, 220, 151, 0.35); background: var(--os-ok-soft); }
+.os-chip.warn { color: var(--os-warn); border-color: rgba(255, 182, 72, 0.35); background: var(--os-warn-soft); }
+.os-chip.danger { color: var(--os-danger); border-color: rgba(255, 95, 115, 0.38); background: var(--os-danger-soft); }
+.os-chip.accent { color: var(--os-accent-hi); border-color: var(--os-accent-line); background: var(--os-accent-soft); }
+.os-chip.violet { color: #c4baff; border-color: rgba(143, 128, 255, 0.4); background: var(--os-violet-soft); }
+
+.os-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 5px;
+  border: 1px solid var(--os-line-3);
+  border-bottom-width: 2px;
+  background: rgba(5, 9, 18, 0.7);
+  color: var(--os-text-2);
+  font: 500 10.5px/1 var(--os-font-mono);
+}
+
+/* A meter: one line, filled to a real fraction. */
+.os-meter { height: 6px; border-radius: var(--os-r-pill); background: rgba(128, 168, 255, 0.1); overflow: hidden; }
+.os-meter > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--os-accent), var(--os-accent-hi)); transition: width var(--os-slow) var(--os-ease); }
+.os-meter.warn > span { background: var(--os-warn); }
+.os-meter.danger > span { background: var(--os-danger); }
+
+/* When there is nothing yet, say what will appear and how to make it. */
+.os-empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--os-2);
+  padding: var(--os-8) var(--os-4);
+  text-align: center;
+  color: var(--os-text-2);
+}
+.os-empty strong { color: var(--os-text); font-weight: 600; }
+.os-empty p { margin: 0; max-width: 46ch; font-size: var(--os-fs-sm); }
+
+/* Tooltips from data-tip, for icon-only controls. */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translate(-4px, -50%);
+  padding: 6px 9px;
+  border-radius: var(--os-r-sm);
+  border: 1px solid var(--os-line-2);
+  background: var(--os-surface-solid);
+  color: var(--os-text);
+  font: 500 var(--os-fs-xs)/1.2 var(--os-font-body);
+  white-space: nowrap;
+  box-shadow: var(--os-shadow-2);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--os-fast) var(--os-ease), transform var(--os-fast) var(--os-ease);
+  z-index: 50;
+}
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after { opacity: 1; transform: translate(0, -50%); }
+[data-tip-pos="below"]::after { left: 50%; top: calc(100% + 8px); transform: translate(-50%, -4px); }
+[data-tip-pos="below"]:hover::after,
+[data-tip-pos="below"]:focus-visible::after { transform: translate(-50%, 0); }
+
+/* Scrollbars that belong to the room. */
+.os ::-webkit-scrollbar { width: 10px; height: 10px; }
+.os ::-webkit-scrollbar-track { background: transparent; }
+.os ::-webkit-scrollbar-thumb { background: rgba(128, 168, 255, 0.16); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+.os ::-webkit-scrollbar-thumb:hover { background: rgba(128, 168, 255, 0.28); background-clip: padding-box; border: 2px solid transparent; }
+.os * { scrollbar-color: rgba(128, 168, 255, 0.2) transparent; }
+
+/* Below a laptop width the sidebar is the slim one whatever was chosen. */
+@media (max-width: 1100px) {
+  .os, .os.os-slim { grid-template-columns: var(--os-sidebar-slim) minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .os, .os.os-slim { grid-template-columns: minmax(0, 1fr); }
+  .os-view { padding: var(--os-4) var(--os-4) var(--os-5); }
+}

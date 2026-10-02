@@ -32,6 +32,22 @@ export type CoreVisual = {
   converge: number;
   /** 0 when the machine cannot be reached, which drains the colour. */
   alive: number;
+  /**
+   * Signals running along the network's links, 0..1: the share of links
+   * carrying one. Thinking is the network busy with itself; with no work, a
+   * few still move, and with no machine or a fault, none do.
+   */
+  traffic: number;
+  /**
+   * Rings leaving the globe (positive) or arriving at it (negative), -1..1. A
+   * voice going out when speaking, sound coming in when listening; their
+   * strength follows the real level, so silence sends nothing.
+   */
+  ripple: number;
+  /** A sweep around the instrument, 0..1: looking for something. */
+  scan: number;
+  /** The drawing slipping, 0..1. A fault and nothing else. */
+  glitch: number;
 };
 
 const cyan: [number, number, number] = [0.21, 0.78, 1.0];
@@ -45,23 +61,24 @@ const grey: [number, number, number] = [0.42, 0.48, 0.54];
 
 const visuals: Record<CoreState, CoreVisual> = {
   // Idle is not dead: enough energy to drift and breathe, no convergence.
-  idle: { color: cyan, accent: paleCyan, energy: 0.22, spin: 1, converge: 0, alive: 1 },
+  idle: { color: cyan, accent: paleCyan, energy: 0.22, spin: 1, converge: 0, alive: 1, traffic: 0.16, ripple: 0, scan: 0, glitch: 0 },
   // Listening brightens and holds still — attention, not activity. The motion
   // that matters here comes from the real microphone level instead.
-  listening: { color: paleCyan, accent: cyan, energy: 0.45, spin: 0.7, converge: -0.15, alive: 1 },
-  thinking: { color: violet, accent: cyan, energy: 0.6, spin: 1.6, converge: 0.2, alive: 1 },
-  searching: { color: teal, accent: paleCyan, energy: 0.75, spin: 2.1, converge: -0.6, alive: 1 },
-  reading: { color: cyan, accent: teal, energy: 0.5, spin: 1.1, converge: 0.3, alive: 1 },
-  writing: { color: amber, accent: paleCyan, energy: 0.8, spin: 1.8, converge: 0.65, alive: 1 },
-  analysing: { color: violet, accent: teal, energy: 0.7, spin: -1.5, converge: 0.45, alive: 1 },
+  listening: { color: paleCyan, accent: cyan, energy: 0.45, spin: 0.7, converge: -0.15, alive: 1, traffic: 0.22, ripple: -0.7, scan: 0, glitch: 0 },
+  thinking: { color: violet, accent: cyan, energy: 0.6, spin: 1.6, converge: 0.2, alive: 1, traffic: 0.75, ripple: 0, scan: 0.3, glitch: 0 },
+  searching: { color: teal, accent: paleCyan, energy: 0.75, spin: 2.1, converge: -0.6, alive: 1, traffic: 0.5, ripple: 0, scan: 1, glitch: 0 },
+  reading: { color: cyan, accent: teal, energy: 0.5, spin: 1.1, converge: 0.3, alive: 1, traffic: 0.45, ripple: 0, scan: 0.6, glitch: 0 },
+  writing: { color: amber, accent: paleCyan, energy: 0.8, spin: 1.8, converge: 0.65, alive: 1, traffic: 0.85, ripple: 0, scan: 0, glitch: 0 },
+  analysing: { color: violet, accent: teal, energy: 0.7, spin: -1.5, converge: 0.45, alive: 1, traffic: 0.9, ripple: 0, scan: 0.7, glitch: 0 },
   // The most energy and the strongest pull: a tool is genuinely running.
-  executing: { color: cyan, accent: amber, energy: 1, spin: 2.4, converge: 0.8, alive: 1 },
-  speaking: { color: paleCyan, accent: teal, energy: 0.55, spin: 0.9, converge: -0.35, alive: 1 },
-  success: { color: green, accent: paleCyan, energy: 0.6, spin: 1.2, converge: -0.7, alive: 1 },
-  error: { color: red, accent: amber, energy: 0.3, spin: 0.3, converge: 0, alive: 1 },
+  executing: { color: cyan, accent: amber, energy: 1, spin: 2.4, converge: 0.8, alive: 1, traffic: 1, ripple: 0, scan: 0.45, glitch: 0 },
+  speaking: { color: paleCyan, accent: teal, energy: 0.55, spin: 0.9, converge: -0.35, alive: 1, traffic: 0.3, ripple: 1, scan: 0, glitch: 0 },
+  success: { color: green, accent: paleCyan, energy: 0.6, spin: 1.2, converge: -0.7, alive: 1, traffic: 0.35, ripple: 0.55, scan: 0, glitch: 0 },
+  // A fault stops the traffic: nothing is being worked on any more.
+  error: { color: red, accent: amber, energy: 0.3, spin: 0.3, converge: 0, alive: 1, traffic: 0, ripple: 0, scan: 0, glitch: 1 },
   // Unreachable: barely moving, colour drained. It should be obvious at a
   // glance that this is not a working machine.
-  offline: { color: grey, accent: grey, energy: 0.06, spin: 0.15, converge: 0, alive: 0 }
+  offline: { color: grey, accent: grey, energy: 0.06, spin: 0.15, converge: 0, alive: 0, traffic: 0, ripple: 0, scan: 0, glitch: 0 }
 };
 
 export function visualForState(state: CoreState): CoreVisual {
