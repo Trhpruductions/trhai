@@ -87,6 +87,14 @@ async function runSchedule(id: string, name: string, action: ScheduleAction): Pr
       return;
     }
 
+    // The reminder is its own words: recorded as the run, and the app shows
+    // the run as a notification. Nothing is asked of a model.
+    if (action.kind === "remind") {
+      recordRun(id, "ok", action.text);
+      console.log(`schedule "${name}" reminded`);
+      return;
+    }
+
     const result = await runAssistantOrchestrator({
       // Nobody is watching a timer fire, so this turn never gets command
       // access even if machine control happens to be switched on.

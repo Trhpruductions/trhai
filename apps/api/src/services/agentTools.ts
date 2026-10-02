@@ -31,6 +31,7 @@ import { elisionIn, fileView, fitsOneRead, maxToolResultTokens, shortenToTokens 
 import { messageProblem, sendEmail, sendingTools, sendText, type MessagingDeps } from "./messaging.js";
 import { extractDocumentText, isDocumentPath, maxDocumentBytes } from "./documentText.js";
 import { readableAtOnce, summarizeLongText, type GenerateText } from "./summarize.js";
+import { daysAskedFor, timeAskedFor } from "./scheduleRequest.js";
 import { imageKind, lookAtImages, maxImageBytes, type VisionImage, type VisionResult } from "./vision.js";
 import { readLocalModelConfig } from "./localModel.js";
 import { describeTelemetry, readFreeSpace, readGpuHeadroom, readTelemetry, readTopMemoryPrograms } from "./systemTelemetry.js";
@@ -1233,6 +1234,33 @@ export async function readMachineStatus(context: Pick<ToolContext, "readTelemetr
   ]);
   const label = letter ? `${letter}:` : path.parse(diskPath).root.replace(/[\\/]+$/, "") || diskPath;
   return describeTelemetry(telemetry, { label, space }, headroom, topMemory);
+}
+
+/**
+ * The lines of the machine's readings a question is about - memory for "how
+ * much RAM am I using", the drive for "how much space is left" - or all of
+ * them when it names nothing in particular ("how's my PC doing?").
+ */
+export function readingsFor(question: string, readings: string): string {
+  const text = (question ?? "").toLowerCase();
+  const topics: Array<[RegExp, RegExp]> = [
+    [/\b(?:cpu|processor)\b/, /^Processor:/],
+    [/\b(?:ram|memory)\b/, /^(?:Memory:|Programs using the most memory:)/],
+    [/\b(?:gpu|graphics card|video card|vram|video memory)\b|\bhow hot\b|\btemp(?:erature)?s?\b/, /^Graphics card:/],
+    [/\b(?:disk|drive|storage|ssd|hdd|space)\b/, /^(?:Drive|Disk)\b/],
+    [/\b(?:network|internet|connection|bandwidth|download|upload)\b/, /^Network:/],
+    [/\buptime\b|\bhow long\b[^.?!]*\b(?:up|on|running)\b|\bbeen (?:up|on)\b/, /^Up for:/]
+  ];
+  const lines = readings.split("\n");
+  const wanted = topics.filter(([asked]) => asked.test(text)).map(([, line]) => line);
+  const chosen = wanted.length > 0 ? lines.filter((line) => wanted.some((pattern) => pattern.test(line))) : [];
+  const answer = chosen.length > 0 ? chosen : lines;
+  // The processor's temperature is not among the readings; say so rather
+  // than let the graphics card's stand in for it unremarked.
+  if (/\b(?:cpu|processor)\b/.test(text) && /\b(?:temp|temps|temperature|hot)\b/.test(text)) {
+    answer.push("Processor temperature: not measured here - Windows does not report it to this app.");
+  }
+  return answer.join("\n");
 }
 
 /** The drive letter a request names - "drive C", "C:" - or "" when it names none. */
@@ -2968,6 +2996,16 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
           ok: false,
           content: "add_schedule needs either daily_at (a time like 09:00) or every_minutes."
         };
+      }
+
+      // Which days and what time come from the user's own words wherever they
+      // say them plainly - not from the model's reading of them, which saved
+      // "every day at 9:15 am" as every weekday. See scheduleRequest.ts.
+      if (cadence.kind === "daily" && context.request) {
+        const days = daysAskedFor(context.request);
+        const minuteOfDay = timeAskedFor(context.request) ?? cadence.minuteOfDay;
+        const weekdaysOnly = days ? days === "weekdays" : cadence.weekdaysOnly === true;
+        cadence = weekdaysOnly ? { kind: "daily", minuteOfDay, weekdaysOnly: true } : { kind: "daily", minuteOfDay };
       }
 
       // The same schedule is not made twice. Asked for one daily check, the

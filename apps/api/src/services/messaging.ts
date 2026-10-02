@@ -199,21 +199,24 @@ export function messageProblem(
   return null;
 }
 
+/**
+ * Why a text cannot go from this PC, in the user's own words, or null when it
+ * can. messageProblem says the same to the model, which the user never reads.
+ */
+export function phoneLinkProblem(status: PhoneLinkStatus): string | null {
+  if (status === "linked") return null;
+  return status === "not-linked"
+    ? "Nothing was sent. Texts go out from your own phone through Phone Link, and no phone is linked to it on this PC yet. "
+      + "Open Phone Link from the Start menu and follow its steps to link your phone, then ask again."
+    : "Nothing was sent. Texts go out from your own phone through Phone Link, which isn't on this PC. "
+      + "It comes with Windows 11 - install Phone Link from the Microsoft Store, link your phone, then ask again.";
+}
+
 /** A text message, opened in Phone Link ready to send. */
 export async function sendText(args: Record<string, unknown>, deps: MessagingDeps = {}): Promise<SendOutcome> {
-  // Phone Link is checked here in the user's own words; the shared check
-  // below is worded for the model, which the user never reads.
   const phoneLink = deps.phoneLink ?? phoneLinkStatus();
-  if (phoneLink !== "linked") {
-    return {
-      ok: false,
-      content: phoneLink === "not-linked"
-        ? "Nothing was sent. Texts go out from your own phone through Phone Link, and no phone is linked to it on this PC yet. "
-          + "Open Phone Link from the Start menu and follow its steps to link your phone, then ask again."
-        : "Nothing was sent. Texts go out from your own phone through Phone Link, which isn't on this PC. "
-          + "It comes with Windows 11 - install Phone Link from the Microsoft Store, link your phone, then ask again."
-    };
-  }
+  const unavailable = phoneLinkProblem(phoneLink);
+  if (unavailable) return { ok: false, content: unavailable };
   const problem = messageProblem("send_text", args, { phoneLink });
   if (problem) return { ok: false, content: problem };
   const number = normalizePhoneNumber(args.to) as string;

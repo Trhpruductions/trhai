@@ -38,18 +38,27 @@ export type ScheduleRunStatus = "ok" | "failed" | "missed" | "interrupted";
  */
 export type ScheduleAction =
   | { kind: "ask"; prompt: string }
-  | { kind: "flow" };
+  | { kind: "flow" }
+  /**
+   * The words themselves, shown when it fires; nothing is asked of a model.
+   * "Remind me to drink water" needs no answer, and a model asked to produce
+   * one at nine every morning is slow, and sometimes wrong, for nothing.
+   */
+  | { kind: "remind"; text: string };
 
 export function isScheduleAction(value: unknown): value is ScheduleAction {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as { kind?: unknown; prompt?: unknown };
+  const candidate = value as { kind?: unknown; prompt?: unknown; text?: unknown };
   if (candidate.kind === "flow") return true;
+  if (candidate.kind === "remind") return typeof candidate.text === "string" && candidate.text.trim().length > 0;
   return candidate.kind === "ask" && typeof candidate.prompt === "string" && candidate.prompt.trim().length > 0;
 }
 
 /** What the interface calls this action. */
 export function describeAction(action: ScheduleAction): string {
-  return action.kind === "flow" ? "Runs the saved flow" : `Asks: “${action.prompt}”`;
+  if (action.kind === "flow") return "Runs the saved flow";
+  if (action.kind === "remind") return `Reminds you: “${action.text}”`;
+  return `Asks: “${action.prompt}”`;
 }
 
 export type Schedule = {
@@ -285,13 +294,14 @@ export function addSchedule(
   if (!name || !action || !isCadence(input.cadence)) return null;
   if (schedules.length >= maxSchedules) return null;
 
-  const prompt = action.kind === "ask" ? action.prompt.slice(0, maxPromptLength) : "";
+  const prompt = action.kind === "ask" ? action.prompt.slice(0, maxPromptLength)
+    : action.kind === "remind" ? action.text.trim().slice(0, maxPromptLength) : "";
   const now = input.now ?? new Date();
   const schedule: Schedule = {
     id: input.id,
     name: name.slice(0, 120),
     prompt,
-    action: action.kind === "ask" ? { kind: "ask", prompt } : action,
+    action: action.kind === "ask" ? { kind: "ask", prompt } : action.kind === "remind" ? { kind: "remind", text: prompt } : action,
     cadence: input.cadence,
     enabled: true,
     createdAt: now.toISOString(),

@@ -407,6 +407,15 @@ export function describeAgentLens(agent: AgentLens): string {
     + "This is an emphasis, not a new set of rules: everything above still holds, and the tools are the same.";
 }
 
+/** Whether a request names a document already saved - "add a line to the Roadmap". */
+export function namesASavedDocument(question: string, documents: ToolContext["documents"]): boolean {
+  const asked = question.toLowerCase();
+  return (documents ?? []).some((document) => {
+    const title = document.title.trim().toLowerCase();
+    return title.length >= 3 && asked.includes(title);
+  });
+}
+
 /**
  * The last few turns of the conversation, as messages the model can read.
  *
@@ -894,7 +903,7 @@ function parseDirectJson(trimmed: string, known: string[]): ToolCall[] {
  * but does not parse (a stray brace in plain prose) rather than giving up on
  * the rest of the message. Returns null once nothing more closes.
  */
-function nextJsonObject(text: string, from: number): { value: unknown; end: number } | null {
+function nextJsonObject(text: string, from: number): { value: unknown; start: number; end: number } | null {
   const start = text.indexOf("{", from);
   if (start === -1) return null;
 
@@ -916,7 +925,7 @@ function nextJsonObject(text: string, from: number): { value: unknown; end: numb
       depth -= 1;
       if (depth === 0) {
         try {
-          return { value: JSON.parse(text.slice(start, i + 1)), end: i + 1 };
+          return { value: JSON.parse(text.slice(start, i + 1)), start, end: i + 1 };
         } catch {
           return nextJsonObject(text, start + 1);
         }
@@ -1106,9 +1115,54 @@ export function parseTextToolCalls(text: string, known = advertisedToolNames()):
     .filter((call): call is ToolCall => call !== null);
   if (embedded.length > 0) return embedded;
 
+  const argumentsOnly = argumentsOnlyCall(trimmed, known);
+  if (argumentsOnly) return [argumentsOnly];
+
   return trimmed.split("\n")
     .map((line) => parseBareCall(line, known))
     .filter((call): call is ToolCall => call !== null);
+}
+
+/**
+ * A call written as its arguments alone, with the tool's name left out:
+ *
+ *   Saved the schedule: {"name": "drink-water-reminder", "prompt": "Drink
+ *   water", "daily_at": "09:15", "every_minutes": null, "weekdays_only": false}
+ *
+ * That was the whole reply, live, to "every day at 9:15 am remind me to drink
+ * water" a few turns into a conversation - and nothing had been saved. With no
+ * tool name in it, nothing above saw a call, so the claim went to the user as
+ * fact. The object is read as a call only when it can be nobody else's: its
+ * keys are all that tool's own, every required one is there, at least one
+ * belongs to no other tool on offer - and it is the reply, not an example
+ * inside a longer answer.
+ */
+function argumentsOnlyCall(text: string, known: string[]): ToolCall | null {
+  const found = nextJsonObject(text, 0);
+  if (!found || nextJsonObject(text, found.end)) return null;
+  if (!found.value || typeof found.value !== "object" || Array.isArray(found.value)) return null;
+  const record = found.value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length < 2) return null;
+  const around = `${text.slice(0, found.start)} ${text.slice(found.end)}`.replace(/```(?:json)?/gi, "").trim();
+  if (around.length > 80) return null;
+
+  type Definition = ReturnType<typeof availableTools>[number];
+  const definitions = availableTools(true).filter((definition) => known.includes(definition.function.name));
+  const parametersOf = (definition: Definition) =>
+    Object.keys((definition.function.parameters as { properties?: Record<string, unknown> }).properties ?? {});
+  const requiredOf = (definition: Definition) => {
+    const required = (definition.function.parameters as { required?: unknown }).required;
+    return Array.isArray(required) ? required.filter((key): key is string => typeof key === "string") : [];
+  };
+  const fits = definitions.filter((definition) => {
+    const own = parametersOf(definition);
+    const distinctive = own.filter((key) => definitions.every((other) => other === definition || !parametersOf(other).includes(key)));
+    return keys.every((key) => own.includes(key))
+      && requiredOf(definition).every((key) => keys.includes(key))
+      && keys.some((key) => distinctive.includes(key));
+  });
+  return fits.length === 1 ? { name: fits[0].function.name, arguments: record } : null;
 }
 
 /** The tools this app offers right now, by name. */
@@ -1648,9 +1702,15 @@ export async function runAgent(
         // and a video only when it mentions one.
         schedules: mentionsScheduling(question),
         video: mentionsVideo(question),
-        // A request that only reads does not write to the knowledge base
-        // either, unless it asks for something to be kept.
-        documents: intent.kind !== "read" || /\b(?:save|store|keep|record)\b/i.test(question),
+        // The knowledge base is written only when keeping something is asked
+        // for - "save", "note", "document" - or a saved document is named.
+        // "Write a two-sentence product description for a water bottle" asks
+        // for words in the reply: with write_document on offer, the model
+        // saved them as a document called "Stainless Steel Water Bottle" and
+        // the reply showed none of them.
+        documents: /\b(?:save|store|keep|record)\b/i.test(question)
+          || (intent.kind !== "read" && (/\b(?:documents?|docs?|notes?|knowledge)\b/i.test(question)
+            || namesASavedDocument(question, context.documents))),
         // The machine's own readings, when the question is about them.
         status: asksAboutMachineState(question),
         // Starting an app, when something was asked to start.

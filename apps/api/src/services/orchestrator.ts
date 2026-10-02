@@ -4,7 +4,8 @@ import { isCodeWork } from "./machinePaths.js";
 import { pickAuthorModel } from "./appAuthor.js";
 import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
-import { appNamedIn, runTool, type AgentLens } from "./agentTools.js";
+import { appNamedIn, driveNamedIn, readingsFor, readMachineStatus, runTool, type AgentLens } from "./agentTools.js";
+import type { readTelemetry } from "./systemTelemetry.js";
 import { workspaceRoot } from "./workspace.js";
 import { changesSomething } from "./toolPermissions.js";
 import { convertUnits } from "./unitConversion.js";
@@ -13,7 +14,7 @@ import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
 import { isContinuationRequest, looksLikeScheduleRequest } from "./requestAnalysis.js";
 import { asksAboutTheScreen, planProject } from "@ascend/shared";
-import { classifyIntent, wantsToStopAnApp, wantsWebSearch } from "./actionIntent.js";
+import { asksForAReading, classifyIntent, wantsASummary, wantsToStopAnApp, wantsWebSearch } from "./actionIntent.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
 import {
@@ -27,8 +28,15 @@ import {
   recordPendingConfirmation,
   type PendingConfirmation
 } from "./pendingConfirmation.js";
-import { describeHeldMessage, sendingTools, type MessagingDeps } from "./messaging.js";
-import type { GenerateText } from "./summarize.js";
+import {
+  describeHeldMessage, messageProblem, phoneLinkProblem, phoneLinkStatus, sendingTools, type MessagingDeps
+} from "./messaging.js";
+import { parseDirectMessage } from "./messageRequest.js";
+import { randomUUID } from "node:crypto";
+import { addSchedule, describeCadence, listSchedules } from "./scheduleStore.js";
+import { parseReminderRequest } from "./scheduleRequest.js";
+import { answerWeekdayQuestion } from "./dateMath.js";
+import { summarizeDocument, type GenerateText } from "./summarize.js";
 import { lookAtImages, type VisionImage, type VisionResult } from "./vision.js";
 import { describeEmailAccount } from "./emailAccount.js";
 import {
@@ -105,6 +113,8 @@ export type OrchestratorInput = {
   images?: VisionImage[];
   /** Asks the vision model about images; the real local one when absent. Injected for tests. */
   vision?: (images: VisionImage[], question: string) => Promise<VisionResult>;
+  /** Reads this machine's sensors; the real ones when absent. Injected for tests. */
+  readTelemetry?: typeof readTelemetry;
   /** Launches a built app so it runs live; see appRunner. Forwarded to run_app and build_app. */
   launchApp?: (project: string) => Promise<StartResult>;
   stopApp?: (project: string) => boolean;
@@ -220,6 +230,11 @@ export async function runAssistantOrchestrator(
   const looking = !approving && !resuming ? await resolveImages(input) : null;
   if (looking) return looking;
 
+  // A text or an email that says who and what outright is held for approval
+  // without the model writing it; see resolveDirectMessage.
+  const direct = !approving && !resuming ? resolveDirectMessage(input) : null;
+  if (direct) return direct;
+
   // Forgetting is done here, deterministically, and never by the model.
   //
   // It used to reach the agent loop like any other request, and the loop is
@@ -279,11 +294,22 @@ export async function runAssistantOrchestrator(
   const togglingSchedule = resolveToggleSchedule(input, approving, effectiveMessage);
   if (togglingSchedule) return togglingSchedule;
 
+  // "every day at 9:15 am remind me to drink water" - saved here when the
+  // words and the timing are all there; see resolveCreateReminder.
+  const reminding = resolveCreateReminder(input, approving, effectiveMessage);
+  if (reminding) return reminding;
+
   // "convert 5 miles to kilometers" - a table lookup and a multiplication.
   // Asked of the model it came back as 44.5, as 20°C for 70°F, and as a bare
   // formula; worked out here it is exact every time. See unitConversion.ts.
   const conversion = approving ? null : convertUnits(effectiveMessage);
   if (conversion) return deterministicResult(effectiveMessage, conversion.text, "conversion");
+
+  // "what day of the week is December 25, 2026?" - a calendar lookup. The
+  // model answered Sunday, Wednesday and Thursday in three runs; it is a
+  // Friday. See answerWeekdayQuestion.
+  const weekday = approving ? null : answerWeekdayQuestion(effectiveMessage, new Date());
+  if (weekday) return deterministicResult(effectiveMessage, weekday, "calendar");
 
   // "save a document called X with the text Y" is a list operation, not a
   // reasoning one: a title and a body, straight into the store. Left to the
@@ -296,6 +322,22 @@ export async function runAssistantOrchestrator(
   // update_document's arguments across four rounds and reported confusion.
   const appendingDocument = resolveAppendDocument(input, approving, effectiveMessage);
   if (appendingDocument) return appendingDocument;
+
+  // "summarize the Harbor Town Handbook" - a saved document named outright,
+  // read in full and summarized here; see resolveDocumentSummary.
+  const summarizing = approving ? null : await resolveDocumentSummary(input, effectiveMessage);
+  if (summarizing) return summarizing;
+
+  // "how much memory is my computer using?" - the answer is the reading.
+  // Given the readings with the question, the model still answered a few
+  // turns in with the date and time: the question said "right now", and so
+  // does the sentence giving it the date. A reading is not a judgement call.
+  // Advice about one ("why is it slow?", "is 80°C too hot?") still goes to
+  // the model, with the readings - see asksForAReading.
+  if (!approving && asksForAReading(effectiveMessage)) {
+    const readings = await readMachineStatus(input.readTelemetry ? { readTelemetry: input.readTelemetry } : {}, driveNamedIn(effectiveMessage));
+    return deterministicResult(effectiveMessage, readingsFor(effectiveMessage, readings), "reading");
+  }
 
   // "search my documents for X" — left to the model it ran search_files and
   // read back workspace paths instead of the knowledge base.
@@ -687,6 +729,108 @@ async function resolveImages(input: OrchestratorInput): Promise<OrchestratorResu
     return { ...deterministicResult(question, seen.reason, "failed"), model: "memory" };
   }
   return { ...deterministicResult(question, seen.text, "vision"), model: `ollama/${seen.model}` };
+}
+
+/**
+ * A text or an email that names its recipient and its words outright, held
+ * for approval without the model writing it. See messageRequest.ts: a few
+ * turns into a conversation the model stopped calling send_text at all.
+ *
+ * Held exactly as a model's call would be - the same check first, the same
+ * pending record, the same word-for-word display - so "yes" and "no" go
+ * through resolveSendMessage unchanged.
+ */
+function resolveDirectMessage(input: OrchestratorInput): OrchestratorResult | null {
+  const sessionId = input.sessionId;
+  if (!sessionId || input.unattended) return null;
+  const direct = parseDirectMessage(input.userMessage);
+  if (!direct) return null;
+  if (direct.tool === "send_text") {
+    const unavailable = phoneLinkProblem(input.messaging?.phoneLink ?? phoneLinkStatus());
+    if (unavailable) return deterministicResult(input.userMessage, unavailable, "message");
+  }
+  // Anything else the check finds - a text too long for one message - goes
+  // the model's way, which already explains each problem.
+  if (messageProblem(direct.tool, direct.arguments, input.messaging ?? {})) return null;
+  const pending = { tool: direct.tool, arguments: direct.arguments, request: input.userMessage };
+  recordPendingConfirmation(sessionId, pending);
+  return deterministicResult(
+    input.userMessage,
+    describeHeldMessage(direct.tool, direct.arguments, describeEmailAccount()),
+    "message",
+    { tool: direct.tool, ...describePendingAction({ ...pending, askedAt: Date.now() }) }
+  );
+}
+
+/**
+ * "every day at 9:15 am remind me to drink water" - a reminder whose words and
+ * timing are all in the request, saved without the model. See
+ * parseReminderRequest. A few turns into a conversation the model printed the
+ * schedule as text and said "Saved the schedule" - and nothing had been saved.
+ *
+ * Saved as a "remind" action: when it fires, the words themselves are the
+ * reminder, and the app shows them. Nothing is asked of a model at nine.
+ */
+function resolveCreateReminder(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  asked: string
+): OrchestratorResult | null {
+  if (approving || input.unattended) return null;
+  const reminder = parseReminderRequest(asked);
+  if (!reminder) return null;
+  const reply = (text: string, strategy = "schedule") => deterministicResult(asked, text, strategy);
+  const when = describeCadence(reminder.cadence);
+  const wanted = reminder.text.toLowerCase();
+  // The same reminder is not made twice - the rule add_schedule keeps.
+  const existing = listSchedules().find((schedule) => describeCadence(schedule.cadence) === when
+    && (schedule.name.trim().toLowerCase() === wanted || schedule.prompt.trim().toLowerCase() === wanted));
+  if (existing) return reply(`Already scheduled - "${existing.name}": ${when}. Nothing new was added; that one covers it.`);
+  const saved = addSchedule({
+    id: randomUUID(), name: reminder.text.slice(0, 60), action: { kind: "remind", text: reminder.text }, cadence: reminder.cadence
+  });
+  if (!saved) return reply("That reminder could not be saved, so nothing was scheduled.", "failed");
+  return reply(`Scheduled "${saved.name}": ${describeCadence(saved.cadence)}. TRH AI shows the reminder when it's due, while it's running.`);
+}
+
+/** The saved document a request names - its title in the words, the longest such title winning. */
+function documentNamedIn(asked: string, documents: Array<{ title: string; body: string }>) {
+  const words = asked.toLowerCase();
+  const names = (title: string) => {
+    const whole = title.trim().toLowerCase();
+    // "Q3 report.pdf" is asked for as "the Q3 report" - but a bare "report"
+    // is too common a word to stand for one document.
+    const bare = whole.replace(/\.[a-z0-9]{2,5}$/, "");
+    return [whole, ...(bare !== whole && bare.length >= 8 ? [bare] : [])].filter((name) => name.length >= 3);
+  };
+  return documents
+    .filter((document) => names(document.title).some((name) => words.includes(name)))
+    .sort((a, b) => b.title.length - a.title.length)[0] ?? null;
+}
+
+/** What the reader wants the summary to dwell on, when the request says. */
+function summaryFocus(asked: string): string {
+  const focus = /\b(?:focus(?:ing|ed)?\s+on|with\s+(?:a\s+)?focus\s+on|especially(?:\s+on)?|paying\s+attention\s+to)\s+(.+?)[.?!]*\s*$/i.exec(asked);
+  return focus ? focus[1].trim() : "";
+}
+
+/**
+ * "summarize the Harbor Town Handbook" - a saved document, named outright,
+ * read in full and summarized without leaving the reading to the model.
+ *
+ * Offered summarize_document, the model mostly did not call it: live, it once
+ * asked for the path of a document it had just been given by name, and once
+ * summarized the single passage the prompt happened to carry. Neither read the
+ * document. When the request names a saved document there is nothing to choose.
+ */
+async function resolveDocumentSummary(input: OrchestratorInput, asked: string): Promise<OrchestratorResult | null> {
+  if (!input.generateText || !wantsASummary(asked)) return null;
+  const document = documentNamedIn(asked, input.documents ?? []);
+  if (!document) return null;
+  if (input.sessionId) setActivity(input.sessionId, "summarize_document");
+  const written = await summarizeDocument(document.title, document.body, { focus: summaryFocus(asked), generate: input.generateText });
+  if (!written.ok) return deterministicResult(asked, written.reason, "failed");
+  return { ...deterministicResult(asked, written.text, "generated"), model: written.model ? `ollama/${written.model}` : "local" };
 }
 
 /** A reply written here, by neither a model nor the composer. */
@@ -1819,6 +1963,8 @@ async function answerWithLocalModel(
     // And the same vision model the images route uses, so look_at_image in
     // the loop sees what a test's stand-in sees rather than the real Ollama.
     ...(input.vision ? { vision: input.vision } : {}),
+    // And the same sensors resolveMachineReading reads.
+    ...(input.readTelemetry ? { readTelemetry: input.readTelemetry } : {}),
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history,

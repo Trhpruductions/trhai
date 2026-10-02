@@ -387,8 +387,11 @@ test("yes sends exactly the message that was shown, without asking the model aga
   const { opened, open, copy } = recorder();
   const messaging = { open, copy, phoneLink: "linked" as const };
   await withScriptedModel([textCall, { message: { content: "I've sent it!" } }, reworded], async (chats) => {
+    // "about": a message the model has to write. One that gives its words
+    // outright ("that I'm running late") is held without the model at all -
+    // see clear-requests.test.ts - and this is about the model's version.
     const asked = await runAssistantOrchestrator({
-      mode: "general", sessionId: "send-1", userMessage: "text 555-010-0123 that I'm running 10 minutes late", messaging
+      mode: "general", sessionId: "send-1", userMessage: "text 555-010-0123 about running 10 minutes late", messaging
     });
     assert.deepEqual(opened, [], "nothing is sent while the user has not answered");
     assert.match(asked.assistantMessage, /Here's the text for \(555\) 010-0123/);
