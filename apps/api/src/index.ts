@@ -7,6 +7,7 @@ import { createApp } from "./server.js";
 import { startScheduler, stopScheduler } from "./services/scheduler.js";
 import { noteListening } from "./services/runtimeStatus.js";
 import { listenOn, listenPlan, type Listener } from "./services/networkAccess.js";
+import { encryptPlainStores } from "./services/dataInventory.js";
 
 /**
  * Find .env by walking up from this file, not from the working directory.
@@ -48,6 +49,12 @@ function findEnvFile(name: string): string | undefined {
 
 const envFile = findEnvFile(process.env.NODE_ENV === "test" ? ".env.test" : ".env");
 if (envFile) dotenv.config({ path: envFile });
+
+// Before any store loads, and after .env (which may hold TRHAI_DATA_KEY): a
+// store still kept as plain JSON from before encryption is rewritten encrypted.
+const atRest = encryptPlainStores();
+if (atRest.encrypted.length) console.log(`ascend-api encrypted ${atRest.encrypted.join(", ")}, which had been stored as plain text`);
+for (const { name, reason } of atRest.failed) console.warn(`ascend-api could not encrypt ${name}: ${reason}`);
 
 const port = Number(process.env.PORT ?? 4000);
 // This PC's own addresses only, unless ASCEND_NETWORK_ACCESS lets other devices
