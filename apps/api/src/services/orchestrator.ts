@@ -6,6 +6,7 @@ import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
 import type { AgentLens } from "./agentTools.js";
 import { changesSomething } from "./toolPermissions.js";
+import { convertUnits } from "./unitConversion.js";
 import type { RunningApp, StartResult } from "./appRunner.js";
 import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
@@ -242,6 +243,12 @@ export async function runAssistantOrchestrator(
 
   const togglingSchedule = resolveToggleSchedule(input, approving, effectiveMessage);
   if (togglingSchedule) return togglingSchedule;
+
+  // "convert 5 miles to kilometers" - a table lookup and a multiplication.
+  // Asked of the model it came back as 44.5, as 20°C for 70°F, and as a bare
+  // formula; worked out here it is exact every time. See unitConversion.ts.
+  const conversion = approving ? null : convertUnits(effectiveMessage);
+  if (conversion) return deterministicResult(effectiveMessage, conversion.text, "conversion");
 
   // "save a document called X with the text Y" is a list operation, not a
   // reasoning one: a title and a body, straight into the store. Left to the
