@@ -27,8 +27,9 @@ import {
   writeFileAt,
   writeWorkspaceFile
 } from "./workspace.js";
-import { elisionIn, fileView, fitsOneRead } from "./contextBudget.js";
+import { elisionIn, fileView, fitsOneRead, maxToolResultTokens, shortenToTokens } from "./contextBudget.js";
 import { messageProblem, sendEmail, sendingTools, sendText, type MessagingDeps } from "./messaging.js";
+import { extractDocumentText, isDocumentPath, maxDocumentBytes } from "./documentText.js";
 import { describeTelemetry, readFreeSpace, readGpuHeadroom, readTelemetry, readTopMemoryPrograms } from "./systemTelemetry.js";
 import { fetchWebPage } from "./webFetch.js";
 import { webSearch } from "./webSearch.js";
@@ -1505,6 +1506,35 @@ function wouldGut(absolutePath: string, content: string, request: string | undef
     + "new_text. Nothing was written.";
 }
 
+/** A document file's text, read from an already-resolved path; see documentText.ts. */
+async function readDocumentAt(absolutePath: string): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
+  let size: number;
+  try {
+    const info = statSync(absolutePath);
+    if (info.isDirectory()) return { ok: false, reason: `"${absolutePath}" is a folder, not a document.` };
+    size = info.size;
+  } catch {
+    return { ok: false, reason: `There is no file at "${absolutePath}".` };
+  }
+  if (size > maxDocumentBytes) {
+    return { ok: false, reason: `"${path.basename(absolutePath)}" is ${Math.round(size / 1024 / 1024)} MB; documents up to ${maxDocumentBytes / 1024 / 1024} MB can be read.` };
+  }
+  const extracted = await extractDocumentText(readFileSync(absolutePath), absolutePath);
+  return extracted.ok ? { ok: true, text: extracted.text } : { ok: false, reason: extracted.reason };
+}
+
+/**
+ * Why a write must not land on `target`: a PDF, Word or PowerPoint file. The
+ * tools write plain text, and plain text saved over one of those leaves a file
+ * nothing can open.
+ */
+function writesOverADocument(target: string): string | null {
+  return isDocumentPath(target)
+    ? `${path.basename(target)} is a ${path.extname(target).slice(1).toUpperCase()} document, and the file tools write plain `
+      + "text - saving it there would leave a file nothing can open. Write the text to a .txt or .md file instead."
+    : null;
+}
+
 /** Why `content` must not be written, when it is a shortened view; see elisionIn. */
 function writesAShortenedView(content: string): string | null {
   const elided = elisionIn(content);
@@ -1719,11 +1749,11 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       }
 
       // Bounded: a long document would crowd out the rest of the exchange, and
-      // a truncated read has to say it was truncated.
-      const limit = 4000;
-      const body = found.body.length > limit
-        ? `${found.body.slice(0, limit)}\n\n[truncated — this document is longer than shown]`
-        : found.body;
+      // a shortened read has to say so. Its start and end, like a long file,
+      // with the way to the middle - documents are imported PDFs now, far
+      // longer than the 4,000 characters this used to stop at.
+      const body = shortenToTokens(found.body, maxToolResultTokens - 50,
+        "Use search_documents with a topic to find the passage about it");
 
       return { ok: true, content: `"${found.title}":\n${body}` };
     }
@@ -2551,6 +2581,19 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       });
       if (!verdict.ok) return { ok: false, content: verdict.reason };
 
+      // A PDF, Word or PowerPoint file is read for its text. It was refused as
+      // binary, so "what does report.pdf say" had nothing to answer from.
+      if (isDocumentPath(verdict.path)) {
+        const document = await readDocumentAt(verdict.path);
+        if (!document.ok) return { ok: false, content: document.reason };
+        noteProjectTouched(context.sessionId, target);
+        noteFileTouched(context.sessionId, target);
+        return fileView(document.text, {
+          start: lineArgument(call.arguments.start_line),
+          end: lineArgument(call.arguments.end_line)
+        }, true);
+      }
+
       let result = readFileAt(verdict.path, maxOpenedBytes);
 
       // A bare filename means the project this session is working in.
@@ -2604,6 +2647,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       if (placeholder) return { ok: false, content: `${placeholder} Nothing was written.` };
       const shortenedView = writesAShortenedView(content);
       if (shortenedView) return { ok: false, content: `${shortenedView} Nothing was written.` };
+      const overDocument = writesOverADocument(target);
+      if (overDocument) return { ok: false, content: `${overDocument} Nothing was written.` };
 
       const verdict = resolveForAccess(target, {
         // As above: an unattended run stays in the workspace.
@@ -2654,6 +2699,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       if (placeholder) return { ok: false, content: `${placeholder} Nothing was changed.` };
       const shortenedView = writesAShortenedView(addition ?? newText ?? "");
       if (shortenedView) return { ok: false, content: `${shortenedView} Nothing was changed.` };
+      const overDocument = writesOverADocument(target);
+      if (overDocument) return { ok: false, content: `${overDocument} Nothing was changed.` };
 
       // Read and write are checked separately with the same rule, so an edit
       // cannot reach anywhere a read or a write could not.

@@ -36,6 +36,7 @@ import { AgentPicker } from "../components/AgentPicker";
 import { AppGate, useAccount } from "../components/AppGate";
 import { AccountPanel } from "../components/AccountPanel";
 import { MessagingPanel } from "../components/MessagingPanel";
+import { DocumentsPanel } from "../components/DocumentsPanel";
 import "./dash.css";
 import "./trhai.css";
 
@@ -1199,6 +1200,7 @@ function Dashboard() {
               <button type="button" className="trh-section-back" onClick={() => setView("home")}>◇ BACK TO HOME</button>
             </div>
             <div className="trh-section-body">
+              {view === "memory" ? <DocumentsPanel /> : null}
               {view === "memory" ? (
                 <MemoryStatus
                   entries={memories?.total ?? null}
