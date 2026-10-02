@@ -13,11 +13,17 @@ import "./coregl.css";
 // distance field evaluated per pixel. Adding 600 kB of library to draw two
 // triangles would have cost more than it did anything.
 //
-// Everything the reference asks for is procedural: the interior of the orb is
-// domain-warped noise, the rings are analytic, the particles are hashed from
-// their index, the filaments are angular noise. Nothing is a texture and
-// nothing is a sprite, so the whole thing is resolution-independent and reacts
-// per-frame to state and to the real audio level.
+// It is drawn as the globe in the app's key art (public/trh-background.png):
+// a see-through sphere of points joined to their neighbours, a bright limb, an
+// orbit ring around its waist and HUD arcs around that. On the dashboard it sits
+// exactly over the art's own globe, so the two read as one object - the art's
+// beam and floor finish it off below. It was a radar dial before, drawn on top
+// of a globe it looked nothing like.
+//
+// Everything is procedural: the network is a 3D cell field on the sphere, the
+// rings are analytic, the particles are hashed from their index. Nothing is a
+// texture and nothing is a sprite, so the whole thing is resolution-independent
+// and reacts per-frame to state and to the real audio level.
 //
 // It degrades rather than disappearing. No WebGL2 and a lost context both fall
 // back to the SVG core, which is a complete drawing in its own right — never a
@@ -34,8 +40,12 @@ precision highp float;
 
 uniform vec2  uResolution;
 uniform float uTime;
+/* How far the globe has turned. Integrated from the state's spin on the CPU,
+   so a change of state changes the speed and never jumps the angle - time
+   multiplied by a changing speed spun everything wildly for a second at every
+   transition. */
+uniform float uPhase;
 uniform float uEnergy;
-uniform float uSpin;
 uniform float uConverge;
 uniform float uAmplitude;
 uniform vec3  uColor;
@@ -45,6 +55,11 @@ uniform float uAlive;
 out vec4 fragColor;
 
 const float TAU = 6.28318530718;
+/* The key art's few warm marks among the blue. Fixed rather than per state:
+   they are part of the drawing, not a reading. */
+const vec3 WARM = vec3(1.0, 0.56, 0.24);
+/* The sphere the network lives on, in cell units: about 140 points in all. */
+const float NET_SCALE = 3.2;
 
 float hash21(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -52,26 +67,98 @@ float hash21(vec2 p) {
   return fract(p.x * p.y);
 }
 
-float noise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  float a = hash21(i);
-  float b = hash21(i + vec2(1.0, 0.0));
-  float c = hash21(i + vec2(0.0, 1.0));
-  float d = hash21(i + vec2(1.0, 1.0));
-  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+vec3 hash33(vec3 p) {
+  p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+  p += dot(p, p.yxz + 33.33);
+  return fract((p.xxy + p.yxx) * p.zyx);
 }
 
-float fbm(vec2 p) {
-  float total = 0.0;
-  float amp = 0.5;
-  for (int i = 0; i < 4; i++) {
-    total += amp * noise(p);
-    p *= 2.03;
-    amp *= 0.5;
+/* The globe's own frame: its axis leans toward the viewer, the way the art's
+   does, and it turns about that axis by phase. */
+mat3 globeFrame(float phase) {
+  float ct = cos(0.40), st = sin(0.40);
+  float cp = cos(phase), sp = sin(phase);
+  mat3 tilt = mat3(1.0, 0.0, 0.0, 0.0, ct, st, 0.0, -st, ct);
+  mat3 turn = mat3(cp, 0.0, -sp, 0.0, 1.0, 0.0, sp, 0.0, cp);
+  return turn * tilt;
+}
+
+/* One link of the network, from a to b, following the sphere's surface.
+   Only neighbours are joined, as in the art: a long link fades out. */
+float link(vec3 q, vec3 a, vec3 b, float px) {
+  vec3 ab = b - a;
+  float len = length(ab);
+  float keep = smoothstep(1.25, 0.80, len);
+  if (keep <= 0.0) return 0.0;
+  float h = clamp(dot(q - a, ab) / (len * len), 0.0, 1.0);
+  vec3 c = a + ab * h;
+  c *= NET_SCALE / length(c);
+  float d = length(q - c);
+  return keep * (1.0 - smoothstep(0.35 * px, 1.5 * px, d));
+}
+
+/* The network at one point of the sphere: x is links, y is nodes.
+   s is a unit vector in the globe's frame and px the size of a pixel there.
+
+   Points come from a 3D cell field, each cell holding one, and only points
+   lying near the surface count - otherwise the cells inside the sphere would
+   pile their points onto it too. The four nearest are joined to each other,
+   which draws every short link in full: wherever a link passes, both of its
+   ends are among the four nearest points. */
+vec2 network(vec3 s, float px, float time) {
+  vec3 q = s * NET_SCALE;
+  vec3 base = floor(q);
+  vec3 p0 = vec3(0.0), p1 = vec3(0.0), p2 = vec3(0.0), p3 = vec3(0.0);
+  float d0 = 1e3, d1 = 1e3, d2 = 1e3, d3 = 1e3;
+  float seed0 = 0.0;
+
+  for (int z = -1; z <= 1; z++) {
+    for (int y = -1; y <= 1; y++) {
+      for (int x = -1; x <= 1; x++) {
+        vec3 cell = base + vec3(float(x), float(y), float(z));
+        vec3 h = hash33(cell);
+        vec3 f = cell + h;
+        float lf = length(f);
+        if (abs(lf - NET_SCALE) > 0.55) continue;
+        f *= NET_SCALE / lf;
+        float d = length(q - f);
+        if (d >= d3) continue;
+        if (d < d0) { p3 = p2; d3 = d2; p2 = p1; d2 = d1; p1 = p0; d1 = d0; p0 = f; d0 = d; seed0 = h.x; }
+        else if (d < d1) { p3 = p2; d3 = d2; p2 = p1; d2 = d1; p1 = f; d1 = d; }
+        else if (d < d2) { p3 = p2; d3 = d2; p2 = f; d2 = d; }
+        else { p3 = f; d3 = d; }
+      }
+    }
   }
-  return total;
+
+  float lines = 0.0;
+  if (d1 < 1e2) lines = max(lines, link(q, p0, p1, px));
+  if (d2 < 1e2) {
+    lines = max(lines, link(q, p0, p2, px));
+    lines = max(lines, link(q, p1, p2, px));
+  }
+  if (d3 < 1e2) {
+    lines = max(lines, link(q, p0, p3, px));
+    lines = max(lines, link(q, p1, p3, px));
+    lines = max(lines, link(q, p2, p3, px));
+  }
+
+  /* Each node a hard dot with a small halo, twinkling on its own clock. */
+  float twinkle = 0.55 + 0.45 * sin(time * (0.7 + 1.6 * seed0) + seed0 * TAU);
+  float nodes = 0.0;
+  if (d0 < 1e2) {
+    nodes = (1.0 - smoothstep(0.7 * px, 1.8 * px, d0)) * 1.3
+      + exp(-d0 * d0 / (2.0 * pow(4.0 * px, 2.0))) * 0.45;
+    nodes *= twinkle;
+  }
+  return vec2(lines, nodes);
+}
+
+/* Distance to an ellipse, close enough for a hairline (Quilez's estimate). */
+float ellipseDistance(vec2 p, vec2 radii) {
+  float k0 = length(p / radii);
+  float k1 = max(length(p / (radii * radii)), 1e-5);
+  return k0 * (k0 - 1.0) / k1;
 }
 
 /* A hairline ring, anti-aliased against the pixel footprint rather than a
@@ -94,8 +181,7 @@ void main() {
   float r = length(uv);
   float angle = atan(uv.y, uv.x);
 
-  /* Discarded early: roughly a fifth of the pixels are outside the core, and
-     every one would otherwise pay for four octaves of noise. */
+  /* Discarded early: the corners are outside everything drawn here. */
   if (r > 0.60) {
     fragColor = vec4(0.0);
     return;
@@ -104,148 +190,98 @@ void main() {
   float t = uTime;
   float energy = uEnergy;
   float amp = uAmplitude;
-  float spin = t * uSpin;
+  float spin = uPhase;
+  float pixel = 1.0 / min(uResolution.x, uResolution.y);
 
   vec3 col = vec3(0.0);
 
-  /* ---- the orb ---------------------------------------------------------
-     Small and intense rather than large and soft. The interior is domain-
-     warped noise so it churns, but the falloff is tight: what reads as a
-     power source is a hard bright centre, not a wide haze. */
-  float pulse = 1.0 + 0.09 * amp + 0.025 * sin(t * 0.9);
-  float coreRadius = 0.105 * pulse;
+  /* ---- the globe ---------------------------------------------------------
+     Large, like the art's, and transparent: the far side of the network shows
+     through the near side, dimmer, which is what makes it read as a sphere of
+     light rather than a picture of one. A real level swells it slightly - the
+     voice moving the globe - and with no reading it only breathes. */
+  float R = 0.275 * (1.0 + 0.035 * amp + 0.006 * sin(t * 0.9));
+  float inDisc = 1.0 - smoothstep(R - 1.5 * pixel, R + 1.5 * pixel, r);
 
-  vec2 warp = vec2(
-    fbm(uv * 7.0 + vec2(t * 0.21, t * -0.17)),
-    fbm(uv * 7.0 + vec2(t * -0.13, t * 0.19) + 7.31)
-  );
-  float interior = fbm(uv * 11.0 + warp * 2.2 + vec2(0.0, t * 0.30));
+  vec2 onDisc = uv / R;
+  float z = sqrt(max(0.0, 1.0 - dot(onDisc, onDisc)));
+  if (inDisc > 0.0) {
+    mat3 frame = globeFrame(spin);
+    /* A pixel's size on the network's sphere, which grows toward the limb as
+       the surface turns away - so links keep one width on screen. */
+    float px = NET_SCALE * pixel / R / max(z, 0.22);
+    vec2 near = network(frame * vec3(onDisc, z), px, t);
+    vec2 far = network(frame * vec3(onDisc, -z), px, t);
 
-  float orb = smoothstep(coreRadius, coreRadius * 0.1, r);
-  col += uColor * orb * mix(0.85, 1.9, interior) * (1.6 + 1.2 * amp);
-
-  /* The white-hot centre. Kept small so it reads as a source rather than
-     bleaching the middle of the screen into a flat disc. */
-  col += vec3(0.55, 0.85, 1.0) * smoothstep(coreRadius * 0.62, 0.0, r) * (1.5 + 1.0 * amp);
-  col += vec3(1.0) * smoothstep(coreRadius * 0.45, 0.0, r) * (3.0 + 2.5 * amp);
-
-  /* ---- the orb is a sphere, not a disc --------------------------------
-     Everything above is radial, which is why the core read as a glow painted
-     on glass rather than as an object sitting in the space the rings imply.
-     Reconstructing a hemisphere normal from the pixel position and lighting it
-     is what gives it a near side and a far side.
-
-     The light comes from up and to the left, matching the key light in the
-     room gradient behind it, so the core is lit by the same scene as
-     everything else rather than by a source of its own. */
-  if (r < coreRadius) {
-    vec2 sphere = uv / coreRadius;
-    float z = sqrt(max(0.0, 1.0 - dot(sphere, sphere)));
-    vec3 normal = normalize(vec3(sphere, z));
-    vec3 lightDir = normalize(vec3(-0.42, 0.46, 0.78));
-
-    float lambert = max(0.0, dot(normal, lightDir));
-    /* A terminator this soft keeps it looking like plasma rather than
-       billiard-ball plastic. */
-    float shaded = mix(0.72, 1.0, pow(lambert, 0.7));
-
-    /* Fresnel: the limb of a glowing sphere is brighter than its middle,
-       which is what sells it as luminous rather than merely round. */
-    float limb = pow(1.0 - z, 2.4);
-
-    /* Shading is applied gently. A lit sphere is the goal, but this one is
-       also the light source in the scene — dimming it the way an opaque
-       object would be lit made it read as a grey ball with a highlight, and
-       cost the core the luminosity that made it worth looking at. */
-    col *= mix(1.0, shaded, 0.3);
-    col += uColor * limb * (2.2 + 1.4 * amp);
-    col += mix(uColor, vec3(1.0), 0.6) * limb * limb * (1.2 + 0.9 * amp);
-    /* A specular glint, small and offset, so the surface has a direction. */
-    col += vec3(1.0) * pow(max(0.0, dot(normal, lightDir)), 42.0) * 1.4;
-
-    /* ---- globe grid ------------------------------------------------
-       Meridians and parallels across the sphere's own surface, so the
-       core reads as a world under glass rather than a ball of plasma -
-       the reference's wireframe-globe language, added rather than
-       substituted for the plasma work above it. Evaluated on the real
-       surface normal, so the lines curve with the sphere instead of
-       being flat rings painted over a disc.
-
-       The meridians turn with spin, the same value that already speeds
-       up the rings when the machine is genuinely working - a globe that
-       spun on its own timer while idle would be exactly the decoration
-       this shader otherwise refuses. */
-    float longitude = atan(normal.x, normal.z);
-    float latitude = asin(clamp(normal.y, -1.0, 1.0));
-    float meridians = smoothstep(0.940, 0.998, abs(cos(longitude * 9.0 - spin * 0.25)));
-    float parallels = smoothstep(0.945, 0.998, abs(cos(latitude * 10.0)));
-    float grid = max(meridians, parallels);
-    col += mix(uColor, uAccent, 0.5) * grid * mix(0.28, 1.0, z) * (0.30 + 0.45 * energy);
+    /* Quieter in the middle, behind the TRH AI mark, so the mark stays legible. */
+    float hush = mix(0.5, 1.0, smoothstep(0.08, 0.5, length(onDisc)));
+    vec3 linkColor = mix(uColor, vec3(0.80, 0.95, 1.0), 0.22);
+    col += linkColor * near.x * (0.85 + 0.55 * energy) * hush * inDisc;
+    col += mix(uColor, vec3(1.0), 0.55) * near.y * (1.25 + 0.8 * energy + 1.3 * amp) * hush * inDisc;
+    col += uColor * (far.x * 0.32 + far.y * 0.5) * hush * inDisc;
   }
 
-  /* ---- the iris --------------------------------------------------------
-     Blades around the orb that close as the core works harder, so the
-     silhouette itself changes rather than only the colour. Driven by energy,
-     which is driven by the real state and the machine's real load — an iris
-     that opened and shut on a timer would be the most convincing fake here,
-     because a mechanism implies a mechanism.
+  /* The limb: a sphere of light is brightest at its edge. */
+  float limb = pow(1.0 - z, 3.0);
+  col += uColor * limb * (1.3 + 0.9 * energy + 1.4 * amp) * inDisc;
+  col += mix(uColor, vec3(1.0), 0.45) * hairline(r, R, 0.0011) * (1.1 + 0.9 * amp);
+  /* A soft light at the heart, under the mark, that a voice brightens. */
+  col += mix(uColor, vec3(1.0), 0.3) * exp(-r * r / 0.0045) * (0.28 + 0.55 * amp);
+  /* And a halo just outside the edge. */
+  col += uColor * exp(-max(r - R, 0.0) * 20.0) * (1.0 - inDisc) * (0.30 + 0.30 * energy + 0.45 * amp);
 
-     Twelve blades, each a wedge whose inner edge sits at a radius set by how
-     open the iris is. Analytic, so it costs a couple of instructions. */
-  float blade = abs(fract(angle / TAU * 12.0) - 0.5) * 2.0;
-  float irisOpen = mix(0.30, 0.16, clamp(energy + amp * 0.4, 0.0, 1.0));
-  float irisEdge = irisOpen + blade * 0.028;
-  float iris = smoothstep(irisEdge + 0.012, irisEdge, r) * smoothstep(coreRadius * 1.6, coreRadius * 2.6, r);
-  col += uColor * iris * (0.16 + 0.3 * energy);
-  /* A lit rim along each blade edge, which is what makes it read as a plate
-     rather than a shadow. */
-  col += mix(uColor, uAccent, 0.4) * hairline(r, irisEdge, 0.0016) * (0.7 + 0.9 * energy);
+  /* ---- the orbit ------------------------------------------------------------
+     Rings around the globe's waist, seen from a little above as in the art:
+     the near half crosses in front of the globe and the far half passes behind
+     it, where only a trace shows through. Dashes run round the main ring at the
+     globe's own speed. */
+  /* Centred a little below the globe's middle, so the rings wrap its lower half. */
+  vec2 e = mat2(cos(0.08), -sin(0.08), sin(0.08), cos(0.08)) * (uv + vec2(0.0, 0.07));
+  float behind = step(0.0, e.y) * inDisc;
+  float orbitAngle = atan(e.y / 0.17, e.x);
+  float orbitDash = step(0.42, fract(orbitAngle / TAU * 22.0 - spin * 0.55));
 
-  /* ---- bloom -----------------------------------------------------------
-     Two falloffs: a tight one that gives the orb its halo, and a wide faint
-     one that lifts the whole instrument off the background. */
-  col += uColor * exp(-r * 13.0) * (0.85 + 0.7 * amp);
-  col += mix(uColor, uAccent, 0.5) * exp(-r * 4.5) * (0.16 + 0.22 * energy);
+  float orbitMain = 1.0 - smoothstep(0.0, 1.6 * pixel, abs(ellipseDistance(e, vec2(0.44, 0.44 * 0.17))));
+  float orbitOuter = 1.0 - smoothstep(0.0, 1.2 * pixel, abs(ellipseDistance(e, vec2(0.475, 0.475 * 0.17))));
+  float orbitGlow = exp(-abs(ellipseDistance(e, vec2(0.44, 0.44 * 0.17))) * 60.0);
+  float occlusion = mix(1.0, 0.16, behind);
+  col += mix(uColor, vec3(1.0), 0.3) * orbitMain * mix(0.55, 1.0, orbitDash) * (1.2 + 0.8 * energy) * occlusion;
+  col += uColor * orbitOuter * 0.55 * occlusion;
+  col += uColor * orbitGlow * (0.22 + 0.25 * energy) * occlusion;
 
-  /* ---- energy field ----------------------------------------------------
-     Turbulence between the orb and the rings, pushed or pulled by uConverge
-     so the field has a direction matching the work being done. Kept dim: this
-     is atmosphere, and it is what turned into visible smears when it was not. */
-  float flow = fbm(uv * 5.5 - vec2(0.0, t * (0.15 + 0.4 * energy)) + uConverge * r * 3.0);
-  float shell = smoothstep(coreRadius, 0.30, r) * smoothstep(0.52, 0.28, r);
-  col += uAccent * shell * pow(flow, 2.0) * energy * 0.42;
+  /* ---- HUD arcs ------------------------------------------------------------
+     Concentric arcs around the globe, as in the art: a fine ring hugging it,
+     broken arcs turning with it, a scale that stays still so the turning has
+     something to be read against, and a readout of uneven dashes. Hairlines
+     at radii that share no common multiple, so they never line up into a
+     single spinning wheel. */
+  col += uColor * hairline(r, R * 1.09, 0.0007) * 0.9;
 
-  /* ---- rings -----------------------------------------------------------
-     Hairlines at radii that share no common multiple, each with its own
-     rotation and its own gap pattern, so they never line up into a single
-     spinning wheel. */
-  float innerGaps = smoothstep(0.30, 0.85, abs(sin((angle + spin * 0.60) * 6.0)));
-  col += uColor * hairline(r, 0.190, 0.0016) * innerGaps * (3.2 + 1.8 * energy);
+  float arcTurn = angle + spin * 2.0;
+  float arcGaps = smoothstep(0.25, 0.80, abs(sin(arcTurn * 3.0)));
+  col += uColor * hairline(r, 0.335, 0.0014) * arcGaps * (1.9 + 1.2 * energy);
 
-  float midGaps = smoothstep(0.15, 0.70, abs(sin((angle - spin * 0.37) * 3.0)));
-  col += uAccent * hairline(r, 0.268, 0.0026) * midGaps * (2.8 + 2.0 * energy);
+  /* The art's few warm marks: two short arcs riding the turning ring. */
+  float along = fract(arcTurn / TAU);
+  float warmMarks = (1.0 - smoothstep(0.0, 0.014, abs(along - 0.17)))
+    + (1.0 - smoothstep(0.0, 0.008, abs(along - 0.62)));
+  col += WARM * hairline(r, 0.335, 0.0024) * warmMarks * 1.5;
 
-  /* A continuous faint ring between them, so the gapped ones read as sitting
-     on a dial rather than floating. */
-  col += uColor * hairline(r, 0.228, 0.0008) * 1.0;
+  /* The still scale. */
+  float ticks = smoothstep(0.82, 0.995, abs(sin(angle * 45.0)));
+  col += uColor * hairline(r, 0.365, 0.0045) * ticks * 0.9;
+  float majorTicks = smoothstep(0.95, 0.999, abs(sin(angle * 6.0)));
+  col += uColor * hairline(r, 0.365, 0.010) * majorTicks * 1.4;
 
-  /* Tick marks. The one element that does not rotate: without a fixed
-     reference the eye has nothing to read the rotation against. */
-  float ticks = smoothstep(0.80, 0.995, abs(sin(angle * 36.0)));
-  col += uColor * hairline(r, 0.330, 0.0075) * ticks * 2.0;
-
-  float majorTicks = smoothstep(0.93, 0.999, abs(sin(angle * 6.0)));
-  col += uColor * hairline(r, 0.330, 0.016) * majorTicks * 2.4;
-
-  /* ---- data ring -------------------------------------------------------
-     Dashes of hashed length, counter-rotating. Irregular spacing is what
-     separates a readout from a dotted line: an even dash pattern reads as
-     ornament, an uneven one reads as content. */
-  float dataAngle = angle * 24.0 - spin * 0.9;
-  float dataCell = floor(dataAngle / TAU * 24.0);
-  float dataLen = 0.35 + 0.6 * hash21(vec2(dataCell, 17.0));
-  float dataMark = step(1.0 - dataLen, fract(dataAngle / TAU * 24.0));
-  col += uColor * hairline(r, 0.245, 0.0035) * dataMark * 0.75;
+  /* A readout of dashes of uneven length, counter-turning, over the upper
+     half where the art carries its blocks. Irregular spacing is what makes it
+     read as content rather than ornament. */
+  float dataAngle = angle - spin * 1.4;
+  float dataCell = floor(dataAngle / TAU * 60.0);
+  float dataLen = 0.25 + 0.65 * hash21(vec2(dataCell, 17.0));
+  float dataMark = step(1.0 - dataLen, fract(dataAngle / TAU * 60.0)) * step(0.3, hash21(vec2(dataCell, 5.0)));
+  col += mix(uColor, vec3(1.0), 0.2) * hairline(r, 0.392, 0.0042) * dataMark
+    * smoothstep(-0.1, 0.3, sin(angle)) * (0.8 + 0.8 * energy);
 
   /* ---- the waveform ring ----------------------------------------------
      Radius modulated by the real level. With no reading this is a true
@@ -253,43 +289,23 @@ void main() {
      nothing is being heard is exactly the fake this build refuses. */
   float wave = sin(angle * 9.0 - t * 2.1) * 0.5 + sin(angle * 14.0 + t * 1.3) * 0.3;
   col += mix(uColor, uAccent, 0.6)
-    * hairline(r, 0.386 + wave * amp * 0.05, 0.0022)
-    * (0.55 + 1.5 * amp);
+    * hairline(r, 0.418 + wave * amp * 0.04, 0.0018)
+    * (0.45 + 1.5 * amp);
 
-  /* ---- light shafts ----------------------------------------------------
-     Thin volumetric rays leaving the orb, spaced by the same twelve-fold
-     symmetry as the iris so they read as light escaping between the blades
-     rather than as a separate decoration laid on top. */
-  float shaft = pow(abs(sin(angle * 6.0)), 26.0);
-  float shaftFade = smoothstep(coreRadius, coreRadius * 2.2, r) * smoothstep(0.5, 0.16, r);
-  col += mix(uColor, vec3(1.0), 0.35) * shaft * shaftFade * (0.5 + 1.1 * amp + 0.5 * energy);
-
-  /* ---- scan sweep ------------------------------------------------------
-     One arm sweeping the dial, brightest at its leading edge and fading
-     behind it like a radar trace. It rotates with uSpin, so it quickens when
-     real work starts rather than turning at a fixed rate — this is the one
-     element people read as "the machine is looking at something", and it
-     would be a lie if it swept the same way while nothing was happening. */
-  float sweepPhase = fract((angle - t * 0.16 * uSpin) / TAU);
-  float sweepArm = pow(1.0 - sweepPhase, 7.0);
-  float sweepBand = smoothstep(coreRadius, 0.17, r) * smoothstep(0.54, 0.19, r);
-  col += mix(uColor, uAccent, 0.35) * sweepArm * sweepBand * (0.45 + 0.65 * energy);
-
-  /* The leading edge itself, a hard bright line so the arm has a front. */
-  col += uAccent * smoothstep(0.986, 1.0, 1.0 - sweepPhase) * sweepBand * (0.9 + 1.2 * energy);
-
-  /* ---- filaments -------------------------------------------------------
-     Thin radial threads. Both the angular frequency and the exponent are high,
-     which is what makes these threads: at frequency 5 and pow 6 the same
-     expression produced broad wedges that read as smudges on the glass. */
-  float filament = pow(noise(vec2(angle * 26.0, t * 0.30)), 16.0);
-  float filamentBand = smoothstep(coreRadius, 0.20, r) * smoothstep(0.46, 0.22, r);
-  col += uAccent * filament * filamentBand * (1.0 + 1.6 * energy);
+  /* ---- the axis ------------------------------------------------------------
+     A hairline of light through the globe from above, and a beam below it
+     reaching down toward the art's own pedestal - the canvas ends, the art's
+     beam carries on. Faint across the globe itself. */
+  float axisLine = 1.0 - smoothstep(0.4 * pixel, 1.6 * pixel, abs(uv.x));
+  col += mix(uColor, vec3(1.0), 0.4) * axisLine * mix(1.0, 0.22, inDisc) * smoothstep(0.50, 0.36, uv.y) * 0.75;
+  float belowGlobe = smoothstep(-R * 0.85, -R - 0.03, uv.y);
+  col += uColor * exp(-abs(uv.x) * 90.0) * belowGlobe * (0.30 + 0.35 * energy + 0.4 * amp);
+  col += mix(uColor, vec3(1.0), 0.5) * axisLine * belowGlobe * 0.9;
 
   /* ---- particles -------------------------------------------------------
      Hashed from their own index, so radii, speeds and phases all differ with
      nothing stored per particle. uConverge moves the set in or out. */
-  for (int i = 0; i < 28; i++) {
+  for (int i = 0; i < 20; i++) {
     float fi = float(i);
     float seed = hash21(vec2(fi, 3.7));
     float seed2 = hash21(vec2(fi, 9.1));
@@ -298,11 +314,12 @@ void main() {
     float pa = seed * TAU + t * (0.25 + seed * 0.75) * (0.5 + energy) * direction * 0.6;
 
     /* Wrapped, so particles keep arriving rather than all reaching the
-       destination at once and stopping there. */
+       destination at once and stopping there. Pulled in, they settle on the
+       globe's edge; pushed out, they leave the frame. */
     float drift = fract(seed2 + t * 0.06 * (0.4 + energy));
-    float base = mix(0.20, 0.52, seed);
+    float base = mix(0.31, 0.50, seed);
     float pr = uConverge >= 0.0
-      ? mix(base, coreRadius + 0.02, drift * uConverge)
+      ? mix(base, R + 0.02, drift * uConverge)
       : mix(base, 0.56, drift * -uConverge);
 
     float d = length(uv - vec2(cos(pa), sin(pa)) * pr);
@@ -318,13 +335,10 @@ void main() {
   /* ---- outer frame -----------------------------------------------------
      Six brackets rather than a full circle: an unbroken outer ring reads as a
      loading spinner. Each is an arc plus two end caps. */
-  float bracketAngle = angle + spin * 0.10;
+  float bracketAngle = angle + spin * 0.5;
   float brackets = smoothstep(0.88, 0.995, abs(sin(bracketAngle * 3.0)));
-  col += uColor * hairline(r, 0.500, 0.0022) * brackets * 2.6;
-  col += uColor * hairline(r, 0.500, 0.012) * smoothstep(0.985, 1.0, abs(sin(bracketAngle * 3.0))) * 2.6;
-
-  /* A faint outer haze, so the frame has something to sit against. */
-  col += uColor * band(r, 0.500, 0.055) * 0.05;
+  col += uColor * hairline(r, 0.488, 0.0016) * brackets * 1.6;
+  col += uColor * hairline(r, 0.488, 0.010) * smoothstep(0.985, 1.0, abs(sin(bracketAngle * 3.0))) * 1.8;
 
   /* Colour drains when the machine cannot be reached. */
   col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, uAlive);
@@ -341,7 +355,14 @@ void main() {
   col *= (lum / (lum + 0.55)) / max(lum, 0.0001);
   col = pow(col, vec3(0.90));
 
-  fragColor = vec4(col, clamp(max(max(col.r, col.g), col.b) * 1.7, 0.0, 1.0));
+  /* Written premultiplied, with blending off: light adds to whatever is
+     behind the canvas, and the globe's disc is filled dark enough to hide the
+     key art's own globe, which sits right behind this one on the dashboard -
+     two networks turning against each other read as noise. */
+  float glow = clamp(max(max(col.r, col.g), col.b) * 1.5, 0.0, 1.0);
+  float fill = inDisc * 0.88;
+  vec3 deep = vec3(0.008, 0.024, 0.050);
+  fragColor = vec4(col + deep * fill * (1.0 - glow), max(fill, glow));
 }
 `;
 
@@ -499,7 +520,7 @@ export function CoreGL({ state = "idle", size = 300, amplitude, load }: {
       resolution: gl.getUniformLocation(program, "uResolution"),
       time: gl.getUniformLocation(program, "uTime"),
       energy: gl.getUniformLocation(program, "uEnergy"),
-      spin: gl.getUniformLocation(program, "uSpin"),
+      phase: gl.getUniformLocation(program, "uPhase"),
       converge: gl.getUniformLocation(program, "uConverge"),
       amplitude: gl.getUniformLocation(program, "uAmplitude"),
       color: gl.getUniformLocation(program, "uColor"),
@@ -508,8 +529,10 @@ export function CoreGL({ state = "idle", size = 300, amplitude, load }: {
     };
 
     gl.useProgram(program);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    // No blending: one triangle is drawn once over a cleared canvas, and the
+    // shader writes its colour already premultiplied, the way the page
+    // composites a WebGL canvas.
+    gl.disable(gl.BLEND);
 
     setUsable(true);
 
@@ -522,6 +545,8 @@ export function CoreGL({ state = "idle", size = 300, amplitude, load }: {
     // animations instead of one system changing what it is doing.
     let easedEnergy = 0;
     let easedSpin = 1;
+    // The globe's turn, accumulated from the eased spin. See uPhase.
+    let phase = 0;
     let easedConverge = 0;
     let easedAmp = 0;
     let easedAlive = 1;
@@ -621,7 +646,9 @@ export function CoreGL({ state = "idle", size = 300, amplitude, load }: {
       // Energy and spin are damped as well as slowed, so a busy state stays
       // legible as busy without the field becoming agitated.
       gl.uniform1f(uniforms.energy, easedEnergy * (calm < 1 ? 0.55 : 1));
-      gl.uniform1f(uniforms.spin, easedSpin);
+      // About a turn every forty seconds at rest, faster as the work does.
+      phase += (delta / 60) * 0.16 * easedSpin * calm;
+      gl.uniform1f(uniforms.phase, phase);
       gl.uniform1f(uniforms.converge, easedConverge);
       gl.uniform1f(uniforms.amplitude, Math.min(1, Math.max(0, easedAmp)));
       gl.uniform3f(uniforms.color, easedColor[0], easedColor[1], easedColor[2]);

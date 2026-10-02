@@ -139,19 +139,57 @@
 .gate-foot .gate-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--g-ok); box-shadow: 0 0 8px var(--g-ok); }
 
 /* ---------------------------------------------------------- sign-in screen */
+/* Two halves: the key art, framed so its globe is the middle of the left one,
+   and a quiet panel on the right for the form. Spread across the whole screen
+   behind two columns, the art's one centred globe landed between them - half
+   under the card, beside a second core, with the words on its brightest part. */
+.gate.gate-auth { place-items: stretch; background: #04070e; }
+
 .gate-signin {
   position: relative; z-index: 1;
-  width: min(1080px, 94vw);
-  display: grid; grid-template-columns: minmax(0, 1fr) 420px; align-items: center;
-  gap: clamp(28px, 5vw, 80px);
-  padding: 32px 0;
+  min-height: 100dvh;
+  display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(400px, 0.88fr);
 }
 
-.gate-hero { display: flex; flex-direction: column; align-items: flex-start; }
-.gate-hero .gate-core { margin-left: -18px; }
-.gate-hero .gate-wordmark { margin-top: 10px; font-size: clamp(36px, 4.2vw, 52px); text-indent: 0; }
-.gate-hero .gate-tagline { text-indent: 0; }
-.gate-hero-lead { margin: 22px 0 0; max-width: 430px; font-size: 15px; line-height: 1.55; color: #c9dcec; }
+.gate-visual {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; justify-content: space-between; gap: 24px;
+  padding: clamp(26px, 3.6vw, 48px);
+  background:
+    /* Dark where the words are: the stars at the top, the floor at the bottom. */
+    linear-gradient(180deg, rgba(4, 7, 14, 0.6) 0%, rgba(4, 7, 14, 0) 16%, rgba(4, 7, 14, 0) 50%, rgba(4, 7, 14, 0.8) 76%, #04070e 100%),
+    /* And a fade into the form's panel, so the join is a gradient, not an edge. */
+    linear-gradient(90deg, rgba(4, 7, 14, 0) 72%, rgba(4, 7, 14, 0.85) 100%),
+    url("/trh-background.png") 50% 36% / cover no-repeat,
+    #04070e;
+}
+.gate-visual > :not(.gate-particles) { position: relative; z-index: 1; }
+
+.gate-brand .gate-wordmark { font-size: clamp(26px, 2.6vw, 34px); letter-spacing: 0.36em; text-indent: 0; }
+.gate-brand .gate-tagline { margin-top: 4px; text-indent: 0; }
+.gate-visual-copy { max-width: 460px; }
+.gate-hero-lead { margin: 0; font-size: 15px; line-height: 1.55; color: #c9dcec; text-shadow: 0 1px 12px rgba(0, 0, 0, 0.8); }
+
+.gate-form-side {
+  position: relative;
+  display: grid; place-items: center;
+  padding: clamp(24px, 4vw, 56px);
+  border-left: 1px solid var(--g-line-soft);
+  background:
+    radial-gradient(80% 55% at 100% 0%, rgba(56, 208, 255, 0.09), transparent 62%),
+    radial-gradient(70% 50% at 0% 100%, rgba(42, 120, 240, 0.07), transparent 62%),
+    linear-gradient(180deg, #070e1b, #04070e);
+}
+/* The dashboard's own grid, faint, so the panel reads as a surface. */
+.gate-form-side::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(70, 160, 230, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 160, 230, 0.055) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(75% 65% at 50% 45%, #000 25%, transparent 100%);
+}
+.gate-form-side > .gate-card-slot { position: relative; width: min(420px, 100%); }
 .gate-points { list-style: none; margin: 20px 0 0; padding: 0; display: grid; gap: 12px; }
 .gate-points li { display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: #c9dcec; }
 .gate-points svg {
@@ -172,7 +210,7 @@
 /* The card's entrance rides on the column around it, never on the card
    itself: the card carries a backdrop blur, and a filter does not share a
    rule with an animation here (tests/motion-budget.test.ts). */
-.gate-signin > .gate-card-slot { animation: gate-rise 560ms var(--ease, ease) both; }
+.gate-form-side > .gate-card-slot { animation: gate-rise 560ms var(--ease, ease) both; }
 @keyframes gate-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 .gate-card::before {
   content: ""; position: absolute; top: 0; left: 0; right: var(--g-cut); height: 1px;
@@ -353,10 +391,15 @@
   .gate-alert { animation: none; }
 }
 
+/* Narrow: the art becomes a band across the top with the globe in it, and
+   the form sits below it on the same quiet panel. */
 @media (max-width: 900px) {
-  .gate-signin { grid-template-columns: 1fr; width: min(440px, 92vw); gap: 18px; }
-  .gate-hero { flex-direction: row; align-items: center; gap: 14px; }
-  .gate-hero .gate-core { margin: 0; }
-  .gate-hero-lead, .gate-points, .gate-hero .gate-tagline { display: none; }
-  .gate-hero .gate-wordmark { margin: 0; font-size: 28px; }
+  .gate-signin { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .gate-visual {
+    min-height: clamp(190px, 34vh, 300px); justify-content: flex-end; padding: 18px 20px;
+    background-position: 0 0, 0 0, 50% 30%, 0 0;
+  }
+  .gate-visual-copy { display: none; }
+  .gate-brand .gate-wordmark { font-size: 24px; }
+  .gate-form-side { border-left: 0; border-top: 1px solid var(--g-line-soft); padding: 22px 16px 32px; place-items: start center; }
 }

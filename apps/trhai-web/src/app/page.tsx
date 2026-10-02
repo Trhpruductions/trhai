@@ -10,6 +10,7 @@ import { useSpeech } from "../hooks/useSpeech";
 import { ParticleField } from "../components/ParticleField";
 import { useMicrophone } from "../hooks/useMicrophone";
 import { useCues } from "../hooks/useCues";
+import { useElementWidth } from "../hooks/useElementWidth";
 import {
   initialVoiceActivity, stepVoiceActivity, type VoiceActivityState
 } from "../lib/voiceActivity";
@@ -259,6 +260,9 @@ function Dashboard() {
   const [agent, setAgent] = useState<Agent | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  // The core's box, measured, so the globe is drawn at the size CSS gave it.
+  const coreBox = useRef<HTMLDivElement>(null);
+  const coreWidth = useElementWidth(coreBox);
   // Which replies were already on disk at open, so a restored answer does
   // not surface itself as if it had just been produced this run.
   const restoredIds = useRef<Set<string> | null>(null);
@@ -947,7 +951,7 @@ function Dashboard() {
                 <span className="trh-status-sub">{busy ? "WORKING" : "AWAITING COMMAND"}</span>
               </div>
 
-              <div className="trh-core">
+              <div className="trh-core" ref={coreBox}>
                 <ParticleField state={core} className="trh-core-particles" />
                 <svg className="trh-core-arcs" viewBox="0 0 680 680" aria-hidden="true">
                   <circle className="trh-arc trh-arc-1" cx="340" cy="340" r="330" />
@@ -956,7 +960,7 @@ function Dashboard() {
                 </svg>
                 <CoreGL
                   state={core}
-                  size={440}
+                  size={coreWidth ? Math.round(coreWidth * 0.96) : 440}
                   amplitude={mic.listening ? mic.amplitude : speech.speaking ? speech.amplitude : undefined}
                   load={machineLoad}
                 />
