@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { Icon, type IconName } from "../ui/Icon";
 import { useNav } from "../state/nav";
 import { useSystem } from "../state/system";
-import { useAssistantState, useVoice } from "../state/assistant";
+import { useAssistantState, useConversations, useVoice } from "../state/assistant";
 import { apiGet, sessionId } from "../../lib/api";
 import { views, type ViewId } from "../views";
 
@@ -16,7 +16,7 @@ import { views, type ViewId } from "../views";
 
 type Item = {
   id: string;
-  group: "Actions" | "Go to" | "Memory" | "Documents" | "Files" | "Tools" | "Tasks" | "Conversation";
+  group: "Actions" | "Go to" | "Memory" | "Documents" | "Files" | "Tools" | "Tasks" | "Conversations" | "Conversation";
   title: string;
   detail?: string;
   icon?: IconName;
@@ -25,9 +25,10 @@ type Item = {
   run: () => void;
 };
 
-const groupOrder: Item["group"][] = ["Actions", "Go to", "Conversation", "Memory", "Documents", "Tasks", "Tools", "Files"];
+const groupOrder: Item["group"][] = ["Actions", "Go to", "Conversations", "Conversation", "Memory", "Documents", "Tasks", "Tools", "Files"];
 
 type MemoryRow = { id: string; title: string; body: string; kind?: string; pinned?: boolean };
+type ConversationRow = { id: string; title: string; preview: string; pinned: boolean; archived: boolean };
 type DocumentRow = { id: string; title: string; body?: string };
 type FileRow = { path: string; directory: boolean; bytes: number };
 
@@ -44,9 +45,11 @@ export function CommandPalette() {
   const { paletteOpen, setPaletteOpen, go, slim, setSlim, setNoticesOpen } = useNav();
   const { capabilities, tasks } = useSystem();
   const assistant = useAssistantState();
+  const { newConversation, openConversation } = useConversations();
   const voice = useVoice();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
+  const [conversations, setConversations] = useState<ConversationRow[]>([]);
   const [memories, setMemories] = useState<MemoryRow[]>([]);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [files, setFiles] = useState<FileRow[]>([]);
@@ -65,12 +68,14 @@ export function CommandPalette() {
     void Promise.all([
       apiGet<{ memories: MemoryRow[] }>(`/v1/assist/memory?sessionId=${id}`),
       apiGet<{ documents: DocumentRow[] }>(`/v1/knowledge?sessionId=${id}`),
-      apiGet<{ entries: FileRow[] }>("/v1/files")
-    ]).then(([memoryResult, documentResult, fileResult]) => {
+      apiGet<{ entries: FileRow[] }>("/v1/files"),
+      apiGet<{ conversations: ConversationRow[] }>(`/v1/conversations?sessionId=${id}`)
+    ]).then(([memoryResult, documentResult, fileResult, conversationResult]) => {
       if (cancelled) return;
       if (memoryResult.ok) setMemories(memoryResult.data.memories);
       if (documentResult.ok) setDocuments(documentResult.data.documents);
       if (fileResult.ok) setFiles(fileResult.data.entries);
+      if (conversationResult.ok) setConversations(conversationResult.data.conversations);
     });
     return () => { cancelled = true; };
   }, [paletteOpen]);
@@ -79,6 +84,7 @@ export function CommandPalette() {
     const close = (run: () => void) => () => { setPaletteOpen(false); run(); };
     const open = (view: ViewId) => close(() => go(view));
     const actions: Item[] = [
+      ...(assistant.busy ? [] : [{ id: "act-new-chat", group: "Actions" as const, title: "New chat", icon: "plus" as IconName, run: close(() => { newConversation(); go("chat"); }) }]),
       { id: "act-mic", group: "Actions", title: voice.mic.listening ? "Stop listening and send" : "Start voice input", icon: "mic", keys: "Alt M", run: close(() => void voice.toggleMic()) },
       { id: "act-hands", group: "Actions", title: voice.handsFree ? "Turn hands-free listening off" : "Turn hands-free listening on", icon: "wave", run: close(() => voice.setHandsFree(!voice.handsFree)) },
       {
@@ -96,6 +102,13 @@ export function CommandPalette() {
       keys: index < 10 ? `Alt ${(index + 1) % 10}` : undefined, run: open(view.id)
     }));
     const found: Item[] = [
+      // Saved conversations by name; opening one goes to the chat workspace with it on screen.
+      ...conversations.map((conversation) => ({
+        id: `convo-${conversation.id}`, group: "Conversations" as const, title: conversation.title,
+        detail: conversation.preview || undefined,
+        icon: conversation.pinned ? "pin" as IconName : "message" as IconName,
+        run: close(() => { go("chat"); if (!assistant.busy) void openConversation(conversation.id); })
+      })),
       ...memories.map((memory) => ({
         id: `mem-${memory.id}`, group: "Memory" as const, title: memory.title || memory.body, detail: memory.body !== memory.title ? memory.body : memory.kind,
         icon: memory.pinned ? "pin" as IconName : undefined, iconPath: memory.pinned ? undefined : views.find((view) => view.id === "memory")?.icon,
@@ -126,7 +139,8 @@ export function CommandPalette() {
       }))
     ];
     return [...actions, ...destinations, ...found];
-  }, [voice, assistant, slim, setSlim, setNoticesOpen, go, setPaletteOpen, memories, documents, files, capabilities, tasks]);
+  }, [voice, assistant, slim, setSlim, setNoticesOpen, go, setPaletteOpen, memories, documents, files, capabilities, tasks,
+    conversations, newConversation, openConversation]);
 
   const q = query.trim().toLowerCase();
   const shown = useMemo(() => {

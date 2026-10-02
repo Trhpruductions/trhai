@@ -47,6 +47,64 @@ export type AssistantStatus =
   | { state: "success" }
   | { state: "error"; detail: string };
 
+/** A conversation as the API lists it (GET /v1/conversations). */
+export type ConversationSummary = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  pinned: boolean;
+  archived: boolean;
+  turnCount: number;
+  preview: string;
+  /** Where a search matched, when it was inside the conversation rather than its title. */
+  match?: string;
+};
+
+export type ConversationFilter = { query?: string; archived?: boolean };
+
+type StoredTurnPayload = { id?: string; role: ChatRole; content: string; createdAt?: string; strategy?: string; model?: string };
+
+/** Which conversation was open, so a reload comes back to it. */
+const conversationKey = "trhai.chat.conversation.v1";
+
+function isConversationId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9-]{8,64}$/.test(value);
+}
+
+function readOpenConversation(): string | null {
+  try {
+    const value = window.localStorage.getItem(conversationKey);
+    return isConversationId(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberOpenConversation(id: string | null): void {
+  try {
+    if (id) window.localStorage.setItem(conversationKey, id);
+    else window.localStorage.removeItem(conversationKey);
+  } catch {
+    // Not remembered across a reload; everything else still works.
+  }
+}
+
+/**
+ * Stored turns as messages. "restored-" ids mark them as history rather than
+ * news: they are never read aloud and never shown on the stage as a fresh reply.
+ */
+function restoredMessages(turns: StoredTurnPayload[]): ChatMessage[] {
+  return turns.map((turn, index) => ({
+    id: `restored-${turn.id ?? index}`,
+    role: turn.role,
+    text: turn.content,
+    at: Date.parse(turn.createdAt ?? "") || Date.now(),
+    strategy: turn.strategy,
+    model: turn.model
+  }));
+}
+
 function isPendingConfirmation(value: unknown): value is { tool: string; verb: string; target: string } {
   const pending = value as { tool?: unknown; verb?: unknown; target?: unknown } | null;
   return Boolean(pending) && typeof pending?.tool === "string" && typeof pending?.verb === "string"
@@ -67,6 +125,16 @@ export function useAssistant() {
   const [status, setStatus] = useState<AssistantStatus>({ state: "idle" });
   const [restored, setRestored] = useState(false);
   const session = useRef(resolveSessionId());
+  /**
+   * The conversation on screen, or null for a new chat that has not been sent
+   * yet. Kept in a ref as well as state: send() reads it mid-request, and
+   * reading state there would see the value from when send() was created.
+   */
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const openConversationRef = useRef<string | null>(null);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const listFilter = useRef<ConversationFilter>({});
+  const listGeneration = useRef(0);
   const busy = useRef(false);
   // Bumped once per send() call. A poll tick or a success-hold timeout only
   // acts while its own call is still the most recent one — this is what
@@ -82,45 +150,116 @@ export function useAssistant() {
    */
   const inFlight = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    // Signed in, the transcript is the account's, wherever it was last used.
-    fetch(`${apiBaseUrl}/v1/assist/conversation?sessionId=${encodeURIComponent(session.current)}`, { headers: requestHeaders() })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((payload) => {
-        const turns: Array<{ role: ChatRole; content: string; strategy?: string; model?: string }> =
-          payload?.data?.turns ?? [];
-        if (!cancelled && turns.length > 0) {
-          setMessages(turns.map((turn, index) => ({
-            id: `restored-${index}`,
-            role: turn.role,
-            text: turn.content,
-            at: Date.now(),
-            strategy: turn.strategy,
-            model: turn.model
-          })));
-        }
-      })
-      .catch(() => { /* a fresh session has no transcript to restore, and that is fine */ })
-      .finally(() => { if (!cancelled) setRestored(true); });
-    return () => { cancelled = true; };
+  /** Makes a conversation the open one, without touching what is on screen. */
+  const adopt = useCallback((id: string | null) => {
+    openConversationRef.current = id;
+    setConversationId(id);
+    rememberOpenConversation(id);
   }, []);
 
-  const send = useCallback(async (input: string, images: Array<{ name: string; data: string }> = []) => {
+  /**
+   * The conversation list, filtered as last asked (a search, or the archived
+   * ones). Re-run after every reply and every change, so a new conversation's
+   * title and a rename show up without anyone refreshing.
+   */
+  const loadConversations = useCallback(async (filter?: ConversationFilter) => {
+    if (filter) listFilter.current = filter;
+    const mine = ++listGeneration.current;
+    const params = new URLSearchParams({ sessionId: session.current });
+    if (listFilter.current.query?.trim()) params.set("q", listFilter.current.query.trim());
+    if (listFilter.current.archived) params.set("archived", "1");
+    try {
+      const response = await fetch(`${apiBaseUrl}/v1/conversations?${params}`, { headers: requestHeaders() });
+      const payload = response.ok ? await response.json() : null;
+      // Only the newest request may answer: typing a search fires several.
+      if (mine === listGeneration.current && Array.isArray(payload?.data?.conversations)) {
+        setConversations(payload.data.conversations as ConversationSummary[]);
+      }
+    } catch {
+      // The list stays as it was; the next reply or change asks again.
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const sessionParam = encodeURIComponent(session.current);
+    // Anything sent or opened while this is loading wins: a message typed in
+    // the first second must not be swept away by the restore landing late.
+    const startedAt = generation.current;
+    const superseded = () => cancelled || generation.current !== startedAt;
+    // The conversation that was open last time, if it still exists; otherwise
+    // the one used most recently. Signed in, either follows the account to
+    // whichever browser it was last used in.
+    const open = async () => {
+      const remembered = readOpenConversation();
+      if (remembered) {
+        const response = await fetch(`${apiBaseUrl}/v1/conversations/${remembered}?sessionId=${sessionParam}`, { headers: requestHeaders() });
+        const conversation = response.ok ? (await response.json())?.data?.conversation : null;
+        if (conversation) {
+          if (!superseded()) {
+            setMessages(restoredMessages(conversation.turns ?? []));
+            adopt(conversation.id);
+          }
+          return;
+        }
+      }
+      const response = await fetch(`${apiBaseUrl}/v1/assist/conversation?sessionId=${sessionParam}`, { headers: requestHeaders() });
+      const payload = response.ok ? await response.json() : null;
+      if (superseded()) return;
+      const turns: StoredTurnPayload[] = payload?.data?.turns ?? [];
+      if (turns.length > 0) setMessages(restoredMessages(turns));
+      adopt(isConversationId(payload?.data?.conversationId) ? payload.data.conversationId : null);
+    };
+    open()
+      .catch(() => { /* a fresh session has no transcript to restore, and that is fine */ })
+      .finally(() => {
+        if (cancelled) return;
+        setRestored(true);
+        void loadConversations();
+      });
+    return () => { cancelled = true; };
+  }, [adopt, loadConversations]);
+
+  const send = useCallback(async (
+    input: string,
+    images: Array<{ name: string; data: string }> = [],
+    options: { regenerate?: boolean } = {}
+  ) => {
     const text = input.trim();
     if (!text || busy.current) return;
+
+    // Asking again: the question already on screen stays, the reply to it
+    // goes, and the API replaces that exchange in the stored conversation
+    // once the new answer exists.
+    const regenerating = options.regenerate === true;
+    const before = regenerating && messages[messages.length - 1]?.role === "assistant" ? messages.slice(0, -1) : messages;
+    if (regenerating && (before[before.length - 1]?.role !== "user" || before[before.length - 1]?.text !== text)) return;
+
     busy.current = true;
     const myGeneration = ++generation.current;
     const stillCurrent = () => generation.current === myGeneration;
 
-    const userTurn: ChatMessage = {
-      id: crypto.randomUUID(), role: "user", text, at: Date.now(),
-      ...(images.length > 0 ? { images: images.length } : {})
-    };
-    setMessages((prior) => [...prior, userTurn]);
+    // A new chat is named here, by its first message; the API creates it
+    // under this id, so the list and the next message agree on which it is.
+    let conversation = openConversationRef.current;
+    if (!conversation) {
+      conversation = crypto.randomUUID();
+      adopt(conversation);
+    }
+
+    if (regenerating) {
+      setMessages(before);
+    } else {
+      const userTurn: ChatMessage = {
+        id: crypto.randomUUID(), role: "user", text, at: Date.now(),
+        ...(images.length > 0 ? { images: images.length } : {})
+      };
+      setMessages((prior) => [...prior, userTurn]);
+    }
     setStatus({ state: "thinking" });
 
-    const history = messages.slice(-historyTurns).map((entry) => ({ role: entry.role, content: entry.text }));
+    const earlier = regenerating ? before.slice(0, -1) : messages;
+    const history = earlier.slice(-historyTurns).map((entry) => ({ role: entry.role, content: entry.text }));
 
     // Which tool is actually running right now, if any — real activity from
     // the orchestrator (see /v1/assist/activity), not a guess dressed up as
@@ -173,6 +312,8 @@ export function useAssistant() {
         // a change in the settings rail applies to the very next message.
         body: JSON.stringify({
           message: text, sessionId: session.current, history, mode: "general",
+          conversationId: conversation,
+          ...(regenerating ? { regenerate: true } : {}),
           agentId: readActiveAgent(window.localStorage)?.id,
           // Shown to the vision model on the API; never stored there.
           ...(images.length > 0 ? { images } : {})
@@ -291,6 +432,12 @@ export function useAssistant() {
       setMessages((prior) => (prior.some((message) => message.id === replyId)
         ? prior.map((message) => (message.id === replyId ? finished : message))
         : [...prior, finished]));
+      // The conversation the API recorded this in - the same one, unless it
+      // had to pick - and the list, which now has its title and newest line.
+      if (isConversationId(data.conversationId) && data.conversationId !== openConversationRef.current && stillCurrent()) {
+        adopt(data.conversationId);
+      }
+      void loadConversations();
       if (stillCurrent()) {
         setStatus({ state: "success" });
         // A brief confirmation, not a resting state — see core.css's
@@ -341,7 +488,7 @@ export function useAssistant() {
       inFlight.current = null;
       busy.current = false;
     }
-  }, [messages]);
+  }, [messages, adopt, loadConversations]);
 
   /**
    * Stop the request in flight.
@@ -354,20 +501,91 @@ export function useAssistant() {
     inFlight.current?.abort();
   }, []);
 
-  const clear = useCallback(async () => {
+  /** Asks the newest question again, replacing the answer it got. */
+  const regenerate = useCallback(() => {
+    const asked = [...messages].reverse().find((message) => message.role === "user");
+    if (!asked || busy.current) return;
+    void send(asked.text, [], { regenerate: true });
+  }, [messages, send]);
+
+  /** A blank chat. Nothing is created until its first message is sent. */
+  const newConversation = useCallback(() => {
+    if (busy.current) return;
+    generation.current += 1;
     setMessages([]);
     setStatus({ state: "idle" });
+    adopt(null);
+  }, [adopt]);
+
+  /** Puts a conversation from the list on screen. Not while a reply is being written. */
+  const openConversation = useCallback(async (id: string) => {
+    if (busy.current || id === openConversationRef.current) return;
     try {
-      await fetch(`${apiBaseUrl}/v1/assist/conversation`, {
-        method: "DELETE",
+      const response = await fetch(
+        `${apiBaseUrl}/v1/conversations/${encodeURIComponent(id)}?sessionId=${encodeURIComponent(session.current)}`,
+        { headers: requestHeaders() }
+      );
+      const conversation = response.ok ? (await response.json())?.data?.conversation : null;
+      if (!conversation) {
+        // Gone - deleted in another window, most likely. The list catches up.
+        void loadConversations();
+        return;
+      }
+      generation.current += 1;
+      setMessages(restoredMessages(conversation.turns ?? []));
+      setStatus({ state: "idle" });
+      adopt(conversation.id);
+    } catch {
+      // Left on the conversation already open.
+    }
+  }, [adopt, loadConversations]);
+
+  const changeConversation = useCallback(async (id: string, change: { title?: string; pinned?: boolean; archived?: boolean }) => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/v1/conversations/${encodeURIComponent(id)}`, {
+        method: "PATCH",
         headers: requestHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ sessionId: session.current })
+        body: JSON.stringify({ sessionId: session.current, ...change })
+      });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      void loadConversations();
+    }
+  }, [loadConversations]);
+
+  const renameConversation = useCallback((id: string, title: string) => changeConversation(id, { title }), [changeConversation]);
+  const pinConversation = useCallback((id: string, pinned: boolean) => changeConversation(id, { pinned }), [changeConversation]);
+  const archiveConversation = useCallback((id: string, archived: boolean) => changeConversation(id, { archived }), [changeConversation]);
+
+  const deleteConversation = useCallback(async (id: string) => {
+    try {
+      await fetch(`${apiBaseUrl}/v1/conversations/${encodeURIComponent(id)}?sessionId=${encodeURIComponent(session.current)}`, {
+        method: "DELETE",
+        headers: requestHeaders()
       });
     } catch {
-      // The visible transcript is already gone; a failed server-side clear is
-      // not worth interrupting the user for.
+      // The list below shows whether it went.
     }
-  }, []);
+    if (id === openConversationRef.current) newConversation();
+    void loadConversations();
+  }, [loadConversations, newConversation]);
 
-  return { messages, status, restored, sessionId: session.current, send, stop, clear };
+  /** Deletes the conversation on screen - what "clear" meant when there was only one. */
+  const clear = useCallback(async () => {
+    const open = openConversationRef.current;
+    if (open) {
+      await deleteConversation(open);
+      return;
+    }
+    setMessages([]);
+    setStatus({ state: "idle" });
+  }, [deleteConversation]);
+
+  return {
+    messages, status, restored, sessionId: session.current, send, stop, clear, regenerate,
+    conversationId, conversations, loadConversations, newConversation, openConversation,
+    renameConversation, pinConversation, archiveConversation, deleteConversation
+  };
 }

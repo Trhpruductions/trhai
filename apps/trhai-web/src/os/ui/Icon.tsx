@@ -39,7 +39,11 @@ export const icons = {
   info: "M12 3.5a8.5 8.5 0 1 1 0 17 8.5 8.5 0 0 1 0-17ZM12 11v5.5M12 7.8h.01",
   ok: "M12 3.5a8.5 8.5 0 1 1 0 17 8.5 8.5 0 0 1 0-17ZM8 12.5l2.7 2.7L16.5 9.5",
   external: "M14 4h6v6M20 4l-9 9M10 6H5v13h13v-5",
-  grid: "M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z"
+  grid: "M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z",
+  archive: "M3.5 5h17v4h-17zM5.5 9v10h13V9M10 13h4",
+  pencil: "M4 20h4.5L19 9.5l-4.5-4.5L4 15.5V20ZM13 6.5l4.5 4.5",
+  panel: "M3.5 5h17v14h-17zM9.5 5v14",
+  message: "M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z"
 } as const;
 
 export type IconName = keyof typeof icons;

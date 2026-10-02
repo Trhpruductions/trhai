@@ -2,7 +2,9 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { asksAboutTheScreen, speakableText } from "@ascend/shared";
-import { useAssistant, type AssistantStatus, type ChatMessage } from "../../hooks/useAssistant";
+import {
+  useAssistant, type AssistantStatus, type ChatMessage, type ConversationFilter, type ConversationSummary
+} from "../../hooks/useAssistant";
 import { useMicrophone } from "../../hooks/useMicrophone";
 import { useSpeech } from "../../hooks/useSpeech";
 import { useCues } from "../../hooks/useCues";
@@ -49,6 +51,8 @@ type AssistantApi = {
   send: (text: string, images?: Array<{ name: string; data: string }>) => Promise<void>;
   stop: () => void;
   clear: () => Promise<void>;
+  /** Asks the newest question again, replacing the answer it got. */
+  regenerate: () => void;
   // The composer, shared: the command bar on every workspace is the same one.
   draft: string;
   setDraft: (next: string | ((prior: string) => string)) => void;
@@ -101,7 +105,21 @@ type Levels = {
   level: number;
 };
 
+/** Every conversation, and the one on screen. Its own context: the list changes rarely. */
+type ConversationsApi = {
+  conversationId: string | null;
+  conversations: ConversationSummary[];
+  loadConversations: (filter?: ConversationFilter) => Promise<void>;
+  newConversation: () => void;
+  openConversation: (id: string) => Promise<void>;
+  renameConversation: (id: string, title: string) => Promise<boolean>;
+  pinConversation: (id: string, pinned: boolean) => Promise<boolean>;
+  archiveConversation: (id: string, archived: boolean) => Promise<boolean>;
+  deleteConversation: (id: string) => Promise<void>;
+};
+
 const AssistantContext = createContext<AssistantApi | null>(null);
+const ConversationsContext = createContext<ConversationsApi | null>(null);
 const VoiceContext = createContext<VoiceApi | null>(null);
 const LevelContext = createContext<Levels>({ micAmplitude: 0, speechAmplitude: undefined, level: 0 });
 const ActivityContext = createContext<ActivityEntry[]>([]);
@@ -109,7 +127,11 @@ const ActivityContext = createContext<ActivityEntry[]>([]);
 const activityLimit = 80;
 
 export function AssistantProvider({ children }: { children: ReactNode }) {
-  const { messages, status, restored, send, stop, clear } = useAssistant();
+  const {
+    messages, status, restored, send, stop, clear, regenerate,
+    conversationId, conversations, loadConversations, newConversation, openConversation,
+    renameConversation, pinConversation, archiveConversation, deleteConversation
+  } = useAssistant();
   const mic = useMicrophone();
   const speech = useSpeech();
   const cues = useCues();
@@ -399,13 +421,19 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       : status.state === "executing" ? 1 : status.state === "thinking" ? 0.6 : 0;
 
   const assistant = useMemo<AssistantApi>(() => ({
-    messages, status, restored, busy, core, label, send, stop, clear,
+    messages, status, restored, busy, core, label, send, stop, clear, regenerate,
     draft, setDraft, attachments, attachNote, sharing, screenShareable, ask, addImages, attachScreen,
     removeAttachment, openImagePicker, attentive, setAttentive, lastAsked, lastReply, replyFromThisRun,
     dismissedReplyId, dismissReply: setDismissedReplyId, agent, setAgent, executionEvents
-  }), [messages, status, restored, busy, core, label, send, stop, clear, draft, attachments, attachNote, sharing,
+  }), [messages, status, restored, busy, core, label, send, stop, clear, regenerate, draft, attachments, attachNote, sharing,
     screenShareable, ask, addImages, attachScreen, removeAttachment, openImagePicker, attentive, lastAsked, lastReply,
     replyFromThisRun, dismissedReplyId, agent, executionEvents]);
+
+  const conversationsApi = useMemo<ConversationsApi>(() => ({
+    conversationId, conversations, loadConversations, newConversation, openConversation,
+    renameConversation, pinConversation, archiveConversation, deleteConversation
+  }), [conversationId, conversations, loadConversations, newConversation, openConversation,
+    renameConversation, pinConversation, archiveConversation, deleteConversation]);
 
   const voice = useMemo<VoiceApi>(() => ({
     mic: {
@@ -433,27 +461,36 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   return (
     <AssistantContext.Provider value={assistant}>
-      <VoiceContext.Provider value={voice}>
-        <LevelContext.Provider value={levels}>
-          <ActivityContext.Provider value={activity}>
-            {children}
-            <input
-              ref={imagePicker}
-              type="file"
-              accept={acceptedImageTypes}
-              multiple
-              hidden
-              onChange={(event) => {
-                const files = [...(event.target.files ?? [])];
-                event.target.value = "";
-                void addImages(files);
-              }}
-            />
-          </ActivityContext.Provider>
-        </LevelContext.Provider>
-      </VoiceContext.Provider>
+      <ConversationsContext.Provider value={conversationsApi}>
+        <VoiceContext.Provider value={voice}>
+          <LevelContext.Provider value={levels}>
+            <ActivityContext.Provider value={activity}>
+              {children}
+              <input
+                ref={imagePicker}
+                type="file"
+                accept={acceptedImageTypes}
+                multiple
+                hidden
+                onChange={(event) => {
+                  const files = [...(event.target.files ?? [])];
+                  event.target.value = "";
+                  void addImages(files);
+                }}
+              />
+            </ActivityContext.Provider>
+          </LevelContext.Provider>
+        </VoiceContext.Provider>
+      </ConversationsContext.Provider>
     </AssistantContext.Provider>
   );
+}
+
+/** Every conversation, the one on screen, and what can be done with them. */
+export function useConversations(): ConversationsApi {
+  const conversations = useContext(ConversationsContext);
+  if (!conversations) throw new Error("useConversations needs AssistantProvider");
+  return conversations;
 }
 
 export function useAssistantState(): AssistantApi {
