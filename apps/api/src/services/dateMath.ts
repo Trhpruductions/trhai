@@ -68,9 +68,45 @@ export function parseDate(input: string, today: Date): Date | null {
     return atMidnight(Number(named[5]), month, day);
   }
 
+  // 12/25/2026 - month first, as this app's users write it (a day-first
+  // reader would get 4/5 as the 5th of April, not the 4th of May).
+  const slashed = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text);
+  if (slashed) {
+    return atMidnight(Number(slashed[3]), Number(slashed[1]) - 1, Number(slashed[2]));
+  }
+
   // A bare year is not a date, and neither is a timestamp with no day. Refusing
   // is better than picking January the first on the user's behalf.
   return null;
+}
+
+const weekdayQuestions = [
+  // what day (of the week) is / was / will ... be / does ... fall on
+  /^\s*(?:what|which)\s+day\s+(?:of\s+the\s+week\s+)?(?:is|was|will|would|does|did)\s+(.+?)(?:\s+(?:be|fall|land)(?:\s+on)?)?\s*\??\s*$/i,
+  // (what's) the day of the week for / on ...
+  /^\s*(?:what(?:'s|\s+is)\s+)?(?:the\s+)?day\s+of\s+the\s+week\s+(?:for|on|of)\s+(.+?)\s*\??\s*$/i
+];
+
+/**
+ * "What day of the week is December 25, 2026?" answered from the calendar, or
+ * null when the question is not one of those or its date cannot be read.
+ *
+ * The model works weekdays out in its head and gets them wrong: asked that
+ * exact question it said Sunday, then Wednesday, then Thursday. It is a
+ * Friday. A date with no year is taken as this year's.
+ */
+export function answerWeekdayQuestion(question: string, today: Date): string | null {
+  const asked = weekdayQuestions.map((pattern) => pattern.exec(question ?? "")).find(Boolean);
+  if (!asked) return null;
+  const phrase = asked[1].trim()
+    .replace(/^(?:the|on)\s+/i, "")
+    .replace(/(\d)(?:st|nd|rd|th)?\s+of\s+/i, "$1 ");
+  const date = parseDate(phrase, today)
+    ?? (/\b\d{4}\b/.test(phrase) ? null : parseDate(`${phrase} ${today.getFullYear()}`, today));
+  if (!date) return null;
+  const label = date.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+  const weekday = date.toLocaleDateString(undefined, { weekday: "long" });
+  return `${label} ${daysBetween(today, date) < 0 ? "was" : "is"} a ${weekday}.`;
 }
 
 /** Whole calendar days from `from` to `to`. Negative when `to` is earlier. */

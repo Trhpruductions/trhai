@@ -12,7 +12,7 @@ import { splitLongPassage } from "./knowledgeStore.js";
 // sampled or skipped below the cap.
 
 /** One call to the local model with a prompt sent as written. */
-export type GenerateText = (prompt: string) => Promise<{ ok: true; text: string } | { ok: false; reason: string }>;
+export type GenerateText = (prompt: string) => Promise<{ ok: true; text: string; model?: string } | { ok: false; reason: string }>;
 
 /** About what one section may hold, leaving the window room for the prompt and the notes. */
 export const sectionTokens = 2400;
@@ -116,4 +116,49 @@ export async function summarizeLongText(
 /** Whether a text is short enough to hand to the model whole rather than in sections. */
 export function readableAtOnce(text: string): boolean {
   return estimateTokens(text) <= directTokens;
+}
+
+function summaryPrompt(title: string, focus: string, source: string, fromNotes: boolean): string {
+  const lines = [fromNotes
+    ? `These are notes taken on every part of the document "${title}", in order.`
+    : `This is the whole of the document "${title}".`];
+  if (focus) lines.push(`The reader wants to know about: ${focus}.`);
+  lines.push(
+    `Write a summary of it: two or three sentences saying what it is and its main point, then the key points as a short bulleted list in the document's order.`,
+    "Keep names, numbers, amounts and dates exactly as written. Add nothing that is not in the text.",
+    "",
+    "---",
+    source,
+    "---"
+  );
+  return lines.join("\n");
+}
+
+export type WrittenSummary = { ok: true; text: string; model?: string } | { ok: false; reason: string };
+
+/**
+ * A finished summary of a document, read in full: whole when it is short, in
+ * sections when it is long, then written up from what was read. Says so when
+ * the document is longer than one summary covers.
+ */
+export async function summarizeDocument(
+  title: string,
+  body: string,
+  options: { focus?: string; generate: GenerateText; onSection?: (done: number, total: number) => void }
+): Promise<WrittenSummary> {
+  const focus = (options.focus ?? "").trim();
+  let source = body.trim();
+  let note = "";
+  if (!source) return { ok: false, reason: `"${title}" is empty, so there is nothing to summarize.` };
+  if (!readableAtOnce(source)) {
+    const read = await summarizeLongText(source, { title, focus, generate: options.generate, onSection: options.onSection });
+    if (!read.ok) return read;
+    source = read.notes;
+    if (read.read < read.sections) {
+      note = `\n\n_This covers the first ${read.read} of the document's ${read.sections} parts - it is longer than one summary reads._`;
+    }
+  }
+  const written = await options.generate(summaryPrompt(title, focus, source, source !== body.trim()));
+  if (!written.ok) return { ok: false, reason: `The summary could not be written: ${written.reason}` };
+  return { ok: true, text: `${written.text.trim()}${note}`, ...(written.model ? { model: written.model } : {}) };
 }

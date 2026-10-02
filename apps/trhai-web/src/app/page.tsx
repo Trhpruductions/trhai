@@ -10,6 +10,7 @@ import { useSpeech } from "../hooks/useSpeech";
 import { ParticleField } from "../components/ParticleField";
 import { useMicrophone } from "../hooks/useMicrophone";
 import { useCues } from "../hooks/useCues";
+import { useReminders } from "../hooks/useReminders";
 import { useElementWidth } from "../hooks/useElementWidth";
 import {
   initialVoiceActivity, stepVoiceActivity, type VoiceActivityState
@@ -129,6 +130,12 @@ function Dashboard() {
   const mic = useMicrophone();
   const speech = useSpeech();
   const cues = useCues();
+  // A reminder that fires is shown, chimed - and said aloud when replies are
+  // being read aloud, which is what VOICE on asks for.
+  const { reminders, dismiss: dismissReminder } = useReminders((reminder) => {
+    cues.play(reminder.failed ? "warn" : "done");
+    if (speech.enabled && !reminder.failed) speech.speak(`${reminder.title}. ${reminder.body}`);
+  });
 
   const [clock, setClock] = useState<Date | null>(null);
   const [draft, setDraft] = useState("");
@@ -1069,6 +1076,23 @@ function Dashboard() {
                 <span className="trh-status-word">STATUS: <em className={`trh-${core}`}>{label.toUpperCase()}</em></span>
                 <span className="trh-status-sub">{busy ? "WORKING" : "AWAITING COMMAND"}</span>
               </div>
+
+              {/* Reminders that just fired; see useReminders. */}
+              {reminders.length > 0 ? (
+                <div className="trh-reminders" role="status" aria-live="polite">
+                  {reminders.map((reminder) => (
+                    <div key={reminder.key} className={`trh-reminder${reminder.failed ? " trh-reminder-failed" : ""}`}>
+                      <span className="trh-reminder-title">
+                        {reminder.failed ? "SCHEDULE FAILED" : "REMINDER"}
+                        {/* A reminder's name is usually its words; said once is enough. */}
+                        {reminder.title !== reminder.body ? ` · ${reminder.title}` : ""}
+                      </span>
+                      <span className="trh-reminder-body">{reminder.body}</span>
+                      <button type="button" aria-label={`Dismiss ${reminder.title}`} onClick={() => dismissReminder(reminder.key)}>×</button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="trh-core" ref={coreBox}>
                 <ParticleField state={core} className="trh-core-particles" />

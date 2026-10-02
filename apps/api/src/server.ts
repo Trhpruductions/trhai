@@ -331,7 +331,7 @@ async function generateWithModel(prompt: string) {
   const base = readLocalModelConfig();
   const result = await generate({ ...base, timeoutMs: Math.max(base.timeoutMs, 120000) },
     { question: prompt, context: [], rawPrompt: prompt });
-  return result.ok ? { ok: true as const, text: result.text } : { ok: false as const, reason: result.reason };
+  return result.ok ? { ok: true as const, text: result.text, model: result.model } : { ok: false as const, reason: result.reason };
 }
 
 /** The per-turn session state both assist routes derive the same way. */
