@@ -22,9 +22,11 @@ import {
   readFileAt,
   readWorkspaceFile,
   resolveInWorkspace,
+  workspaceRoot,
   writeFileAt,
   writeWorkspaceFile
 } from "./workspace.js";
+import { describeTelemetry, readFreeSpace, readGpuHeadroom, readTelemetry, readTopMemoryPrograms } from "./systemTelemetry.js";
 import { fetchWebPage } from "./webFetch.js";
 import { webSearch } from "./webSearch.js";
 import { renderMockupPrompt, extractRendering, findRenderFault, saveRendering, inferKind, type RenderKind } from "./renderMockup.js";
@@ -227,6 +229,11 @@ export type ToolContext = {
    * supplied.
    */
   searchWeb?: typeof webSearch;
+  /**
+   * Reads the machine, injected the same way so a test can give system_status
+   * known readings - the real readTelemetry, the dashboard's own, otherwise.
+   */
+  readTelemetry?: typeof readTelemetry;
   /**
    * Asks the local model to write an application, for requests that are not one
    * of the two shapes the templates cover.
@@ -456,8 +463,9 @@ export const toolDefinitions: ToolDefinition[] = [
     function: {
       name: "search_conversation",
       description:
-        "Search what has already been said in this conversation. Use this when the user refers "
-        + "back to something earlier that was never saved to memory.",
+        "Search what has already been said in this conversation, further back than the last few "
+        + "messages you can already see. Use this when the user refers back to something earlier "
+        + "that was never saved to memory.",
       parameters: {
         type: "object",
         properties: {
@@ -711,6 +719,26 @@ export const toolDefinitions: ToolDefinition[] = [
         "The current date and time on the user's machine. Use this for anything involving today, "
         + "now, or how long ago something was — you cannot know it otherwise.",
       parameters: { type: "object", properties: {}, required: [] }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "system_status",
+      description:
+        "Live readings from this computer: processor load, memory in use, the graphics card (load, "
+        + "video memory, temperature, power), free disk space, network speed and how long it has been on. "
+        + "Use it for any question about how busy, hot or full the machine is - not run_command.",
+      parameters: {
+        type: "object",
+        properties: {
+          drive: {
+            type: "string",
+            description: "A drive letter such as C or D, when the question is about one drive's space."
+          }
+        },
+        required: []
+      }
     }
   },
   {
@@ -1012,13 +1040,17 @@ const webTools = new Set(["fetch_url", "web_search"]);
 const renderTools = new Set(["render_mockup"]);
 /** Offered only when the request mentions the time or the date; see mentionsTime. */
 const timeTools = new Set(["current_datetime"]);
+/** Offered only when the request is about the machine's own readings; see asksAboutMachineState. */
+const statusTools = new Set(["system_status"]);
+/** Offered only when the request asks for something to be started; see asksToStartSomething. */
+const launchTools = new Set(["run_app"]);
 
 export function availableTools(
   armed: boolean,
   options: {
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
-    schedules?: boolean; video?: boolean; documents?: boolean;
+    schedules?: boolean; video?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1037,6 +1069,8 @@ export function availableTools(
   const allowSchedules = options.schedules ?? true;
   const allowVideo = options.video ?? true;
   const allowDocumentWrites = options.documents ?? true;
+  const allowStatus = options.status ?? true;
+  const allowLaunch = options.launch ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1055,8 +1089,39 @@ export function availableTools(
     if (!allowSchedules && scheduleTools.has(name)) return false;
     if (!allowVideo && videoTools.has(name)) return false;
     if (!allowDocumentWrites && documentWritingTools.has(name)) return false;
+    if (!allowStatus && statusTools.has(name)) return false;
+    if (!allowLaunch && launchTools.has(name)) return false;
     return true;
   });
+}
+
+/**
+ * The machine's readings, as system_status reports them: the dashboard's own
+ * numbers from the same code, nothing estimated. The disk is the drive asked
+ * about (a letter, on Windows), or else the workspace's.
+ */
+export async function readMachineStatus(context: Pick<ToolContext, "readTelemetry">, drive = ""): Promise<string> {
+  const asked = drive.trim().replace(/[:\\/\s]+$/, "");
+  const letter = process.platform === "win32" && /^[a-z]$/i.test(asked) ? asked.toUpperCase() : "";
+  const diskPath = letter ? `${letter}:\\` : workspaceRoot();
+  // The card's margin and the process list only alongside the machine's own
+  // readings: a test's stand-in readings get nothing real mixed into them.
+  const real = !context.readTelemetry;
+  const [telemetry, space, headroom, topMemory] = await Promise.all([
+    (context.readTelemetry ?? readTelemetry)(),
+    readFreeSpace(diskPath),
+    real ? readGpuHeadroom() : Promise.resolve(null),
+    real ? readTopMemoryPrograms() : Promise.resolve(null)
+  ]);
+  const label = letter ? `${letter}:` : path.parse(diskPath).root.replace(/[\\/]+$/, "") || diskPath;
+  return describeTelemetry(telemetry, { label, space }, headroom, topMemory);
+}
+
+/** The drive letter a request names - "drive C", "C:" - or "" when it names none. */
+export function driveNamedIn(request: string): string {
+  // Not "a": "how far can I drive a car" names no drive, and A: is a floppy.
+  const found = /\bdrive\s+([b-z])(?![a-z])|\b([b-z]):(?:[\\/]|\s|$|\?)/i.exec(request ?? "");
+  return (found?.[1] ?? found?.[2] ?? "").toUpperCase();
 }
 
 /** How many results a search hands back before it stops being useful context. */
@@ -1163,7 +1228,25 @@ function resolveBuiltProject(context: ToolContext, project: string): string {
  * the same loose matching as an explicit name, so "the tip calculator" is
  * tip-calculator, not calculator. Null unless it lands on a real app.
  */
-function appNamedIn(candidates: string[], request: string | undefined): string | null {
+/**
+ * Which app to act on: the one the user's own words name, over the model's
+ * pick when the two differ and the request never used the model's.
+ *
+ * Live: "run the calculator app" arrived as run_app with project
+ * "tip-calculator" - a real app, just not the one asked for, though an app
+ * called exactly "calculator" was sitting in the workspace. Then "stop the
+ * calculator app" stopped tip-calculator, since that was the calculator
+ * running. The model's pick stands when the request names nothing, or names
+ * the app it picked.
+ */
+export function appTheUserNamed(candidates: string[], given: string | null, request: string | undefined): string | null {
+  const named = appNamedIn(candidates, request);
+  if (!named || !given) return named ?? given;
+  const words = (value: string) => ` ${value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  return words(request ?? "").includes(words(given)) ? given : named;
+}
+
+export function appNamedIn(candidates: string[], request: string | undefined): string | null {
   if (!request || candidates.length === 0) return null;
   const match = matchProjectName(candidates, request);
   return candidates.includes(match) ? match : null;
@@ -1353,7 +1436,8 @@ function wouldGut(absolutePath: string, content: string, request: string | undef
   if (!current.ok) return null;
   const shrink = replacesMostOf(current.content, content, request);
   if (!shrink) return null;
-  return `${path.basename(absolutePath)} has ${shrink.before} lines, and this would keep ${shrink.kept} of them. `
+  return `${path.basename(absolutePath)} has ${shrink.before} line${shrink.before === 1 ? "" : "s"}, `
+    + `and this would keep ${shrink.kept} of ${shrink.before === 1 ? "it" : "them"}. `
     + "To add to it or change part of it, use edit_file: append for new lines at the end, or old_text with "
     + "new_text. Nothing was written.";
 }
@@ -2139,8 +2223,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "run_app": {
-      const asked = requireString(call.arguments.project)?.replace(/[\\/]+$/, "")
-        ?? appNamedIn(builtAppNames(context), context.request)
+      const asked = appTheUserNamed(builtAppNames(context), requireString(call.arguments.project)?.replace(/[\\/]+$/, "") ?? null, context.request)
         ?? activeProject(context.sessionId);
       if (!asked) {
         return {
@@ -2165,8 +2248,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "stop_app": {
-      const asked = requireString(call.arguments.project)?.replace(/[\\/]+$/, "")
-        ?? appNamedIn(runningAppNames(context), context.request);
+      const asked = appTheUserNamed(runningAppNames(context), requireString(call.arguments.project)?.replace(/[\\/]+$/, "") ?? null, context.request);
       if (!asked) return { ok: false, content: "stop_app needs the app's folder name." };
       if (!context.stopApp) return { ok: false, content: "Apps cannot be stopped here." };
       // "stop the todo app" rarely names the folder verbatim; resolve it against
@@ -2645,6 +2727,11 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
           hour: "2-digit", minute: "2-digit"
         })} (local time on the user's machine)`
       };
+    }
+
+    case "system_status": {
+      const drive = typeof call.arguments.drive === "string" ? call.arguments.drive : "";
+      return { ok: true, content: await readMachineStatus(context, drive) };
     }
 
     case "fetch_url": {

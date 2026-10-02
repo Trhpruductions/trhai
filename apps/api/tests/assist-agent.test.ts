@@ -86,7 +86,8 @@ test("an agent named on the request is in the system prompt the model is sent", 
 
 test("an agent's own limits travel with it", async () => {
   const { system } = await ask({ agentId: "financial-advisor" });
-  assert.match(system, /work as Ledger, a financial advisor\. Organizes numbers and frames tradeoffs\. Does not recommend investments\./);
+  assert.match(system, /work as Ledger, a financial advisor\./);
+  assert.match(system, /Organizes numbers and frames tradeoffs\. Does not recommend investments\./);
 });
 
 test("no agent, or one the catalogue does not know, sends no persona at all", async () => {

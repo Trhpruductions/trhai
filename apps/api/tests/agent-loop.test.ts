@@ -13,11 +13,11 @@ import path from "node:path";
 const testWorkspace = mkdtempSync(path.join(tmpdir(), "ascend-agent-"));
 process.env.ASCEND_WORKSPACE = testWorkspace;
 import {
-  describeAgentLens, describeToolCall, echoesAReport, executionKindForTool, explainGatedTool, gatedToolCall,
-  isBareRefusal, looksLikeBareToolCall, looksLikeRawToolCalls, parseTextToolCalls, runAgent, systemPrompt,
-  wroteWhatWasAsked
+  describeAgentLens, describeToolCall, echoesAReport, echoesToolTemplate, executionKindForTool, explainGatedTool,
+  gatedToolCall, isBareRefusal, looksLikeBareToolCall, looksLikeRawToolCalls, parseTextToolCalls, recentTurns, runAgent,
+  systemPrompt, unwrapPseudoReply, wroteWhatWasAsked
 } from "../src/services/agentLoop.js";
-import { availableTools, runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
+import { appTheUserNamed, availableTools, runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
 import { mentionsDocument, namesAFilePath } from "../src/services/actionIntent.js";
 import { defaultContextTokens, minimumContextTokens, type LocalModelConfig } from "../src/services/localModel.js";
 
@@ -3014,6 +3014,9 @@ test("with no agent active, the system prompt carries no persona", async () => {
 test("an agent's lens names it, keeps its limits whole, and changes no rules", () => {
   const lens = describeAgentLens(ada);
   assert.match(lens, /work as Ada, a programmer\./);
+  // Live, working as Reach: "Meet Reach, your local AI assistant" for a
+  // pitch about something else entirely.
+  assert.match(lens, /Ada is the name of that role, not of the user, their product or anything they ask you to write about\./);
   assert.match(lens, /explains what a failure is actually telling you\./);
   assert.match(lens, /Keep in view: Files, failures, and the smallest change that fixes them\./);
   assert.match(lens, /not a new set of rules/);
@@ -3151,8 +3154,13 @@ test("a sum is offered the calculator and not the shell", async () => {
     const offered = await offeredFor("convert 5 miles to kilometers");
     assert.ok(offered.includes("calculate"));
     assert.ok(!offered.includes("run_command"));
-    // A question the machine answers keeps it.
-    assert.ok((await offeredFor("how much free space is on drive D?")).includes("run_command"));
+    // A question the shell answers keeps it...
+    assert.ok((await offeredFor("is anything listening on port 4000?")).includes("run_command"));
+    // ...and one the machine's own readings answer gets those instead: see the
+    // system_status tests.
+    const disk = await offeredFor("how much free space is on drive D?");
+    assert.ok(disk.includes("system_status"));
+    assert.ok(!disk.includes("run_command"));
   } finally {
     if (!wasArmed) disarmCommands();
   }
@@ -3167,4 +3175,296 @@ test("a request that only reads is not offered the document writers", async () =
   }
   // Asked to keep one, it still can.
   assert.ok((await offeredFor("read notes.txt and save a summary as a document called Notes Summary")).includes("write_document"));
+});
+
+// ---- Follow-ups: the model sees the conversation -----------------------------
+
+test("the last few turns go to the model, before the question and without repeating it", () => {
+  const conversation = [
+    { role: "user" as const, content: "What's the capital of Australia?" },
+    { role: "assistant" as const, content: "The capital of Australia is Canberra." },
+    // The client sends the message being answered as the last turn of its history.
+    { role: "user" as const, content: "And roughly how many people live there?" }
+  ];
+
+  assert.deepEqual(recentTurns(conversation, ["And roughly how many people live there?"]), [
+    { role: "user", content: "What's the capital of Australia?" },
+    { role: "assistant", content: "The capital of Australia is Canberra." }
+  ]);
+  assert.deepEqual(recentTurns(undefined, ["hello"]), []);
+});
+
+test("only the most recent turns go, each cut to a readable length", () => {
+  const conversation = Array.from({ length: 10 }, (_, index) => ({
+    role: (index % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+    content: index === 9 ? "x".repeat(3000) : `turn ${index}`
+  }));
+
+  const sent = recentTurns(conversation, ["the next question"]);
+  assert.equal(sent.length, 6);
+  assert.equal(sent[0].content, "turn 4", "the oldest turns are the ones dropped");
+  assert.ok(sent[5].content.length < 900, "a long turn is cut, not sent whole");
+  assert.match(sent[5].content, /\[\.\.\.\]$/);
+});
+
+test("a follow-up reaches the model with the turn it follows", async () => {
+  // Live: "And roughly how many people live there?" was answered "I don't have
+  // access to current population data for any specific location" - the model
+  // never saw that "there" was Canberra.
+  const { server, baseUrl, received } = await fakeModel([answer("About 470,000 people live in Canberra.")]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "And roughly how many people live there?", {
+      ...context,
+      conversation: [
+        { role: "user", content: "What's the capital of Australia?" },
+        { role: "assistant", content: "The capital of Australia is Canberra." }
+      ]
+    });
+
+    assert.equal(result.ok, true);
+    const sent = (received[0] as { messages: Array<{ role: string; content: string }> }).messages;
+    assert.deepEqual(sent.map((message) => message.role), ["system", "user", "assistant", "user"]);
+    assert.match(sent[2].content, /Canberra/);
+    assert.equal(sent[3].content, "And roughly how many people live there?", "the question comes last");
+  } finally {
+    server.close();
+  }
+});
+
+test("a request to reshape the last answer gets nothing that writes", async () => {
+  // Live: "Make that answer one sentence." saved a document called
+  // daily-log.txt reading "Today was a productive day."
+  const offered = await offeredFor("Make that answer one sentence.");
+  for (const writer of ["write_document", "write_file", "edit_file", "build_app", "remember", "add_schedule", "run_command"]) {
+    assert.ok(!offered.includes(writer), `${writer} was offered`);
+  }
+  // Asking for a file is a different request.
+  assert.ok((await offeredFor("make that into a file called summary.txt")).includes("write_file"));
+});
+
+test("a reply that is the tool-calling template is corrected, not shown", async () => {
+  // Verbatim, the whole reply to "Make that answer one sentence."
+  const template = "For each function call, return a json object with function name and arguments within {} "
+    + "with NO other text. Do not include any backticks or ```json.";
+  const { server, baseUrl, received } = await fakeModel([answer(template), answer("Canberra is the capital of Australia.")]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "Make that answer one sentence.", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.text, "Canberra is the capital of Australia.");
+    const told = ((received[1] as { messages: Array<{ content: string }> }).messages.at(-1)?.content) ?? "";
+    assert.match(told, /not an answer/);
+    assert.match(told, /Make that answer one sentence\./, "the question goes with the correction");
+  } finally {
+    server.close();
+  }
+});
+
+test("a template echoed twice is a failure, never the reply", async () => {
+  const template = "For each function call, return a json object with function name and arguments within <tool_call></tool_call> tags.";
+  const { server, baseUrl } = await fakeModel([answer(template), answer(template)]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "hello again", context);
+    assert.equal(result.ok, false);
+  } finally {
+    server.close();
+  }
+});
+
+test("echoesToolTemplate knows the template and nothing else", () => {
+  assert.equal(echoesToolTemplate("For each function call, return a json object with function name and arguments"), true);
+  assert.equal(echoesToolTemplate("You are provided with function signatures within <tools></tools> XML tags"), true);
+  assert.equal(echoesToolTemplate("Each function returns a JSON object with the result."), false);
+  assert.equal(echoesToolTemplate("Canberra is the capital."), false);
+});
+
+test("an invented tool's input is not passed off as its answer", async () => {
+  // Live, the whole answer to "translate 'good morning' to Spanish" was "good
+  // morning": the text the invented tool was meant to translate.
+  const pseudo = '{"name": "translate", "arguments": {"text": "good morning", "to_language": "Spanish"}}';
+  assert.equal(unwrapPseudoReply(pseudo, ["translate 'good morning' to Spanish"]), pseudo);
+  // Words lifted from the request without quotes count the same.
+  assert.equal(unwrapPseudoReply('{"name": "translate", "arguments": {"text": "thank you very much"}}',
+    ["translate thank you very much into French"]), '{"name": "translate", "arguments": {"text": "thank you very much"}}');
+  // An answer in costume is still unwrapped, including a one-word one the
+  // question happens to contain.
+  assert.equal(unwrapPseudoReply('{"name": "respond", "arguments": {"text": "Buenos días."}}',
+    ["translate 'good morning' to Spanish"]), "Buenos días.");
+  assert.equal(unwrapPseudoReply('{"name": "answer", "arguments": {"answer": "Canberra"}}',
+    ["is the capital Canberra or Sydney?"]), "Canberra");
+
+  const { server, baseUrl, received } = await fakeModel([answer(pseudo), answer("Buenos días.")]);
+  try {
+    const result = await runAgent(configFor(baseUrl), "translate 'good morning' to Spanish", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.text, "Buenos días.");
+    const told = ((received[1] as { messages: Array<{ content: string }> }).messages.at(-1)?.content) ?? "";
+    assert.match(told, /There is no tool called translate/);
+  } finally {
+    server.close();
+  }
+});
+
+// ---- system_status: the machine's own readings -------------------------------
+
+const readings = async () => ({
+  cpu: { model: "Test CPU", cores: 16, speedMhz: 4200, fraction: 0.27, detail: "27% across 16 cores", unavailable: null },
+  memory: { fraction: 0.57, detail: "18.2 / 31.9 GB", unavailable: null },
+  gpu: {
+    name: "NVIDIA GeForce RTX 4060 Ti", fraction: 0.12, detail: "12% busy", unavailable: null,
+    vram: { fraction: 0.74, detail: "5.9 / 8.0 GB", unavailable: null },
+    temperatureC: 48, clockMhz: 2535, powerWatts: null
+  },
+  cloud: { services: [], detail: "" },
+  disk: { fraction: 0.5, detail: "1.82 / 3.64 TB", unavailable: null },
+  network: { fraction: null, detail: "", unavailable: "Measuring…", receivedBytesPerSecond: null, sentBytesPerSecond: null },
+  uptimeSeconds: 3 * 86400 + 4 * 3600 + 120,
+  takenAt: new Date(0).toISOString()
+});
+
+test("system_status reports the readings it was given, and leaves out what was not read", async () => {
+  const result = await runTool({ name: "system_status", arguments: {} }, { ...context, readTelemetry: readings });
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /Processor: 27% busy across 16 cores \(Test CPU\)\./);
+  assert.match(result.content, /Memory: 18\.2 \/ 31\.9 GB in use \(57%\)\./);
+  assert.match(result.content, /NVIDIA GeForce RTX 4060 Ti, 12% busy, video memory 5\.9 \/ 8\.0 GB \(74%\), 48°C\./);
+  assert.match(result.content, /(?:Drive [A-Z]:|Disk [^:]*:) [\d.]+ (?:GB|TB) free of [\d.]+ (?:GB|TB)/, "the workspace's own drive, really measured");
+  assert.match(result.content, /Up for: 3 days 4 hours\./);
+  // No power reading and no network rate yet: neither is mentioned, let alone invented.
+  assert.doesNotMatch(result.content, /\bW\b|Network/);
+});
+
+test("system_status is offered for questions about the machine, and only those", async () => {
+  for (const question of ["what's my CPU usage right now?", "how much RAM am I using?", "how hot is my GPU?",
+    "how much free space is on drive C?", "how long has my computer been on?"]) {
+    assert.ok((await offeredFor(question)).includes("system_status"), question);
+  }
+  for (const question of ["what's in your memory?", "what's the temperature in Paris?", "write a haiku about autumn"]) {
+    assert.ok(!(await offeredFor(question)).includes("system_status"), question);
+  }
+});
+
+test("a question about the machine reaches the model with the real readings", async () => {
+  const { server, baseUrl, received } = await fakeModel([answer("Your processor is 27% busy.")]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "what's my CPU usage right now?", { ...context, readTelemetry: readings });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.text, "Your processor is 27% busy.", "a faithful answer is kept as written");
+    const question = (received[0] as { messages: Array<{ role: string; content: string }> }).messages.at(-1)?.content ?? "";
+    assert.match(question, /^what's my CPU usage right now\?/);
+    assert.match(question, /Processor: 27% busy across 16 cores/);
+  } finally {
+    server.close();
+  }
+});
+
+test("an invented reading is replaced by the real ones", async () => {
+  // Verbatim from the live run, with system_status on offer and not called.
+  const { server, baseUrl } = await fakeModel([answer("You are using 32 GB of your 64 GB RAM, which is 49%.")]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "how much RAM am I using?", { ...context, readTelemetry: readings });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.match(result.text, /^This is what this machine reports right now:/);
+    assert.match(result.text, /Memory: 18\.2 \/ 31\.9 GB in use \(57%\)\./);
+    assert.doesNotMatch(result.text, /64 GB|49%/);
+  } finally {
+    server.close();
+  }
+});
+
+test("advice about the machine may use numbers of its own", async () => {
+  // Not a reading: a GPU's safe range is general knowledge, and replacing the
+  // advice with the readings would lose the answer.
+  const advice = "Most GPUs run safely up to about 83°C, so yours is fine.";
+  const { server, baseUrl } = await fakeModel([answer(advice)]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "is my GPU too hot?", { ...context, readTelemetry: readings });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.text, advice);
+  } finally {
+    server.close();
+  }
+});
+
+test("the app the user named wins over a different one the model picked", () => {
+  const apps = ["calculator", "tip-calculator", "todo-list-app", "snake-game"];
+  // Live: "run the calculator app" arrived as run_app("tip-calculator").
+  assert.equal(appTheUserNamed(apps, "tip-calculator", "run the calculator app"), "calculator");
+  assert.equal(appTheUserNamed(apps, "calculator", "run the calculator app"), "calculator");
+  assert.equal(appTheUserNamed(apps, "tip-calculator", "run the tip calculator"), "tip-calculator");
+  // Nothing named in the request: the model's pick stands, or nothing.
+  assert.equal(appTheUserNamed(apps, "todo-list-app", "run it again"), "todo-list-app");
+  assert.equal(appTheUserNamed(apps, null, "run the calculator app"), "calculator");
+  assert.equal(appTheUserNamed(apps, null, "run it"), null);
+});
+
+test("starting an app is offered only when something was asked to start", async () => {
+  // Live: "Plan tonight's stream: two hours of a survival game" started snake-game.
+  assert.ok(!(await offeredFor("Plan tonight's stream: two hours of a survival game")).includes("run_app"));
+  assert.ok((await offeredFor("run the calculator app")).includes("run_app"));
+  assert.ok((await offeredFor("open my todo app")).includes("run_app"));
+});
+
+test("a refused write followed by an append that worked reports only the append", async () => {
+  // Live: "Added a line saying..." followed by "notes.txt has 1 line, and
+  // this would keep 0 of it... Nothing was written."
+  writeFileSync(path.join(testWorkspace, "gut-notes.txt"), "first note\n", "utf8");
+  const { server, baseUrl } = await fakeModel([
+    toolCall("write_file", { path: "gut-notes.txt", content: "\nsecond note\n" }),
+    toolCall("edit_file", { path: "gut-notes.txt", append: "second note" }),
+    answer("Added a line saying second note to the end of gut-notes.txt.")
+  ]);
+
+  try {
+    const request = "add a line saying second note to the end of gut-notes.txt";
+    const result = await runAgent(configFor(baseUrl), request, { ...context, request });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.toolsUsed.map((used) => [used.name, used.ok]), [["write_file", false], ["edit_file", true]]);
+    assert.doesNotMatch(result.text, /Nothing was written/);
+    assert.equal(readFileSync(path.join(testWorkspace, "gut-notes.txt"), "utf8").replace(/\r\n/g, "\n"), "first note\nsecond note\n");
+  } finally {
+    server.close();
+  }
+});
+
+test("a request with nothing to do with the machine is not offered the shell", async () => {
+  // Live, with machine access on: "Plan tonight's stream" ran `stream-cli`
+  // three times on one run and `echo Starting a two-hour survival game
+  // stream.` on another, and never gave a plan.
+  const wasArmed = commandsArmed();
+  armCommands();
+  try {
+    assert.ok(!(await offeredFor("Plan tonight's stream: two hours of a survival game")).includes("run_command"));
+    assert.ok(!(await offeredFor("Give me three openings for a blog post about learning to code at 40")).includes("run_command"));
+    assert.ok((await offeredFor("what version of node is installed?")).includes("run_command"));
+    // An order to run something keeps it whatever it names.
+    assert.ok((await offeredFor("run whoami")).includes("run_command"));
+  } finally {
+    if (!wasArmed) disarmCommands();
+  }
+});
+
+test("a reading question does not get the shell, but a question about programs still does", async () => {
+  // Live: "what's my CPU usage right now?" ran wmic, which this Windows no
+  // longer has, and sent the user to Task Manager.
+  const wasArmed = commandsArmed();
+  armCommands();
+  try {
+    assert.ok(!(await offeredFor("what's my CPU usage right now?")).includes("run_command"));
+    assert.ok((await offeredFor("which process is using the most RAM?")).includes("run_command"));
+  } finally {
+    if (!wasArmed) disarmCommands();
+  }
 });

@@ -78,6 +78,8 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // the internet like fetch_url, and is bounded the same careful way.
   web_search: 1,
   list_schedules: 1,
+  // Reads the machine's own counters - the dashboard's readings - and changes nothing.
+  system_status: 1,
 
   // 2 — creates or changes something. Bounded by the workspace on its own, or
   // by the machine-access switch when that has been granted.

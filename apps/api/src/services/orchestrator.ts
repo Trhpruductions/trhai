@@ -4,7 +4,8 @@ import { isCodeWork } from "./machinePaths.js";
 import { pickAuthorModel } from "./appAuthor.js";
 import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
-import type { AgentLens } from "./agentTools.js";
+import { appNamedIn, runTool, type AgentLens } from "./agentTools.js";
+import { workspaceRoot } from "./workspace.js";
 import { changesSomething } from "./toolPermissions.js";
 import { convertUnits } from "./unitConversion.js";
 import type { RunningApp, StartResult } from "./appRunner.js";
@@ -12,7 +13,7 @@ import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
 import { isContinuationRequest, looksLikeScheduleRequest } from "./requestAnalysis.js";
 import { planProject } from "@ascend/shared";
-import { classifyIntent, wantsWebSearch } from "./actionIntent.js";
+import { classifyIntent, wantsToStopAnApp, wantsWebSearch } from "./actionIntent.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
 import {
@@ -26,7 +27,8 @@ import {
   type PendingConfirmation
 } from "./pendingConfirmation.js";
 import {
-  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, isListAppsRequest, parseForgetRequest, parseNthThingRequest, parsePinRequest,
+  isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, isListAppsRequest, isListWorkspaceRequest, parseForgetRequest,
+  parseNthThingRequest, parsePinRequest,
   parseRemoveScheduleRequest, parseToggleScheduleRequest
 } from "./memoryRequests.js";
 import { matchMemories } from "./factWording.js";
@@ -230,6 +232,14 @@ export async function runAssistantOrchestrator(
   // "what apps have I built" - a workspace listing, off the model.
   const apps = resolveListApps(input, approving, effectiveMessage);
   if (apps) return apps;
+
+  // "list the files in my workspace" - the same, for everything at the top.
+  const workspaceListing = await resolveListWorkspace(approving, effectiveMessage);
+  if (workspaceListing) return workspaceListing;
+
+  // "stop the calculator app" - a lookup among the running apps and one call.
+  const stopping = resolveStopApp(input, approving, effectiveMessage);
+  if (stopping) return stopping;
 
   // "delete the recipe box app" - a destructive folder removal, confirm-then-do.
   const deletingApp = resolveDeleteApp(input, approving, effectiveMessage);
@@ -683,6 +693,75 @@ function resolveListApps(
   const runningCount = apps.filter((app) => app.running).length;
   const tail = runningCount > 0 ? `\n\n${runningCount} running now.` : "\n\nNone are running - say \"run the <name> app\" to start one.";
   return deterministicResult(effectiveMessage, `Your apps (${apps.length}):\n${lines}${more}${tail}`, "list");
+}
+
+/**
+ * "stop the calculator app" - stopped here, not left to the model.
+ *
+ * With the conversation in view, the model answered it with directions: "run
+ * the following command in your command prompt: cd ...\tip-calculator && npm
+ * stop" - the wrong app, and nothing stopped. Before that it stopped the app
+ * and then started it again. Which app is a lookup among the running ones,
+ * and stopping it is one call. Only a message that opens with the stop is
+ * taken here; "build a timer, then stop the old one" is still the model's.
+ */
+function resolveStopApp(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): OrchestratorResult | null {
+  const text = effectiveMessage.trim();
+  if (approving || !input.stopApp || !input.runningApps || !wantsToStopAnApp(text)) return null;
+  const stopVerb = /^(?:(?:please|can you|could you|now|ok(?:ay)?|and)\s+)*(?:stop|close|shut\s*down|shutdown|kill|quit|halt|terminate)\b/i;
+  if (!stopVerb.test(text)) return null;
+
+  const running = input.runningApps();
+  const runningNames = running.map((app) => app.project);
+  const named = appNamedIn(runningNames, text);
+  // What the request calls the app, once the stop and the generic words are
+  // gone: "calculator" in "stop the calculator app", nothing in "stop the app".
+  const calledIt = text.toLowerCase().replace(stopVerb, "")
+    .replace(/\b(?:the|my|this|that|it|its|running|current|open|web|local|app|apps|application|server|site|website|preview|please|now|for me|down)\b/g, " ")
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim();
+  const reply = (message: string) => deterministicResult(effectiveMessage, message, "app");
+
+  // The one it names, or the only one running when it names none. A name
+  // that matches nothing running never falls back to whatever is: "stop the
+  // weather app" must not stop the todo app.
+  const target = named ?? (!calledIt && running.length === 1 ? runningNames[0] : null);
+  if (target) {
+    const url = running.find((app) => app.project === target)?.url;
+    return reply(input.stopApp(target)
+      ? `Stopped ${target}${url ? ` (it was at ${url})` : ""}.`
+      : `${target} could not be stopped.`);
+  }
+  const notRunning = calledIt ? `Nothing running is called "${calledIt}"` : "No app is running";
+  if (running.length === 0) return reply(`${calledIt ? `"${calledIt}" is not running` : "No app is running"}, so there was nothing to stop.`);
+  return reply(`${calledIt ? `${notRunning}, so nothing was stopped.` : "Which one?"} Running now: ${runningNames.join(", ")}.`);
+}
+
+/**
+ * "list the files in my workspace" - the top of the workspace, read here
+ * rather than left to the model; see isListWorkspaceRequest. The listing is
+ * list_files' own, so it reads exactly as the model would have been shown it.
+ */
+async function resolveListWorkspace(
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): Promise<OrchestratorResult | null> {
+  if (approving || !isListWorkspaceRequest(effectiveMessage)) return null;
+
+  const listed = await runTool({ name: "list_files", arguments: {} }, { memories: [], knowledge: [] });
+  if (!listed.ok) return deterministicResult(effectiveMessage, listed.content, "list");
+
+  // The tool's closing note is addressed to the model ("pass recursive:
+  // true"); the person reading this gets the plain version instead.
+  const listing = listed.content.replace(/\n\n\[top level only;[^\]]*\]$/, "");
+  const count = listing.split("\n").filter((line) => line.startsWith("- ")).length;
+  return deterministicResult(effectiveMessage,
+    `Your workspace (${workspaceRoot()}) has ${count} item${count === 1 ? "" : "s"} at the top level:\n${listing}`
+      + "\n\nAsk what is in any of these folders to see inside it.",
+    "list");
 }
 
 /**

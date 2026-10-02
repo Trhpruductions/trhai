@@ -416,6 +416,112 @@ export function mentionsVideo(message: string): boolean {
 }
 
 /**
+ * Whether a request is about this computer or its software at all, so the
+ * shell is worth offering.
+ *
+ * run_command was offered to every request while machine access was on, and
+ * the model reached for it on requests that had nothing to do with the
+ * machine. Live, "Plan tonight's stream: two hours of a survival game" ran
+ * `stream-cli` three times on one run and `echo Starting a two-hour survival
+ * game stream.` on another, and answered with neither a plan nor anything
+ * true; "Give me three openings for a blog post" ran Get-PSDrive. Every other
+ * tool here is offered by what the request is about, and the shell, the one
+ * that can do anything, was the exception.
+ *
+ * Broad on purpose: anything naming a command, a path, a program, a port, a
+ * file or folder, a device or the machine itself keeps it. Missing one costs
+ * an answer that says it cannot check; offering it to a poem costs a command
+ * nobody asked for.
+ */
+export function mentionsTheMachine(message: string): boolean {
+  const text = message ?? "";
+  if (commandPatterns.some((pattern) => pattern.test(text)) || targetPatterns.some((pattern) => pattern.test(text))) return true;
+  return /\b(?:computer|pc|machine|laptop|desktop|system|windows|linux|mac(?:os)?|os|operating system|process|processes|pid|ports?|services?|daemon|servers?|programs?|apps?|applications?|software|install(?:ed|ing)?|uninstall\w*|updates?|upgrade\w*|versions?|packages?|dependenc(?:y|ies)|modules?|drivers?|disks?|drives?|storage|folders?|director(?:y|ies)|files?|paths?|environment|env|variables?|registry|network|wi-?fi|ethernet|ip|dns|ping|internet|connection|bandwidth|firewall|hostname|localhost|cpu|gpu|ram|memory|battery|temperature|uptime|username|account|clipboard|screen|display|monitor|usb|bluetooth|printer|audio|sound|volume|git|repo|repository|branch|commit|docker|container|vm|wsl|terminal|shell|commands?|console|powershell|cmd|bash|scripts?|cli|run|running|execute|launch|kill|restart|reboot|shutdown|compile|build|tests?|lint|logs?|errors?|crash\w*|listening|open|opened|node|npm|python|java|browser|chrome|firefox|edge|steam)\b/i
+    .test(text);
+}
+
+/**
+ * Whether a request with no recognised verb still asks for software to be
+ * made - "I need a task tracker", "make a snake game", "plan an app for my
+ * workouts" - so build_app and plan_app are worth offering.
+ *
+ * They were offered to every request the classifier found no verb in. Live,
+ * "Plan tonight's stream: two hours of a survival game" called plan_app on
+ * three runs out of three, and on one of them built and wrote a broken app
+ * called "Tonight S Stream Two Hours" into the workspace. The thing to build
+ * has to be named, close to the word asking for it.
+ */
+export function wantsSomethingBuilt(message: string): boolean {
+  return /\b(?:make|build|create|write|code|develop|design|scaffold|generate|need|want|plan)\b(?:\s+(?:me|us|myself))?\s+(?:(?:a|an|the|my|some|another|new|simple|small|little|basic|quick)\s+)*(?:[\w-]+\s+){0,3}?(?:app|apps|application|tool|tracker|website|site|webpage|web page|landing page|homepage|home page|portfolio|blog|dashboard|api|program|calculator|timer|todo list|to-do list|game|quiz|survey|form|bot|extension|editor|converter|generator|manager|organizer|organiser|journal|portal|cli)\b/i
+    .test(message ?? "");
+}
+
+/**
+ * Whether a request asks for something to be started - run, open, launch,
+ * play - so run_app is worth offering.
+ *
+ * Live, "Plan tonight's stream: two hours of a survival game" started the
+ * workspace's snake-game and answered "the game should be running at
+ * localhost:59312". A plan was asked for; nothing was asked to start.
+ */
+export function asksToStartSomething(message: string): boolean {
+  return /\b(?:run|open|launch|start|restart|serve|preview|play|load|boot|fire up|spin up|bring up|pull up|show me the app)\b/i
+    .test(message ?? "");
+}
+
+/**
+ * A request to reshape something already said - "make that answer one
+ * sentence", "say it more simply", "translate that to French" - so nothing
+ * that writes is offered.
+ *
+ * The answer is a rewrite of the last reply, in the reply. Live, "Make that
+ * answer one sentence." saved a document called daily-log.txt reading "Today
+ * was a productive day." Asking for a file, a save or an app is a different
+ * request and keeps its tools.
+ */
+export function reshapesAnEarlierReply(message: string): boolean {
+  const text = (message ?? "").toLowerCase().trim();
+  if (!text || namesAFilePath(text) || mentionsDocument(text)) return false;
+  if (/\b(?:file|files|save|saved|document|write|store|app|project|website|page|folder|schedule|remind)\b/.test(text)) return false;
+  return /^(?:(?:please|can you|could you|now|ok(?:ay)?|and)\s+)*(?:make|turn|put|rewrite|rephrase|reword|shorten|simplify|summari[sz]e|condense|expand|translate|say|explain|repeat)\s+(?:that|this|it|your (?:last )?(?:answer|reply|response))\b/.test(text)
+    || (/\b(?:that|your|the last) (?:answer|reply|response)\b/.test(text)
+      && /\b(?:shorter|longer|simpler|one sentence|one line|bullets?|bullet points|plain(?:er)? (?:english|words)|again|briefly)\b/.test(text));
+}
+
+/**
+ * Whether a request asks how the machine itself is doing - processor, memory,
+ * graphics card, disk space, network, uptime - so system_status is worth
+ * offering.
+ *
+ * "memory" on its own is the assistant's memory ("what's in your memory"), so
+ * it counts only as RAM wording: memory usage, how much memory, free memory.
+ * A temperature counts only next to a part of the computer, or "what's the
+ * temperature" would be answered with the graphics card's.
+ */
+export function asksAboutMachineState(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  return /\b(?:cpu|processor|ram|vram|gpu|graphics card|video card|uptime|bandwidth)\b/.test(text)
+    || /\bmemory (?:usage|use|used|in use|left|free|available|load|pressure)\b|\b(?:free|available|used|system) memory\b|\bhow much memory\b/.test(text)
+    || /\b(?:disk|drive|storage|ssd|hdd)\b[^.?!]*\b(?:space|free|full|left|used|capacity)\b|\b(?:space|free|full|capacity)\b[^.?!]*\b(?:disk|drive|ssd|hdd)\b|\b(?:free|disk|storage) space\b|\bspace (?:left|free|remaining)\b/.test(text)
+    || /\bhow long (?:has|have) (?:my |the |this )?(?:pc|computer|machine|system|laptop)\b|\b(?:pc|computer|machine|system|laptop) (?:been )?(?:up|on) for\b/.test(text)
+    || /\bhow(?:'s| is) my (?:pc|computer|machine|system|laptop)\b|\b(?:system|computer|pc|machine) (?:status|load|usage|health|performance|stats)\b/.test(text)
+    || /\b(?:network|internet|connection) (?:speed|usage|traffic|throughput)\b|\b(?:download|upload) (?:speed|rate)\b/.test(text)
+    || /\b(?:pc|computer|machine|laptop|system)\b[^.?!]*\b(?:temp|temps|temperature|hot)\b|\bhow hot is my\b/.test(text);
+}
+
+/**
+ * A question whose whole answer is a reading - "what's my CPU usage?", "how
+ * hot is my GPU?" - as opposed to advice about one ("how do I lower my CPU
+ * usage?", "is 80°C too hot?"), where numbers from general knowledge are part
+ * of a good answer.
+ */
+export function asksForAReading(message: string): boolean {
+  return asksAboutMachineState(message)
+    && !/\b(?:how (?:do|can|should|could|would) i|why|what (?:causes|should|can|could)|should i|tips?|ways? to|lower|reduce|improve|speed up|free up|fix|normal|safe|too (?:hot|high|much|full|slow|low)|worry|enough|upgrade|recommend|best)\b/i
+      .test(message ?? "");
+}
+
+/**
  * Whether a request has anything to do with the time or the date, so
  * current_datetime is worth offering. The date is in the system prompt in
  * any case; this stops the clock being read twice on a question about ports.

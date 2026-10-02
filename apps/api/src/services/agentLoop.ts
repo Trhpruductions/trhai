@@ -1,5 +1,7 @@
 import { modelOptions, type LocalModelConfig } from "./localModel.js";
-import { availableTools, runTool, verifiedDetail, type AgentLens, type ToolContext, type ToolCall } from "./agentTools.js";
+import {
+  availableTools, driveNamedIn, readMachineStatus, runTool, verifiedDetail, type AgentLens, type ToolContext, type ToolCall
+} from "./agentTools.js";
 import { commandsArmed } from "./commandRunner.js";
 import { readStream, toLines } from "./streamReader.js";
 import { enterStage, stageForTool } from "./reasoningStage.js";
@@ -7,10 +9,10 @@ import { beginEvent, endEvent, type ExecutionKind } from "./executionLog.js";
 import { stripFabricatedToolOutput } from "./fabricatedOutput.js";
 import {
   answerDirectly, claimsUnperformedMutation, claimsUnusedTool, contradictsToolRecord,
-  correctionFor, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
+  correctionFor, inventsAReading, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
+import { asksAboutMachineState, asksForAReading, asksToStartSomething, mentionsTheMachine, wantsSomethingBuilt, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -169,13 +171,19 @@ export const maxCallsPerRound = 4;
 export function narratesACommand(text: string): boolean {
   const trimmed = text.trim();
   // Starting a server is never something to run here; it is what the user
-  // does with the result.
-  if (/```[^`]*\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:start|dev|serve)\b|```[^`]*\bnode\s+(?:\S*[\\/])?(?:server|index|app)\.(?:m?js|cjs)\b/i.test(trimmed)) return false;
+  // does with the result. Fenced or inline.
+  if (/`[^`]*\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:start|dev|serve)\b|`[^`]*\bnode\s+(?:\S*[\\/])?(?:server|index|app)\.(?:m?js|cjs)\b/i.test(trimmed)) return false;
   if (/^run_command\s+\S/i.test(trimmed)) return true;
   // The code fence may sit a blank line below the sentence, so the span
   // between the verb and the fence allows newlines.
   return /\b(?:i(?:'ll| will| would| can| am going to)|let me|let's|we can|you can|to (?:check|see|find|get)[^.\n]{0,60})\b[^`\n]{0,80}\b(?:run|execute|use)\b[^`]{0,120}```[\s\S]*?```/i.test(trimmed)
-    || /^(?:run|execute)(?: the following| this)?(?: command)?:?\s*```[\s\S]*?```/im.test(trimmed);
+    || /^(?:run|execute)(?: the following| this)?(?: command)?:?\s*```[\s\S]*?```/im.test(trimmed)
+    // Inline, in a sentence. Asked "which process is using the most RAM?"
+    // with run_command on offer: "You can identify it by using the Task
+    // Manager or by running the command `tasklist /fi "MEMUSAGE gt 1024"` in
+    // Command Prompt." Only a span with a space, a flag or a path in it is a
+    // command; "the `calculate` tool" is a name.
+    || /\b(?:run|running|execute|executing|type|typing)\s+(?:the\s+)?(?:following\s+)?(?:command\s+)?`(?=[^`\n]*[\s\\/-])[^`\n]{2,200}`/i.test(trimmed);
 }
 
 /** Whether the request asks for something to be kept in memory. */
@@ -297,6 +305,9 @@ export const systemPrompt = [
   "documents, their schedule. You cannot know these. Use a tool:",
   "- search_memory for anything they have told you.",
   "- search_documents, list_documents, read_document for anything written down.",
+  "- system_status for how this computer is doing: processor load, memory in use, the graphics",
+  "  card, free disk space, network speed, uptime. Those are real readings - report them as",
+  "  given, and never run a command or guess to get them.",
   "- current_datetime for today, now, or how long ago. You cannot know the date otherwise.",
   "  The date is never in their notes or documents. Do not search for it there;",
   "  searching and finding nothing led to answering \"the current date is not recorded\",",
@@ -317,7 +328,7 @@ export const systemPrompt = [
   "  Say what you are about to run. A non-zero exit code means it FAILED - report that, do",
   "  not describe a failed command as done.",
   `  This machine runs ${process.platform === "win32" ? "Windows: commands run in cmd.exe, so use dir, findstr, type, netstat, or"
-    + " powershell -Command \"...\" for anything else (disk space: powershell -Command \"Get-PSDrive D\")."
+    + " powershell -Command \"...\" for anything else (what is on a port: netstat -ano | findstr :4000)."
     + " Not ls, df, grep, cat or wmic." : "a POSIX shell: ls, grep, df and the rest work as usual."}`,
   "- search_files to find where something is defined or used in files on disk: it returns",
   "  file:line for every match. Never search_memory or search_documents for code: those hold",
@@ -380,9 +391,67 @@ export const systemPrompt = [
 export function describeAgentLens(agent: AgentLens): string {
   const role = agent.role.toLowerCase();
   const article = /^[aeiou]/.test(role) ? "an" : "a";
+  // The name is the role's, and said so. Working as Reach, the marketer was
+  // asked for a one-line pitch for a local-first assistant and answered
+  // "Meet Reach, your local AI assistant" - twice, on two runs.
   return `For this conversation the user has asked you to work as ${agent.name}, ${article} ${role}. `
+    + `${agent.name} is the name of that role, not of the user, their product or anything they ask you to write about. `
     + `${agent.description} Keep in view: ${agent.focus} `
     + "This is an emphasis, not a new set of rules: everything above still holds, and the tools are the same.";
+}
+
+/**
+ * The last few turns of the conversation, as messages the model can read.
+ *
+ * The model was sent the system prompt and the current message and nothing
+ * else, so no follow-up could work. Live: "What's the capital of Australia?"
+ * was answered, and the next message, "And roughly how many people live
+ * there?", got "I don't have access to current population data for any
+ * specific location" - "there" pointed at nothing it could see. "Make that
+ * answer one sentence." had no "that" either; one reply was the tool-calling
+ * template, another saved a document called daily-log.txt. search_conversation
+ * finds something said earlier only when the model thinks to look, and a
+ * pronoun gives it nothing to look for.
+ *
+ * Bounded both ways: the last six turns, each cut to 800 characters. A file
+ * listing or build report from three turns back is context, not something to
+ * read again in full on every round of every later turn.
+ */
+const recentTurnCount = 6;
+const recentTurnChars = 800;
+
+export function recentTurns(conversation: ToolContext["conversation"], asked: string[]): ChatMessage[] {
+  const turns = [...(conversation ?? [])];
+  // The client may send the message being answered as the last turn of its
+  // history. It goes in once, as the question, not twice.
+  const current = new Set(asked.map((entry) => entry.trim()).filter(Boolean));
+  while (turns.length > 0 && turns[turns.length - 1].role === "user"
+    && current.has(turns[turns.length - 1].content.trim())) {
+    turns.pop();
+  }
+  return turns
+    .filter((turn) => turn.content.trim().length > 0)
+    .slice(-recentTurnCount)
+    .map((turn) => ({
+      role: turn.role,
+      content: turn.content.length > recentTurnChars ? `${turn.content.slice(0, recentTurnChars)} [...]` : turn.content
+    }));
+}
+
+/**
+ * A reply that is the model's tool-calling instructions rather than an answer.
+ *
+ * Seen live as the whole reply to "Make that answer one sentence.": "For each
+ * function call, return a json object with function name and arguments within
+ * {} with NO other text. Do not include any backticks or ```json." That is the
+ * chat template's own wording, which sits just before the question; with
+ * nothing to answer, the model repeated the last instructions it had read.
+ */
+const toolTemplateEcho =
+  /\bfor each function call,? return a json object\b|\bfunction signatures within\b|<\/?tools>|\bwith no other text\.? do not include any backticks\b/i;
+
+export function echoesToolTemplate(text: string): boolean {
+  return toolTemplateEcho.test(text);
 }
 
 /**
@@ -657,7 +726,23 @@ function looksLikeAShellCommand(rest: string): boolean {
   return /^(?:npm|npx|pnpm|yarn|node|git|python|py|pip|powershell|pwsh|cmd|dir|findstr|netstat|type|echo|cd|ls|cat|grep|curl|wget|docker|tsc|eslint|systeminfo|tasklist|taskkill|where|which|whoami|hostname|ipconfig|ping|del|mkdir|rmdir|copy|move|ren|set|start|explorer|code|dotnet|cargo|go|java|mvn|gradle|make|tree|wsl|bash|sh)\b/i.test(rest);
 }
 
+/** Whether a tool can be called with nothing at all. */
+function takesNoRequiredArguments(name: string): boolean {
+  const definition = availableTools(true).find((candidate) => candidate.function.name === name);
+  const required = (definition?.function.parameters as { required?: unknown } | undefined)?.required;
+  return Boolean(definition) && (!Array.isArray(required) || required.length === 0);
+}
+
 function parseBareCall(line: string, known: string[]): ToolCall | null {
+  // `system_status` - the name and nothing else, as the whole reply. Seen
+  // live for "which process is using the most RAM?", and shown to the user as
+  // the answer. A tool that needs nothing is called with nothing; one that
+  // needs arguments is not guessed at.
+  const bareName = /^`?([a-zA-Z_][a-zA-Z0-9_]*)`?\.?$/.exec(line.trim());
+  if (bareName && known.includes(bareName[1]) && takesNoRequiredArguments(bareName[1])) {
+    return { name: bareName[1], arguments: {} };
+  }
+
   // `fetch_url {"url":"https://news.ycombinator.com/"}}` - the name, a space,
   // and the arguments as JSON, with a stray brace. Seen live as the whole of
   // the user-facing reply. The name is the tool's own, the object its
@@ -861,11 +946,11 @@ function extractJsonObjects(text: string): unknown[] {
  * a call, and the JSON went to the user verbatim. The sentence inside is the
  * reply; this takes it out.
  */
-export function unwrapPseudoReply(text: string): string {
+export function unwrapPseudoReply(text: string, asked: string[] = []): string {
   const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return text;
 
-  const whole = sentenceFromPseudoCall(trimmed);
+  const whole = sentenceFromPseudoCall(trimmed, asked);
   if (whole) return whole;
 
   // Several, one per line. Asked for three tips on error messages, the whole
@@ -874,10 +959,37 @@ export function unwrapPseudoReply(text: string): string {
   // above cannot parse that, so the raw JSON was the answer the user saw.
   const lines = trimmed.split("\n").map((line) => line.trim()).filter(Boolean);
   if (lines.length > 1) {
-    const sentences = lines.map(sentenceFromPseudoCall);
+    const sentences = lines.map((line) => sentenceFromPseudoCall(line, asked));
     if (sentences.every((sentence): sentence is string => sentence !== null)) return sentences.join("\n\n");
   }
   return text;
+}
+
+/** Lower case, quotes and punctuation gone, spaces collapsed: for comparing wording. */
+function wording(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Whether an argument is the user's own words handed back, rather than an answer.
+ *
+ * {"name": "translate", "arguments": {"text": "good morning", "to_language":
+ * "Spanish"}} was unwrapped to "good morning", and that was the whole answer to
+ * "translate 'good morning' to Spanish". The text was what the invented tool
+ * was meant to act on, not what it produced. Text the user quoted, or two or
+ * more words lifted straight from the request, is input; a one-word answer
+ * that happens to appear in the question ("Canberra or Sydney?") is not
+ * treated as one.
+ */
+function repeatsTheRequest(value: string, asked: string[]): boolean {
+  const said = wording(value);
+  if (!said) return false;
+  return asked.some((request) => {
+    const quoted = [...request.matchAll(/["'‘’“”]([^"'‘’“”]{1,200})["'‘’“”]/g)]
+      .map((match) => wording(match[1]));
+    if (quoted.includes(said)) return true;
+    return said.includes(" ") && ` ${wording(request)} `.includes(` ${said} `);
+  });
 }
 
 /**
@@ -898,7 +1010,7 @@ const spokenArgumentKeys = [
 ];
 
 /** The sentence inside one pseudo-call, or null when it is not one; see spokenArgumentKeys. */
-function sentenceFromPseudoCall(candidate: string): string | null {
+function sentenceFromPseudoCall(candidate: string, asked: string[] = []): string | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(candidate);
@@ -918,7 +1030,10 @@ function sentenceFromPseudoCall(candidate: string): string | null {
 
   for (const key of spokenArgumentKeys) {
     const value = args[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "string" && value.trim()) {
+      // The thing to act on is not the answer; see repeatsTheRequest.
+      return repeatsTheRequest(value, asked) ? null : value.trim();
+    }
   }
   return null;
 }
@@ -1159,6 +1274,22 @@ export async function runAgent(
     hour: "2-digit", minute: "2-digit"
   });
 
+  // Read before the model answers, not left for it to fetch. With
+  // system_status on offer, "what's my CPU usage right now?" called nothing
+  // and was answered "45%"; "how hot is my GPU?" got "82 degrees Celsius".
+  // Every number was invented, in under a second. The real readings go in
+  // with the question, and an answer that still gives others is replaced
+  // below (see inventsAReading).
+  // The readings name the programs holding the most memory, so "which
+  // process is using the most RAM?" is answered from them too; processor use
+  // per program they do not have, which is why a question about programs
+  // keeps the shell (see readingOnly).
+  const aboutPrograms = /\b(?:process|processes|program|programs|apps?|application|applications|task manager|which|what(?:'s| is) using|using (?:the )?most)\b/i
+    .test(question);
+  const machineReadings = asksAboutMachineState(question)
+    ? await readMachineStatus(context, driveNamedIn(question))
+    : null;
+
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -1182,7 +1313,15 @@ export async function runAgent(
         // Last, so it reads as a lens on everything above rather than ahead of it.
         + (context.agent ? `\n\n${describeAgentLens(context.agent)}` : "")
     },
-    { role: "user", content: question }
+    // What was said just before, so a follow-up has something to follow.
+    ...recentTurns(context.conversation, [question, context.request ?? ""]),
+    {
+      role: "user",
+      content: machineReadings
+        ? `${question}\n\nLive readings from this machine, taken just now. They are real: answer from them as `
+          + `given, and do not give any other number for this machine.\n${machineReadings}`
+        : question
+    }
   ];
 
   const toolsUsed: ToolOutcome[] = [];
@@ -1205,6 +1344,7 @@ export async function runAgent(
   let correctedUnwrittenOrder = false;
   let correctedNarratedCommand = false;
   let correctedInventedTool = false;
+  let correctedTemplateEcho = false;
 
   // Fixed for the turn: what was asked does not change as the loop runs.
   const askedAQuestion = isExplanatoryQuestion(question);
@@ -1223,7 +1363,17 @@ export async function runAgent(
   // by rendering a nineteen-second video called "Welcome, Whiskers!" into the
   // workspace. It is asking for something, the same as a question is.
   const shape = analyzeRequest(question).shape;
-  const onlyAsks = !intent.action && (shape === "question" || (shape === "statement" && !looksDeclarative(question)));
+  // "Make that answer one sentence" asks for words, the same as a question
+  // does; see reshapesAnEarlierReply.
+  const onlyAsks = (!intent.action && (shape === "question" || (shape === "statement" && !looksDeclarative(question))))
+    || reshapesAnEarlierReply(question);
+
+  // A question about the machine's readings is answered from them, not from
+  // the shell: see system_status. Asked "what's my CPU usage right now?" with
+  // run_command in reach, the model ran wmic, which this Windows no longer
+  // has, and sent the user to Task Manager. Which program is responsible still
+  // needs the process list, and an order to run something keeps the shell.
+  const readingOnly = asksAboutMachineState(question) && !intent.action && !aboutPrograms;
 
   // A request that names the file it wants written is not a request to
   // scaffold a project.
@@ -1440,14 +1590,17 @@ export async function runAgent(
       // kilometers" with calculate on offer, the model ran `bc` three times -
       // a POSIX calculator this Windows machine does not have - and answered
       // with advice to install it. An order to run something keeps the shell.
-      ? availableTools(commandsArmed() && !unattended && !(looksArithmetic(question) && !intent.action), {
+      ? availableTools(commandsArmed() && !unattended && !(looksArithmetic(question) && !intent.action) && !readingOnly
+        // And only for a request about the machine, or an order to run
+        // something: see mentionsTheMachine.
+        && (mentionsTheMachine(question) || intent.kind === "execute" || intent.kind === "check"), {
         // A request to look does not get the tools that change things. Asked
         // to read one file, the model read it and then wrote three - see
         // machineChangingTools in agentTools. A request to STOP an app loses
         // them too: stop_app is not among them, so it stays in reach while
         // run_app and build_app do not - which is what stops "stop the notes
         // app" from stopping it and then restarting it.
-        changes: intent.kind !== "read" && !wantsToStopAnApp(question),
+        changes: intent.kind !== "read" && !wantsToStopAnApp(question) && !reshapesAnEarlierReply(question),
         // A question keeps run_command - the machine answers "is anything
         // listening on port 4000?" - and loses everything that writes.
         writes: !onlyAsks,
@@ -1461,8 +1614,10 @@ export async function runAgent(
         // omega to the end of it" names an action - a write - and still had
         // build_app in reach: the model built an app called "Now Add A Line
         // Saying" instead of editing the file.
+        // And a request with no verb the classifier knows only when it names
+        // something to build: see wantsSomethingBuilt.
         scaffolding: !askedAQuestion && !namedAFileToWrite
-          && (intent.kind === undefined || intent.kind === "generate"),
+          && (intent.kind === "generate" || (intent.kind === undefined && wantsSomethingBuilt(question))),
         // A calculator is only in reach when there is a sum to do.
         arithmetic: looksArithmetic(question),
         // And the date tools only when the request is about dates.
@@ -1484,6 +1639,10 @@ export async function runAgent(
         // A request that only reads does not write to the knowledge base
         // either, unless it asks for something to be kept.
         documents: intent.kind !== "read" || /\b(?:save|store|keep|record)\b/i.test(question),
+        // The machine's own readings, when the question is about them.
+        status: asksAboutMachineState(question),
+        // Starting an app, when something was asked to start.
+        launch: asksToStartSomething(question),
         // A request about a knowledge document, with no file named, does not get
         // the workspace file writers — so "save a document called X" reaches
         // write_document instead of writing an X.txt file. Nor does a pure web
@@ -1599,7 +1758,9 @@ export async function runAgent(
 
     // Tool-call JSON is never shown as an answer, whether or not it was
     // understood: it is the model's working, not its reply.
-    const unwrapped = parseTextToolCalls(rawText).length > 0 ? "" : unwrapPseudoReply(rawText);
+    const unwrapped = parseTextToolCalls(rawText).length > 0
+      ? ""
+      : unwrapPseudoReply(rawText, [question, context.request ?? ""]);
     // A reply that is still a bare tool-call object — even an invented tool like
     // open_url that parseTextToolCalls does not recognise — is the model trying
     // to act, not an answer. Drop it so the raw JSON never reaches the user; a
@@ -1620,6 +1781,26 @@ export async function runAgent(
     if (firstTurnToolCalls === null) firstTurnToolCalls = calls.length;
 
     if (calls.length === 0) {
+      // Its own instructions repeated back, instead of an answer: told once,
+      // with the question, and then given up on rather than shown. A change
+      // already made still stands as the answer (see reportWhatWasDone).
+      if (text && echoesToolTemplate(text)) {
+        const done = reportWhatWasDone(typeof response.model === "string" ? response.model : config.model);
+        if (done) return done;
+        if (!correctedTemplateEcho) {
+          correctedTemplateEcho = true;
+          spendCorrection();
+          messages.push({ role: "assistant", content: rawText });
+          messages.push({
+            role: "user",
+            content: "That is your tool instructions, not an answer. Answer this in plain sentences - "
+              + `no tool call, no JSON: "${context.request ?? question}"`
+          });
+          continue;
+        }
+        return { ok: false, reason: "The local model repeated its tool instructions instead of answering.", toolsUsed };
+      }
+
       if (!text) {
         // Two different failures, and they must not be confused. A model that
         // is still asking for tools on the final round has not gone quiet — it
@@ -1911,7 +2092,12 @@ export async function runAgent(
       const relevant = mutationAttempts.filter((attempt) => !attempt.quiet
         && !(awaitingConfirmation && attempt.name === awaitingConfirmation.tool && !attempt.ok));
       const succeeded = relevant.filter((attempt) => attempt.ok);
-      const mutationResults = (succeeded.length > 0 ? succeeded : relevant)
+      // A change that worked, quiet or not, makes a refused attempt beside the
+      // point. Live: write_file was refused for dropping the file's line, the
+      // append then worked, and the reply read "Added a line..." followed by
+      // "...Nothing was written."
+      const anyChangeWorked = mutationAttempts.some((attempt) => attempt.ok);
+      const mutationResults = (succeeded.length > 0 ? succeeded : anyChangeWorked ? [] : relevant)
         .map((attempt) => attempt.content);
 
       // A promise counts the same as a claim here. "I will now write the file"
@@ -1992,6 +2178,21 @@ export async function runAgent(
       // and the opposite of what happened. Drop it so the tool's own success
       // line (appended by withMutationResults) is what the user reads.
       const reportedText = mutationResults.length > 0 && isBareRefusal(cleanedText) ? "" : cleanedText;
+
+      // A reading the machine did not give, on a question that only asked for
+      // one: the readings themselves are the answer instead. See
+      // inventsAReading; anything system_status returned counts as given.
+      if (machineReadings && asksForAReading(question)
+        && inventsAReading(reportedText, [machineReadings, ...readResults].join("\n"))) {
+        return {
+          ok: true,
+          text: `This is what this machine reports right now:\n${machineReadings}`,
+          model: typeof response.model === "string" ? response.model : config.model,
+          toolsUsed,
+          actionAudit: auditFor(toolsUsed.length > 0 ? "tool-called" : "prose")
+        };
+      }
+
       return {
         ok: true,
         // A held call the reply does not mention is a decision the user cannot

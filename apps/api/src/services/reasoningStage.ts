@@ -125,7 +125,7 @@ export function stageForTool(tool: string): Stage {
   if (tool === "build_app" || tool === "change_app" || tool === "write_file" || tool === "write_document") return "building";
   if (tool === "run_command") return "building";
   if (tool.startsWith("search_") || tool.startsWith("list_") || tool.startsWith("read_")
-    || tool === "fetch_url") {
+    || tool === "fetch_url" || tool === "system_status") {
     return "gathering";
   }
   if (tool === "plan_app") return "planning";
