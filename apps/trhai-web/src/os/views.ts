@@ -76,8 +76,8 @@ export const views: ViewDef[] = [
     icon: "M12 3a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM5 16a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM19 16a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM12 7v4M12 11l-6 5M12 11l6 5", keywords: "internet connection api services throughput"
   },
   {
-    id: "settings", label: "Settings", group: "System", blurb: "Account, voice, appearance, messaging and behaviour.",
-    icon: "M12 9.4a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2ZM12 2.8v2.4M12 18.8v2.4M4.5 7.3l2 1.2M17.5 15.5l2 1.2M4.5 16.7l2-1.2M17.5 8.5l2-1.2", keywords: "preferences account voice accent personality agent email texting"
+    id: "settings", label: "Settings", group: "System", blurb: "Account, assistant, voice, appearance, messaging and notifications - and where your data is kept.",
+    icon: "M12 9.4a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2ZM12 2.8v2.4M12 18.8v2.4M4.5 7.3l2 1.2M17.5 15.5l2 1.2M4.5 16.7l2-1.2M17.5 8.5l2-1.2", keywords: "preferences account voice accent personality agent email texting notifications data privacy encryption about version"
   }
 ];
 

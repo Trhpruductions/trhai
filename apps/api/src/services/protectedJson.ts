@@ -42,6 +42,11 @@ function isEnvelope(value: unknown): value is ProtectedJsonEnvelope {
     && typeof envelope.ciphertext === "string";
 }
 
+/** Where the key that encrypts TRH AI's data is kept - the path, never the key. */
+export function dataKeyLocation(): string {
+  return process.env.TRHAI_DATA_KEY_FILE ?? defaultKeyFile();
+}
+
 function defaultKeyFile(): string {
   if (process.env.NODE_TEST_CONTEXT) return dataFile(".trhai-data-key");
 
