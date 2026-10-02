@@ -534,6 +534,13 @@ export function formatSize(bytes: number): string {
   return bytes >= terabyte ? `${(bytes / terabyte).toFixed(2)} TB` : `${formatGigabytes(bytes)} GB`;
 }
 
+/** A transfer rate in bytes, named as bytes: "480 KB/s", "1.2 MB/s". */
+export function formatTransfer(bytesPerSecond: number): string {
+  if (bytesPerSecond >= 1_000_000) return `${(bytesPerSecond / 1_000_000).toFixed(1)} MB/s (megabytes per second)`;
+  if (bytesPerSecond >= 1_000) return `${Math.round(bytesPerSecond / 1_000)} KB/s (kilobytes per second)`;
+  return `${Math.round(bytesPerSecond)} bytes/s`;
+}
+
 /** "3 days 4 hours", "2 hours 5 minutes", "12 minutes". */
 export function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86400);
@@ -611,8 +618,11 @@ export function describeTelemetry(
       + `(${percent((disk.space.total - disk.space.free) / disk.space.total)} used).`
     : `${where} no reading - that drive could not be measured.`);
 
+  // Units spelled out. The dashboard's "↓480k ↑560k/s" was retold as "480
+  // kbps" - kilobits, an eighth of what was measured.
   if (network.receivedBytesPerSecond !== null && network.sentBytesPerSecond !== null) {
-    lines.push(`Network: ${network.detail.replace(/\s+/g, " ")}.`);
+    lines.push(`Network: receiving ${formatTransfer(network.receivedBytesPerSecond)}, `
+      + `sending ${formatTransfer(network.sentBytesPerSecond)}.`);
   }
   lines.push(`Up for: ${formatUptime(telemetry.uptimeSeconds)}.`);
   return lines.join("\n");

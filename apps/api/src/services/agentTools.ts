@@ -1042,13 +1042,15 @@ const renderTools = new Set(["render_mockup"]);
 const timeTools = new Set(["current_datetime"]);
 /** Offered only when the request is about the machine's own readings; see asksAboutMachineState. */
 const statusTools = new Set(["system_status"]);
+/** Offered only when the request asks for something to be started; see asksToStartSomething. */
+const launchTools = new Set(["run_app"]);
 
 export function availableTools(
   armed: boolean,
   options: {
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
-    schedules?: boolean; video?: boolean; documents?: boolean; status?: boolean;
+    schedules?: boolean; video?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1068,6 +1070,7 @@ export function availableTools(
   const allowVideo = options.video ?? true;
   const allowDocumentWrites = options.documents ?? true;
   const allowStatus = options.status ?? true;
+  const allowLaunch = options.launch ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1087,6 +1090,7 @@ export function availableTools(
     if (!allowVideo && videoTools.has(name)) return false;
     if (!allowDocumentWrites && documentWritingTools.has(name)) return false;
     if (!allowStatus && statusTools.has(name)) return false;
+    if (!allowLaunch && launchTools.has(name)) return false;
     return true;
   });
 }
@@ -1224,7 +1228,25 @@ function resolveBuiltProject(context: ToolContext, project: string): string {
  * the same loose matching as an explicit name, so "the tip calculator" is
  * tip-calculator, not calculator. Null unless it lands on a real app.
  */
-function appNamedIn(candidates: string[], request: string | undefined): string | null {
+/**
+ * Which app to act on: the one the user's own words name, over the model's
+ * pick when the two differ and the request never used the model's.
+ *
+ * Live: "run the calculator app" arrived as run_app with project
+ * "tip-calculator" - a real app, just not the one asked for, though an app
+ * called exactly "calculator" was sitting in the workspace. Then "stop the
+ * calculator app" stopped tip-calculator, since that was the calculator
+ * running. The model's pick stands when the request names nothing, or names
+ * the app it picked.
+ */
+export function appTheUserNamed(candidates: string[], given: string | null, request: string | undefined): string | null {
+  const named = appNamedIn(candidates, request);
+  if (!named || !given) return named ?? given;
+  const words = (value: string) => ` ${value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  return words(request ?? "").includes(words(given)) ? given : named;
+}
+
+export function appNamedIn(candidates: string[], request: string | undefined): string | null {
   if (!request || candidates.length === 0) return null;
   const match = matchProjectName(candidates, request);
   return candidates.includes(match) ? match : null;
@@ -1414,7 +1436,8 @@ function wouldGut(absolutePath: string, content: string, request: string | undef
   if (!current.ok) return null;
   const shrink = replacesMostOf(current.content, content, request);
   if (!shrink) return null;
-  return `${path.basename(absolutePath)} has ${shrink.before} lines, and this would keep ${shrink.kept} of them. `
+  return `${path.basename(absolutePath)} has ${shrink.before} line${shrink.before === 1 ? "" : "s"}, `
+    + `and this would keep ${shrink.kept} of ${shrink.before === 1 ? "it" : "them"}. `
     + "To add to it or change part of it, use edit_file: append for new lines at the end, or old_text with "
     + "new_text. Nothing was written.";
 }
@@ -2200,8 +2223,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "run_app": {
-      const asked = requireString(call.arguments.project)?.replace(/[\\/]+$/, "")
-        ?? appNamedIn(builtAppNames(context), context.request)
+      const asked = appTheUserNamed(builtAppNames(context), requireString(call.arguments.project)?.replace(/[\\/]+$/, "") ?? null, context.request)
         ?? activeProject(context.sessionId);
       if (!asked) {
         return {
@@ -2226,8 +2248,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     }
 
     case "stop_app": {
-      const asked = requireString(call.arguments.project)?.replace(/[\\/]+$/, "")
-        ?? appNamedIn(runningAppNames(context), context.request);
+      const asked = appTheUserNamed(runningAppNames(context), requireString(call.arguments.project)?.replace(/[\\/]+$/, "") ?? null, context.request);
       if (!asked) return { ok: false, content: "stop_app needs the app's folder name." };
       if (!context.stopApp) return { ok: false, content: "Apps cannot be stopped here." };
       // "stop the todo app" rarely names the folder verbatim; resolve it against

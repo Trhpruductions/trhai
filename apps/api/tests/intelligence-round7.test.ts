@@ -68,6 +68,70 @@ test("a request to list the workspace is answered with its top level, by the app
   assert.doesNotMatch(reply.assistantMessage, /server\.js/, "the top level, not inside the folders");
 });
 
+test("stopping an app is done by the app, and never stops one that was not meant", async () => {
+  // Live, with the conversation in view: "stop the calculator app" was
+  // answered with directions to run "npm stop" in tip-calculator, and the
+  // calculator kept running.
+  const stopped: string[] = [];
+  const running = (projects: string[]) => projects.map((project, index) => ({
+    project, port: 5000 + index, url: `http://localhost:${5000 + index}`, pid: 1, startedAt: "", output: []
+  }));
+  const ask = (userMessage: string, projects: string[]) => runAssistantOrchestrator({
+    mode: "general", userMessage,
+    stopApp: (project) => { stopped.push(project); return true; },
+    runningApps: () => running(projects),
+    listApps: () => ["calculator", "todo-list-app", "recipe-box"].map((name) => ({ name, running: projects.includes(name), url: null }))
+  });
+
+  const named = await ask("stop the calculator app", ["calculator", "todo-list-app"]);
+  assert.equal(named.strategy, "app");
+  assert.equal(named.assistantMessage, "Stopped calculator (it was at http://localhost:5000).");
+  assert.deepEqual(stopped, ["calculator"]);
+
+  // "the app", with one running: that one.
+  stopped.length = 0;
+  assert.match((await ask("please stop the app", ["todo-list-app"])).assistantMessage, /^Stopped todo-list-app/);
+  assert.deepEqual(stopped, ["todo-list-app"]);
+
+  // A name that matches nothing running stops nothing, even with one app up.
+  stopped.length = 0;
+  const wrong = await ask("stop the weather app", ["todo-list-app"]);
+  assert.match(wrong.assistantMessage, /Nothing running is called "weather", so nothing was stopped\. Running now: todo-list-app\./);
+  const notUp = await ask("stop the calculator app", []);
+  assert.match(notUp.assistantMessage, /"calculator" is not running, so there was nothing to stop\./);
+  const which = await ask("stop the app", ["calculator", "recipe-box"]);
+  assert.match(which.assistantMessage, /^Which one\? Running now: calculator, recipe-box\.$/);
+  assert.deepEqual(stopped, [], "nothing was stopped by any of those");
+});
+
+test("a request with no verb gets the app builders only when it names something to build", async () => {
+  const { wantsSomethingBuilt } = await import("../src/services/actionIntent.js");
+  for (const request of ["I need a task tracker", "make a snake game", "plan an app for my workouts",
+    "I want a website for my bakery", "create a landing page for my band", "build me a calculator"]) {
+    assert.equal(wantsSomethingBuilt(request), true, request);
+  }
+  // Verbatim: called plan_app three runs out of three, and once built
+  // "Tonight S Stream Two Hours" into the workspace.
+  for (const request of ["Plan tonight's stream: two hours of a survival game", "write a haiku about autumn",
+    "give me three tips for writing clear error messages", "plan my week"]) {
+    assert.equal(wantsSomethingBuilt(request), false, request);
+  }
+});
+
+test("the shell is for requests about the machine", async () => {
+  const { mentionsTheMachine } = await import("../src/services/actionIntent.js");
+  for (const request of ["is anything listening on port 4000?", "what version of node is installed?", "run npm test",
+    "check git status in D:/trhai", "is chrome open?", "ping google.com", "how big is my downloads folder?", "what's my IP address?"]) {
+    assert.equal(mentionsTheMachine(request), true, request);
+  }
+  // Verbatim live requests that ran commands nobody asked for.
+  for (const request of ["Plan tonight's stream: two hours of a survival game",
+    "Give me three openings for a blog post about learning to code at 40", "write a haiku about autumn",
+    "give me a name for my cat", "What's the capital of Australia?"]) {
+    assert.equal(mentionsTheMachine(request), false, request);
+  }
+});
+
 test("reshaping the last answer is recognised, and asking for a file is not", () => {
   for (const request of ["Make that answer one sentence.", "make it shorter", "say that again more simply",
     "translate that to French", "can you rephrase that?", "put it in bullet points", "make your last answer shorter"]) {
@@ -110,7 +174,8 @@ test("a reading that could not be taken says so, and why", () => {
   assert.match(text, /^Memory: 8\.0 \/ 16\.0 GB in use \(50%\)\.$/m);
   assert.match(text, /^Graphics card: no reading - no NVIDIA GPU detected on this machine\.$/m);
   assert.match(text, /^Drive Q: no reading - that drive could not be measured\.$/m);
-  assert.match(text, /^Network: ↓92k ↑5k\/s\.$/m);
+  // Bytes, said as bytes: the dashboard's "↓92k" was once retold as kilobits.
+  assert.match(text, /^Network: receiving 92 KB\/s \(kilobytes per second\), sending 5 KB\/s \(kilobytes per second\)\.$/m);
   assert.match(text, /^Up for: 10 minutes\.$/m);
   // No number appears for anything that was not read.
   assert.doesNotMatch(text, /Processor: \d|Graphics card: [^n]/);

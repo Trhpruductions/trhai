@@ -12,7 +12,7 @@ import {
   correctionFor, inventsAReading, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { asksAboutMachineState, asksForAReading, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
+import { asksAboutMachineState, asksForAReading, asksToStartSomething, mentionsTheMachine, wantsSomethingBuilt, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -391,7 +391,11 @@ export const systemPrompt = [
 export function describeAgentLens(agent: AgentLens): string {
   const role = agent.role.toLowerCase();
   const article = /^[aeiou]/.test(role) ? "an" : "a";
+  // The name is the role's, and said so. Working as Reach, the marketer was
+  // asked for a one-line pitch for a local-first assistant and answered
+  // "Meet Reach, your local AI assistant" - twice, on two runs.
   return `For this conversation the user has asked you to work as ${agent.name}, ${article} ${role}. `
+    + `${agent.name} is the name of that role, not of the user, their product or anything they ask you to write about. `
     + `${agent.description} Keep in view: ${agent.focus} `
     + "This is an emphasis, not a new set of rules: everything above still holds, and the tools are the same.";
 }
@@ -1586,7 +1590,10 @@ export async function runAgent(
       // kilometers" with calculate on offer, the model ran `bc` three times -
       // a POSIX calculator this Windows machine does not have - and answered
       // with advice to install it. An order to run something keeps the shell.
-      ? availableTools(commandsArmed() && !unattended && !(looksArithmetic(question) && !intent.action) && !readingOnly, {
+      ? availableTools(commandsArmed() && !unattended && !(looksArithmetic(question) && !intent.action) && !readingOnly
+        // And only for a request about the machine, or an order to run
+        // something: see mentionsTheMachine.
+        && (mentionsTheMachine(question) || intent.kind === "execute" || intent.kind === "check"), {
         // A request to look does not get the tools that change things. Asked
         // to read one file, the model read it and then wrote three - see
         // machineChangingTools in agentTools. A request to STOP an app loses
@@ -1607,8 +1614,10 @@ export async function runAgent(
         // omega to the end of it" names an action - a write - and still had
         // build_app in reach: the model built an app called "Now Add A Line
         // Saying" instead of editing the file.
+        // And a request with no verb the classifier knows only when it names
+        // something to build: see wantsSomethingBuilt.
         scaffolding: !askedAQuestion && !namedAFileToWrite
-          && (intent.kind === undefined || intent.kind === "generate"),
+          && (intent.kind === "generate" || (intent.kind === undefined && wantsSomethingBuilt(question))),
         // A calculator is only in reach when there is a sum to do.
         arithmetic: looksArithmetic(question),
         // And the date tools only when the request is about dates.
@@ -1632,6 +1641,8 @@ export async function runAgent(
         documents: intent.kind !== "read" || /\b(?:save|store|keep|record)\b/i.test(question),
         // The machine's own readings, when the question is about them.
         status: asksAboutMachineState(question),
+        // Starting an app, when something was asked to start.
+        launch: asksToStartSomething(question),
         // A request about a knowledge document, with no file named, does not get
         // the workspace file writers — so "save a document called X" reaches
         // write_document instead of writing an X.txt file. Nor does a pure web
@@ -2081,7 +2092,12 @@ export async function runAgent(
       const relevant = mutationAttempts.filter((attempt) => !attempt.quiet
         && !(awaitingConfirmation && attempt.name === awaitingConfirmation.tool && !attempt.ok));
       const succeeded = relevant.filter((attempt) => attempt.ok);
-      const mutationResults = (succeeded.length > 0 ? succeeded : relevant)
+      // A change that worked, quiet or not, makes a refused attempt beside the
+      // point. Live: write_file was refused for dropping the file's line, the
+      // append then worked, and the reply read "Added a line..." followed by
+      // "...Nothing was written."
+      const anyChangeWorked = mutationAttempts.some((attempt) => attempt.ok);
+      const mutationResults = (succeeded.length > 0 ? succeeded : anyChangeWorked ? [] : relevant)
         .map((attempt) => attempt.content);
 
       // A promise counts the same as a claim here. "I will now write the file"

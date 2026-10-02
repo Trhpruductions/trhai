@@ -188,13 +188,26 @@ const replaceWholeFile =
  * not keep every closing brace in a source file. A one-line file is left
  * alone: replacing a single line is an ordinary write.
  */
+/**
+ * A request that only adds to a file - a line, a comment, an entry - rather
+ * than changing what is there.
+ *
+ * Nothing already in the file may go, whatever its size. Live: "add a line
+ * saying second note to the end of notes.txt" went to write_file with
+ * "\nsecond note", and the file's one line, "first note", was gone; the
+ * one-line exemption below let it through.
+ */
+const onlyAdds =
+  /\b(?:add|append|insert|prepend)\b[^.?!]{0,80}\b(?:line|lines|text|sentence|comment|comments|entry|entries|row|rows|item|items|note|paragraph)\b|\bto the (?:end|bottom|top|start|beginning) of\b/i;
+
 export function replacesMostOf(
   current: string,
   next: string,
   request: string | undefined
 ): { before: number; kept: number } | null {
   const before = contentLines(current);
-  if (before.length < 2) return null;
+  const adding = onlyAdds.test(request ?? "") && !replaceWholeFile.test(request ?? "");
+  if (before.length < (adding ? 1 : 2)) return null;
 
   const available = new Map<string, number>();
   for (const line of contentLines(next)) available.set(line, (available.get(line) ?? 0) + 1);
@@ -207,7 +220,7 @@ export function replacesMostOf(
     }
   }
 
-  if (kept * 2 >= before.length) return null;
+  if (adding ? kept === before.length : kept * 2 >= before.length) return null;
   if (replaceWholeFile.test(request ?? "")) return null;
   return { before: before.length, kept };
 }

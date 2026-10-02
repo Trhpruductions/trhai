@@ -194,6 +194,20 @@ test("a replacement of one passage is not a request to replace the file", () => 
   assert.ok(replacesMostOf(serverFile, "hi\n", "replace foo with bar in server.js"));
 });
 
+test("a request that only adds keeps every line, even in a one-line file", () => {
+  // Live: "add a line saying second note to the end of notes.txt" went to
+  // write_file with "\nsecond note" and the file's one line was gone.
+  const request = "add a line saying second note to the end of rg-tmp/notes.txt";
+  assert.deepEqual(replacesMostOf("first note\n", "\nsecond note\n", request), { before: 1, kept: 0 });
+  // Writing the file back with the line added is fine.
+  assert.equal(replacesMostOf("first note\n", "first note\nsecond note\n", request), null);
+  // Half is not enough when the request only adds.
+  assert.deepEqual(replacesMostOf("a\nb\nc\nd\n", "a\nb\nc\nnew\n", "append a line saying new to list.txt"), { before: 4, kept: 3 });
+  // A new file, or one asked to be rewritten, is not held to it.
+  assert.equal(replacesMostOf("", "second note\n", request), null);
+  assert.equal(replacesMostOf("first note\n", "second note\n", "rewrite notes.txt and add a line saying second note"), null);
+});
+
 test("one-line and empty files, and writes that keep half or more, are not second-guessed", () => {
   assert.equal(replacesMostOf("hello\n", "goodbye\n", undefined), null, "a single line is an ordinary write");
   const twenty = Array.from({ length: 20 }, (_, index) => `${index}`).join("\n");

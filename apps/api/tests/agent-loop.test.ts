@@ -17,7 +17,7 @@ import {
   gatedToolCall, isBareRefusal, looksLikeBareToolCall, looksLikeRawToolCalls, parseTextToolCalls, recentTurns, runAgent,
   systemPrompt, unwrapPseudoReply, wroteWhatWasAsked
 } from "../src/services/agentLoop.js";
-import { availableTools, runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
+import { appTheUserNamed, availableTools, runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
 import { mentionsDocument, namesAFilePath } from "../src/services/actionIntent.js";
 import { defaultContextTokens, minimumContextTokens, type LocalModelConfig } from "../src/services/localModel.js";
 
@@ -3014,6 +3014,9 @@ test("with no agent active, the system prompt carries no persona", async () => {
 test("an agent's lens names it, keeps its limits whole, and changes no rules", () => {
   const lens = describeAgentLens(ada);
   assert.match(lens, /work as Ada, a programmer\./);
+  // Live, working as Reach: "Meet Reach, your local AI assistant" for a
+  // pitch about something else entirely.
+  assert.match(lens, /Ada is the name of that role, not of the user, their product or anything they ask you to write about\./);
   assert.match(lens, /explains what a failure is actually telling you\./);
   assert.match(lens, /Keep in view: Files, failures, and the smallest change that fixes them\./);
   assert.match(lens, /not a new set of rules/);
@@ -3391,6 +3394,65 @@ test("advice about the machine may use numbers of its own", async () => {
     assert.equal(result.text, advice);
   } finally {
     server.close();
+  }
+});
+
+test("the app the user named wins over a different one the model picked", () => {
+  const apps = ["calculator", "tip-calculator", "todo-list-app", "snake-game"];
+  // Live: "run the calculator app" arrived as run_app("tip-calculator").
+  assert.equal(appTheUserNamed(apps, "tip-calculator", "run the calculator app"), "calculator");
+  assert.equal(appTheUserNamed(apps, "calculator", "run the calculator app"), "calculator");
+  assert.equal(appTheUserNamed(apps, "tip-calculator", "run the tip calculator"), "tip-calculator");
+  // Nothing named in the request: the model's pick stands, or nothing.
+  assert.equal(appTheUserNamed(apps, "todo-list-app", "run it again"), "todo-list-app");
+  assert.equal(appTheUserNamed(apps, null, "run the calculator app"), "calculator");
+  assert.equal(appTheUserNamed(apps, null, "run it"), null);
+});
+
+test("starting an app is offered only when something was asked to start", async () => {
+  // Live: "Plan tonight's stream: two hours of a survival game" started snake-game.
+  assert.ok(!(await offeredFor("Plan tonight's stream: two hours of a survival game")).includes("run_app"));
+  assert.ok((await offeredFor("run the calculator app")).includes("run_app"));
+  assert.ok((await offeredFor("open my todo app")).includes("run_app"));
+});
+
+test("a refused write followed by an append that worked reports only the append", async () => {
+  // Live: "Added a line saying..." followed by "notes.txt has 1 line, and
+  // this would keep 0 of it... Nothing was written."
+  writeFileSync(path.join(testWorkspace, "gut-notes.txt"), "first note\n", "utf8");
+  const { server, baseUrl } = await fakeModel([
+    toolCall("write_file", { path: "gut-notes.txt", content: "\nsecond note\n" }),
+    toolCall("edit_file", { path: "gut-notes.txt", append: "second note" }),
+    answer("Added a line saying second note to the end of gut-notes.txt.")
+  ]);
+
+  try {
+    const request = "add a line saying second note to the end of gut-notes.txt";
+    const result = await runAgent(configFor(baseUrl), request, { ...context, request });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.toolsUsed.map((used) => [used.name, used.ok]), [["write_file", false], ["edit_file", true]]);
+    assert.doesNotMatch(result.text, /Nothing was written/);
+    assert.equal(readFileSync(path.join(testWorkspace, "gut-notes.txt"), "utf8").replace(/\r\n/g, "\n"), "first note\nsecond note\n");
+  } finally {
+    server.close();
+  }
+});
+
+test("a request with nothing to do with the machine is not offered the shell", async () => {
+  // Live, with machine access on: "Plan tonight's stream" ran `stream-cli`
+  // three times on one run and `echo Starting a two-hour survival game
+  // stream.` on another, and never gave a plan.
+  const wasArmed = commandsArmed();
+  armCommands();
+  try {
+    assert.ok(!(await offeredFor("Plan tonight's stream: two hours of a survival game")).includes("run_command"));
+    assert.ok(!(await offeredFor("Give me three openings for a blog post about learning to code at 40")).includes("run_command"));
+    assert.ok((await offeredFor("what version of node is installed?")).includes("run_command"));
+    // An order to run something keeps it whatever it names.
+    assert.ok((await offeredFor("run whoami")).includes("run_command"));
+  } finally {
+    if (!wasArmed) disarmCommands();
   }
 });
 
