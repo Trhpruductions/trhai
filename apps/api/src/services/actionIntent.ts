@@ -382,6 +382,38 @@ export function wantsRendering(message: string): boolean {
 }
 
 /**
+ * Whether a request is about something happening on a schedule, so
+ * add_schedule is worth offering.
+ *
+ * It was the one tool that changes something and was offered to every request
+ * that was not a question. Live, "give me a name for my cat" reached the model
+ * with it in reach, and the reply was "I've set up a daily reminder for 9:00
+ * AM" - a real schedule, saved, that would have fired every morning. Every
+ * other tool like it is offered by what the request is about: remember only
+ * when asked to remember, the web only for a lookup, build_app only for a
+ * build. This puts scheduling on the same footing, anywhere in the sentence:
+ * "set up a daily reminder at 8am" opens with "set", and still asks for one.
+ */
+export function mentionsScheduling(message: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  return /\b(?:schedul\w*|remind(?:er|ers|ing)?|recurring|repeat(?:ing|edly)?|daily|weekly|hourly|nightly|monthly|weekdays?|routine|cron|alarm|every\s+(?:day|morning|afternoon|evening|night|week|weekday|weekend|month|hour|minute|\d+\s*(?:minutes?|mins?|hours?|hrs?|days?|weeks?))|each\s+(?:day|morning|evening|night|week|weekday|month)|on\s+(?:mon|tues|wednes|thurs|fri|satur|sun)days?)\b/.test(text)
+    || /\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)/.test(text);
+}
+
+/**
+ * Whether a request is about a video, so make_video is worth offering.
+ *
+ * The same gap as the scheduler's: offered to every request that was not a
+ * question, so asked for a name for a cat, the model rendered a nineteen-second
+ * motion-graphics video. Rendering takes a minute of the machine and writes a
+ * file nobody asked for; it belongs to requests that mention one.
+ */
+export function mentionsVideo(message: string): boolean {
+  return /\b(?:videos?|clips?|animat(?:ion|ions|ed|e)|motion[- ]graphics?|mp4|movie|trailer|explainer|slideshow|reel)\b/i
+    .test(message ?? "");
+}
+
+/**
  * Whether a request has anything to do with the time or the date, so
  * current_datetime is worth offering. The date is in the system prompt in
  * any case; this stops the clock being read twice on a question about ports.

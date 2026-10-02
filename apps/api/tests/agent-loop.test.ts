@@ -2875,3 +2875,42 @@ test("after an edit's checks ran the app, starting its server by hand is refused
     server.close();
   }
 });
+
+// ---- The scheduler is offered for scheduling ----------------------------------------
+
+/** The tool names a request was offered on its first round. */
+async function offeredFor(request: string): Promise<string[]> {
+  const { server, baseUrl, received } = await fakeModel([answer("Here you go.")]);
+  try {
+    await runAgent(configFor(baseUrl), request, context);
+    const tools = (received[0] as { tools?: Array<{ function: { name: string } }> }).tools ?? [];
+    return tools.map((tool) => tool.function.name);
+  } finally {
+    server.close();
+  }
+}
+
+test("a request with nothing recurring in it is not offered add_schedule", async () => {
+  // Live: "give me a name for my cat" reached the model with the scheduler in
+  // reach, and the reply was "I've set up a daily reminder for 9:00 AM" - a
+  // real schedule, saved, firing every morning.
+  assert.ok(!(await offeredFor("give me a name for my cat")).includes("add_schedule"));
+});
+
+test("a request to schedule something still gets add_schedule", async () => {
+  assert.ok((await offeredFor("set up a daily reminder at 8am to drink water")).includes("add_schedule"));
+});
+
+test("a request that is neither an order nor a statement gets nothing that writes", async () => {
+  // Live, the same request on the next try rendered a nineteen-second video
+  // into the workspace. It is asking for a name, the way a question would.
+  const offered = await offeredFor("give me a name for my cat");
+  for (const writer of ["make_video", "add_schedule", "build_app", "write_file", "edit_file", "write_document"]) {
+    assert.ok(!offered.includes(writer), `${writer} was offered`);
+  }
+});
+
+test("a request about a video still gets make_video", async () => {
+  assert.ok((await offeredFor("make a short video about our product launch")).includes("make_video"));
+  assert.ok(!(await offeredFor("make a todo list app")).includes("make_video"), "and a build does not");
+});

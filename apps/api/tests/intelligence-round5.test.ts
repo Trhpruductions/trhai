@@ -435,6 +435,34 @@ test("a reply wrapped in an invented tool call is unwrapped", async () => {
   assert.equal(unwrapPseudoReply('{"name": "x", "arguments": {"count": 3}}'), '{"name": "x", "arguments": {"count": 3}}');
 });
 
+test("several invented calls, one per line, are unwrapped into the answer they carry", async () => {
+  const { unwrapPseudoReply } = await import("../src/services/agentLoop.js");
+  // Verbatim shape: asked for three tips, the reply was three invented calls.
+  const three = [
+    '{"name": "write_clear_message", "arguments": {"message": "Keep it simple and straightforward."}}',
+    '{"name": "provide_context", "arguments": {"message": "Say what the user was doing when it failed."}}',
+    '{"name": "suggest_fix", "arguments": {"message": "Tell them what to do next."}}'
+  ].join("\n");
+  assert.equal(
+    unwrapPseudoReply(three),
+    "Keep it simple and straightforward.\n\nSay what the user was doing when it failed.\n\nTell them what to do next."
+  );
+  // One line that is not a pseudo call keeps the whole text as it was.
+  assert.equal(unwrapPseudoReply(`${three}\n{"port": 4000}`), `${three}\n{"port": 4000}`);
+});
+
+test("an invented call with a single string argument is that string, whatever its key", async () => {
+  const { unwrapPseudoReply } = await import("../src/services/agentLoop.js");
+  // Verbatim: dropped as an empty reply before.
+  assert.equal(
+    unwrapPseudoReply('{"name": "tell_fact", "arguments": {"fact": "Octopuses have three hearts."}}'),
+    "Octopuses have three hearts."
+  );
+  // Two strings is not one sentence to pick; left alone.
+  const two = '{"name": "x", "arguments": {"a": "one", "b": "two"}}';
+  assert.equal(unwrapPseudoReply(two), two);
+});
+
 test("a weekday schedule skips the weekend", async () => {
   const { describeCadence, isCadence, nextDueAfter } = await import("../src/services/scheduleStore.js");
   const cadence = { kind: "daily" as const, minuteOfDay: 8 * 60, weekdaysOnly: true };

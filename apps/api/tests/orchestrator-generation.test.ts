@@ -84,6 +84,20 @@ test("parseSaveDocumentRequest pulls the title and body from a save-a-document r
   assert.equal(parseSaveDocumentRequest("save a document called Roadmap"), null);
 });
 
+test("a request opening with an unlisted verb reaches the model instead of \"Got it.\"", async () => {
+  // Live, verbatim: answered "Got it." (strategy acknowledge) without the
+  // model ever being asked.
+  await withFakeModel("Here are three tips: say what failed, why, and what to do next.", async (received) => {
+    const result = await runAssistantOrchestrator({
+      mode: "general",
+      userMessage: "Give me three tips for writing readable error messages."
+    });
+    assert.notEqual(result.strategy, "acknowledge");
+    assert.match(result.assistantMessage, /three tips/);
+    assert.ok(received.length > 0, "the model was asked");
+  });
+});
+
 test("saving a document goes straight to the store, off the model", async () => {
   const saved: Array<{ title: string; body: string }> = [];
   const result = await runAssistantOrchestrator({

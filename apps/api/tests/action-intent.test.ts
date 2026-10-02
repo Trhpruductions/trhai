@@ -1,6 +1,45 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { changesAskedFor, classifyIntent, clarificationFor, isExplanatoryQuestion, looksArithmetic } from "../src/services/actionIntent.js";
+import {
+  changesAskedFor, classifyIntent, clarificationFor, isExplanatoryQuestion, looksArithmetic, mentionsScheduling, mentionsVideo
+} from "../src/services/actionIntent.js";
+
+test("a request about a video is recognised, and nothing else is", () => {
+  for (const request of ["make a short video about our launch", "render an explainer clip", "animate the logo", "a motion graphics intro"]) {
+    assert.equal(mentionsVideo(request), true, request);
+  }
+  for (const request of ["give me a name for my cat", "build me a todo app", "what time is it"]) {
+    assert.equal(mentionsVideo(request), false, request);
+  }
+});
+
+test("a request about something recurring is recognised wherever it says so", () => {
+  for (const request of [
+    "set up a daily reminder at 8am to drink water",
+    "every weekday at 9am ask me whether CI passed",
+    "schedule a build check",
+    "remind me to stretch every hour",
+    "run the backup at 2am",
+    "check the build every 30 minutes",
+    "on Mondays, ask me what I shipped last week"
+  ]) {
+    assert.equal(mentionsScheduling(request), true, request);
+  }
+});
+
+test("a request with nothing recurring in it does not get the scheduler", () => {
+  // Live: this one reached the model with add_schedule in reach, and a daily
+  // 9am reminder was saved.
+  for (const request of [
+    "give me a name for my cat",
+    "what time is it",
+    "build me a todo app",
+    "append a line to notes.txt",
+    "Give me three tips for writing readable error messages."
+  ]) {
+    assert.equal(mentionsScheduling(request), false, request);
+  }
+});
 
 // The classifier that decides whether prose alone would be a failure.
 //

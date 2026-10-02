@@ -980,6 +980,10 @@ const memoryWritingTools = new Set(["remember"]);
 
 /** Offered only when the request names a clock time; see looksLikeClockMath. */
 const clockTools = new Set(["shift_time"]);
+/** Offered only when the request is about something recurring; see mentionsScheduling. */
+const scheduleTools = new Set(["add_schedule"]);
+/** Offered only when the request is about a video; see mentionsVideo. */
+const videoTools = new Set(["make_video"]);
 /** Offered only when the request mentions the web or asks for a lookup; see mentionsWeb and wantsWebSearch. */
 const webTools = new Set(["fetch_url", "web_search"]);
 /** Offered only when the request asks to see/show/render something; see wantsRendering. */
@@ -992,6 +996,7 @@ export function availableTools(
   options: {
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
+    schedules?: boolean; video?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1007,6 +1012,8 @@ export function availableTools(
   const allowWrites = options.writes ?? true;
   const allowFileWrites = options.files ?? true;
   const allowMemory = options.memory ?? true;
+  const allowSchedules = options.schedules ?? true;
+  const allowVideo = options.video ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1022,6 +1029,8 @@ export function availableTools(
     if (!allowChanges && machineChangingTools.has(name)) return false;
     if (!allowWrites && writingTools.has(name)) return false;
     if (!allowMemory && memoryWritingTools.has(name)) return false;
+    if (!allowSchedules && scheduleTools.has(name)) return false;
+    if (!allowVideo && videoTools.has(name)) return false;
     return true;
   });
 }

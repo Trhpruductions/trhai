@@ -9,7 +9,7 @@
 // question, it says so plainly rather than filling the gap with confident-sounding
 // boilerplate.
 
-import { analyzeRequest, isContinuationRequest, type RequestAnalysis } from "./requestAnalysis.js";
+import { analyzeRequest, isContinuationRequest, looksDeclarative, type RequestAnalysis } from "./requestAnalysis.js";
 import { statesFact } from "./factWording.js";
 import { classifyIntent } from "./actionIntent.js";
 import { selectRelevantMemories, type ScorableMemory, type ScoredMemory } from "./memoryRelevance.js";
@@ -759,11 +759,19 @@ export function composeReply(input: ComposerInput): ComposedReply {
   // question, and it is regression-tested. Where the two disagree it wins:
   // treating an order as conversation costs the user the work, while treating
   // a statement as an order costs one wasted generation.
+  //
+  // And a statement has to read as one. "Statement" here is the analysis's
+  // word for anything that did not open with a verb it knew, and requests
+  // kept arriving through that gap - "Give me three tips for writing readable
+  // error messages" was answered "Got it." with nothing else, as was "give me
+  // a name for my cat". looksDeclarative asks the positive question instead:
+  // is the speaker the subject, or is there a subject and a verb about it?
   if (
     analysis.shape === "statement"
     && !analysis.hasRequestMarker
     && !refining
     && !classifyIntent(message).action
+    && looksDeclarative(message)
   ) {
     // Facts are pulled out of every message, not only ones that open with
     // "remember" - recordMemoriesFromMessage runs on the way in, for preferences,
