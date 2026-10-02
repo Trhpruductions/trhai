@@ -124,6 +124,7 @@ import { readAppManifest, searchFiles } from "./services/agentTools.js";
 import { checkUrlShape, readWebPage } from "./services/webFetch.js";
 import { webSearch } from "./services/webSearch.js";
 import { internetCheck, networkInterfaces, ollamaRuntime, serviceStatus, unloadModel } from "./services/runtimeStatus.js";
+import { accessKey, accessKeyHeader, guardOtherDevices, isLoopback } from "./services/networkAccess.js";
 import { persistenceFailures } from "./services/persistenceHealth.js";
 import { lockedProtectedFiles } from "./services/protectedJson.js";
 import { dataInventory } from "./services/dataInventory.js";
@@ -141,6 +142,12 @@ function normalizeSessionId(value: unknown): string | null {
   }
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > maxSessionIdLength) {
+    return null;
+  }
+  // `user:` is the signed-in namespace (resolveMemoryKey). Accepted raw, it let
+  // a caller with no token name an account's key and read its memories,
+  // conversations and to-dos; it is reached only through a sign-in.
+  if (/^user:/i.test(trimmed)) {
     return null;
   }
   return trimmed;
@@ -454,8 +461,28 @@ function recordExchange(
   return conversationId;
 }
 
-export function createApp() {
+/**
+ * Whether another device's request needs the access key and whether its
+ * answers may show it. Only index.ts sets this, from ASCEND_NETWORK_ACCESS;
+ * every test app keeps the default, which is the only way the service runs
+ * unless someone asks.
+ */
+export type AppOptions = { otherDevices?: boolean };
+
+/** The access key, or null - which lets no other device in - when it cannot be read. */
+function readAccessKey(): string | null {
+  try {
+    return accessKey();
+  } catch (error) {
+    console.error(`[network] the access key could not be read, so no other device can connect: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+export function createApp(options: AppOptions = {}) {
   const app = express();
+  const otherDevices = options.otherDevices === true;
+  const key = otherDevices ? readAccessKey() : null;
 
   app.use(helmet());
   // Defaults to this machine's own origins rather than "*". The API listens on
@@ -473,6 +500,10 @@ export function createApp() {
     // in the app.
     exposedHeaders: ["X-Speech-Voice"]
   }));
+  // With other devices let in, a request from one needs the access key. After
+  // cors(), which answers a browser's preflight itself: a preflight never
+  // carries the key, and its answer gives nothing away.
+  if (otherDevices) app.use(guardOtherDevices(key));
   // A chat turn may carry images, base64 in the body, far past the 1 MB every
   // other route needs - so only the two chat routes get the larger allowance.
   const smallJson = express.json({ limit: "1mb" });
@@ -1346,15 +1377,19 @@ export function createApp() {
   });
 
   // This PC's network as TRH AI sees it: its addresses, what the service
-  // listens on and whether that reaches beyond this PC, the model runtime's
-  // address, and the apps TRH AI has running with their ports.
-  app.get("/v1/network", async (_req, res) => {
+  // listens on and whether that reaches beyond this PC, whether other devices
+  // are let in, the model runtime's address, and the apps TRH AI has running
+  // with their ports.
+  app.get("/v1/network", async (req, res) => {
     const config = readLocalModelConfig();
     const ollama = await ollamaRuntime(config.baseUrl);
     res.json({
       data: {
         interfaces: networkInterfaces(),
         service: serviceStatus().listening,
+        // The key is shown on this PC, to be typed into another device - never
+        // to a device asking for it over the network.
+        access: { otherDevices, header: accessKeyHeader, key: otherDevices && isLoopback(req.socket.remoteAddress) ? key : null },
         ollama: { baseUrl: config.baseUrl, reachable: ollama.reachable },
         apps: listRunningApps().map((running) => ({ project: running.project, port: running.port, url: running.url }))
       },

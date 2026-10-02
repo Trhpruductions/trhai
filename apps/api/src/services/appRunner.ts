@@ -13,7 +13,17 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import { existsSync, statSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { workspaceRoot } from "./workspace.js";
+
+/**
+ * Loaded into every app this starts, with `node --require`: a listen() with no
+ * address, or one meaning every address, is given 127.0.0.1. The generator
+ * writes that address itself now, but the apps it wrote before - most of the
+ * workspace - listened on every address, so anything on the same network
+ * could reach one while it ran.
+ */
+export const loopbackPreload = fileURLToPath(new URL("./loopbackOnly.cjs", import.meta.url));
 
 export type RunningApp = {
   project: string;
@@ -238,9 +248,12 @@ export async function startApp(project: string): Promise<StartResult> {
   } catch {
     return { ok: false, reason: "no free port was available to start the app on" };
   }
-  const url = `http://localhost:${port}`;
+  // 127.0.0.1 rather than localhost: the app listens there and nowhere else,
+  // and a browser asked for localhost tries ::1 first and waits out the
+  // refusal - over half a second on the first request, measured in Chromium.
+  const url = `http://127.0.0.1:${port}`;
 
-  const child = spawn(process.execPath, [found.entry], {
+  const child = spawn(process.execPath, ["--require", loopbackPreload, found.entry], {
     cwd: found.dir,
     env: { ...process.env, PORT: String(port), SMOKE_PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],

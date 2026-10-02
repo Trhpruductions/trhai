@@ -4,17 +4,25 @@ import type { AddressInfo } from "node:net";
 // TRH AI's own service, the local model runtime it depends on, and this PC's
 // network, as they are right now - for the System and Network workspaces.
 //
-// Every figure here is read when asked for. The listen address in particular
-// is recorded by index.ts from the server it actually started, not worked out
-// from how the code happens to call listen(): a page saying "reachable only
-// from this PC" has to be true of the running process, not of a guess.
+// Every figure here is read when asked for. The listen addresses in particular
+// are recorded by index.ts from the servers it actually started, not worked
+// out from how the code happens to call listen(): a page saying "reachable
+// only from this PC" has to be true of the running process, not of a guess.
 
 const startedAt = new Date();
-let listening: { address: string; port: number; family: string } | null = null;
+let listening: { port: number; addresses: Array<{ address: string; family: string }>; keyRequired: boolean } | null = null;
 
-/** Called once the server is listening, with what it bound to. */
-export function noteListening(address: AddressInfo | string | null): void {
-  if (address && typeof address === "object") listening = { address: address.address, port: address.port, family: address.family };
+/**
+ * Called once the service is listening, with every address it bound - this
+ * PC's two, usually - and whether another device has to show the access key.
+ */
+export function noteListening(bound: AddressInfo[], options: { keyRequired?: boolean } = {}): void {
+  if (bound.length === 0) return;
+  listening = {
+    port: bound[0].port,
+    addresses: bound.map(({ address, family }) => ({ address, family })),
+    keyRequired: options.keyRequired ?? false
+  };
 }
 
 /** Whether a bound address accepts connections from other machines. */
@@ -31,7 +39,9 @@ export function serviceStatus() {
     uptimeSeconds: Math.round(process.uptime()),
     rssBytes: memory.rss,
     heapUsedBytes: memory.heapUsed,
-    listening: listening ? { ...listening, fromNetwork: reachableFromNetwork(listening.address) } : null
+    listening: listening
+      ? { ...listening, fromNetwork: listening.addresses.some((entry) => reachableFromNetwork(entry.address)) }
+      : null
   };
 }
 

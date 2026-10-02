@@ -342,5 +342,15 @@ machine-access grant is carried by an `--import` flag on the npm script. There i
 a `NODE_TEST_CONTEXT` fallback in `commandRunner.ts` now, but prefer `npm test`.
 
 **After changing `apps/trhai-web`, rebuild *and restart* the server on 3210.**
-`next start` reads the build once at boot; a rebuild alone changes nothing on
-screen and you will chase a phantom.
+`npm run start` (scripts/serve.mjs, Next's own handler) reads the build once at
+boot; a rebuild alone changes nothing on screen and you will chase a phantom.
+
+**Only this PC can reach TRH AI.** The API, the web app and every app TRH AI runs
+listen on 127.0.0.1 and ::1, never on every address: the API answers anyone who
+can reach it, and with machine access on it runs commands without asking. Both
+loopback addresses, because `localhost` resolves to ::1 first on Windows and a
+refused connection there costs about 2 s per request. Apps are kept local by a
+`--require` preload (`apps/api/src/services/loopbackOnly.cjs`) as well as by the
+generator, because older apps in the workspace name no address.
+`ASCEND_NETWORK_ACCESS=on` lets other devices reach the API, each request then
+carrying the access key shown under Network.
