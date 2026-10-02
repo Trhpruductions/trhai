@@ -61,7 +61,7 @@ let testDataRoot: string | undefined;
  * running one test file directly skips the flag. NODE_TEST_CONTEXT is set by
  * node's runner in every test child process however it was launched.
  */
-function dataRoot(): string {
+export function dataRoot(): string {
   if (process.env.NODE_TEST_CONTEXT) {
     testDataRoot ??= mkdtempSync(path.join(tmpdir(), "trhai-test-data-"));
     return testDataRoot;

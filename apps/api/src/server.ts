@@ -126,6 +126,7 @@ import { webSearch } from "./services/webSearch.js";
 import { internetCheck, networkInterfaces, ollamaRuntime, serviceStatus, unloadModel } from "./services/runtimeStatus.js";
 import { persistenceFailures } from "./services/persistenceHealth.js";
 import { lockedProtectedFiles } from "./services/protectedJson.js";
+import { dataInventory } from "./services/dataInventory.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -1319,6 +1320,13 @@ export function createApp() {
       },
       traceId: "trace-local"
     });
+  });
+
+  // What TRH AI keeps on this PC, file by file, and whether each is really
+  // encrypted - for Settings > Data & privacy. Names, sizes and dates only;
+  // nothing inside a store is read out.
+  app.get("/v1/system/data", (_req, res) => {
+    res.json({ data: dataInventory(), traceId: "trace-local" });
   });
 
   // Free a model's memory now - the graphics card's, mostly - instead of when
