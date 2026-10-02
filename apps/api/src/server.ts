@@ -2,7 +2,9 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
+import { agentById } from "@ascend/shared";
 import { runAssistantOrchestrator } from "./services/orchestrator.js";
+import type { AgentLens } from "./services/agentTools.js";
 import { clearActivity, getActivity } from "./services/agentActivity.js";
 import { normalizeAssistHistory } from "./services/assistContext.js";
 import { appendTurn, clearConversation, listTurns } from "./services/conversationStore.js";
@@ -135,6 +137,22 @@ function normalizeCadence(value: unknown): Cadence | undefined {
   return undefined;
 }
 
+/**
+ * The active agent a request names, if it names a real one.
+ *
+ * Only an id crosses the wire, and only the catalogue's own entry is used: a
+ * client cannot send a persona of its own making into the system prompt. An
+ * unknown or missing id is no agent, not an error - the turn is answered as
+ * it would have been anyway.
+ */
+function agentFromRequest(req: express.Request): AgentLens | undefined {
+  const id = typeof req.body?.agentId === "string" ? req.body.agentId.trim() : "";
+  const agent = id ? agentById(id) : undefined;
+  return agent
+    ? { name: agent.name, role: agent.role, description: agent.description, focus: agent.focus }
+    : undefined;
+}
+
 function normalizeAssistMode(mode: unknown): AssistRouteMode {
   if (mode === "build"
     || mode === "code"
@@ -160,7 +178,7 @@ function normalizeAssistMode(mode: unknown): AssistRouteMode {
  * difference only shows up as "it works in chat but not on the dashboard".
  */
 function buildAssistInput(
-  _req: express.Request,
+  req: express.Request,
   options: {
     mode: AssistRouteMode;
     message: string;
@@ -179,6 +197,7 @@ function buildAssistInput(
     userMessage: message,
     sessionId: sessionId ?? undefined,
     history,
+    agent: agentFromRequest(req),
     memoryContext: memoryContext.map((entry) => ({
       id: entry.id,
       title: entry.title,
@@ -394,6 +413,7 @@ export function createApp() {
         userMessage: message,
         sessionId: sessionId ?? undefined,
         history,
+        agent: agentFromRequest(req),
         memoryContext: memoryContext.map((entry) => ({
           id: entry.id,
           title: entry.title,

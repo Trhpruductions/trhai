@@ -85,3 +85,14 @@
   outline: 2px solid var(--text);
   outline-offset: 2px;
 }
+
+/* The agent picker shares the personality panel's look; only the focus line's
+   label is its own. */
+.agent-focus-label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
