@@ -276,6 +276,7 @@ function buildAssistInput(
     listApps: () => listBuiltApps(),
     deleteApp: (name: string) => removeBuiltApp(name),
     authorApp: authorAppWithModel,
+    generateText: generateWithModel,
     ...(onToken ? { onToken } : {}),
     ...(cancel ? { cancel } : {})
   };
@@ -305,6 +306,19 @@ async function authorAppWithModel(prompt: string) {
 
   const config = { ...base, model, timeoutMs: Math.max(base.timeoutMs, 300000) };
   const result = await generate(config, { question: prompt, context: [], rawPrompt: prompt });
+  return result.ok ? { ok: true as const, text: result.text } : { ok: false as const, reason: result.reason };
+}
+
+/**
+ * One call to the configured local model with a prompt sent as written - the
+ * section notes of a long document's summary. The configured model, not the
+ * coding one authorApp prefers: this is reading prose, not writing an app.
+ * Given longer than a chat reply, since a section is a page or two of text.
+ */
+async function generateWithModel(prompt: string) {
+  const base = readLocalModelConfig();
+  const result = await generate({ ...base, timeoutMs: Math.max(base.timeoutMs, 120000) },
+    { question: prompt, context: [], rawPrompt: prompt });
   return result.ok ? { ok: true as const, text: result.text } : { ok: false as const, reason: result.reason };
 }
 
@@ -537,7 +551,8 @@ export function createApp() {
         runningApps: () => listRunningApps(),
         listApps: () => listBuiltApps(),
         deleteApp: (name: string) => removeBuiltApp(name),
-        authorApp: authorAppWithModel
+        authorApp: authorAppWithModel,
+        generateText: generateWithModel
       }).finally(() => {
         // Whatever a client polling /v1/assist/activity mid-turn was told is
         // stale the instant this turn ends, success or failure alike.

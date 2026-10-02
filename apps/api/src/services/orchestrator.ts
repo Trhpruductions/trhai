@@ -28,6 +28,7 @@ import {
   type PendingConfirmation
 } from "./pendingConfirmation.js";
 import { describeHeldMessage, sendingTools, type MessagingDeps } from "./messaging.js";
+import type { GenerateText } from "./summarize.js";
 import { describeEmailAccount } from "./emailAccount.js";
 import {
   isLastAskRequest, isListMemoriesRequest, isListSchedulesRequest, isListAppsRequest, isListWorkspaceRequest, isRunningAppsRequest,
@@ -97,6 +98,8 @@ export type OrchestratorInput = {
   pinMemory?: (id: string, pinned: boolean) => boolean;
   /** What sending an approved text or email touches; the real ones when absent. See messaging.ts. */
   messaging?: MessagingDeps;
+  /** One call to the local model with a prompt as written, for summarize_document. */
+  generateText?: GenerateText;
   /** Launches a built app so it runs live; see appRunner. Forwarded to run_app and build_app. */
   launchApp?: (project: string) => Promise<StartResult>;
   stopApp?: (project: string) => boolean;
@@ -1761,6 +1764,7 @@ async function answerWithLocalModel(
     runningApps: input.runningApps,
     listApps: input.listApps,
     authorApp: input.authorApp,
+    generateText: input.generateText,
     confirmedActions,
     unattended: input.unattended,
     sessionId: input.sessionId,

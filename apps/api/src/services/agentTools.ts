@@ -30,6 +30,7 @@ import {
 import { elisionIn, fileView, fitsOneRead, maxToolResultTokens, shortenToTokens } from "./contextBudget.js";
 import { messageProblem, sendEmail, sendingTools, sendText, type MessagingDeps } from "./messaging.js";
 import { extractDocumentText, isDocumentPath, maxDocumentBytes } from "./documentText.js";
+import { readableAtOnce, summarizeLongText, type GenerateText } from "./summarize.js";
 import { describeTelemetry, readFreeSpace, readGpuHeadroom, readTelemetry, readTopMemoryPrograms } from "./systemTelemetry.js";
 import { fetchWebPage } from "./webFetch.js";
 import { webSearch } from "./webSearch.js";
@@ -227,6 +228,12 @@ export type ToolContext = {
    */
   messaging?: MessagingDeps;
   /**
+   * One call to the local model with a prompt sent as written, for tools that
+   * need the model's reading of a text - summarize_document's section notes.
+   * Injected like authorApp; absent means there is no model to ask here.
+   */
+  generateText?: GenerateText;
+  /**
    * Overridable so a test can exercise fetch_url's dispatch without a real
    * network call — real fetchWebPage, with its own SSRF and size/timeout
    * defences, when nothing is supplied.
@@ -353,6 +360,26 @@ export const toolDefinitions: ToolDefinition[] = [
           title: { type: "string", description: "The document title, as listed." }
         },
         required: ["title"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "summarize_document",
+      description:
+        "Summarize a whole document, however long - one in the knowledge base by its title, or a file on this "
+        + "machine by its path (PDF, Word, PowerPoint or text). It reads every part, so use it instead of "
+        + "read_document or read_file when asked to summarize a document, give its key points, or say what it "
+        + "covers. Optionally name what to focus on.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "A knowledge-base document's title, as listed. Give this or path." },
+          path: { type: "string", description: "A file's path, in the workspace or anywhere on this machine. Give this or title." },
+          focus: { type: "string", description: "What the summary should concentrate on. Optional." }
+        },
+        required: []
       }
     }
   },
@@ -1103,7 +1130,7 @@ export function availableTools(
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
     schedules?: boolean; video?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
-    messaging?: boolean;
+    messaging?: boolean; summaries?: boolean; readers?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1125,6 +1152,8 @@ export function availableTools(
   const allowStatus = options.status ?? true;
   const allowLaunch = options.launch ?? true;
   const allowMessaging = options.messaging ?? true;
+  const allowSummaries = options.summaries ?? true;
+  const allowReaders = options.readers ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1147,6 +1176,14 @@ export function availableTools(
     if (!allowLaunch && launchTools.has(name)) return false;
     // Only when the request asks to text or email someone; see wantsToSendAMessage.
     if (!allowMessaging && sendingTools.has(name)) return false;
+    // Only when the request asks for a summary; see wantsASummary. Offered to
+    // everything, it is a slow tool the model would reach for to "read" a file.
+    if (!allowSummaries && name === "summarize_document") return false;
+    // And for a summary, the readers that see only part of a long document
+    // are withheld. Live, "summarize architecture-plan.md" called read_file,
+    // got the file's start and end, and wrote a confident summary of a
+    // document it had not read.
+    if (!allowReaders && (name === "read_file" || name === "read_document")) return false;
     return true;
   });
 }
@@ -1642,6 +1679,61 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       return {
         ok: true,
         content: matches.map((entry) => `- ${entry.memory.body}`).join("\n")
+      };
+    }
+
+    // The whole of a long document, read in sections; see summarize.ts. Read
+    // whole when it is short enough - asking the model about a one-page file
+    // in twelve rounds would only be slower.
+    case "summarize_document": {
+      const title = requireString(call.arguments.title);
+      const target = requireString(call.arguments.path);
+      const focus = requireString(call.arguments.focus) ?? "";
+      let name: string;
+      let text: string;
+      if (target) {
+        // The same reach as read_file, and the same rule about who granted it.
+        const verdict = resolveForAccess(target, {
+          granted: commandsArmed() && !context.unattended,
+          intent: "read",
+          insideWorkspace: resolveInWorkspace
+        });
+        if (!verdict.ok) return { ok: false, content: verdict.reason };
+        if (isDocumentPath(verdict.path)) {
+          const document = await readDocumentAt(verdict.path);
+          if (!document.ok) return { ok: false, content: document.reason };
+          text = document.text;
+        } else {
+          const read = readFileAt(verdict.path, maxOpenedBytes);
+          if (!read.ok) return { ok: false, content: explainMiss(read.reason, target) };
+          text = read.content;
+        }
+        name = path.basename(verdict.path);
+      } else if (title) {
+        const found = findDocument(context, title);
+        if (!found) return { ok: false, content: describeMissingDocument(context, title) };
+        name = found.title;
+        text = found.body;
+      } else {
+        return { ok: false, content: "summarize_document needs the title of a document, or the path of a file." };
+      }
+
+      if (readableAtOnce(text)) {
+        return { ok: true, content: `"${name}" is short enough to read whole. Summarize it from this:\n\n${text}` };
+      }
+      if (!context.generateText) {
+        return { ok: false, content: "Summarizing a long document needs the local model, which is not available here." };
+      }
+      const summary = await summarizeLongText(text, { title: name, focus, generate: context.generateText });
+      if (!summary.ok) return { ok: false, content: summary.reason };
+      const coverage = summary.read < summary.sections
+        ? `the first ${summary.read} of its ${summary.sections} parts - it is longer than one summary reads, so say that the rest was not covered`
+        : `all ${summary.sections} of its parts`;
+      return {
+        ok: true,
+        content: `Notes on "${name}", made by reading ${coverage}${focus ? `, with attention to ${focus}` : ""}. `
+          + "Write the summary from these notes; every name and figure in them comes from the document:\n\n"
+          + summary.notes
       };
     }
 
