@@ -47,6 +47,14 @@ export function AgentPicker({ active, onChange }: {
             <span className="agent-focus-label">Keeps in view</span>
             {active.focus}
           </p>
+          {/* The real string appended to every reply, as the personality
+              picker shows its own. */}
+          {active.mandatoryDisclaimer ? (
+            <p className="persona-disclaimer">
+              <span className="persona-disclaimer-label">Every reply carries:</span>
+              {active.mandatoryDisclaimer}
+            </p>
+          ) : null}
         </>
       ) : (
         <p className="persona-summary">

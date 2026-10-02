@@ -38,7 +38,8 @@ a document, or written by the model — and with which tools ran.
 | **Memory** | "remember that ..." stores a fact; pin, rename and forget from the Memory panel. Survives restarts. |
 | **Knowledge** | Paste or import text files; questions are answered by quoting the matching passage with its source. |
 | **Automation** | Block canvas — IF / ELSE / WAIT / RUN SCRIPT and more. Dry run performs nothing; a live run executes control flow and scripts, and skips anything needing credentials with the reason stated. |
-| **Marketplace / Agents** | Ten agents with ratings, version history and install. The active agent changes the assistant's suggestions and focus. |
+| **Agents** | Ten agents - programmer, designer, researcher and more - chosen in the settings rail. The active one shapes how the model answers, not what it can do. The doctor, lawyer and financial-advisor agents add a professional-advice caveat to every reply, the same way the matching personalities do. |
+| **Machine readings** | Asked how the computer is doing, the assistant answers from the same readings as the dashboard - processor, memory and the programs using it, graphics card and its temperature margin, disk, network, uptime - and never estimates one. |
 | **Personalities** | Ten profiles that change tone and suggestions. The medical, legal and cyber-security profiles always append a professional-advice disclaimer — enforced in the response path, not left to the wording. |
 | **Widgets** | Draggable, resizable dashboard widgets. Widgets with no real data source say so instead of showing a plausible number. |
 | **Calendar** | Local events with live relative times. No connected account needed. |
@@ -69,9 +70,13 @@ npm run dev:all
 ```
 
 That starts the API on `http://127.0.0.1:4000` and the web app on
-`http://127.0.0.1:5173`. To run them separately use `npm run dev:api` and
+`http://127.0.0.1:3210`. To run them separately use `npm run dev:api` and
 `npm run dev:web`; for the desktop shell use `npm run dev:desktop`, which loads
-the same web port.
+the same web port. To check the whole stack is up and answering:
+
+```bash
+npm run smoke:web-stack
+```
 
 Set `ASCEND_WEB_PORT` to move the web app; the desktop shell reads the same
 variable, so the two stay in step.
@@ -88,13 +93,22 @@ npm run health:api
 npm test
 ```
 
-489 tests across the API, web app and shared packages. Also available:
-`npm run typecheck`, `npm run lint`, `npm run build`.
+Runs the tests of every workspace: the API, the web client, the desktop shell
+and the shared packages. Also available: `npm run typecheck`, `npm run lint`,
+`npm run build`. To run one API test file, keep the isolation setup - a bare
+`node --test` on a file runs against your real data:
+
+```bash
+cd apps/api && node --test --import tsx --import ./tests/setup/isolate-state.ts tests/agent-loop.test.ts
+```
 
 ## Structure
 
 - `apps/api` — API service. Assistant, memory, knowledge, accounts.
-- `apps/web` — React + Vite shell. All destinations and the widget dashboard.
+- `apps/trhai-web` — the client: a Next.js app, served on port 3210. This is
+  what the desktop shell and the launcher open.
+- `apps/web` — the earlier React + Vite client. Superseded by `apps/trhai-web`;
+  nothing starts it.
 - `apps/desktop` — Electron shell providing host telemetry, file and command access.
 - `packages/shared` — project planner and generator; the code that writes code.
 - `docs` — architecture, roadmap, PRD, backlog, contracts, product vision.
@@ -102,9 +116,14 @@ npm test
 
 ## Configuration
 
-Copy `apps/api/.env.example` to `apps/api/.env` to change any of these.
+Copy `.env.example` to `.env` at the repository root to change any of these;
+it documents every setting.
 
 - `PORT` — API port, default 4000.
+- `OLLAMA_MODEL` — which local model answers. `OLLAMA_NUM_CTX` — the context
+  window every request asks for, default 16384. The assistant's instructions and
+  tool list need more than Ollama's own default of 4096; a smaller window cuts
+  them off without any error, so anything under 8192 is raised to 8192.
 - `CORS_ORIGIN` — which browser origins may call the API. Defaults to this
   machine's own origins on any port. The API listening on localhost does not by
   itself stop a page on a site you visit from calling it, and the assistant,
