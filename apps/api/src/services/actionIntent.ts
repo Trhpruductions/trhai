@@ -581,6 +581,25 @@ export function classifyIntent(message: string): IntentVerdict {
     };
   }
 
+  // "summarize https://example.com", "explain notes.txt": the opener is an
+  // explanatory one, and the request still cannot be met without reading the
+  // thing it names. Filed as a question, the model's "I'm sorry, but I cannot
+  // fetch a URL or access the internet" - with fetch_url on offer - was taken
+  // as the answer, because nothing pushes a question to use a tool.
+  // Only when the address or file IS what it asks about: "explain what a
+  // package.json is" names a file and asks about the idea, not the file.
+  const readsTheTarget = /^(?:summari[sz]e|explain|describe|tell me about|give me (?:a |the )?(?:summary|gist|tldr) of|what(?:'s| is) (?:on|at))\s+(?:(?:the|this|my|that)\s+)?(?:(?:file|page|site|website|document|article|link|url)\s+)?(?:https?:\/\/\S+|[a-z]:[\\/]\S+|\S+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b)/;
+  if (hasTarget && readsTheTarget.test(text)) {
+    const url = /\bhttps?:\/\/[^\s]+/i.test(message);
+    return {
+      action: true,
+      kind: "read",
+      hasTarget: true,
+      reason: url ? "asks about the page at a named address" : "asks about a named file",
+      expects: url ? ["fetch_url"] : ["read_file"]
+    };
+  }
+
   // A question stays a question even when it mentions doing something.
   if (startsWithExplanatory(text)) {
     return { action: false, hasTarget: false, reason: "asks about something", expects: [] };

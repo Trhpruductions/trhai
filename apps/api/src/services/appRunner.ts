@@ -92,7 +92,12 @@ export function removeBuiltApp(name: string): boolean {
   const dir = path.join(path.resolve(workspaceRoot()), folder);
   if (!existsSync(dir)) return false;
   try {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    // Ten tries, the wait growing by 250ms each time - up to about fourteen
+    // seconds, spent only while something still holds the files. Five tries
+    // at 200ms was not enough: live, "stop the habit tracker app" and then
+    // "delete" (confirmed a fraction of a second later) failed with "could not
+    // be deleted", and the same request a minute later went through.
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
     return !existsSync(dir);
   } catch {
     return false;

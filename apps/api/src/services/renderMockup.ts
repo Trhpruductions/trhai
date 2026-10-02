@@ -11,7 +11,7 @@
 // styles fetched from the internet) so it renders identically offline and on
 // whatever machine this app is later moved to.
 
-import { mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { workspaceRoot } from "./workspace.js";
 
@@ -134,7 +134,11 @@ export function slugify(title: string): string {
 export function saveRendering(title: string, kind: RenderKind, html: string): Rendering {
   const dir = renderingsDir();
   mkdirSync(dir, { recursive: true });
-  const name = slugify(title);
+  // A new name rather than the old file: a second "mockup of a login screen"
+  // replaced the first one's file outright, and the earlier design was gone.
+  const base = slugify(title);
+  let name = base;
+  for (let copy = 2; existsSync(path.join(dir, `${name}.html`)); copy += 1) name = `${base}-${copy}`;
   // The title and kind ride along in a comment so a later listing can read them
   // back without a sidecar file to keep in sync.
   const header = `<!-- TITLE: ${title || name} -->\n<!-- KIND: ${kind} -->\n`;
