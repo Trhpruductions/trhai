@@ -515,6 +515,51 @@ export function wantsToSendAMessage(message: string): boolean {
   return sendOrder.test(text) || verbToSomeone.test(text);
 }
 
+/** "reply with just the code", "in the chat", "don't save it to a file": where the answer goes, said outright. */
+const replyOnly =
+  /\b(?:reply|respond|answer)\s+(?:back\s+)?(?:only\s+|just\s+)?with\b|\bjust\s+(?:give\s+me\s+)?the\s+(?:code|text|words|answer)\b|\b(?:in|into)\s+(?:the|your|this)\s+(?:chat|reply|response|answer)\b|\bhere\s+in\s+(?:the\s+)?chat\b|\b(?:don'?t|do\s+not|no\s+need\s+to|without)\s+(?:sav(?:e|ing)|writ(?:e|ing)|creat(?:e|ing)|mak(?:e|ing)|edit(?:ing)?)\b[^.?!\n]{0,30}\bfiles?\b/i;
+
+/**
+ * An order to compose something that is read rather than kept: a story, a
+ * poem, a description, a function. The thing asked for has to come soon
+ * after the verb, in the same sentence: "create the config. Then write a
+ * note about it" is not an order for a note.
+ */
+const composesWords =
+  /^(?:please\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:write|compose|draft|tell|give|make\s+up|come\s+up\s+with|create|generate)\b[^.?!\n]{0,80}?\b(?:stor(?:y|ies)|tales?|poems?|haikus?|limericks?|sonnets?|essays?|paragraphs?|sentences?|descriptions?|slogans?|taglines?|headlines?|captions?|jokes?|riddles?|speech(?:es)?|toasts?|letters?|emails?|messages?|repl(?:y|ies)|responses?|summar(?:y|ies)|outlines?|lists?|checklists?|bios?|blurbs?|reviews?|tweets?|posts?|articles?|introductions?|conclusions?|dialogues?|lyrics|songs?|pitch(?:es)?|explanations?|definitions?|translations?|names?|titles?|plans?|recipes?|functions?|snippets?|regex(?:es)?|regular\s+expressions?|one-liners?)\b/i;
+
+/**
+ * "...and save it", "store that as a note", "write it down": the words are to
+ * be kept after all. Not "keep it short" or "put it simply", which are about
+ * the writing, and not "a store that sells...", which is a shop.
+ */
+const keepsTheWords =
+  /(?<!\b(?:a|an|the|my|your|our|this|that)\s+)\b(?:save|store|export)\s+(?:it|that|this|them|those|these)\b|\b(?:save|saved|store|stored|export|exported)\s+(?:as|to|in|into)\b|\b(?:and|then)\s+(?:save|store|export)\b|\b(?:to|into|in|as)\s+(?:a|an|the|my)\s+(?:new\s+)?(?:document|note)\b|\bwrite\s+(?:it|that|this|them)\s+(?:to|into|down)\b/i;
+
+/** A file, a folder or the workspace is mentioned: there may be something to put there. */
+const namesAPlaceOnDisk = /\b(?:files?|folders?|director(?:y|ies)|workspace)\b/i;
+
+/**
+ * Whether the request asks for words to read in the reply, rather than for
+ * something to be put on disk.
+ *
+ * "Write a very long story about a lighthouse keeper" was answered, with the
+ * file writers on offer, by a write_file call carrying the story: the screen
+ * showed nothing while it was written, a file nobody asked for appeared in
+ * the workspace, and one run wrote for three minutes until the time limit
+ * ended it. "Write a function... Reply with just the code" saved the function
+ * as a file as well. Either the request says so outright, or it orders a
+ * piece of writing and says nothing of keeping it or of anywhere to put it.
+ *
+ * Only for a request that names no file: one that does is an order to write
+ * that file, and the caller decides it before asking this.
+ */
+export function asksForWordsInTheReply(message: string): boolean {
+  const text = (message ?? "").trim();
+  if (replyOnly.test(text)) return true;
+  return composesWords.test(text) && !keepsTheWords.test(text) && !namesAPlaceOnDisk.test(text);
+}
+
 /**
  * A request to reshape something already said - "make that answer one
  * sentence", "say it more simply", "translate that to French" - so nothing
