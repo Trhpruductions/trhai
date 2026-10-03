@@ -13,6 +13,7 @@ import { analyzeRequest, isContinuationRequest, looksDeclarative, type RequestAn
 import { statesFact } from "./factWording.js";
 import { classifyIntent } from "./actionIntent.js";
 import { selectRelevantMemories, type ScorableMemory, type ScoredMemory } from "./memoryRelevance.js";
+import { answeringSentence } from "./passageFocus.js";
 import { buildTaskPlan } from "./taskPlanning.js";
 import { getSystemCapabilities, toolsByLevel } from "./systemCapabilities.js";
 import {
@@ -587,9 +588,17 @@ export function composeReply(input: ComposerInput): ComposedReply {
       const quoted = fromKnowledge
         .map((entry) => `- "${entry.memory.body}"\n  — ${entry.memory.documentTitle}`)
         .join("\n\n");
+      // The sentence the question is about, read first. Still a quote, and
+      // the passage it comes from is still given whole underneath: asked how
+      // many vacation days new employees get, the reply was the handbook's
+      // title, the vacation rule, the office's closing day and when expenses
+      // are due, with the answer left for the reader to find.
+      const best = fromKnowledge[0].memory;
+      const sentence = answeringSentence(query, best.body);
+      const lead = sentence ? `"${sentence}"\n  — ${best.documentTitle}\n\nIn full:\n\n` : "";
 
       return {
-        text: `From your knowledge base:\n\n${quoted}\n\nThat is quoted from the document, not interpreted. If it doesn't answer the question, the wording may just not match.`,
+        text: `From your knowledge base:\n\n${lead}${quoted}\n\nThat is quoted from the document, not interpreted. If it doesn't answer the question, the wording may just not match.`,
         strategy: "answer",
         groundedOn: fromKnowledge.map((entry) => entry.memory.id),
         groundedOnHistory: 0
