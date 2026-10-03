@@ -22,16 +22,41 @@ export type ProviderHint = { name: string; domains: string[]; passwordHelp: stri
 /** Phone Link installed with a phone linked, installed with none, or not on this PC. */
 export type PhoneLinkStatus = "linked" | "not-linked" | "missing";
 
+/** The phone linked in Phone Link, once the user has said which. */
+export type PhoneKind = "iphone" | "android";
+
 export type MessagingStatus = {
   email: EmailAccountView;
-  texts: { phoneLink: PhoneLinkStatus };
+  texts: { phoneLink: PhoneLinkStatus; phone?: PhoneKind | null };
   providers: ProviderHint[];
 };
 
-/** What the settings screen says about texting, for each Phone Link state. */
-export function describeTexting(status: PhoneLinkStatus): { ready: boolean; text: string } {
+export const phoneChoices: Array<{ id: PhoneKind; label: string }> = [
+  { id: "iphone", label: "iPhone" },
+  { id: "android", label: "Android" }
+];
+
+/**
+ * What the settings screen says about texting, for each Phone Link state and
+ * phone. With an iPhone, Phone Link cannot start a text already written, so
+ * the steps differ - and the screen says so rather than promising a Send
+ * button that will not be there.
+ */
+export function describeTexting(status: PhoneLinkStatus, phone: PhoneKind | null = null): { ready: boolean; text: string } {
   switch (status) {
     case "linked":
+      if (phone === "iphone") {
+        return {
+          ready: true,
+          text: "Texts are copied and Phone Link opens. With an iPhone it can't start a text that's already written, so you paste it into a new message there and press Send. It goes from your phone."
+        };
+      }
+      if (phone === null) {
+        return {
+          ready: true,
+          text: "Texts open in Phone Link and are copied as well, in case it doesn't start one. Say which phone is linked, below, for the right steps."
+        };
+      }
       return { ready: true, text: "Texts open in Phone Link, written and ready, and go from your phone when you press Send." };
     case "not-linked":
       return {

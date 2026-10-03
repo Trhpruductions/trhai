@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import nodemailer from "nodemailer";
 import { readEmailAccount, providerFor, type EmailAccount } from "./emailAccount.js";
+import { readPreferences, type PhoneKind } from "./preferences.js";
 
 // Sending a text or an email for the user, from this machine.
 //
@@ -25,10 +26,14 @@ export type SendOutcome = { ok: boolean; content: string; via?: "phone-link" | "
 export type MessagingDeps = {
   /** Opens a link with this machine's handler for it. True when something opened. */
   open?: (url: string) => Promise<boolean>;
+  /** Opens Phone Link itself, as its Start menu entry does. True when it started. */
+  openPhoneLink?: () => Promise<boolean>;
   /** Puts text on the clipboard. True when it got there. */
   copy?: (text: string) => Promise<boolean>;
   /** Whether Phone Link is here, with a phone linked, to send texts. */
   phoneLink?: PhoneLinkStatus;
+  /** The phone linked in Phone Link, as the user has set it; read from preferences when left out. */
+  phone?: PhoneKind | null;
   /** The saved email account; null for none. Read from the store when left out. */
   account?: EmailAccount | null;
   /** Builds the SMTP connection; nodemailer's own when left out. */
@@ -115,6 +120,34 @@ export function phoneLinkStatus(localAppData = process.env.LOCALAPPDATA, platfor
   } catch {
     return "not-linked";
   }
+}
+
+/** The phone the user has said is linked in Phone Link, or null when they have not said. */
+export function linkedPhone(deps: Pick<MessagingDeps, "phone"> = {}): PhoneKind | null {
+  return deps.phone !== undefined ? deps.phone : readPreferences().phone;
+}
+
+/** Phone Link's app id: what its own Start menu entry opens. */
+export const phoneLinkAppId = "Microsoft.YourPhone_8wekyb3d8bbwe!App";
+
+/**
+ * Opens Phone Link the way its Start menu entry does - through the shell's
+ * Apps folder, by app id - rather than through a link it may not act on.
+ */
+export function openPhoneLinkApp(): Promise<boolean> {
+  if (process.platform !== "win32") return Promise.resolve(false);
+  return new Promise((resolve) => {
+    try {
+      const child = spawn("explorer.exe", [`shell:AppsFolder\\${phoneLinkAppId}`], { detached: true, stdio: "ignore", windowsHide: true });
+      child.once("error", () => resolve(false));
+      child.once("spawn", () => {
+        child.unref();
+        resolve(true);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 /**
@@ -221,6 +254,34 @@ export async function sendText(args: Record<string, unknown>, deps: MessagingDep
   if (problem) return { ok: false, content: problem };
   const number = normalizePhoneNumber(args.to) as string;
   const message = text(args.message);
+  const who = formatPhoneNumber(number);
+
+  // An iPhone. Phone Link can start a new message to one person from one, but
+  // not a message already written: Microsoft documents no link that fills one
+  // in, and on the PC this was built on, with an iPhone linked, an sms: link
+  // opened nothing at all. So the text is copied and Phone Link opened, and
+  // the user is told the steps - never that it is waiting for them to press
+  // Send, which with an iPhone it is not.
+  if (linkedPhone(deps) === "iphone") {
+    const [copied, opened] = await Promise.all([
+      (deps.copy ?? copyToClipboard)(message),
+      (deps.openPhoneLink ?? openPhoneLinkApp)()
+    ]);
+    if (!copied) {
+      return {
+        ok: false,
+        content: `Nothing was sent - your text to ${who} could not be copied to hand to Phone Link. `
+          + `Open Phone Link, choose **New message**, enter ${who} and type it there.`
+      };
+    }
+    return {
+      ok: true,
+      via: "phone-link",
+      content: `Your text to ${who} is copied${opened ? ", and Phone Link is open" : ""}. With an iPhone, Phone Link can't `
+        + `start a text that's already written, so ${opened ? "" : "open Phone Link, "}choose **New message**, enter ${who}, `
+        + "paste it (Ctrl+V) and press **Send**. It goes from your phone."
+    };
+  }
 
   const link = smsLink(number, message);
   if (link.length > maxLinkLength) {
@@ -234,7 +295,6 @@ export async function sendText(args: Record<string, unknown>, deps: MessagingDep
     (deps.open ?? openWithSystem)(link),
     (deps.copy ?? copyToClipboard)(message)
   ]);
-  const who = formatPhoneNumber(number);
   if (!opened) {
     return {
       ok: false,
@@ -377,13 +437,19 @@ export async function sendEmail(args: Record<string, unknown>, deps: MessagingDe
 export function describeHeldMessage(
   tool: string,
   args: Record<string, unknown>,
-  account: { configured: boolean; address?: string } = { configured: false }
+  account: { configured: boolean; address?: string } = { configured: false },
+  phone: PhoneKind | null = null
 ): string {
   const quote = (value: string) => value.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
   if (tool === "send_text") {
     const number = normalizePhoneNumber(args.to);
-    return `Here's the text for ${number ? formatPhoneNumber(number) : text(args.to)}:\n\n${quote(text(args.message))}\n\n`
-      + "It goes out from your phone through Phone Link. Say **yes** to send it, or **no** to cancel.";
+    // What "yes" does, said before it is said: with an iPhone it hands the
+    // text over to paste, and that is not the same as sending it.
+    const how = phone === "iphone"
+      ? "It goes out from your phone through Phone Link. With an iPhone, **yes** copies it and opens Phone Link, "
+        + "for you to paste into a new message and send. Say **no** to cancel."
+      : "It goes out from your phone through Phone Link. Say **yes** to send it, or **no** to cancel.";
+    return `Here's the text for ${number ? formatPhoneNumber(number) : text(args.to)}:\n\n${quote(text(args.message))}\n\n${how}`;
   }
   const to = (parseEmailAddresses(args.to) ?? [text(args.to)]).join(", ");
   const subject = text(args.subject);

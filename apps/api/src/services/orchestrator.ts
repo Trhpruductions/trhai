@@ -31,7 +31,7 @@ import {
   type PendingConfirmation
 } from "./pendingConfirmation.js";
 import {
-  describeHeldMessage, messageProblem, phoneLinkProblem, phoneLinkStatus, sendingTools, type MessagingDeps
+  describeHeldMessage, linkedPhone, messageProblem, phoneLinkProblem, phoneLinkStatus, sendingTools, type MessagingDeps
 } from "./messaging.js";
 import { parseDirectMessage } from "./messageRequest.js";
 import { randomUUID } from "node:crypto";
@@ -651,7 +651,7 @@ export async function runAssistantOrchestrator(
       // words that will actually go. Only this turn's own offer, never one
       // left standing from earlier.
       const heldMessage = nowPending && generated.awaitingConfirmation && sendingTools.has(nowPending.tool)
-        ? describeHeldMessage(nowPending.tool, nowPending.arguments, describeEmailAccount())
+        ? describeHeldMessage(nowPending.tool, nowPending.arguments, describeEmailAccount(), linkedPhone(input.messaging ?? {}))
         : null;
       const text = heldMessage ?? generated.text;
       return {
@@ -778,7 +778,7 @@ function resolveDirectMessage(input: OrchestratorInput): OrchestratorResult | nu
   recordPendingConfirmation(sessionId, pending);
   return deterministicResult(
     input.userMessage,
-    describeHeldMessage(direct.tool, direct.arguments, describeEmailAccount()),
+    describeHeldMessage(direct.tool, direct.arguments, describeEmailAccount(), linkedPhone(input.messaging ?? {})),
     "message",
     { tool: direct.tool, ...describePendingAction({ ...pending, askedAt: Date.now() }) }
   );
