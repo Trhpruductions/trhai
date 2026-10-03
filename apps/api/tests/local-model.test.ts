@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
+import { once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   buildPrompt,
   checkAvailability,
@@ -242,6 +244,52 @@ test("a server that never replies gives up rather than hanging the request", asy
     // Said as what happened: the model was there and did not answer in time.
     assert.equal(result.reason, "llama3.2 did not reply within 300 ms.");
   } finally {
+    server.close();
+  }
+});
+
+test("a request the turn stops is let go of at once, and said as stopped rather than as no reply", async () => {
+  // App authoring and a long summary run during a turn, for minutes. Stop has
+  // to end the request - Ollama stops writing when its asker lets go - and it
+  // is not the model failing to answer in time: the time had not run out.
+  let asked = 0;
+  let markArrived!: () => void;
+  const arrived = new Promise<void>((resolve) => { markArrived = resolve; });
+  let markLetGo!: () => void;
+  const letGo = new Promise<void>((resolve) => { markLetGo = resolve; });
+  const server = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      asked += 1;
+      response.on("close", () => {
+        if (!response.writableEnded) markLetGo();
+      });
+      markArrived();
+      // ...and never answered.
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  try {
+    const stop = new AbortController();
+    // Five seconds, so the time limit cannot be what ends it below.
+    const answering = generate(configFor(baseUrl, { timeoutMs: 5000 }), { question: "anything", context: [] }, fetch, stop.signal);
+    await arrived;
+    const stoppedAt = Date.now();
+    stop.abort();
+    assert.deepEqual(await answering, { ok: false, reason: "Stopped before it finished." });
+    assert.ok(Date.now() - stoppedAt < 1000, "ended by Stop, not by the time limit");
+    assert.equal(await Promise.race([letGo.then(() => "let go"), delay(2000).then(() => "held")]), "let go",
+      "the request was let go of, which is what stops the model");
+
+    // A turn already stopped asks nothing at all.
+    const again = await generate(configFor(baseUrl, { timeoutMs: 5000 }), { question: "anything", context: [] }, fetch, stop.signal);
+    assert.deepEqual(again, { ok: false, reason: "Stopped before it finished." });
+    assert.equal(asked, 1, "the model was not asked again");
+  } finally {
+    server.closeAllConnections();
     server.close();
   }
 });

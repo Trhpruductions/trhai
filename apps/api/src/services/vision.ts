@@ -1,4 +1,4 @@
-import type { LocalModelConfig } from "./localModel.js";
+import { deadlineOrStop, stoppedBeforeFinishing, type LocalModelConfig } from "./localModel.js";
 
 // Looking at an image, with a local vision model in Ollama.
 //
@@ -245,12 +245,18 @@ function ollamaError(body: string): string {
   return text.split("\n")[0].slice(0, 200);
 }
 
-/** Asks the vision model about one or more images. Never throws. */
+/**
+ * Asks the vision model about one or more images. Never throws.
+ *
+ * `cancel` is the turn's Stop. Looking can take minutes on a cold card, and
+ * Stop has to end that request rather than leave the model reading the
+ * images for a reply nobody will see.
+ */
 export async function lookAtImages(
   images: VisionImage[],
   question: string,
   config: Pick<LocalModelConfig, "baseUrl" | "timeoutMs">,
-  options: { fetcher?: Fetcher; model?: string } = {}
+  options: { fetcher?: Fetcher; model?: string; cancel?: AbortSignal } = {}
 ): Promise<VisionResult> {
   if (images.length === 0) return { ok: false, reason: "There was no image to look at." };
   if (images.length > maxImagesPerTurn) return { ok: false, reason: `Up to ${maxImagesPerTurn} images can be looked at at once.` };
@@ -294,8 +300,9 @@ export async function lookAtImages(
         ]
       }),
       // A cold start loads the model from disk - 73 s measured on a busy card -
-      // and the first image after it is slow too: allowed far longer than a reply.
-      signal: AbortSignal.timeout(Math.max(config.timeoutMs, 300_000))
+      // and the first image after it is slow too: allowed far longer than a
+      // reply. Stop ends it sooner.
+      signal: deadlineOrStop(Math.max(config.timeoutMs, 300_000), options.cancel)
     });
     if (!response.ok) {
       const detail = ollamaError(await response.text().catch(() => ""));
@@ -316,6 +323,8 @@ export async function lookAtImages(
     const text = typeof payload.message?.content === "string" ? payload.message.content.trim() : "";
     return text ? { ok: true, text, model } : { ok: false, reason: `The vision model (${model}) returned nothing.` };
   } catch (error) {
+    // Stopped, which is not the model failing to answer in time.
+    if (options.cancel?.aborted) return { ok: false, reason: stoppedBeforeFinishing };
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
     return { ok: false, reason: timedOut ? `The vision model (${model}) did not answer in time.` : "The vision model could not be reached." };
   }

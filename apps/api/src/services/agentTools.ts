@@ -33,7 +33,7 @@ import { extractDocumentText, isDocumentPath, maxDocumentBytes } from "./documen
 import { readableAtOnce, summarizeLongText, type GenerateText } from "./summarize.js";
 import { daysAskedFor, timeAskedFor } from "./scheduleRequest.js";
 import { imageKind, lookAtImages, maxImageBytes, type VisionImage, type VisionResult } from "./vision.js";
-import { readLocalModelConfig } from "./localModel.js";
+import { readLocalModelConfig, stoppedBeforeFinishing } from "./localModel.js";
 import { describeTelemetry, readFreeSpace, readGpuHeadroom, readTelemetry, readTopMemoryPrograms } from "./systemTelemetry.js";
 import { fetchWebPage } from "./webFetch.js";
 import { webSearch } from "./webSearch.js";
@@ -238,7 +238,16 @@ export type ToolContext = {
    */
   generateText?: GenerateText;
   /** Asks the vision model about images; the real local one when absent. See vision.ts. */
-  vision?: (images: VisionImage[], question: string) => Promise<VisionResult>;
+  vision?: (images: VisionImage[], question: string, cancel?: AbortSignal) => Promise<VisionResult>;
+  /**
+   * Stops this turn: the user pressed Stop, or their browser went away.
+   *
+   * Passed on by every tool that asks a model - the vision model, a long
+   * summary, app authoring - so Stop ends that request as it ends the loop's
+   * own. Those hold the GPU for minutes, and stopping only the loop left them
+   * running for a reply nobody would see.
+   */
+  cancel?: AbortSignal;
   /**
    * Overridable so a test can exercise fetch_url's dispatch without a real
    * network call — real fetchWebPage, with its own SSRF and size/timeout
@@ -265,8 +274,10 @@ export type ToolContext = {
    * error: with no model running there is nothing to author with, and
    * build_app says so instead of falling back to a records app that would be
    * the wrong thing built confidently.
+   *
+   * `cancel` is the turn's Stop; see cancel above.
    */
-  authorApp?: (description: string) => Promise<{ ok: true; text: string } | { ok: false; reason: string }>;
+  authorApp?: (description: string, cancel?: AbortSignal) => Promise<{ ok: true; text: string } | { ok: false; reason: string }>;
 };
 
 export const toolDefinitions: ToolDefinition[] = [
@@ -1781,8 +1792,9 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
         return { ok: false, content: `"${path.basename(verdict.path)}" is not an image (PNG, JPEG, GIF, WebP or BMP). Use read_file for a text file.` };
       }
       const question = requireString(call.arguments.question) ?? "";
-      const look = context.vision ?? ((images: VisionImage[], asked: string) => lookAtImages(images, asked, readLocalModelConfig()));
-      const seen = await look([{ name: path.basename(verdict.path), data }], question);
+      const look = context.vision ?? ((images: VisionImage[], asked: string, cancel?: AbortSignal) =>
+        lookAtImages(images, asked, readLocalModelConfig(), { cancel }));
+      const seen = await look([{ name: path.basename(verdict.path), data }], question, context.cancel);
       if (!seen.ok) return { ok: false, content: seen.reason };
       noteFileTouched(context.sessionId, target);
       return { ok: true, content: `What ${path.basename(verdict.path)} shows (from the vision model, ${seen.model}):\n${seen.text}` };
@@ -1830,7 +1842,7 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
       if (!context.generateText) {
         return { ok: false, content: "Summarizing a long document needs the local model, which is not available here." };
       }
-      const summary = await summarizeLongText(text, { title: name, focus, generate: context.generateText });
+      const summary = await summarizeLongText(text, { title: name, focus, generate: context.generateText, cancel: context.cancel });
       if (!summary.ok) return { ok: false, content: summary.reason };
       const coverage = summary.read < summary.sections
         ? `the first ${summary.read} of its ${summary.sections} parts - it is longer than one summary reads, so say that the rest was not covered`
@@ -2385,10 +2397,13 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
           const tryEvent = beginEvent(context.sessionId, "create",
             `Writing the app${attempt > 1 ? ` (attempt ${attempt})` : ""}`);
 
-          const authored = await context.authorApp(authorPrompt(description));
+          const authored = await context.authorApp(authorPrompt(description), context.cancel);
           if (!authored.ok) {
             lastFault = authored.reason;
             endEvent(context.sessionId, tryEvent, "failed", lastFault);
+            // Stopped, not failed: not tried again. The next attempt would be
+            // stopped before it began, and still be logged as one that was made.
+            if (context.cancel?.aborted) return { ok: false, content: `${stoppedBeforeFinishing} Nothing was written.` };
             continue;
           }
 
@@ -2594,10 +2609,12 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
         const scriptEvent = beginEvent(sessionId, "create",
           `Writing the video script${attempt > 1 ? ` (attempt ${attempt})` : ""}`);
 
-        const authored = await context.authorApp(videoScriptPrompt(description));
+        const authored = await context.authorApp(videoScriptPrompt(description), context.cancel);
         if (!authored.ok) {
           lastFault = authored.reason;
           endEvent(sessionId, scriptEvent, "failed", lastFault);
+          // Stopped: not tried again, as for build_app.
+          if (context.cancel?.aborted) return { ok: false, content: `${stoppedBeforeFinishing} Nothing was rendered.` };
           continue;
         }
 
@@ -3140,7 +3157,7 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
       const rawKind = requireString(call.arguments.kind);
       const kind: RenderKind = rawKind === "diagram" || rawKind === "mockup" ? rawKind : inferKind(description);
 
-      const authored = await context.authorApp(renderMockupPrompt(description, kind));
+      const authored = await context.authorApp(renderMockupPrompt(description, kind), context.cancel);
       if (!authored.ok) return { ok: false, content: `Could not render that: ${authored.reason}` };
 
       const extracted = extractRendering(authored.text);

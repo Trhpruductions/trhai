@@ -147,6 +147,35 @@ function allowedTime(config: Pick<LocalModelConfig, "timeoutMs">): string {
   return config.timeoutMs >= 1000 ? `${Math.round(config.timeoutMs / 1000)} s` : `${config.timeoutMs} ms`;
 }
 
+/**
+ * Why a request was given up on: the turn it was part of was stopped - the
+ * user pressed Stop, or their browser went away.
+ *
+ * Not noReplyWithin. The time had not run out and the model was still
+ * working, so "did not reply" would blame the machine for a decision the user
+ * made.
+ */
+export const stoppedBeforeFinishing = "Stopped before it finished.";
+
+/**
+ * The signal one request to a model runs under: its own time limit, and the
+ * turn's Stop when it has one.
+ *
+ * Both, not either. Stop has to reach the request at once - a model asked to
+ * look at an image or write an app holds the GPU for minutes, and ending only
+ * the browser's connection left it running. And a request nobody stops must
+ * still give up on its own if the model stalls.
+ *
+ * Armed until the reply has been read, not just until fetch() resolves: the
+ * gap requestDeadline in agentLoop.ts closes for a streamed reply. A time
+ * limit that fires rejects with a TimeoutError rather than an AbortError, so a
+ * caller that reports it checks for both.
+ */
+export function deadlineOrStop(ms: number, cancel?: AbortSignal): AbortSignal {
+  const deadline = AbortSignal.timeout(ms);
+  return cancel ? AbortSignal.any([deadline, cancel]) : deadline;
+}
+
 /** Why a reply stopped by replyLimit is not used: it ran on and never finished. */
 export function replyTooLong(config: Pick<LocalModelConfig, "model" | "contextTokens">): string {
   return `The reply from ${config.model} ran past the length limit `
@@ -380,24 +409,28 @@ export function buildPrompt(request: GenerationRequest): string {
 export async function generate(
   config: LocalModelConfig,
   request: GenerationRequest,
-  fetchImpl: FetchLike = fetch
+  fetchImpl: FetchLike = fetch,
+  /**
+   * The turn's Stop. App authoring and a long summary run during a turn and
+   * can take minutes, so Stop ends this request too - see deadlineOrStop.
+   */
+  cancel?: AbortSignal
 ): Promise<GenerationResult> {
   try {
-    const response = await withTimeout(config.timeoutMs, (signal) =>
-      fetchImpl(`${config.baseUrl}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // Streaming would let the UI show tokens as they arrive, but this API
-        // returns one JSON reply per request, so a single response is simpler
-        // and the client is not built for a stream yet.
-        body: JSON.stringify({
-          model: config.model,
-          prompt: request.rawPrompt ?? buildPrompt(request),
-          stream: false,
-          options: modelOptions(config)
-        }),
-        signal
-      }));
+    const response = await fetchImpl(`${config.baseUrl}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Streaming would let the UI show tokens as they arrive, but this API
+      // returns one JSON reply per request, so a single response is simpler
+      // and the client is not built for a stream yet.
+      body: JSON.stringify({
+        model: config.model,
+        prompt: request.rawPrompt ?? buildPrompt(request),
+        stream: false,
+        options: modelOptions(config)
+      }),
+      signal: deadlineOrStop(config.timeoutMs, cancel)
+    });
 
     if (!response.ok) {
       return { ok: false, reason: `Ollama answered ${response.status}.` };
@@ -421,9 +454,12 @@ export async function generate(
       model: typeof payload.model === "string" ? payload.model : config.model
     };
   } catch (error) {
+    // Stopped on purpose, not out of time: both end the request, and the
+    // caller's own signal says which it was.
+    if (cancel?.aborted) return { ok: false, reason: stoppedBeforeFinishing };
     return {
       ok: false,
-      reason: error instanceof Error && error.name === "AbortError"
+      reason: error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")
         ? noReplyWithin(config)
         : "Local model unavailable: the request failed."
     };
