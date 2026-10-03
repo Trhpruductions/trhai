@@ -19,7 +19,7 @@ import {
   correctionFor, inventsAReading, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { asksAboutMachineState, asksForAReading, asksToStartSomething, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
+import { asksAboutMachineState, asksForAReading, asksForWordsInTheReply, asksToStartSomething, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -1698,6 +1698,12 @@ export async function runAgent(
       || /[a-z]:[\\/][^\s]+/i.test(question)
       || /(?:^|\s)\.{0,2}\/[^\s]+\.[a-z0-9]{1,6}\b/i.test(question)
       || /\b(?:save|store|write|put|export|dump|record)\b.{0,40}\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i.test(question);
+    // Words asked for are written in the reply, not to disk: see
+    // asksForWordsInTheReply. A named file, a file the conversation is already
+    // working on, and any order the classifier reads as acting on this machine
+    // keep the file writers as before.
+    const fileWritersHaveWork = wantsToWriteAFile || Boolean(context.impliedFile)
+      || intent.action || !asksForWordsInTheReply(question);
 
     const offeredTools = offerTools
       // A sum is not a job for the shell. Asked to "convert 5 miles to
@@ -1778,12 +1784,14 @@ export async function runAgent(
         // lookup that names no file to write: "search the web for the Node.js
         // release schedule" had edit_file in reach and the model wandered into
         // web_search → edit_file → edit_file, writing files nobody asked for.
-        // An explicit save target ("save it to notes.txt") keeps them.
+        // An explicit save target ("save it to notes.txt") keeps them. And a
+        // request for words to read - a story, "reply with just the code" -
+        // does not get them either.
         files: (mentionsDocument(question) && !namesAFilePath(question))
           ? false
           : (mentionsWeb(question) || wantsWebSearch(question))
             ? wantsToWriteAFile
-            : true
+            : fileWritersHaveWork
       })
       : [];
     const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));
