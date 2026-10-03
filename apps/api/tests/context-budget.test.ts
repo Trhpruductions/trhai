@@ -1,10 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fakeEngine, type ScriptedReply } from "./helpers/fakeEngine.js";
 
 // A workspace of its own, so the reads and writes below never touch a real one.
 const testWorkspace = mkdtempSync(path.join(tmpdir(), "trhai-budget-"));
@@ -265,23 +264,18 @@ test("an earlier call's long arguments can be shortened, without touching the ar
 
 // ------------------------------------------------------------- through the loop
 
-function fakeModel(turns: Array<Record<string, unknown>>) {
-  const received: Array<{ messages: Msg[]; tools?: unknown[]; options?: { num_ctx?: number } }> = [];
-  return new Promise<{ server: Server; baseUrl: string; received: typeof received }>((resolve) => {
-    let turn = 0;
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(chunk as Buffer));
-      request.on("end", () => {
-        received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        const body = turns[Math.min(turn, turns.length - 1)];
-        turn += 1;
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ model: "qwen2.5-coder:7b", ...body }));
-      });
-    });
-    server.listen(0, "127.0.0.1", () => resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received }));
-  });
+/**
+ * A stand-in engine answering each chat request with the next scripted turn.
+ * `window` is the context window it says the model is loaded with - the
+ * figure the loop cuts its prompt to.
+ */
+async function fakeModel(turns: ScriptedReply[], window?: number) {
+  const engine = await fakeEngine({ models: ["qwen2.5-coder:7b"], reply: turns, window });
+  return {
+    server: engine.server,
+    baseUrl: engine.baseUrl,
+    received: engine.chats as Array<{ messages: Msg[]; tools?: unknown[]; max_tokens?: number }>
+  };
 }
 
 const call = (name: string, args: Record<string, unknown>) => ({ message: { content: "", tool_calls: [{ function: { name, arguments: args } }] } });
@@ -289,14 +283,16 @@ const call = (name: string, args: Record<string, unknown>) => ({ message: { cont
 test("reading two long files in one turn keeps every request inside the window, rules first", async () => {
   writeFileSync(path.join(testWorkspace, "big-a.txt"), numberedLines(4000, "alpha alpha alpha alpha"));
   writeFileSync(path.join(testWorkspace, "big-b.txt"), numberedLines(4000, "bravo bravo bravo bravo"));
+  // The window is the engine's to give: it says 12,000 here, and the loop has
+  // to cut every request to that, whatever its own default is.
+  const contextTokens = 12_000;
   const { server, baseUrl, received } = await fakeModel([
     call("read_file", { path: "big-a.txt" }),
     call("read_file", { path: "big-b.txt" }),
     { message: { content: "Both files are numbered lines." } }
-  ]);
-  const contextTokens = 12_000;
+  ], contextTokens);
   try {
-    const result = await runAgent({ baseUrl, model: "qwen2.5-coder:7b", modelFromEnv: true, timeoutMs: 4000, contextTokens },
+    const result = await runAgent({ baseUrl, model: "qwen2.5-coder:7b", modelFromEnv: true, timeoutMs: 4000 },
       "read big-a.txt and then big-b.txt and tell me what they contain", { memories: [], knowledge: [] });
     assert.equal(result.ok, true);
     assert.equal(received.length, 3);
@@ -307,7 +303,7 @@ test("reading two long files in one turn keeps every request inside the window, 
       assert.ok(requestTokens(request.messages, toolsTokens) <= budget,
         `request ${index + 1} is ~${requestTokens(request.messages, toolsTokens)} tokens for a ${budget}-token budget`);
       assert.equal(request.messages[0].content, received[0].messages[0].content, "the rules go out whole every time");
-      assert.equal(request.options?.num_ctx, contextTokens);
+      assert.equal(request.max_tokens, contextTokens, "and a reply may be as long as that window, no longer");
     }
     const last = received[2].messages;
     assert.ok(last.some((message) => message.role === "user" && message.content.startsWith("read big-a.txt")), "the question too");

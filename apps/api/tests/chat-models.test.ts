@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { LocalModelConfig } from "../src/services/localModel.js";
+import type { EngineModel } from "../src/services/modelEngine.js";
+import { fakeEngine, modelsBody } from "./helpers/fakeEngine.js";
 
 // A model per conversation, and how full the model's context window was -
 // the two things the chat header shows next to the conversation's name.
@@ -19,10 +20,9 @@ process.env.ASSIST_KNOWLEDGE_FILE = path.join(dataDir, "knowledge.json");
 process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 process.env.ASCEND_WORKSPACE = mkdtempSync(path.join(tmpdir(), "ascend-chat-models-ws-"));
 
-const { chatModelsFrom, isModelName, listChatModels, withChosenModel } = await import("../src/services/modelCatalog.js");
+const { chatModelsFrom, isModelName, listChatModels, sizeFromName, withChosenModel } = await import("../src/services/modelCatalog.js");
 const { recordContextUse, takeContextUse } = await import("../src/services/contextUse.js");
 const { runAgent } = await import("../src/services/agentLoop.js");
-const { contextWindow } = await import("../src/services/localModel.js");
 const { getConversation, resetConversations } = await import("../src/services/conversationStore.js");
 const { createApp } = await import("../src/server.js");
 
@@ -34,16 +34,30 @@ const id = () => globalThis.crypto.randomUUID();
 
 // ---- which models can hold a conversation ---------------------------------
 
+/** A model as the engine lists it. Not loaded, so it says no size or window, unless told. */
+const listed = (id: string, more: Partial<EngineModel> = {}): EngineModel =>
+  ({ id, status: "unloaded", windowTokens: null, sizeBytes: null, vision: false, failed: false, ...more });
+
 test("the list leaves out the vision model and embedding models, and is sorted", () => {
   const models = chatModelsFrom([
-    { name: "qwen2.5-coder:7b", size: 4_683_087_332, details: { family: "qwen2", parameter_size: "7.6B" } },
-    { name: "qwen2.5vl:3b", details: { family: "qwen25vl" } },
-    { name: "nomic-embed-text:latest", details: { family: "nomic-bert", families: ["nomic-bert"] } },
-    { name: "llama3.1:8b", details: { family: "llama", parameter_size: "8.0B" } },
-    { name: 42 } as never
-  ], "qwen2.5vl:3b");
-  assert.deepEqual(models.map((model) => model.name), ["llama3.1:8b", "qwen2.5-coder:7b"]);
-  assert.deepEqual(models[1], { name: "qwen2.5-coder:7b", parameterSize: "7.6B", family: "qwen2", sizeBytes: 4_683_087_332 });
+    listed("qwen2.5-coder-7b"),
+    listed("qwen2.5-vl-3b", { vision: true }),
+    listed("nomic-embed-text"),
+    listed("llama3.1-8b", { status: "loaded", sizeBytes: 4_900_000_000, windowTokens: 16384 })
+  ], new Map([["qwen2.5-coder-7b", 4_683_087_332]]));
+  assert.deepEqual(models.map((model) => model.name), ["llama3.1-8b", "qwen2.5-coder-7b"]);
+  // The size comes from the file on disk where the engine has not loaded the model and so does not say.
+  assert.deepEqual(models[1], { name: "qwen2.5-coder-7b", parameterSize: "7B", family: null, sizeBytes: 4_683_087_332 });
+  assert.equal(models[0].sizeBytes, 4_900_000_000, "and from the engine where it has");
+});
+
+test("a model's size is read from its name, in either spelling", () => {
+  assert.equal(sizeFromName("qwen2.5-coder-7b"), "7B");
+  assert.equal(sizeFromName("qwen2.5-coder:7b"), "7B");
+  assert.equal(sizeFromName("qwen3-8b"), "8B");
+  assert.equal(sizeFromName("phi-3.5b-mini"), "3.5B");
+  assert.equal(sizeFromName("vexora"), null);
+  assert.equal(sizeFromName("qwen2.5"), null, "a version number is not a size");
 });
 
 test("model names are checked, not trusted", () => {
@@ -59,14 +73,15 @@ test("a chosen model is asked for by name; no choice leaves the config alone", (
 });
 
 test("the catalogue names the model that answers when a conversation picks none", async () => {
-  const tags = { models: [{ name: "qwen2.5-coder:7b" }, { name: "llama3.1:8b" }, { name: "qwen2.5vl:3b" }] };
-  const fetchTags = (async () => new Response(JSON.stringify(tags), { status: 200 })) as typeof fetch;
-  const listed = await listChatModels({ baseUrl: "http://ollama", model: "qwen2.5-coder:7b", modelFromEnv: true, timeoutMs: 1000 }, fetchTags);
-  assert.equal(listed.defaultModel, "qwen2.5-coder:7b");
-  assert.deepEqual(listed.models.map((model) => model.name), ["llama3.1:8b", "qwen2.5-coder:7b"]);
+  const models = modelsBody(["qwen2.5-coder-7b", "llama3.1-8b", "qwen2.5-vl-3b"], { vision: ["qwen2.5-vl-3b"] });
+  const fetchModels = (async () => new Response(JSON.stringify(models), { status: 200 })) as typeof fetch;
+  // Named the way a .env written under Ollama names it: still the same model.
+  const catalogue = await listChatModels({ baseUrl: "http://engine", model: "qwen2.5-coder:7b", modelFromEnv: true, timeoutMs: 1000 }, fetchModels);
+  assert.equal(catalogue.defaultModel, "qwen2.5-coder-7b");
+  assert.deepEqual(catalogue.models.map((model) => model.name), ["llama3.1-8b", "qwen2.5-coder-7b"]);
 
   const down = (async () => { throw new Error("connection refused"); }) as typeof fetch;
-  const nothing = await listChatModels({ baseUrl: "http://ollama", model: "x", modelFromEnv: true, timeoutMs: 1000 }, down);
+  const nothing = await listChatModels({ baseUrl: "http://engine", model: "x", modelFromEnv: true, timeoutMs: 1000 }, down);
   assert.deepEqual(nothing.models, []);
   assert.match(nothing.reason ?? "", /No local model server/);
 });
@@ -79,31 +94,21 @@ test("a measurement is reported once, then gone", () => {
   assert.equal(takeContextUse("s"), null, "never shown again for a later reply");
 });
 
-function fakeModel(reply: string) {
-  return new Promise<{ server: Server; baseUrl: string }>((resolve) => {
-    const server = createServer((request, response) => {
-      request.resume();
-      request.on("end", () => {
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ model: "llama3.1:8b", message: { content: reply } }));
-      });
-    });
-    server.listen(0, "127.0.0.1", () => resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}` }));
-  });
-}
-
-test("the agent loop records the prompt it actually sent, against the window it ran with", async () => {
-  const { server, baseUrl } = await fakeModel("Paris.");
+test("the agent loop records the prompt it actually sent, against the window the engine gave the model", async () => {
+  // 9,216 tokens is what an 8B model gets on an 8 GB card - not the loop's
+  // own default, which is what this used to compare against.
+  const engine = await fakeEngine({ models: ["llama3.1-8b"], window: 9216, reply: { message: { content: "Paris." } } });
   try {
-    const config: LocalModelConfig = { baseUrl, model: "llama3.1:8b", modelFromEnv: true, timeoutMs: 4000 };
+    const config: LocalModelConfig = { baseUrl: engine.baseUrl, model: "llama3.1-8b", modelFromEnv: true, timeoutMs: 4000 };
     const result = await runAgent(config, "What is the capital of France?", { memories: [], knowledge: [], sessionId: "ctx-session" });
     assert.equal(result.ok, true);
     const use = takeContextUse("ctx-session");
     assert.ok(use, "nothing was recorded");
     assert.ok(use.promptTokens > 500, `a prompt with the rules in it is not ${use.promptTokens} tokens`);
-    assert.equal(use.windowTokens, contextWindow(config));
+    assert.equal(use.windowTokens, 9216);
+    assert.equal(engine.chats[0].max_tokens, 9216, "and a reply may be as long as that window");
   } finally {
-    server.close();
+    await engine.close();
   }
 });
 

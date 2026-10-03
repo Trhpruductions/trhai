@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createServer } from "node:http";
-import { once } from "node:events";
+import { fakeEngine } from "./helpers/fakeEngine.js";
 
 // Requests that say everything outright - a text with its number and words, a
 // schedule with its days and time, a weekday for a date, a summary of a saved
@@ -19,7 +18,7 @@ for (const [name, file] of [["MEMORY", "memory"], ["CONVERSATION", "conversation
 }
 process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 // A dead port: anything here that reached for the model would fail loudly.
-process.env.OLLAMA_BASE_URL = "http://127.0.0.1:9";
+process.env.TRHAI_ENGINE_URL = "http://127.0.0.1:9";
 
 const { parseDirectMessage, subjectFrom } = await import("../src/services/messageRequest.js");
 const { daysAskedFor, parseReminderRequest, timeAskedFor } = await import("../src/services/scheduleRequest.js");
@@ -277,35 +276,21 @@ test("an equation is content, not a vague request", async () => {
 });
 
 test("words written for the reply are not offered to be saved as a document", async () => {
-  const offered: string[][] = [];
-  const server = createServer((request, response) => {
-    const chunks: Buffer[] = [];
-    request.on("data", (chunk) => chunks.push(chunk as Buffer));
-    request.on("end", () => {
-      response.writeHead(200, { "Content-Type": "application/json" });
-      if (request.url?.startsWith("/api/chat")) {
-        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { tools?: Array<{ function: { name: string } }> };
-        offered.push((body.tools ?? []).map((tool) => tool.function.name));
-        response.end(JSON.stringify({ model: "llama3.2:latest", message: { content: "Done." } }));
-        return;
-      }
-      response.end(JSON.stringify({ models: [{ name: "llama3.2:latest" }] }));
-    });
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const config = { baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, model: "llama3.2", modelFromEnv: true, timeoutMs: 4000 };
+  const engine = await fakeEngine();
+  // The tools each chat request offered the model, by name.
+  const offered = () => engine.chats.map((chat) => (chat.tools ?? []).map((tool) => tool.function.name));
+  const config = { baseUrl: engine.baseUrl, model: "llama3.2", modelFromEnv: true, timeoutMs: 4000 };
   try {
     await runAgent(config, "Write a two-sentence product description for a stainless steel water bottle.", { memories: [], knowledge: [] });
-    assert.ok(!offered[0].includes("write_document"), "a description is for the reply");
+    assert.ok(!offered()[0].includes("write_document"), "a description is for the reply");
     await runAgent(config, "Write up today's meeting and save it as a note.", { memories: [], knowledge: [] });
-    assert.ok(offered.at(-1)?.includes("write_document"), "saving is asked for");
+    assert.ok(offered().at(-1)?.includes("write_document"), "saving is asked for");
     await runAgent(config, "Add a line about the launch date to the Roadmap", {
       memories: [], knowledge: [], documents: [{ id: "doc-1", title: "Roadmap", body: "Q1: beta." }]
     });
-    assert.ok(offered.at(-1)?.includes("update_document") || offered.at(-1)?.includes("write_document"), "a saved document is named");
+    assert.ok(offered().at(-1)?.includes("update_document") || offered().at(-1)?.includes("write_document"), "a saved document is named");
   } finally {
-    server.close();
+    await engine.close();
   }
 });
 
@@ -380,7 +365,7 @@ test("summarize a saved document by name: read in full here, not left to the mod
     generateText: model.generate
   });
   assert.equal(answered.assistantMessage, "Harbor Town Handbook: a guide to the town.");
-  assert.equal(answered.model, "ollama/qwen2.5-coder:7b");
+  assert.equal(answered.model, "local/qwen2.5-coder:7b");
   assert.ok(model.prompts.some((prompt) => prompt.includes("Key fact: the bakery closes")), "the last section was read");
 
   const unnamed = recordingModel();

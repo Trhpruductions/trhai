@@ -71,7 +71,7 @@ import {
 // spent a long time claiming "Saved." for writes that never happened, and the
 // fix was to report outcomes rather than intentions. The same applies here.
 
-/** A tool as the model sees it — the JSON-schema shape Ollama expects. */
+/** A tool as the model sees it — the JSON-schema shape the model engine expects. */
 export type ToolDefinition = {
   type: "function";
   function: {

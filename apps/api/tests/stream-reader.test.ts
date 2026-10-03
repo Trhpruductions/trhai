@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { openDepth, readStream, safePrefix, toLines } from "../src/services/streamReader.js";
+import { completionBody, modelsBody, streamEvent } from "./helpers/fakeEngine.js";
 
 // Streaming is easy; streaming without showing the user things they should
 // never see is the actual problem. This model encodes some tool calls as
@@ -12,8 +13,9 @@ async function* fromLines(lines: string[]): AsyncGenerator<string> {
   for (const line of lines) yield line;
 }
 
-function frame(content: string, done = false): string {
-  return JSON.stringify({ model: "test", message: { role: "assistant", content }, done });
+/** One event of the engine's stream, as a line: a piece of the reply, or with `finish` its last frame. */
+function frame(content: string, finish: string | null = null): string {
+  return `data: ${JSON.stringify({ model: "test", choices: [{ index: 0, delta: content ? { content } : {}, finish_reason: finish }] })}`;
 }
 
 test("brace depth ignores braces inside strings", () => {
@@ -46,7 +48,8 @@ test("once the object closes, everything is released again", () => {
 test("tokens arrive in order and are never repeated", async () => {
   const seen: string[] = [];
   const result = await readStream(
-    fromLines([frame("Hello"), frame(", "), frame("world"), frame("", true)]),
+    // As the engine sends it: blank lines between events, and [DONE] at the end.
+    fromLines([frame("Hello"), "", frame(", "), "", frame("world"), "", frame("", "stop"), "", "data: [DONE]"]),
     (text) => seen.push(text)
   );
 
@@ -117,33 +120,68 @@ test("why the stream ended is kept, and a reply cut off at the limit keeps back 
   const cut = await readStream(fromLines([
     frame("Writing it now: "),
     frame('{"name": "write_file", "arguments": {"content": "line one'),
-    JSON.stringify({ model: "test", message: { role: "assistant", content: "" }, done: true, done_reason: "length" })
+    frame("", "length")
   ]), (text) => seen.push(text));
 
   assert.equal(cut.doneReason, "length");
   assert.equal(seen.join(""), "Writing it now: ");
   assert.match(cut.content, /line one/, "the caller still gets all of it, to decide what to do with");
 
-  const finished = await readStream(fromLines([frame("All done."), JSON.stringify({ model: "test", done: true, done_reason: "stop" })]));
+  const finished = await readStream(fromLines([frame("All done."), frame("", "stop")]));
   assert.equal(finished.doneReason, "stop");
   assert.equal(finished.content, "All done.");
 });
 
-test("tool calls sent through the interface are carried out", async () => {
-  const withCall = JSON.stringify({
-    model: "test",
-    message: { role: "assistant", content: "", tool_calls: [{ function: { name: "current_datetime" } }] },
-    done: true
-  });
+test("a tool call sent through the interface is put together from its pieces", async () => {
+  // The engine sends a call's name first, then its arguments a few characters
+  // at a time, each piece saying which call it belongs to.
+  const piece = (delta: Record<string, unknown>, finish: string | null = null) =>
+    `data: ${JSON.stringify({ model: "test", choices: [{ index: 0, delta, finish_reason: finish }] })}`;
+  const result = await readStream(fromLines([
+    piece({ role: "assistant", content: null }),
+    piece({ tool_calls: [{ index: 0, id: "abc", type: "function", function: { name: "calculate", arguments: "" } }] }),
+    piece({ tool_calls: [{ index: 0, function: { arguments: '{"expression": ' } }] }),
+    piece({ tool_calls: [{ index: 0, function: { arguments: '"1234 * 5678"}' } }] }),
+    piece({ tool_calls: [{ index: 1, id: "def", type: "function", function: { name: "current_datetime", arguments: "{}" } }] }),
+    piece({}, "tool_calls"),
+    "data: [DONE]"
+  ]));
 
-  const result = await readStream(fromLines([withCall]));
-  assert.ok(Array.isArray(result.toolCalls));
+  assert.deepEqual(result.toolCalls, [
+    { function: { name: "calculate", arguments: '{"expression": "1234 * 5678"}' } },
+    { function: { name: "current_datetime", arguments: "{}" } }
+  ]);
+  assert.equal(result.doneReason, "tool_calls");
+  assert.equal(result.content, "");
   assert.equal(result.model, "test");
+
+  // A reply with no call in it carries none, rather than an empty list.
+  assert.equal((await readStream(fromLines([frame("Just words."), frame("", "stop")]))).toolCalls, undefined);
+});
+
+test("a thinking model's thoughts are not the reply, and never reach the screen", async () => {
+  const seen: string[] = [];
+  const thought = (text: string) =>
+    `data: ${JSON.stringify({ model: "test", choices: [{ index: 0, delta: { reasoning_content: text }, finish_reason: null }] })}`;
+  const result = await readStream(
+    fromLines([thought("The user wants a sum. 17 + 25 is"), thought(" 42."), frame("42"), frame("", "stop")]),
+    (text) => seen.push(text)
+  );
+  assert.equal(seen.join(""), "42");
+  assert.equal(result.content, "42");
+});
+
+test("an error the engine sends part way is a failed request, not a short reply", async () => {
+  const failed = `data: ${JSON.stringify({ error: { code: 500, message: "the request exceeds the available context size", type: "exceed_context_size_error" } })}`;
+  await assert.rejects(
+    readStream(fromLines([frame("It began"), failed])),
+    /exceeds the available context size/
+  );
 });
 
 test("a malformed line is skipped rather than losing the reply", async () => {
   // One unreadable frame is not a reason to drop everything still arriving.
-  const result = await readStream(fromLines([frame("good "), "{not json", frame("parts")]));
+  const result = await readStream(fromLines([frame("good "), "data: {not json", ": a comment line", frame("parts")]));
   assert.equal(result.content, "good parts");
 });
 
@@ -195,19 +233,16 @@ test("a streamed turn produces the same result as an unstreamed one", async () =
   const { runAgent } = await import("../src/services/agentLoop.js");
   const reply = "The answer is forty-two.";
 
-  // One fake model, two shapes: NDJSON frames when stream is true, a single
+  // One fake model, two shapes: an event stream when stream is true, a single
   // object when it is false. Whatever the loop asks for, it gets.
-  const fakeFetch = (async (_url: string, init?: { body?: string }) => {
+  const fakeFetch = (async (url: string, init?: { body?: string }) => {
+    if (String(url).endsWith("/models")) return new Response(JSON.stringify(modelsBody(["fake"])));
     const body = JSON.parse(String(init?.body ?? "{}"));
     if (!body.stream) {
-      return new Response(JSON.stringify({ model: "fake", message: { role: "assistant", content: reply } }));
+      return new Response(JSON.stringify(completionBody("fake", { message: { content: reply } })));
     }
-    const frames = reply.split(" ").map((word, index) => JSON.stringify({
-      model: "fake",
-      message: { role: "assistant", content: index === 0 ? word : ` ${word}` },
-      done: false
-    })).join("\n") + "\n";
-    return new Response(frames);
+    const events = reply.split(" ").map((word, index) => streamEvent("fake", { content: index === 0 ? word : ` ${word}` }));
+    return new Response([...events, streamEvent("fake", {}, "stop"), "data: [DONE]\n\n"].join(""));
   }) as unknown as typeof fetch;
 
   const config = { baseUrl: "http://fake", model: "fake", timeoutMs: 5000 } as never;
@@ -231,9 +266,10 @@ test("without a token callback the request is not streamed at all", async () => 
   const { runAgent } = await import("../src/services/agentLoop.js");
   let askedForStream: unknown = "never called";
 
-  const fakeFetch = (async (_url: string, init?: { body?: string }) => {
+  const fakeFetch = (async (url: string, init?: { body?: string }) => {
+    if (String(url).endsWith("/models")) return new Response(JSON.stringify(modelsBody(["fake"])));
     askedForStream = JSON.parse(String(init?.body ?? "{}")).stream;
-    return new Response(JSON.stringify({ model: "fake", message: { role: "assistant", content: "hi" } }));
+    return new Response(JSON.stringify(completionBody("fake", { message: { content: "hi" } })));
   }) as unknown as typeof fetch;
 
   await runAgent({ baseUrl: "http://fake", model: "fake", timeoutMs: 5000 } as never,

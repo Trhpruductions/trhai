@@ -19,7 +19,7 @@ process.env.ASSIST_KNOWLEDGE_FILE = path.join(dataDir, "knowledge.json");
 process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 process.env.ASCEND_NETWORK_KEY_FILE = path.join(dataDir, "network-access.json");
 // /v1/network asks Ollama what it holds; nothing answers here, and quickly.
-process.env.OLLAMA_BASE_URL = "http://127.0.0.1:1";
+process.env.TRHAI_ENGINE_URL = "http://127.0.0.1:1";
 
 const { createApp } = await import("../src/server.js");
 const { accessKey, accessKeyHeader, guardOtherDevices, isLoopback, listenOn, listenPlan } = await import("../src/services/networkAccess.js");

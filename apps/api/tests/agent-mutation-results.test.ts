@@ -1,13 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
-import { AddressInfo } from "node:net";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { runAgent, withMutationResults, withoutFabricatedLiveClaims } from "../src/services/agentLoop.js";
 import type { ToolContext } from "../src/services/agentTools.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
+import { fakeEngine } from "./helpers/fakeEngine.js";
 
 // Caught live: asked to build a support-ticket tracker, build_app wrote a
 // real project and verified it — "9/9 checks passed" — and the model's final
@@ -102,45 +101,21 @@ test("text with no liveness claim at all is unchanged", () => {
 });
 
 /**
- * A stand-in Ollama that answers with a fixed, unrelated story regardless of
- * what the tool actually reported — reproducing the live failure exactly.
+ * A stand-in engine whose model answers with a fixed, unrelated story
+ * regardless of what the tool actually reported — reproducing the live failure
+ * exactly.
  */
-function fakeModelThatIgnoresToolResults() {
-  return new Promise<{ server: Server; baseUrl: string }>((resolve) => {
-    let turn = 0;
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(chunk as Buffer));
-      request.on("end", () => {
-        turn += 1;
-        response.writeHead(200, { "Content-Type": "application/json" });
-
-        if (turn === 1) {
-          response.end(JSON.stringify({
-            model: "llama3.1:8b",
-            message: {
-              content: "",
-              tool_calls: [{ function: { name: "write_file", arguments: { path: "x.txt", content: "hi" } } }]
-            }
-          }));
-          return;
-        }
-
-        // Ignores the real tool result entirely and narrates something else,
-        // exactly as observed live.
-        response.end(JSON.stringify({
-          model: "llama3.1:8b",
-          message: {
-            content: "The app uses db.js, app.js and ticket-form.js to manage tickets."
-          }
-        }));
-      });
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}` });
-    });
+async function fakeModelThatIgnoresToolResults() {
+  const engine = await fakeEngine({
+    models: ["llama3.1-8b"],
+    reply: [
+      { message: { content: "", tool_calls: [{ function: { name: "write_file", arguments: { path: "x.txt", content: "hi" } } }] } },
+      // Ignores the real tool result entirely and narrates something else,
+      // exactly as observed live.
+      { message: { content: "The app uses db.js, app.js and ticket-form.js to manage tickets." } }
+    ]
   });
+  return { server: engine.server, baseUrl: engine.baseUrl };
 }
 
 test("the real result survives end to end through runAgent, not just the helper", async () => {
@@ -167,44 +142,26 @@ test("the real result survives end to end through runAgent, not just the helper"
   }
 });
 
-/** A stand-in Ollama that calls build_app, then claims the result is live. */
-function fakeModelThatClaimsTheAppIsLive() {
-  return new Promise<{ server: Server; baseUrl: string }>((resolve) => {
-    let turn = 0;
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(chunk as Buffer));
-      request.on("end", () => {
-        turn += 1;
-        response.writeHead(200, { "Content-Type": "application/json" });
-
-        if (turn === 1) {
-          response.end(JSON.stringify({
-            model: "llama3.1:8b",
-            message: {
-              content: "",
-              tool_calls: [{
-                function: {
-                  name: "build_app",
-                  arguments: { description: "Build a support desk where tickets have a title, status and priority" }
-                }
-              }]
+/** A stand-in engine whose model calls build_app, then claims the result is live. */
+async function fakeModelThatClaimsTheAppIsLive() {
+  const engine = await fakeEngine({
+    models: ["llama3.1-8b"],
+    reply: [
+      {
+        message: {
+          content: "",
+          tool_calls: [{
+            function: {
+              name: "build_app",
+              arguments: { description: "Build a support desk where tickets have a title, status and priority" }
             }
-          }));
-          return;
+          }]
         }
-
-        response.end(JSON.stringify({
-          model: "llama3.1:8b",
-          message: { content: "The Support Desk is now live at http://localhost:3000." }
-        }));
-      });
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}` });
-    });
+      },
+      { message: { content: "The Support Desk is now live at http://localhost:3000." } }
+    ]
   });
+  return { server: engine.server, baseUrl: engine.baseUrl };
 }
 
 test("a claimed-live build is corrected end to end through runAgent", async () => {

@@ -81,7 +81,9 @@ export function answeredFromModelAlone(
  * whose whole content was that nothing had been answered.
  */
 export function replyProvenance(strategy: string | undefined, model: string | undefined): string | null {
-  const name = model?.replace(/^ollama\//, "").replace(/:latest$/, "");
+  // "local/" is how the API labels a model's name; replies stored while the
+  // models were Ollama's carry "ollama/", and are read the same way.
+  const name = model?.replace(/^(?:local|ollama)\//, "").replace(/:latest$/, "");
   switch (strategy) {
     case "generated": return name ? `Written by ${name}` : "Written by the local model";
     case "vision": return name ? `Looked at with ${name}` : "Looked at with the vision model";
@@ -115,8 +117,9 @@ export function unanswered(strategy: string | undefined): boolean {
  * orchestrator.ts sets it in exactly one place, on the path where a model
  * produced the text. Everything the composer returns carries one of its own
  * strategies instead. That is better than sniffing the model name for a
- * prefix, which would quietly start lying the day something other than Ollama
- * is wired in.
+ * prefix, which would quietly start lying the day the prefix changed - as it
+ * did, from "ollama/" to "local/", when the models moved to TRH AI's own
+ * engine.
  *
  * Returns null when there is nothing honest to say — no reply yet, or a
  * restored turn recorded before strategy was stored. Not knowing is not the
@@ -129,7 +132,7 @@ export function answerCredit(
   if (!strategy) return null;
   if (strategy === "generated") {
     if (!model) return null;
-    return `Answered by ${model.replace(/^ollama\//, "")}`;
+    return `Answered by ${model.replace(/^(?:local|ollama)\//, "")}`;
   }
   if (strategy === "stopped" || strategy === "error") return null;
   return "Answered directly, without a model";

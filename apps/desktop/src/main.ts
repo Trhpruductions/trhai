@@ -825,153 +825,6 @@ async function waitForApiHealth(timeoutMs: number): Promise<boolean> {
   return false;
 }
 
-/**
- * Where model weights live.
- *
- * Defaults beside the workspace rather than under the user profile: models are
- * gigabytes, and the system drive is usually the one without room for them —
- * on this machine C: was full while the workspace drive had terabytes free.
- * An explicit OLLAMA_MODELS still wins.
- */
-function resolveModelStore(): string {
-  const configured = process.env.OLLAMA_MODELS;
-  if (configured) return configured;
-  return path.join(path.parse(workspaceRoot).root, "Ollama", "models");
-}
-
-/** Where Ollama installs itself on Windows, per user. */
-function localModelBinary(): string {
-  const configured = process.env.OLLAMA_BINARY;
-  if (configured) return configured;
-  const localAppData = process.env.LOCALAPPDATA ?? "";
-  return path.join(localAppData, "Programs", "Ollama", "ollama.exe");
-}
-
-/**
- * Start the local model server if it is installed but not listening.
- *
- * Absence stays fine: with no Ollama installed this does nothing and the
- * assistant behaves exactly as it did before, answering from memory and
- * documents and saying plainly when it has nothing. This only removes the need
- * to start a second application by hand.
- */
-/** How many models a server on this port is actually offering, or null. */
-async function countServedModels(port: number): Promise<number | null> {
-  try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/tags`, {
-      signal: AbortSignal.timeout(2500)
-    });
-    if (!response.ok) return null;
-
-    const payload = await response.json() as { models?: unknown };
-    return Array.isArray(payload.models) ? payload.models.length : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Whether the store this app is configured for actually holds a model. */
-async function modelStoreHasModels(): Promise<boolean> {
-  try {
-    const manifests = path.join(resolveModelStore(), "manifests");
-    await access(manifests, fsConstants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Make sure a model server with actual models is reachable, and say where.
- *
- * Returns the base URL the API should talk to, or null when there is no usable
- * model server — in which case the assistant answers from memory and documents
- * and says plainly that it has no model, exactly as it did before.
- *
- * Absence stays fine: with no Ollama installed this does nothing at all.
- */
-/**
- * Ask a few times before believing a server has nothing to say.
- *
- * A freshly started Ollama accepts connections before it serves /api/tags, so
- * one check is not evidence of anything.
- */
-async function countServedModelsWithRetry(port: number, attempts = 5): Promise<number | null> {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const served = await countServedModels(port);
-    if (served !== null) return served;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-
-  return null;
-}
-
-async function ensureLocalModelServer(): Promise<string | null> {
-  const port = Number(process.env.OLLAMA_PORT ?? 11434);
-  const defaultUrl = `http://127.0.0.1:${port}`;
-
-  if (await waitForPort(port, 800)) {
-    // A listening port is not the same as a usable model server.
-    //
-    // Ollama's tray autostart runs before this app and inherits whatever
-    // environment it was launched with — which on this machine did not include
-    // OLLAMA_MODELS. It then reads an empty default store, serves zero models,
-    // and holds the port. This used to return here on the strength of the port
-    // alone, so the assistant silently lost a model that was installed all
-    // along.
-    // Asked more than once. waitForPort succeeds as soon as something accepts a
-    // TCP connection, which for Ollama is before it will answer /api/tags — so
-    // a single check returns "unknown" during the seconds after boot, and the
-    // app concluded the server was fine and used it. It then ran the whole
-    // session against a server with no models in it.
-    const served = await countServedModelsWithRetry(port);
-
-    // Still unknown after retrying: something is on the port that does not
-    // speak Ollama. Leave it alone rather than fighting whatever it is.
-    if (served === null || served > 0) return defaultUrl;
-    if (!(await modelStoreHasModels())) return defaultUrl;
-
-    // Deliberately not killing it. The tray app supervises that process and
-    // respawns it within seconds, with the same empty environment — so killing
-    // it destroys something the user started and fixes nothing. Standing up a
-    // second server on a port of our own is both non-destructive and reliable.
-    return startOwnModelServer(fallbackModelPort);
-  }
-
-  return startOwnModelServer(port);
-}
-
-/** A port of this app's own, used when the default one is already occupied. */
-const fallbackModelPort = Number(process.env.OLLAMA_FALLBACK_PORT ?? 11435);
-
-/**
- * Start a model server pointed at this app's own store.
- *
- * Told explicitly where the models are: a child inherits its parent's
- * environment block, not the registry, so an OLLAMA_MODELS set after this
- * shell's parent started is invisible here.
- */
-async function startOwnModelServer(port: number): Promise<string | null> {
-  const url = `http://127.0.0.1:${port}`;
-
-  // Already running from a previous launch of this app.
-  if (await waitForPort(port, 400)) {
-    return (await countServedModels(port)) ? url : null;
-  }
-
-  const binary = localModelBinary();
-  if (!(await pathExists(binary))) return null;
-
-  spawnDetachedCommand("Ollama", binary, ["serve"], {
-    OLLAMA_MODELS: resolveModelStore(),
-    OLLAMA_HOST: `127.0.0.1:${port}`
-  });
-
-  // Loading is quick; the model itself is only read on the first question.
-  if (!(await waitForPort(port, 15000))) return null;
-  return url;
-}
-
 async function ensureSelfHostedServices() {
   if (autoStartDisabled) return;
   if (!(await pathExists(path.resolve(workspaceRoot, "package.json")))) return;
@@ -980,19 +833,12 @@ async function ensureSelfHostedServices() {
   const webPortReady = await waitForPort(webPort, 1200);
   const apiReady = apiPortReady ? await waitForApiHealth(2500) : false;
 
-  // The local model server is started here for the same reason the API and web
-  // client are: opening this app should be the only thing the user has to do.
-  // Leaving it to them made Ollama a second app to remember, and the assistant
-  // silently fell back to "I don't have anything saved" whenever it was not
-  // already running.
-  const modelUrl = await ensureLocalModelServer();
-
+  // No model server is started here. The API starts the model engine itself
+  // (llama.cpp - see apps/api/src/services/modelEngine.ts) and stops it when
+  // it stops, so opening this app is still the only thing the user has to do,
+  // and there is no second application for them to install or keep running.
   if (!apiReady) {
-    // The API is told where the model server actually is. When the default port
-    // is held by a server with no models, ours is on a different one, and the
-    // API would otherwise keep asking the empty one.
-    spawnDetachedCommand("Ascend API", "npm.cmd", ["run", "dev:api"],
-      modelUrl ? { OLLAMA_BASE_URL: modelUrl } : undefined);
+    spawnDetachedCommand("Ascend API", "npm.cmd", ["run", "dev:api"]);
   }
 
   if (!webPortReady) {

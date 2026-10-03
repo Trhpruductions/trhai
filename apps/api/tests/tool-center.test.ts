@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
+import { fakeEngine } from "./helpers/fakeEngine.js";
 
 // The Tool center: every tool described for a person, whether it can run on
 // this PC now and why not, and a count of every call that went through.
@@ -121,24 +121,15 @@ test("every call through runTool is counted: a result, no result, held for appro
   assert.equal(describeTools(probe()).find((entry) => entry.name === "calculate")?.usage.uses, 1, "and reach the description");
 });
 
-/** A stand-in Ollama listing a chat model and a vision model. */
-function fakeOllama() {
-  return new Promise<{ server: Server; baseUrl: string }>((resolve) => {
-    const server = createServer((request, response) => {
-      request.resume();
-      request.on("end", () => {
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ models: [{ name: "llama3.2:latest" }, { name: "qwen2.5vl:3b" }] }));
-      });
-    });
-    server.listen(0, "127.0.0.1", () => resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}` }));
-  });
+/** A stand-in engine with a chat model and a vision model. */
+function standInModels() {
+  return fakeEngine({ models: ["llama3.2:latest", "qwen2.5-vl-3b"], vision: ["qwen2.5-vl-3b"] });
 }
 
 test("GET /v1/tools describes every tool, with the model's state and the machine-access switch", async () => {
-  const model = await fakeOllama();
-  const previous = process.env.OLLAMA_BASE_URL;
-  process.env.OLLAMA_BASE_URL = model.baseUrl;
+  const model = await standInModels();
+  const previous = process.env.TRHAI_ENGINE_URL;
+  process.env.TRHAI_ENGINE_URL = model.baseUrl;
   const app = createApp().listen(0);
   await once(app, "listening");
   try {
@@ -155,8 +146,8 @@ test("GET /v1/tools describes every tool, with the model's state and the machine
       assert.equal(typeof entry.usage.uses, "number");
     }
   } finally {
-    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
-    else process.env.OLLAMA_BASE_URL = previous;
+    if (previous === undefined) delete process.env.TRHAI_ENGINE_URL;
+    else process.env.TRHAI_ENGINE_URL = previous;
     await new Promise<void>((resolve) => app.close(() => resolve()));
     model.server.close();
   }

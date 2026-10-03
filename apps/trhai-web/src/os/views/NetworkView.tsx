@@ -21,7 +21,7 @@ type NetworkInfo = {
   interfaces: Array<{ name: string; address: string; family: "IPv4" | "IPv6"; internal: boolean }>;
   service: Listening;
   access: NetworkAccess;
-  ollama: { baseUrl: string; reachable: boolean };
+  engine: { baseUrl: string; reachable: boolean };
   apps: Array<{ project: string; port: number; url: string }>;
 };
 
@@ -137,9 +137,9 @@ export function NetworkView() {
                 <li><span className="os-dot ok" aria-hidden="true" /><span>This page</span><span className="os-mono os-faint">{pageOrigin}</span></li>
                 <li><span className={`os-dot ${info?.service ? "ok" : ""}`} aria-hidden="true" /><span>TRH AI&rsquo;s service</span><span className="os-mono os-faint">port {info?.service?.port ?? "—"}</span></li>
                 <li>
-                  <span className={`os-dot ${info ? (info.ollama.reachable ? "ok" : "danger") : ""}`} aria-hidden="true" />
-                  <span>Ollama - the model runtime</span>
-                  <span className="os-mono os-faint">{info?.ollama.baseUrl.replace(/^https?:\/\//, "") ?? "—"}{info && !info.ollama.reachable ? " · not answering" : ""}</span>
+                  <span className={`os-dot ${info ? (info.engine.reachable ? "ok" : "danger") : ""}`} aria-hidden="true" />
+                  <span>The model engine (llama.cpp)</span>
+                  <span className="os-mono os-faint">{info?.engine.baseUrl.replace(/^https?:\/\//, "") ?? "—"}{info && !info.engine.reachable ? " · not answering" : ""}</span>
                 </li>
                 {info?.apps.map((app) => (
                   <li key={app.project}>

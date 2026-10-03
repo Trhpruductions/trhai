@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
-import { AddressInfo } from "node:net";
+import { fakeEngine } from "./helpers/fakeEngine.js";
 import {
   runAssistantOrchestrator, parseSaveDocumentRequest, isListDocumentsRequest, parsePlanAppRequest,
   parseAppendDocumentRequest, parseSearchDocumentsRequest, parseDeleteDocumentRequest, parseDeleteAppRequest, parseClearAppsRequest
@@ -9,63 +8,25 @@ import {
 import { resetPendingConfirmations } from "../src/services/pendingConfirmation.js";
 
 /**
- * A stand-in Ollama that answers everything.
+ * A stand-in engine that answers everything.
  *
  * These tests are about what the orchestrator does with a generated reply, not
  * about inference, so the model always succeeds and always says the same thing.
+ * `received` is every chat request it was sent, in order.
  */
-function fakeOllama(reply: string) {
-  const received: Array<Record<string, unknown>> = [];
-
-  return new Promise<{ server: Server; baseUrl: string; received: typeof received }>((resolve) => {
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(chunk as Buffer));
-      request.on("end", () => {
-        response.writeHead(200, { "Content-Type": "application/json" });
-
-        if (request.url?.startsWith("/api/tags")) {
-          response.end(JSON.stringify({ models: [{ name: "llama3.2:latest" }] }));
-          return;
-        }
-
-        if (chunks.length) {
-          received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        }
-
-        // The orchestrator drives the agent loop, which speaks /api/chat. The
-        // older /api/generate shape is kept for anything still calling it.
-        response.end(JSON.stringify(
-          request.url?.startsWith("/api/chat")
-            ? { model: "llama3.2:latest", message: { content: reply } }
-            : { model: "llama3.2:latest", response: reply }
-        ));
-      });
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      resolve({
-        server,
-        baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-        received
-      });
-    });
-  });
-}
-
 async function withFakeModel<T>(
   reply: string,
   run: (received: Array<Record<string, unknown>>) => Promise<T>
 ): Promise<T> {
-  const { server, baseUrl, received } = await fakeOllama(reply);
-  const previous = process.env.OLLAMA_BASE_URL;
-  process.env.OLLAMA_BASE_URL = baseUrl;
+  const { server, baseUrl, chats: received } = await fakeEngine({ reply: { message: { content: reply } } });
+  const previous = process.env.TRHAI_ENGINE_URL;
+  process.env.TRHAI_ENGINE_URL = baseUrl;
 
   try {
     return await run(received);
   } finally {
-    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
-    else process.env.OLLAMA_BASE_URL = previous;
+    if (previous === undefined) delete process.env.TRHAI_ENGINE_URL;
+    else process.env.TRHAI_ENGINE_URL = previous;
     server.close();
   }
 }
@@ -474,10 +435,10 @@ test("a build request reaches the model so it can build", async () => {
 test("a build request still carries what to build when there is no model", async () => {
   // With nothing to generate an answer, the deterministic plan is still the
   // right reply, and the "Build this" control still needs its request text.
-  const previous = process.env.OLLAMA_BASE_URL;
+  const previous = process.env.TRHAI_ENGINE_URL;
   // A port nothing is listening on, so availability fails fast and the
   // orchestrator falls back exactly as it would on a machine with no Ollama.
-  process.env.OLLAMA_BASE_URL = "http://127.0.0.1:9";
+  process.env.TRHAI_ENGINE_URL = "http://127.0.0.1:9";
 
   try {
     const result = await runAssistantOrchestrator({
@@ -488,8 +449,8 @@ test("a build request still carries what to build when there is no model", async
     assert.equal(result.strategy, "plan");
     assert.ok(result.buildRequest, "a create request must still carry a build request");
   } finally {
-    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
-    else process.env.OLLAMA_BASE_URL = previous;
+    if (previous === undefined) delete process.env.TRHAI_ENGINE_URL;
+    else process.env.TRHAI_ENGINE_URL = previous;
   }
 });
 
@@ -499,8 +460,8 @@ test("a web lookup with no model says so, instead of a canned deploy plan", asyn
   // deploy task and the plan is the composer's model-unavailable fallback. A
   // web search needs the model to drive it, so with no model the honest answer
   // is that it could not run - not a plan for something the user never asked.
-  const previous = process.env.OLLAMA_BASE_URL;
-  process.env.OLLAMA_BASE_URL = "http://127.0.0.1:9";
+  const previous = process.env.TRHAI_ENGINE_URL;
+  process.env.TRHAI_ENGINE_URL = "http://127.0.0.1:9";
 
   try {
     const result = await runAssistantOrchestrator({
@@ -512,8 +473,8 @@ test("a web lookup with no model says so, instead of a canned deploy plan", asyn
     assert.doesNotMatch(result.assistantMessage, /deploy|rollback|flag/i);
     assert.match(result.assistantMessage, /web search|model/i);
   } finally {
-    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
-    else process.env.OLLAMA_BASE_URL = previous;
+    if (previous === undefined) delete process.env.TRHAI_ENGINE_URL;
+    else process.env.TRHAI_ENGINE_URL = previous;
   }
 });
 

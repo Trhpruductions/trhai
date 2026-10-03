@@ -23,7 +23,7 @@ export type ToolCapability = {
 };
 
 export type SystemCapabilities = {
-  /** e.g. "ollama/llama3.2:latest", or null when no local model is running. */
+  /** e.g. "local/qwen2.5-coder-7b", or null when no local model is running. */
   model: string | null;
   /** Every registered tool, in the order the model sees them. */
   tools: ToolCapability[];

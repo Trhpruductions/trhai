@@ -123,7 +123,7 @@ import {
 import { readAppManifest, searchFiles } from "./services/agentTools.js";
 import { checkUrlShape, readWebPage } from "./services/webFetch.js";
 import { webSearch } from "./services/webSearch.js";
-import { internetCheck, networkInterfaces, ollamaRuntime, serviceStatus, unloadModel } from "./services/runtimeStatus.js";
+import { engineRuntime, internetCheck, networkInterfaces, serviceStatus, unloadModel } from "./services/runtimeStatus.js";
 import { accessKey, accessKeyHeader, guardOtherDevices, isLoopback } from "./services/networkAccess.js";
 import { persistenceFailures } from "./services/persistenceHealth.js";
 import { lockedProtectedFiles } from "./services/protectedJson.js";
@@ -377,7 +377,11 @@ function userTurnText(message: string, req: express.Request): string {
  */
 async function generateWithModel(prompt: string, cancel?: AbortSignal) {
   const base = readLocalModelConfig();
-  const result = await generate({ ...base, timeoutMs: Math.max(base.timeoutMs, 120000) },
+  // The configured model when it is there, and otherwise the model a chat
+  // turn would fall back to - not a name the engine has no model for.
+  const availability = await checkAvailability(base);
+  const model = availability.available ? availability.model : base.model;
+  const result = await generate({ ...base, model, timeoutMs: Math.max(base.timeoutMs, 120000) },
     { question: prompt, context: [], rawPrompt: prompt }, fetch, cancel);
   return result.ok ? { ok: true as const, text: result.text, model: result.model } : { ok: false as const, reason: result.reason };
 }
@@ -1342,15 +1346,15 @@ export function createApp(options: AppOptions = {}) {
     res.json({ data: { flow: saved }, traceId: "trace-local" });
   });
 
-  // TRH AI's own service and the model runtime under it: the process, what it
-  // listens on, the models Ollama has in memory now and where, and any store
-  // that cannot be saved or read. For the System workspace.
+  // TRH AI's own service and the model engine under it: the process, what it
+  // listens on, the model the engine has in memory now and the window it gave
+  // it, and any store that cannot be saved or read. For the System workspace.
   app.get("/v1/system/runtime", async (_req, res) => {
     const config = readLocalModelConfig();
     res.json({
       data: {
         service: serviceStatus(),
-        ollama: { baseUrl: config.baseUrl, ...(await ollamaRuntime(config.baseUrl)) },
+        engine: { baseUrl: config.baseUrl, ...(await engineRuntime(config.baseUrl)) },
         stores: { failing: persistenceFailures(), locked: lockedProtectedFiles() }
       },
       traceId: "trace-local"
@@ -1364,8 +1368,8 @@ export function createApp(options: AppOptions = {}) {
     res.json({ data: dataInventory(), traceId: "trace-local" });
   });
 
-  // Free a model's memory now - the graphics card's, mostly - instead of when
-  // its keep-alive runs out. The next request that needs it loads it again.
+  // Free a model's memory now - the graphics card's, mostly - instead of after
+  // it has sat idle. The next request that needs it loads it again.
   app.post("/v1/system/models/unload", async (req, res) => {
     const name = req.body?.name;
     if (!isModelName(name)) {
@@ -1386,7 +1390,7 @@ export function createApp(options: AppOptions = {}) {
   // with their ports.
   app.get("/v1/network", async (req, res) => {
     const config = readLocalModelConfig();
-    const ollama = await ollamaRuntime(config.baseUrl);
+    const engine = await engineRuntime(config.baseUrl);
     res.json({
       data: {
         interfaces: networkInterfaces(),
@@ -1394,7 +1398,7 @@ export function createApp(options: AppOptions = {}) {
         // The key is shown on this PC, to be typed into another device - never
         // to a device asking for it over the network.
         access: { otherDevices, header: accessKeyHeader, key: otherDevices && isLoopback(req.socket.remoteAddress) ? key : null },
-        ollama: { baseUrl: config.baseUrl, reachable: ollama.reachable },
+        engine: { baseUrl: config.baseUrl, reachable: engine.reachable },
         apps: listRunningApps().map((running) => ({ project: running.project, port: running.port, url: running.url }))
       },
       traceId: "trace-local"

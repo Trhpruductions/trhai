@@ -8,7 +8,7 @@ import { AddressInfo } from "node:net";
 import { once } from "node:events";
 
 // The System and Network workspaces' readings: the service as it runs, the
-// models Ollama holds in memory, unloading one, this PC's addresses, and an
+// model the engine holds in memory, unloading it, this PC's addresses, and an
 // internet check that measures once when asked.
 
 const dataDir = mkdtempSync(path.join(tmpdir(), "ascend-system-network-"));
@@ -20,15 +20,19 @@ process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 
 const { createApp } = await import("../src/server.js");
 const {
-  internetCheck, networkInterfaces, noteListening, ollamaRuntime, reachableFromNetwork, serviceStatus, unloadModel
+  engineRuntime, internetCheck, networkInterfaces, noteListening, reachableFromNetwork, serviceStatus, unloadModel
 } = await import("../src/services/runtimeStatus.js");
 
 test.after(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-/** A stand-in Ollama: one model loaded, two installed; it remembers what it was asked. */
-function fakeOllama() {
+/**
+ * A stand-in engine: two models, one of them loaded - which is all the engine
+ * ever holds, and the only one it gives a size and a window for. It remembers
+ * what it was asked.
+ */
+function standInEngine() {
   const asked: Array<{ url: string; body: string }> = [];
   return new Promise<{ server: Server; baseUrl: string; asked: typeof asked }>((resolve) => {
     const server = createServer((request, response) => {
@@ -37,14 +41,17 @@ function fakeOllama() {
       request.on("end", () => {
         asked.push({ url: request.url ?? "", body: Buffer.concat(chunks).toString("utf8") });
         response.writeHead(200, { "Content-Type": "application/json" });
-        if (request.url === "/api/ps") {
-          response.end(JSON.stringify({ models: [{ name: "qwen2.5:3b", size: 2_700_000_000, size_vram: 2_700_000_000, expires_at: "2026-10-02T10:05:00Z" }] }));
-        } else if (request.url === "/api/tags") {
-          response.end(JSON.stringify({ models: [{ name: "qwen2.5:3b", size: 1_900_000_000 }, { name: "qwen2.5-coder:7b", size: 4_700_000_000 }] }));
-        } else if (request.url === "/api/version") {
-          response.end(JSON.stringify({ version: "0.12.3" }));
+        if (request.url === "/models") {
+          response.end(JSON.stringify({
+            data: [
+              { id: "qwen2.5-3b", status: { value: "loaded" }, meta: { n_ctx: 32768, size: 1_900_000_000 }, architecture: { input_modalities: ["text"] } },
+              { id: "qwen2.5-coder-7b", status: { value: "unloaded" }, architecture: { input_modalities: ["text"] } }
+            ]
+          }));
+        } else if (request.url === "/props") {
+          response.end(JSON.stringify({ build_info: "b11366-2923cf286" }));
         } else {
-          response.end(JSON.stringify({ done: true, done_reason: "unload" }));
+          response.end(JSON.stringify({ success: true }));
         }
       });
     });
@@ -80,31 +87,34 @@ test("the service reports itself as it runs, and what it actually listens on", (
   });
 });
 
-test("what Ollama holds in memory and has installed is read from Ollama", async () => {
-  const ollama = await fakeOllama();
+test("what the engine holds in memory and has installed is read from the engine", async () => {
+  const engine = await standInEngine();
   try {
-    const runtime = await ollamaRuntime(ollama.baseUrl);
+    const runtime = await engineRuntime(engine.baseUrl);
     assert.equal(runtime.reachable, true);
-    assert.equal(runtime.version, "0.12.3");
-    assert.deepEqual(runtime.loaded, [{ name: "qwen2.5:3b", sizeBytes: 2_700_000_000, vramBytes: 2_700_000_000, expiresAt: "2026-10-02T10:05:00Z" }]);
-    assert.deepEqual(runtime.installed.map((model) => model.name), ["qwen2.5:3b", "qwen2.5-coder:7b"]);
+    assert.equal(runtime.version, "b11366-2923cf286");
+    // The loaded model, with the window the engine gave it on this card.
+    assert.deepEqual(runtime.loaded, [{ name: "qwen2.5-3b", sizeBytes: 1_900_000_000, windowTokens: 32768 }]);
+    assert.deepEqual(runtime.installed.map((model) => model.name), ["qwen2.5-3b", "qwen2.5-coder-7b"]);
+    assert.equal(runtime.idleUnloadSeconds, 300, "how long a loaded model may sit unused");
   } finally {
-    ollama.server.close();
+    engine.server.close();
   }
-  const away = await ollamaRuntime("http://127.0.0.1:1");
-  assert.deepEqual(away, { reachable: false, version: null, loaded: [], installed: [] });
+  const away = await engineRuntime("http://127.0.0.1:1");
+  assert.deepEqual(away, { reachable: false, version: null, loaded: [], installed: [], idleUnloadSeconds: 300, reason: null });
 });
 
-test("unloading asks Ollama the way Ollama documents: keep_alive 0, no prompt", async () => {
-  const ollama = await fakeOllama();
+test("unloading asks the engine to let that model go, under the engine's own name for it", async () => {
+  const engine = await standInEngine();
   try {
-    assert.deepEqual(await unloadModel(ollama.baseUrl, "qwen2.5:3b"), { ok: true });
-    const request = ollama.asked.find((entry) => entry.url === "/api/generate");
-    assert.deepEqual(JSON.parse(request?.body ?? "{}"), { model: "qwen2.5:3b", keep_alive: 0 });
+    // Named the way a conversation saved under Ollama names it.
+    assert.deepEqual(await unloadModel(engine.baseUrl, "qwen2.5:3b"), { ok: true });
+    const request = engine.asked.find((entry) => entry.url === "/models/unload");
+    assert.deepEqual(JSON.parse(request?.body ?? "{}"), { model: "qwen2.5-3b" });
   } finally {
-    ollama.server.close();
+    engine.server.close();
   }
-  assert.equal((await unloadModel("http://127.0.0.1:1", "qwen2.5:3b")).ok, false);
+  assert.equal((await unloadModel("http://127.0.0.1:1", "qwen2.5-3b")).ok, false);
 });
 
 test("this PC's addresses are listed, loopback among them", () => {
@@ -122,27 +132,28 @@ test("the internet check measures one request, and says plainly when nothing ans
 });
 
 test("the routes: runtime and network read through, and an unload needs a model's name", async () => {
-  const ollama = await fakeOllama();
-  const previous = process.env.OLLAMA_BASE_URL;
-  process.env.OLLAMA_BASE_URL = ollama.baseUrl;
+  const engine = await standInEngine();
+  const previous = process.env.TRHAI_ENGINE_URL;
+  process.env.TRHAI_ENGINE_URL = engine.baseUrl;
   const app = createApp().listen(0);
   await once(app, "listening");
   const baseUrl = `http://127.0.0.1:${(app.address() as AddressInfo).port}`;
   try {
     const runtime = await (await fetch(`${baseUrl}/v1/system/runtime`)).json() as any;
-    assert.equal(runtime.data.ollama.loaded[0].name, "qwen2.5:3b");
+    assert.equal(runtime.data.engine.loaded[0].name, "qwen2.5-3b");
+    assert.equal(runtime.data.engine.loaded[0].windowTokens, 32768);
     assert.ok(Array.isArray(runtime.data.stores.failing));
     const network = await (await fetch(`${baseUrl}/v1/network`)).json() as any;
     assert.ok(network.data.interfaces.length > 0);
-    assert.equal(network.data.ollama.reachable, true);
+    assert.equal(network.data.engine.reachable, true);
     const refused = await fetch(`${baseUrl}/v1/system/models/unload`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "" }) });
     assert.equal(refused.status, 400);
-    const unloaded = await fetch(`${baseUrl}/v1/system/models/unload`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "qwen2.5:3b" }) });
+    const unloaded = await fetch(`${baseUrl}/v1/system/models/unload`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "qwen2.5-3b" }) });
     assert.equal(unloaded.status, 200);
   } finally {
-    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
-    else process.env.OLLAMA_BASE_URL = previous;
+    if (previous === undefined) delete process.env.TRHAI_ENGINE_URL;
+    else process.env.TRHAI_ENGINE_URL = previous;
     await new Promise<void>((resolve) => app.close(() => resolve()));
-    ollama.server.close();
+    engine.server.close();
   }
 });

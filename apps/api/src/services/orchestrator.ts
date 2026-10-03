@@ -388,7 +388,7 @@ export async function runAssistantOrchestrator(
     if (availability.available) {
       return {
         ...toResult(modelReply),
-        assistantMessage: buildCapabilityReply(`ollama/${availability.model}`)
+        assistantMessage: buildCapabilityReply(`local/${availability.model}`)
       };
     }
   }
@@ -622,8 +622,8 @@ export async function runAssistantOrchestrator(
       const text = attempt.kind === "unavailable"
         ? "I couldn't run that web search just now - the local model that drives it isn't "
           + "available. Nothing was changed, and no plan was made. Try again in a moment."
-        : `I couldn't finish that web search. ${attempt.reason} Nothing was changed, and no plan was made. `
-          + "Try again in a moment.";
+        : `I couldn't finish that web search. ${attempt.reason} Nothing was changed, and no plan was made.`
+          + (attempt.final ? "" : " Try again in a moment.");
       return {
         model: "memory",
         assistantMessage: text,
@@ -664,9 +664,11 @@ export async function runAssistantOrchestrator(
     // answered from the user's own notes is still given.
     if (!attempt.ok && attempt.kind === "failed" && !deterministicBuild) {
       const answered = isPartialAnswer ? modelReply.output : "";
+      // Not where trying again would be refused the same way.
+      const again = attempt.final ? "" : " Try again in a moment.";
       const text = answered
-        ? `${answered}\n\nI couldn't finish the rest. ${attempt.reason} Try again in a moment.`
-        : `I couldn't finish that. ${attempt.reason} Try again in a moment.`;
+        ? `${answered}\n\nI couldn't finish the rest. ${attempt.reason}${again}`
+        : `I couldn't finish that. ${attempt.reason}${again}`;
       return {
         model: "memory",
         assistantMessage: text,
@@ -789,7 +791,7 @@ async function resolveImages(input: OrchestratorInput): Promise<OrchestratorResu
   if (!seen.ok) {
     return { ...deterministicResult(question, seen.reason, "failed"), model: "memory" };
   }
-  return { ...deterministicResult(question, seen.text, "vision"), model: `ollama/${seen.model}` };
+  return { ...deterministicResult(question, seen.text, "vision"), model: `local/${seen.model}` };
 }
 
 /**
@@ -893,7 +895,7 @@ async function resolveDocumentSummary(input: OrchestratorInput, asked: string): 
     { focus: summaryFocus(asked), generate: input.generateText, cancel: input.cancel });
   if (!written.ok && input.cancel?.aborted) return deterministicResult(asked, stoppedBeforeFinishing, "stopped");
   if (!written.ok) return deterministicResult(asked, written.reason, "failed");
-  return { ...deterministicResult(asked, written.text, "generated"), model: written.model ? `ollama/${written.model}` : "local" };
+  return { ...deterministicResult(asked, written.text, "generated"), model: written.model ? `local/${written.model}` : "local" };
 }
 
 /** A reply written here, by neither a model nor the composer. */
@@ -1931,14 +1933,20 @@ type LocalModelAttempt =
      * it finished. "failed": a model took it and came back without an answer.
      */
     kind: "unavailable" | "stopped" | "failed";
+    /**
+     * True when asking again would end the same way - the request is longer
+     * than the model's window - so the reply does not suggest it.
+     */
+    final?: boolean;
   };
 
 /**
  * Ask a local model, or say why that could not produce an answer.
  *
- * Availability is checked per request rather than cached. A user starts Ollama
- * after the API, or stops it mid-session, and a cached "unavailable" would keep
- * the feature dark until a restart for no reason the user could see.
+ * Availability is checked per request rather than cached. The engine can stop
+ * mid-session, or still be starting when the first question arrives, and a
+ * cached "unavailable" would keep the feature dark until a restart for no
+ * reason the user could see.
  */
 async function answerWithLocalModel(
   input: OrchestratorInput,
@@ -1984,7 +1992,7 @@ async function answerWithLocalModel(
   // Worked down in order rather than betting on one.
   //
   // A model that is listed is not a model that will load. Asked to answer,
-  // Ollama returned 500 "cudaMalloc failed: out of memory" for the 8B model
+  // the engine returned 500 "cudaMalloc failed: out of memory" for the 8B model
   // and a failed CPU buffer allocation for the 3B one — while the app went on
   // reporting the first as available and silently falling back on every single
   // question, with nothing on screen to say why.
@@ -2053,7 +2061,7 @@ async function answerWithLocalModel(
     // result depended on whether the PC running the suite had a phone linked.
     ...(input.messaging ? { messaging: input.messaging } : {}),
     // And the same vision model the images route uses, so look_at_image in
-    // the loop sees what a test's stand-in sees rather than the real Ollama.
+    // the loop sees what a test's stand-in sees rather than the real engine.
     ...(input.vision ? { vision: input.vision } : {}),
     // And the same sensors resolveMachineReading reads.
     ...(input.readTelemetry ? { readTelemetry: input.readTelemetry } : {}),
@@ -2075,7 +2083,7 @@ async function answerWithLocalModel(
       return {
         ok: true,
         text: result.text,
-        model: `ollama/${result.model}`,
+        model: `local/${result.model}`,
         toolsUsed: result.toolsUsed,
         ...(result.awaitingConfirmation ? { awaitingConfirmation: result.awaitingConfirmation } : {})
       };
@@ -2097,7 +2105,7 @@ async function answerWithLocalModel(
     // anywhere said the model had been asked and had failed.
     if (!result.modelUnusable) {
       console.warn(`[assist] ${model} could not answer: ${result.reason}`);
-      return { ok: false, kind: "failed", reason: result.reason };
+      return { ok: false, kind: "failed", reason: result.reason, ...(result.tooLong ? { final: true } : {}) };
     }
     // Never once something has changed. The next model starts the request
     // from the beginning, so it would make the same change a second time -

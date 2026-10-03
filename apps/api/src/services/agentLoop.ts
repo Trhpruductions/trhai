@@ -1,4 +1,8 @@
-import { contextWindow, modelOptions, noReplyWithin, replyTooLong, unfinishedWithin, type LocalModelConfig } from "./localModel.js";
+import {
+  contextWindow, modelOptions, noReplyWithin, promptTooLong, replyTooLong, unfinishedWithin, type LocalModelConfig
+} from "./localModel.js";
+import { loadEngineModel } from "./modelEngine.js";
+import { engineError, readCompletion, toWireMessages } from "./engineChat.js";
 import { recordContextUse } from "./contextUse.js";
 import { estimateTokens, fitPromptToWindow, fitToolResult, promptBudgetTokens, requestTokens } from "./contextBudget.js";
 import { sendingTools } from "./messaging.js";
@@ -46,7 +50,7 @@ import { increment, observe } from "./metrics.js";
 // verbatim; the loop never quietly substitutes a better-sounding result. What
 // the assistant says afterwards is still labelled as generated.
 
-/** A message in the running exchange, in Ollama's chat shape. */
+/** A message in the running exchange, as the loop keeps it. engineChat.ts turns it into the engine's shape. */
 type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
@@ -107,12 +111,18 @@ export type AgentResult =
     toolsUsed: ToolOutcome[];
     /**
      * True when this model could not be loaded at all, as opposed to loading
-     * and then failing to answer. Ollama reports an out-of-memory or a failed
-     * buffer allocation as a 500, and whether a given model fits depends on
-     * what else the machine is doing — so the caller can usefully try a
+     * and then failing to answer. The engine reports an out-of-memory or a
+     * failed buffer allocation as a 500, and whether a given model fits depends
+     * on what else the machine is doing — so the caller can usefully try a
      * smaller one instead of giving up.
      */
     modelUnusable?: boolean;
+    /**
+     * True when the engine refused the request as longer than the model's
+     * window. Asking again gets the same refusal, so the caller does not
+     * suggest it.
+     */
+    tooLong?: boolean;
     /**
      * True when the user stopped this turn, rather than it failing.
      *
@@ -689,7 +699,7 @@ export function withoutFabricatedLiveClaims(text: string): string {
   return kept.join(" ").trim();
 }
 
-/** Ollama's reply to a chat turn. */
+/** A reply to a chat turn, as the loop keeps it. */
 type ChatResponse = {
   message?: {
     content?: unknown;
@@ -1226,8 +1236,9 @@ function parseToolCalls(response: ChatResponse): ToolCall[] {
     const name = call.function?.name;
     if (typeof name !== "string" || !name) return [];
 
-    // Ollama sends an object; some builds send a JSON string. Both appear in
-    // the wild, and a thrown parse error here would lose the whole reply.
+    // The engine sends a JSON string; a model that writes its call as text
+    // gives an object. Both arrive here, and a thrown parse error would lose
+    // the whole reply.
     const raw = call.function?.arguments;
     let parsed: Record<string, unknown> = {};
     if (raw && typeof raw === "object") {
@@ -1249,7 +1260,7 @@ function parseToolCalls(response: ChatResponse): ToolCall[] {
  * last of its reply, and the caller's way to end it sooner.
  *
  * Held until the caller releases it, not until fetch() resolves. fetch()
- * resolves when the headers arrive, and Ollama sends those with a streamed
+ * resolves when the headers arrive, and the engine sends those with a streamed
  * reply's first words. When this wrapped fetch() alone, the timer and the Stop
  * relay were both let go of just as a streamed reply began, and from then on
  * nothing ended it: the model wrote on until it was done, holding the GPU,
@@ -1330,6 +1341,19 @@ export async function runAgent(
   unattended?: boolean,
   cancel?: AbortSignal
 ): Promise<AgentResult> {
+  // The model is loaded before anything is measured against its window. The
+  // engine fits the window to the graphics card as it loads the model, so
+  // what the prompt has to fit in is only known afterwards - 9,216 tokens for
+  // an 8B model on an 8 GB card, 31,232 for a 7B one. A model that will not
+  // load is said to be unusable, so the caller can try the next.
+  const loaded = await loadEngineModel(config.baseUrl, config.model, { fetchImpl, signal: cancel, timeoutMs: config.timeoutMs });
+  if (!loaded.ok) {
+    return cancel?.aborted
+      ? { ok: false, reason: "Stopped.", toolsUsed: [], stopped: true }
+      : { ok: false, reason: loaded.reason, toolsUsed: [], modelUnusable: true };
+  }
+  config = { ...config, model: loaded.id, contextTokens: loaded.windowTokens };
+
   // The date is stated outright rather than left to a tool call.
   //
   // current_datetime exists and works, and the prompt tells the model to use
@@ -1764,9 +1788,10 @@ export async function runAgent(
       : [];
     const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));
 
-    // Measured before it is sent, and made to fit. Past the window Ollama
-    // cuts from the front without a word, and the front is the rules - so
-    // earlier results give way instead, saying what they left out.
+    // Measured before it is sent, and made to fit. Past the window the engine
+    // refuses the request (Ollama, before it, cut it from the front without a
+    // word, and the front is the rules) - so earlier results give way
+    // instead, saying what they left out.
     const toolsTokens = offerTools ? estimateTokens(JSON.stringify(offeredTools)) : 0;
     const budget = promptBudgetTokens(contextWindow(config));
     const shortenedBy = fitPromptToWindow(messages, toolsTokens, budget, neverShortened);
@@ -1777,7 +1802,7 @@ export async function runAgent(
       // Everything that could give has given. Said where someone looking at
       // the log can see it, because what happens next is the silent cut.
       console.warn(`[agent] the prompt is still ~${promptSize} tokens for a ${budget}-token budget after shortening; `
-        + "raise OLLAMA_NUM_CTX if replies start ignoring the rules");
+        + `${config.model} has a ${contextWindow(config)}-token window on this card, and the engine may refuse the request`);
     } else if (process.env.ASSIST_DEBUG) {
       console.log(`[agent] prompt ~${promptSize} of ${budget} tokens`
         + (shortenedBy ? `, earlier results shortened by ~${shortenedBy} tokens` : ""));
@@ -1791,20 +1816,19 @@ export async function runAgent(
     // time part way through it is not reported as no reply at all.
     let begun = false;
     try {
-      const raw = await fetchImpl(`${config.baseUrl}/api/chat`, {
+      const raw = await fetchImpl(`${config.baseUrl}/v1/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: config.model,
-          messages,
+          // The loop's own messages, in the engine's format.
+          messages: toWireMessages(messages),
           // Streamed only when someone is listening. Tokens are useless to
           // a caller that cannot show them, and the unstreamed path is the
           // one every existing test exercises.
           stream: Boolean(onToken),
-          // The window the whole prompt fits in. Without it Ollama ran the
-          // model at 4,096 tokens and cut every longer prompt from the front,
-          // rules first - see defaultContextTokens.
-          options: modelOptions(config),
+          // The reply limit: one window, the one the model was loaded with.
+          ...modelOptions(config),
           // Withheld while disarmed rather than offered and refused: a
           // model that can see run_command will reason about it and try to
           // talk its way into it; one that never sees it cannot.
@@ -1819,7 +1843,11 @@ export async function runAgent(
         // however many times it is asked — a different model might.
         const detail = await raw.text().catch(() => "");
         const unusable = raw.status >= 500
-          && /out of memory|failed to allocate|terminated|no space/i.test(detail);
+          && /out of memory|failed to allocate|failed to load|terminated|no space/i.test(detail);
+        // Refused as longer than the model's window. Everything that could
+        // give way already has, so this is the request itself, and neither
+        // another try nor another model's turn at it is any use.
+        const tooLong = !unusable && /exceeds the available context size|exceed_context_size/i.test(detail);
 
         // Not handed to another model once something has changed: it would
         // start over and change it again.
@@ -1829,10 +1857,11 @@ export async function runAgent(
         return {
           ok: false,
           reason: unusable
-            ? `${config.model} could not be loaded: ${firstLine(detail)}`
-            : `The local model answered ${raw.status}.`,
+            ? `${config.model} could not be loaded: ${firstLine(engineError(detail))}`
+            : tooLong ? promptTooLong(config) : `The local model answered ${raw.status}.`,
           toolsUsed,
-          modelUnusable: unusable
+          modelUnusable: unusable,
+          ...(tooLong ? { tooLong: true } : {})
         };
       }
 
@@ -1858,7 +1887,12 @@ export async function runAgent(
           ...(streamed.doneReason ? { done_reason: streamed.doneReason } : {})
         } as ChatResponse;
       } else {
-        response = await raw.json() as ChatResponse;
+        const reply = readCompletion(await raw.json(), config.model);
+        response = {
+          model: reply.model,
+          message: { role: "assistant", content: reply.content, ...(reply.toolCalls ? { tool_calls: reply.toolCalls } : {}) },
+          ...(reply.finishReason ? { done_reason: reply.finishReason } : {})
+        } as ChatResponse;
       }
     } catch (error) {
       // Stopped on purpose is not a fault. Both arrive here as an AbortError,

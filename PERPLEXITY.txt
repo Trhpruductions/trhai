@@ -20,7 +20,7 @@ Architecture
   - Express + TypeScript API on port 4000
   - Next.js 16 / React 19 single-page UI on port 3210
   - Electron desktop shell that starts both
-  - All models run locally via Ollama
+  - All models run locally, in the app's own model engine (llama.cpp's server)
 
 Local models installed
   vexora:latest      1.9 GB   general conversation

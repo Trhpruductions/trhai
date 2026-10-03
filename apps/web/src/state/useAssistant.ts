@@ -19,7 +19,7 @@ export type ChatMessage = {
   at: number;
   /** How the reply was produced. Absent on user turns. */
   strategy?: string;
-  /** Which engine answered, e.g. "ollama/llama3.2:latest". */
+  /** Which model answered, e.g. "local/qwen2.5-coder-7b". */
   model?: string;
   /** Set when the assistant decided this was a request to build software. */
   buildRequest?: string;

@@ -445,7 +445,7 @@ export function buildCapabilityReply(localModel?: string): string {
 
   const closing = localModel
     ? "What I answer from memory or your documents is quoted with its source. Anything else is written by the model."
-    : "Install Ollama and pull a model if you want me to answer general questions too.";
+    : "Put a model file in TRH AI's models folder if you want me to answer general questions too.";
 
   return [
     opening,

@@ -223,32 +223,18 @@ test("a sentence that merely contains yes is not agreement", () => {
 // for the model, and the turn was labelled with a tool that had done nothing.
 
 const { runAgent } = await import("../src/services/agentLoop.js");
-const { createServer } = await import("node:http");
+const { fakeEngine } = await import("./helpers/fakeEngine.js");
 
 /** A stand-in model that asks to forget, then answers. */
-function modelThatTriesToForget() {
-  const turns = [
-    { message: { content: "", tool_calls: [{ function: { name: "forget", arguments: { fact: "the codename" } } }] } },
-    { message: { content: "I need your confirmation before I delete that." } }
-  ];
-
-  return new Promise<{ server: import("node:http").Server; baseUrl: string }>((resolve) => {
-    let turn = 0;
-    const server = createServer((request, response) => {
-      request.on("data", () => {});
-      request.on("end", () => {
-        const body = turns[Math.min(turn, turns.length - 1)];
-        turn += 1;
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ model: "test-model", ...body }));
-      });
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      const port = (server.address() as import("node:net").AddressInfo).port;
-      resolve({ server, baseUrl: `http://127.0.0.1:${port}` });
-    });
+async function modelThatTriesToForget() {
+  const engine = await fakeEngine({
+    models: ["test-model"],
+    reply: [
+      { message: { content: "", tool_calls: [{ function: { name: "forget", arguments: { fact: "the codename" } } }] } },
+      { message: { content: "I need your confirmation before I delete that." } }
+    ]
   });
+  return { server: engine.server, baseUrl: engine.baseUrl };
 }
 
 test("a refused tool is not reported as something the assistant did", async () => {
@@ -320,26 +306,17 @@ test("a tool that runs but changes nothing reports that, rather than success", a
 });
 
 test("the loop records what each call achieved, not only that it ran", async () => {
-  const turns = [
-    { message: { content: "", tool_calls: [{ function: { name: "search_memory", arguments: { query: "nothing here" } } }] } },
-    { message: { content: "I found nothing about that." } }
-  ];
-
-  const server = createServer((request, response) => {
-    request.on("data", () => {});
-    request.on("end", () => {
-      const body = turns.shift() ?? turns[0];
-      response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ model: "test-model", ...body }));
-    });
+  const { server, baseUrl } = await fakeEngine({
+    models: ["test-model"],
+    reply: [
+      { message: { content: "", tool_calls: [{ function: { name: "search_memory", arguments: { query: "nothing here" } } }] } },
+      { message: { content: "I found nothing about that." } }
+    ]
   });
-
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const port = (server.address() as { port: number }).port;
 
   try {
     const result = await runAgent(
-      { baseUrl: `http://127.0.0.1:${port}`, model: "test-model", modelFromEnv: true, timeoutMs: 4000 },
+      { baseUrl, model: "test-model", modelFromEnv: true, timeoutMs: 4000 },
       "What do you know about quantum llamas?",
       context
     );

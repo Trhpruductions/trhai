@@ -13,7 +13,7 @@ WHAT THIS IS
 ------------
 A local-first AI desktop assistant, built for one person on one Windows machine.
 Nothing is sent to any cloud service. There are no API keys anywhere: every
-model runs locally through Ollama.
+model runs locally, in the app's own model engine (llama.cpp's server).
 
 Stack:
   - apps/api          Express + TypeScript, port 4000. All the real work.

@@ -252,12 +252,12 @@ test("an assistant turn keeps how it was produced", () => {
   appendTurn("session-provenance", "user", "What is a mutex?");
   appendTurn("session-provenance", "assistant", "A lock.", {
     strategy: "generated",
-    model: "ollama/llama3.2:latest"
+    model: "local/llama3.2:latest"
   });
 
   const [, assistant] = listTurns("session-provenance");
   assert.equal(assistant.strategy, "generated");
-  assert.equal(assistant.model, "ollama/llama3.2:latest");
+  assert.equal(assistant.model, "local/llama3.2:latest");
 });
 
 test("provenance survives a restart", () => {

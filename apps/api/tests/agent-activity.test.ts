@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,6 +7,7 @@ import path from "node:path";
 import { runAgent } from "../src/services/agentLoop.js";
 import type { ToolContext } from "../src/services/agentTools.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
+import { fakeEngine } from "./helpers/fakeEngine.js";
 
 // createApp() below starts a real server; the isolation reasoning is the same
 // as assist-context.test.ts.
@@ -49,43 +49,17 @@ test("a later call for the same session replaces, not appends", () => {
   assert.equal(getActivity("s1")?.tool, "write_file");
 });
 
-/** A fake Ollama that calls two real, harmless tools in sequence, then answers. */
-function fakeModelThatCallsTwoTools() {
-  return new Promise<{ server: Server; baseUrl: string }>((resolve) => {
-    let turn = 0;
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(chunk as Buffer));
-      request.on("end", () => {
-        turn += 1;
-        response.writeHead(200, { "Content-Type": "application/json" });
-
-        if (turn === 1) {
-          response.end(JSON.stringify({
-            model: "llama3.1:8b",
-            message: { content: "", tool_calls: [{ function: { name: "current_datetime", arguments: {} } }] }
-          }));
-          return;
-        }
-        if (turn === 2) {
-          response.end(JSON.stringify({
-            model: "llama3.1:8b",
-            message: {
-              content: "",
-              tool_calls: [{ function: { name: "calculate", arguments: { expression: "2 + 2" } } }]
-            }
-          }));
-          return;
-        }
-
-        response.end(JSON.stringify({ model: "llama3.1:8b", message: { content: "It's 4." } }));
-      });
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}` });
-    });
+/** A stand-in engine whose model calls two real, harmless tools in sequence, then answers. */
+async function fakeModelThatCallsTwoTools() {
+  const engine = await fakeEngine({
+    models: ["llama3.1-8b"],
+    reply: [
+      { message: { content: "", tool_calls: [{ function: { name: "current_datetime", arguments: {} } }] } },
+      { message: { content: "", tool_calls: [{ function: { name: "calculate", arguments: { expression: "2 + 2" } } }] } },
+      { message: { content: "It's 4." } }
+    ]
   });
+  return { server: engine.server, baseUrl: engine.baseUrl };
 }
 
 test("onToolStart fires for each tool call, in order, before the result is known", async () => {

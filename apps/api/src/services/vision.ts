@@ -1,26 +1,26 @@
 import { deadlineOrStop, stoppedBeforeFinishing, type LocalModelConfig } from "./localModel.js";
+import { enginePaths, engineUrl, listEngineModels, loadEngineModel, reviveEngine, sameModel } from "./modelEngine.js";
+import { engineError, readCompletion } from "./engineChat.js";
 
-// Looking at an image, with a local vision model in Ollama.
+// Looking at an image, with a local vision model.
 //
 // The chat model reads text only. An image - pasted into the chat, or a file
-// on disk - goes to a separate vision model (qwen2.5vl:3b by default,
-// OLLAMA_VISION_MODEL to change it), which answers the question asked about
+// on disk - goes to a separate vision model (qwen2.5-vl-3b by default,
+// TRHAI_VISION_MODEL to change it), which answers the question asked about
 // it. Nothing leaves the machine and nothing needs a key, the same as
-// everything else here. Ollama swaps the two models on an 8 GB card, and a
-// cold load from disk took 73 s on a busy one - so the client warms the vision
-// model the moment an image is attached (warmVisionModel), while the question
-// is still being typed.
+// everything else here. The engine keeps one model in memory, so the two swap
+// on an 8 GB card, and a cold load off a hard disk took 73 s on a busy one -
+// so the client warms the vision model the moment an image is attached
+// (warmVisionModel), while the question is still being typed.
 
-export const defaultVisionModel = "qwen2.5vl:3b";
+export const defaultVisionModel = "qwen2.5-vl-3b";
 
 /** The most images looked at in one turn. */
 export const maxImagesPerTurn = 4;
-/** How long the vision model stays loaded after it is used or warmed. */
-export const visionKeepAlive = "15m";
 /** The largest image read, decoded. The web client shrinks big ones before sending. */
 export const maxImageBytes = 20 * 1024 * 1024;
 
-/** Model families Ollama runs with image input, for finding one when the named model is not installed. */
+/** Model families that take images, for finding one by name when the engine does not say which do. */
 const visionFamilies = ["qwen2.5vl", "qwen2.5-vl", "qwen3-vl", "llava", "llama3.2-vision", "gemma3", "minicpm-v", "moondream", "bakllava"];
 
 export type VisionImage = { name: string; data: Buffer };
@@ -29,7 +29,7 @@ export type VisionResult = { ok: true; text: string; model: string } | { ok: fal
 type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
 export function visionModelName(env: NodeJS.ProcessEnv = process.env): string {
-  return env.OLLAMA_VISION_MODEL?.trim() || defaultVisionModel;
+  return env.TRHAI_VISION_MODEL?.trim() || defaultVisionModel;
 }
 
 /** What kind of image the bytes are, or null if they are not one this can show the model. */
@@ -114,28 +114,26 @@ export function imageTokens(size: { width: number; height: number } | null): num
 }
 
 /**
- * The window to load the vision model with: the smallest that fits these
- * images, the instructions, the question and a full answer - reading out a
- * dense screenshot runs long.
+ * The window these images need: their own tokens, and room for the
+ * instructions, the question and a full answer - reading out a dense
+ * screenshot runs long.
  *
- * One image always fits 8K, the common case and the one the warm-up loads,
- * since a different window makes Ollama load the model again. Several large
- * ones did not: measured, three 1080p screenshots filled an 8K window to its
- * last 81 tokens and the answer miscounted them, and four were refused
- * outright. 16K costs 0.3 GB more than 8K on the card, so it is used only when
- * the images need it.
+ * The engine decides the window when it loads the model, so this is what a
+ * request is checked against, not what is asked for. It matters: measured in
+ * an 8K window, three 1080p screenshots filled it to its last 81 tokens and
+ * the answer miscounted them, and four were refused outright.
  */
-export function visionWindowFor(images: VisionImage[]): number {
+export function tokensNeededFor(images: VisionImage[]): number {
   const answerRoom = 2048;
-  const needed = images.reduce((total, image) => total + imageTokens(imageSize(image.data)), 0) + answerRoom;
-  return [8192, 16384].find((window) => needed <= window) ?? 32768;
+  return images.reduce((total, image) => total + imageTokens(imageSize(image.data)), 0) + answerRoom;
 }
 
 /**
- * The vision model to use: the named one if it is installed, otherwise any
- * installed model of a family that takes images, otherwise null. `reachable`
- * is false when Ollama did not answer at all - a different problem from no
- * vision model being installed, and the reply should not confuse the two.
+ * The vision model to use: the named one if it is there, otherwise a model
+ * the engine says takes images, otherwise one of a family known to, otherwise
+ * null. `reachable` is false when the engine did not answer at all - a
+ * different problem from there being no vision model, and the reply should
+ * not confuse the two.
  */
 export async function findVisionModel(
   baseUrl: string,
@@ -143,14 +141,11 @@ export async function findVisionModel(
   fetcher: Fetcher = fetch
 ): Promise<{ reachable: boolean; model: string | null }> {
   try {
-    const response = await fetcher(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(5000) });
-    if (!response.ok) return { reachable: false, model: null };
-    const payload = await response.json() as { models?: Array<{ name?: unknown }> };
-    const names = (payload.models ?? []).map((model) => (typeof model.name === "string" ? model.name : "")).filter(Boolean);
-    const base = (name: string) => name.replace(/:latest$/, "");
-    const exact = names.find((name) => name === wanted || base(name) === base(wanted));
-    const model = exact ?? names.find((name) => visionFamilies.some((family) => name.toLowerCase().startsWith(family))) ?? null;
-    return { reachable: true, model };
+    const models = await listEngineModels(baseUrl, fetcher as typeof fetch, AbortSignal.timeout(5000));
+    const found = models.find((model) => sameModel(model.id, wanted))
+      ?? models.find((model) => model.vision)
+      ?? models.find((model) => visionFamilies.some((family) => model.id.toLowerCase().startsWith(family)));
+    return { reachable: true, model: found?.id ?? null };
   } catch {
     return { reachable: false, model: null };
   }
@@ -198,9 +193,8 @@ export function imageProblem(image: VisionImage): string | null {
 
 /**
  * Loads the vision model ahead of a question, so the load happens while the
- * user is still typing. An Ollama request with no prompt loads the model and
- * returns; nothing is generated. Never throws, and false when nothing was
- * loaded - there is no vision model, or Ollama did not answer.
+ * user is still typing. Nothing is generated. Never throws, and false when
+ * nothing was loaded - there is no vision model, or the engine did not answer.
  */
 export async function warmVisionModel(
   config: Pick<LocalModelConfig, "baseUrl">,
@@ -209,41 +203,11 @@ export async function warmVisionModel(
   const fetcher = options.fetcher ?? fetch;
   const found = await findVisionModel(config.baseUrl, options.model ?? visionModelName(), fetcher);
   if (!found.model) return false;
-  try {
-    const response = await fetcher(`${config.baseUrl}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // The window a one-image question asks for, so that question finds the
-      // model already loaded as it needs it.
-      body: JSON.stringify({ model: found.model, keep_alive: visionKeepAlive, options: { num_ctx: visionWindowFor([]) } }),
-      signal: AbortSignal.timeout(300_000)
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
+  const loaded = await loadEngineModel(config.baseUrl, found.model, { fetchImpl: fetcher as typeof fetch, timeoutMs: 300_000 });
+  return loaded.ok;
 }
 
-/**
- * The message in an Ollama error body. It nests: the runner's own JSON comes
- * back as a string inside Ollama's, so the useful sentence is two levels down.
- */
-function ollamaError(body: string): string {
-  let text = body.trim();
-  for (let depth = 0; depth < 3; depth += 1) {
-    try {
-      const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
-      const inner = typeof parsed.error === "string" ? parsed.error
-        : parsed.error && typeof parsed.error === "object" ? JSON.stringify(parsed.error)
-          : typeof parsed.message === "string" ? parsed.message : null;
-      if (inner === null) break;
-      text = inner.trim();
-    } catch {
-      break;
-    }
-  }
-  return text.split("\n")[0].slice(0, 200);
-}
+const tooLargeTogether = "Those images are too large together for the vision model to take in at once. Try fewer of them, or smaller ones.";
 
 /**
  * Asks the vision model about one or more images. Never throws.
@@ -267,60 +231,86 @@ export async function lookAtImages(
 
   const fetcher = options.fetcher ?? fetch;
   const wanted = options.model ?? visionModelName();
-  const found = await findVisionModel(config.baseUrl, wanted, fetcher);
+  let found = await findVisionModel(config.baseUrl, wanted, fetcher);
+  // This process's own engine, stopped: started again before giving up, as
+  // for a chat turn (see checkAvailability in localModel.ts).
+  if (!found.reachable && config.baseUrl === engineUrl() && await reviveEngine()) {
+    found = await findVisionModel(config.baseUrl, wanted, fetcher);
+  }
   if (!found.reachable) {
-    return { ok: false, reason: "The local model service (Ollama) is not answering, so the image could not be looked at. Start Ollama and try again." };
+    return { ok: false, reason: "The model engine is not answering, so the image could not be looked at. Start TRH AI again and try once more." };
   }
   const model = found.model;
   if (!model) {
     return {
       ok: false,
-      reason: `Seeing images needs a vision model, and none is installed in Ollama. Install one with: ollama pull ${wanted}`
+      reason: `Seeing images needs a vision model, and there is none in TRH AI's models folder (${enginePaths().modelsDir}).`
     };
   }
 
-  // The reply may be as long as the window and no longer, for the reason the
-  // chat model's is (see replyLimit in localModel.ts): past it, the images and
-  // the question have been pushed out of the model's view.
-  const windowTokens = visionWindowFor(images);
+  // A cold start loads the model from disk, and the first image after it is
+  // slow too: the load and the look together are allowed far longer than a
+  // reply. Stop ends either sooner.
+  const allowed = Math.max(config.timeoutMs, 300_000);
+  const signal = deadlineOrStop(allowed, options.cancel);
   try {
-    const response = await fetcher(`${config.baseUrl}/api/chat`, {
+    // Loaded first, to learn the window the engine gave it. The reply may be
+    // as long as that window and no longer, for the reason the chat model's is
+    // (see replyLimit in localModel.ts): past it, the images and the question
+    // have been pushed out of the model's view. And images that need more
+    // than the window are refused here, in words, not by a failed request.
+    const loaded = await loadEngineModel(config.baseUrl, model, { fetchImpl: fetcher as typeof fetch, signal, timeoutMs: allowed });
+    if (!loaded.ok) {
+      return { ok: false, reason: options.cancel?.aborted ? stoppedBeforeFinishing : loaded.reason };
+    }
+    const windowTokens = loaded.windowTokens;
+    if (tokensNeededFor(images) > windowTokens) return { ok: false, reason: tooLargeTogether };
+
+    const response = await fetcher(`${config.baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model,
+        model: loaded.id,
         stream: false,
-        options: { num_ctx: windowTokens, num_predict: windowTokens },
-        // Kept loaded for a while, so the next image is answered in seconds
-        // rather than after another cold load.
-        keep_alive: visionKeepAlive,
+        max_tokens: windowTokens,
+        // Reading what is in an image is not a place for variety: the same
+        // receipt should give the same total every time. Under Ollama the
+        // vision model ran at a temperature of 0.0001 for this reason.
+        temperature: 0,
         messages: [
           { role: "system", content: visionInstructions },
-          { role: "user", content: question.trim() || describeQuestion, images: images.map((image) => image.data.toString("base64")) }
+          {
+            role: "user",
+            content: [
+              { type: "text", text: question.trim() || describeQuestion },
+              // Each image as a data: URL, which is how the engine takes one.
+              ...images.map((image) => ({
+                type: "image_url",
+                image_url: { url: `data:image/${imageKind(image.data)};base64,${image.data.toString("base64")}` }
+              }))
+            ]
+          }
         ]
       }),
-      // A cold start loads the model from disk - 73 s measured on a busy card -
-      // and the first image after it is slow too: allowed far longer than a
-      // reply. Stop ends it sooner.
-      signal: deadlineOrStop(Math.max(config.timeoutMs, 300_000), options.cancel)
+      signal
     });
     if (!response.ok) {
-      const detail = ollamaError(await response.text().catch(() => ""));
-      if (/exceeds the available context size/i.test(detail)) {
-        return { ok: false, reason: "Those images are too large together for the vision model to take in at once. Try fewer of them, or smaller ones." };
+      const detail = engineError(await response.text().catch(() => ""));
+      if (/exceeds the available context size|exceed_context_size/i.test(detail)) {
+        return { ok: false, reason: tooLargeTogether };
       }
       return { ok: false, reason: `The vision model (${model}) answered ${response.status}${detail ? `: ${detail}` : ""}.` };
     }
-    const payload = await response.json() as { message?: { content?: unknown }; done_reason?: unknown };
+    const reply = readCompletion(await response.json(), loaded.id);
     // Cut off at that limit, not finished: a description that never ended is
     // not shown as one.
-    if (payload.done_reason === "length") {
+    if (reply.finishReason === "length") {
       return {
         ok: false,
         reason: `The vision model (${model}) ran past the length limit (${windowTokens.toLocaleString("en-US")} tokens) without finishing its reply.`
       };
     }
-    const text = typeof payload.message?.content === "string" ? payload.message.content.trim() : "";
+    const text = reply.content.trim();
     return text ? { ok: true, text, model } : { ok: false, reason: `The vision model (${model}) returned nothing.` };
   } catch (error) {
     // Stopped, which is not the model failing to answer in time.

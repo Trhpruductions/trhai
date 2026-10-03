@@ -85,10 +85,15 @@ test("an unrecognised tool credits nothing rather than guessing", () => {
 // Who actually answered.
 
 test("a real model is named", () => {
+  // As the API labels one now that the models run in TRH AI's own engine.
+  assert.equal(answerCredit("generated", "local/qwen2.5-coder-7b"), "Answered by qwen2.5-coder-7b");
+  // And as a reply stored while the models were Ollama's still carries it.
   assert.equal(
     answerCredit("generated", "ollama/qwen2.5-coder:7b"),
     "Answered by qwen2.5-coder:7b"
   );
+  // Only that label is taken off: a name with a slash of its own keeps it.
+  assert.equal(answerCredit("generated", "local/hf.co/org/model"), "Answered by hf.co/org/model");
 });
 
 test("the deterministic path is not dressed up as a model", () => {
@@ -126,6 +131,9 @@ test("generated with no model recorded claims nothing", () => {
 // The line under a reply in Chat.
 
 test("the line under a reply in Chat says how it was produced", () => {
+  assert.equal(replyProvenance("generated", "local/qwen3-8b"), "Written by qwen3-8b");
+  assert.equal(replyProvenance("vision", "local/qwen2.5-vl-3b"), "Looked at with qwen2.5-vl-3b");
+  // Replies stored while the models were Ollama's read the same way.
   assert.equal(replyProvenance("generated", "ollama/qwen2.5-coder:7b"), "Written by qwen2.5-coder:7b");
   assert.equal(replyProvenance("generated", "ollama/vexora:latest"), "Written by vexora");
   assert.equal(replyProvenance("answer", "memory"), "Quoted from your saved notes");

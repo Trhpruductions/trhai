@@ -7,6 +7,7 @@ import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
+import { modelsBody, streamEvents } from "./helpers/fakeEngine.js";
 
 // Stop has to reach every model a turn is waiting on, not only the agent
 // loop's own streamed reply (stream-stop.test.ts). A turn also asks the vision
@@ -15,10 +16,10 @@ import { setTimeout as delay } from "node:timers/promises";
 // Stop closed the browser's connection while the model went on looking or
 // writing, holding the GPU, until its own time limit: two to five minutes.
 //
-// The stand-in Ollama below answers the chat model with a tool call, and holds
+// The stand-in engine below answers the chat model with a tool call, and holds
 // any request to look or to write open without answering - what a model still
 // at work looks like from outside - noting when the asker lets go of it, which
-// is what makes a real Ollama stop. Every store the route touches, and the
+// is what makes a real engine stop. Every store the route touches, and the
 // workspace the tools read, are temporary directories set before server.js
 // loads, as in stream-stop.test.ts.
 const dataDir = mkdtempSync(path.join(tmpdir(), "ascend-stop-calls-"));
@@ -40,56 +41,62 @@ test.after(() => {
   rmSync(workspace, { recursive: true, force: true });
 });
 
-const chatModel = "qwen2.5:3b";
-const visionModel = "qwen2.5vl:3b";
+const chatModel = "qwen2.5-3b";
+const visionModel = "qwen2.5-vl-3b";
 const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201ffa5d6a40000000049454e44ae426082", "hex");
 
 type ToolCall = { name: string; arguments: Record<string, unknown> };
-/** One request to a model: where it went, and which model it asked. */
-type Asked = { url: string; model: string };
+/**
+ * One request to a model: which model it asked, and whether for a streamed
+ * reply. The conversation's own rounds are streamed. A look, a summary and an
+ * authored file are each asked for whole.
+ */
+type Asked = { model: string; streamed: boolean };
 
 /**
- * A stand-in Ollama for one turn.
+ * A stand-in engine for one turn.
  *
- * The chat model answers its first request with `toolCall`, streamed the way
- * Ollama streams one, and anything after that with a line of text. A request
- * to look (the vision model) or to write (/api/generate) is held open and
- * never answered. `held` resolves with the first such request when it
- * arrives; `abandoned` when it is let go of before it ended.
+ * The chat model answers the conversation's first round with `toolCall`,
+ * streamed the way the engine streams one, and any round after that with a
+ * line of text. A request to look (the vision model) or to write (a whole
+ * reply from the chat model) is held open and never answered. `held` resolves
+ * with the first such request when it arrives; `abandoned` when it is let go
+ * of before it ended.
  */
-function standInOllama(toolCall?: ToolCall) {
+function standInEngine(toolCall?: ToolCall) {
   const asked: Asked[] = [];
   let markHeld!: (request: Asked) => void;
   let markAbandoned!: () => void;
   const held = new Promise<Asked>((resolve) => { markHeld = resolve; });
   const abandoned = new Promise<void>((resolve) => { markAbandoned = resolve; });
-  let chats = 0;
+  let rounds = 0;
   return new Promise<{ server: Server; baseUrl: string; asked: Asked[]; held: Promise<Asked>; abandoned: Promise<void> }>((resolve) => {
     const server = createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk) => chunks.push(chunk as Buffer));
       request.on("end", () => {
-        if (request.url?.startsWith("/api/tags")) {
+        if (request.url === "/models") {
+          // Both loaded, as far as the asker can tell, so nothing waits on a load.
           response.writeHead(200, { "Content-Type": "application/json" });
-          response.end(JSON.stringify({ models: [{ name: chatModel }, { name: visionModel }] }));
+          response.end(JSON.stringify(modelsBody([chatModel, visionModel], { vision: [visionModel] })));
           return;
         }
-        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { model: string };
-        const entry = { url: request.url ?? "", model: body.model };
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { model: string; stream?: boolean };
+        const entry = { model: body.model, streamed: body.stream === true };
         asked.push(entry);
-        if (entry.url === "/api/chat" && entry.model !== visionModel) {
-          chats += 1;
-          const message = chats === 1 && toolCall
-            ? { role: "assistant", content: "", tool_calls: [{ function: toolCall }] }
-            : { role: "assistant", content: "Done." };
-          response.writeHead(200, { "Content-Type": "application/x-ndjson" });
-          response.write(`${JSON.stringify({ model: entry.model, message, done: false })}\n`);
-          response.end(`${JSON.stringify({ model: entry.model, message: { role: "assistant", content: "" }, done: true, done_reason: "stop" })}\n`);
+        if (entry.streamed && entry.model !== visionModel) {
+          rounds += 1;
+          response.writeHead(200, { "Content-Type": "text/event-stream" });
+          const reply = rounds === 1 && toolCall
+            ? { message: { content: "", tool_calls: [{ function: toolCall }] } }
+            : { message: { content: "Done." } };
+          for (const event of streamEvents(entry.model, reply)) response.write(event);
+          response.end();
           return;
         }
         // Looking at the image, or writing: no answer, and nothing to say one
-        // is coming - what Ollama sends for an unstreamed request until it is
-        // done.
+        // is coming - what the engine sends for an unstreamed request until it
+        // is done.
         response.on("close", () => {
           if (!response.writableEnded) markAbandoned();
         });
@@ -102,13 +109,13 @@ function standInOllama(toolCall?: ToolCall) {
   });
 }
 
-/** The API, asking `ollama`, for as long as `use` runs. */
-async function withApi(ollama: { baseUrl: string }, use: (base: string) => Promise<void>) {
+/** The API, asking `engine`, for as long as `use` runs. */
+async function withApi(engine: { baseUrl: string }, use: (base: string) => Promise<void>) {
   const env: Record<string, string> = {
-    OLLAMA_BASE_URL: ollama.baseUrl,
+    TRHAI_ENGINE_URL: engine.baseUrl,
     // Named, so which model each request goes to does not depend on the PC.
-    OLLAMA_MODEL: chatModel,
-    OLLAMA_VISION_MODEL: visionModel
+    TRHAI_MODEL: chatModel,
+    TRHAI_VISION_MODEL: visionModel
   };
   const saved = new Map<string, string | undefined>();
   for (const [name, value] of Object.entries(env)) {
@@ -167,13 +174,13 @@ async function startTurn(base: string, body: Record<string, unknown>, stop: Abor
 }
 
 /** The request the turn is waiting on, once it reaches the stand-in - or null if none did within `ms`. */
-async function heldWithin(ollama: { held: Promise<Asked> }, ms: number): Promise<Asked | null> {
-  return Promise.race([ollama.held, delay(ms).then(() => null)]);
+async function heldWithin(engine: { held: Promise<Asked> }, ms: number): Promise<Asked | null> {
+  return Promise.race([engine.held, delay(ms).then(() => null)]);
 }
 
 /** Whether that request was let go of within `ms`. */
-async function letGoWithin(ollama: { abandoned: Promise<void> }, ms: number): Promise<"let go" | "held"> {
-  return Promise.race([ollama.abandoned.then(() => "let go" as const), delay(ms).then(() => "held" as const)]);
+async function letGoWithin(engine: { abandoned: Promise<void> }, ms: number): Promise<"let go" | "held"> {
+  return Promise.race([engine.abandoned.then(() => "let go" as const), delay(ms).then(() => "held" as const)]);
 }
 
 /** The session's newest stored reply, once the turn has been written to its conversation. */
@@ -248,7 +255,7 @@ const cases: Case[] = [
     doing: "the vision model looking at an image sent with the message",
     sessionId: "stop-image",
     turn: { message: "What does this say?", images: [{ name: "receipt.png", data: png.toString("base64") }] },
-    waitingOn: { url: "/api/chat", model: visionModel },
+    waitingOn: { model: visionModel, streamed: false },
     task: false
   },
   {
@@ -257,7 +264,7 @@ const cases: Case[] = [
     turn: { message: "what's in cat.png?" },
     toolCall: { name: "look_at_image", arguments: { path: "cat.png", question: "What is in it?" } },
     prepare: async () => { writeFileSync(path.join(workspace, "cat.png"), png); },
-    waitingOn: { url: "/api/chat", model: visionModel },
+    waitingOn: { model: visionModel, streamed: false },
     task: true
   },
   {
@@ -272,7 +279,7 @@ const cases: Case[] = [
       });
       assert.equal(saved.status, 201, "the document was saved");
     },
-    waitingOn: { url: "/api/generate", model: chatModel },
+    waitingOn: { model: chatModel, streamed: false },
     task: false
   },
   {
@@ -281,7 +288,7 @@ const cases: Case[] = [
     turn: { message: "summarize the file report.txt" },
     toolCall: { name: "summarize_document", arguments: { path: "report.txt" } },
     prepare: async () => { writeFileSync(path.join(workspace, "report.txt"), longReport); },
-    waitingOn: { url: "/api/generate", model: chatModel },
+    waitingOn: { model: chatModel, streamed: false },
     task: true
   },
   {
@@ -289,7 +296,7 @@ const cases: Case[] = [
     sessionId: "stop-build-app",
     turn: { message: "build me a snake game" },
     toolCall: { name: "build_app", arguments: { description: "a snake game you steer with the arrow keys" } },
-    waitingOn: { url: "/api/generate", model: chatModel },
+    waitingOn: { model: chatModel, streamed: false },
     task: true,
     attemptStep: "Writing the app"
   },
@@ -298,7 +305,7 @@ const cases: Case[] = [
     sessionId: "stop-make-video",
     turn: { message: "make a short video about our product launch" },
     toolCall: { name: "make_video", arguments: { description: "a short video about our product launch" } },
-    waitingOn: { url: "/api/generate", model: chatModel },
+    waitingOn: { model: chatModel, streamed: false },
     task: true,
     attemptStep: "Writing the video script"
   },
@@ -307,31 +314,31 @@ const cases: Case[] = [
     sessionId: "stop-render-mockup",
     turn: { message: "render a mockup of a login page" },
     toolCall: { name: "render_mockup", arguments: { description: "a login page", kind: "mockup" } },
-    waitingOn: { url: "/api/generate", model: chatModel },
+    waitingOn: { model: chatModel, streamed: false },
     task: true
   }
 ];
 
 for (const each of cases) {
   test(`Stop reaches ${each.doing}, and the model is let go of`, async (t) => {
-    const ollama = await standInOllama(each.toolCall);
-    await withApi(ollama, async (base) => {
+    const engine = await standInEngine(each.toolCall);
+    await withApi(engine, async (base) => {
       const stop = new AbortController();
       try {
         await each.prepare?.(base, each.sessionId);
         const turn = await startTurn(base, { ...each.turn, sessionId: each.sessionId }, stop);
 
         // The turn reached the call this is about, and is waiting on it.
-        assert.deepEqual(await heldWithin(ollama, 10_000), each.waitingOn, "the turn is waiting on the model");
+        assert.deepEqual(await heldWithin(engine, 10_000), each.waitingOn, "the turn is waiting on the model");
         // The control. Left alone, the request stays open while the model
         // works, so "let go of" below is the Stop and nothing else - every
         // time limit on these calls is two minutes or more.
-        assert.equal(await letGoWithin(ollama, 500), "held", "nothing ends a request the model is still answering but Stop or its time limit");
-        const askedBeforeStop = ollama.asked.length;
+        assert.equal(await letGoWithin(engine, 500), "held", "nothing ends a request the model is still answering but Stop or its time limit");
+        const askedBeforeStop = engine.asked.length;
 
         const stoppedAt = Date.now();
         stop.abort(); // what the Stop button does
-        assert.equal(await letGoWithin(ollama, 5000), "let go", "Stop let go of the request, which is what stops the model");
+        assert.equal(await letGoWithin(engine, 5000), "let go", "Stop let go of the request, which is what stops the model");
         t.diagnostic(`let go ${Date.now() - stoppedAt} ms after Stop`);
         // The client's own read ended with the Stop, before any answer came.
         assert.doesNotMatch(await turn.read, /event: done/, "no answer had arrived when Stop was pressed");
@@ -342,8 +349,8 @@ for (const each of cases) {
         assert.deepEqual(await storedReply(base, each.sessionId), { content: "Stopped before it finished.", strategy: "stopped" });
         // Nothing asked of a model after Stop: not the chat model to go on,
         // not another attempt at the writing.
-        assert.equal(ollama.asked.length, askedBeforeStop, "nothing was asked of a model after Stop");
-        assert.deepEqual(ollama.asked.at(-1), each.waitingOn);
+        assert.equal(engine.asked.length, askedBeforeStop, "nothing was asked of a model after Stop");
+        assert.deepEqual(engine.asked.at(-1), each.waitingOn);
 
         if (each.task) {
           const task = await settledTask(base, each.sessionId);
@@ -358,8 +365,8 @@ for (const each of cases) {
         }
       } finally {
         stop.abort();
-        ollama.server.closeAllConnections();
-        ollama.server.close();
+        engine.server.closeAllConnections();
+        engine.server.close();
       }
     });
   });

@@ -123,7 +123,7 @@ function readinessOf(name: string, probe: ToolProbe): ToolReadiness {
   if (name === "look_at_image") {
     return probe.visionModel
       ? ready(`Uses ${probe.visionModel}, on this PC.`)
-      : { state: "needs-setup", note: `Needs a vision model in Ollama, such as ${visionModelName()}.` };
+      : { state: "needs-setup", note: `Needs a vision model in TRH AI's models folder, such as ${visionModelName()}.` };
   }
   if (name === "make_video") {
     if (!probe.ffmpeg) return { state: "needs-setup", note: "Needs ffmpeg installed - it encodes the video." };
