@@ -153,6 +153,17 @@ export function unfinishedWithin(config: Pick<LocalModelConfig, "model" | "timeo
   return `${config.model} did not finish its reply within ${allowedTime(config)}.`;
 }
 
+/**
+ * Why a streamed reply was given up on while the model was still thinking:
+ * its thoughts were arriving, and no word of the reply had.
+ *
+ * Not unfinishedWithin: nothing of the reply had been on screen. And not
+ * noReplyWithin: the model was there, and at work, the whole time.
+ */
+export function stillThinkingAfter(config: Pick<LocalModelConfig, "model" | "timeoutMs">): string {
+  return `${config.model} was still thinking after ${allowedTime(config)}, and had not begun its reply.`;
+}
+
 function allowedTime(config: Pick<LocalModelConfig, "timeoutMs">): string {
   return config.timeoutMs >= 1000 ? `${Math.round(config.timeoutMs / 1000)} s` : `${config.timeoutMs} ms`;
 }

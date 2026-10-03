@@ -126,7 +126,7 @@ test("a tool with no stage of its own is answering, not mislabelled", () => {
 });
 
 test("every stage has a label the interface can show", () => {
-  for (const stage of ["understanding", "gathering", "planning", "building", "verifying", "answering"] as const) {
+  for (const stage of ["understanding", "gathering", "planning", "building", "verifying", "reasoning", "answering"] as const) {
     assert.ok(stageLabels[stage]?.length > 0, `${stage} has no label`);
   }
 });

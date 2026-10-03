@@ -21,6 +21,8 @@ export type ScriptedReply = {
     content?: string;
     tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> | string } }>;
   };
+  /** What a thinking model thinks before it answers. Sent beside the reply, as the engine sends it, never in it. */
+  thinking?: string;
   /** How the reply ended: "stop" unless said. "length" is one the reply limit cut off. */
   done_reason?: string;
   model?: string;
@@ -68,7 +70,12 @@ export function completionBody(model: string, reply: ScriptedReply) {
     choices: [{
       index: 0,
       finish_reason: finishOf(reply),
-      message: { role: "assistant", content: reply.message?.content ?? "", ...(calls.length > 0 ? { tool_calls: calls } : {}) }
+      message: {
+        role: "assistant",
+        ...(reply.thinking ? { reasoning_content: reply.thinking } : {}),
+        content: reply.message?.content ?? "",
+        ...(calls.length > 0 ? { tool_calls: calls } : {})
+      }
     }]
   };
 }
@@ -82,6 +89,10 @@ export function streamEvent(model: string, delta: Record<string, unknown>, finis
 export function streamEvents(model: string, reply: ScriptedReply): string[] {
   const name = reply.model ?? model;
   const events = [streamEvent(name, { role: "assistant", content: null })];
+  // Its thoughts first, a line at a time, as a thinking model sends them.
+  for (const piece of (reply.thinking ?? "").split(/(?<=\n)/).filter(Boolean)) {
+    events.push(streamEvent(name, { reasoning_content: piece }));
+  }
   for (const piece of (reply.message?.content ?? "").split(/(?<=\n)/).filter(Boolean)) {
     events.push(streamEvent(name, { content: piece }));
   }

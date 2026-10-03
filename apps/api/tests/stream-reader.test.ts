@@ -171,6 +171,38 @@ test("a thinking model's thoughts are not the reply, and never reach the screen"
   assert.equal(result.content, "42");
 });
 
+test("when the thoughts start, and when the reply begins after them, are each said once", async () => {
+  const thought = (text: string) =>
+    `data: ${JSON.stringify({ model: "test", choices: [{ index: 0, delta: { reasoning_content: text }, finish_reason: null }] })}`;
+  const piece = (delta: Record<string, unknown>, finish: string | null = null) =>
+    `data: ${JSON.stringify({ model: "test", choices: [{ index: 0, delta, finish_reason: finish }] })}`;
+  const said = async (lines: string[]) => {
+    const heard: boolean[] = [];
+    await readStream(fromLines(lines), undefined, undefined, (thinking) => heard.push(thinking));
+    return heard;
+  };
+
+  // Thinking, then words: said to have started, and to have given way to the reply.
+  assert.deepEqual(await said([
+    thought("The user wants a sum."), thought(" 17 + 25"), thought(" is 42."), frame("42"), frame(" exactly"), frame("", "stop")
+  ]), [true, false]);
+
+  // A reply with no thoughts says nothing at all: "has not answered yet" is not "is thinking".
+  assert.deepEqual(await said([frame("Hello"), frame(" there"), frame("", "stop")]), []);
+  // Nor does an empty thought, which some models send before a plain reply.
+  assert.deepEqual(await said([thought(""), frame("Hello"), frame("", "stop")]), []);
+
+  // Thinking that ends in a tool call rather than in words.
+  assert.deepEqual(await said([
+    thought("I should look that up."),
+    piece({ tool_calls: [{ index: 0, id: "a", type: "function", function: { name: "search_memory", arguments: "{}" } }] }),
+    piece({}, "tool_calls")
+  ]), [true, false]);
+
+  // Cut off while still thinking: the reply is never said to have begun.
+  assert.deepEqual(await said([thought("Let me think"), thought(" some more")]), [true]);
+});
+
 test("an error the engine sends part way is a failed request, not a short reply", async () => {
   const failed = `data: ${JSON.stringify({ error: { code: 500, message: "the request exceeds the available context size", type: "exceed_context_size_error" } })}`;
   await assert.rejects(

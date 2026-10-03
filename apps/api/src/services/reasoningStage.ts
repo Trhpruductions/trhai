@@ -25,6 +25,14 @@ export type Stage =
   | "planning"
   | "building"
   | "verifying"
+  /**
+   * The model is thinking before it answers. Set when its thoughts start to
+   * arrive from the engine, not assumed from which model it is: a thinking
+   * model that answers straight away never enters it. Qwen3 thought for about
+   * eleven seconds before the first word of a one-line sum, and the screen
+   * said "Understanding" the whole time.
+   */
+  | "reasoning"
   | "answering";
 
 /** What each stage is called on screen. */
@@ -34,6 +42,7 @@ export const stageLabels: Record<Stage, string> = {
   planning: "Planning",
   building: "Building",
   verifying: "Verifying",
+  reasoning: "Thinking it through",
   answering: "Answering"
 };
 

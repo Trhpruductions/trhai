@@ -122,15 +122,28 @@ export type StreamResult = {
  * tool call, the JSON is never emitted, and the caller decides what to do
  * with the complete content it gets back at the end. A thinking model's
  * thoughts (delta.reasoning_content) are not the reply and are never emitted.
+ *
+ * `onThinking` says when those thoughts are arriving: called with true at
+ * the first of them, and with false when the reply itself - words, or a tool
+ * call - begins after them. Never called for a reply that came with no
+ * thoughts, so a caller can tell "thinking" from "has not answered yet".
  */
 export async function readStream(
   lines: AsyncIterable<string>,
   onToken?: (text: string) => void,
   /** Whether the accumulated text is a tool call rather than an answer. */
-  looksLikeToolCall: (text: string) => boolean = () => false
+  looksLikeToolCall: (text: string) => boolean = () => false,
+  onThinking?: (thinking: boolean) => void
 ): Promise<StreamResult> {
   let content = "";
   let emitted = 0;
+  let thinking = false;
+  /** The thoughts have ended: the reply proper has begun. Said once. */
+  const replyBegan = () => {
+    if (!thinking) return;
+    thinking = false;
+    onThinking?.(false);
+  };
   // Tool calls arrive in pieces: a name, then its arguments a few characters
   // at a time, each piece saying which call it belongs to.
   const calls: Array<{ name: string; arguments: string }> = [];
@@ -166,7 +179,14 @@ export async function readStream(
     const choice = chunk.choices?.[0];
     if (typeof choice?.finish_reason === "string") doneReason = choice.finish_reason;
 
+    const thought = choice?.delta?.reasoning_content;
+    if (typeof thought === "string" && thought.length > 0 && !thinking && content.length === 0 && calls.length === 0) {
+      thinking = true;
+      onThinking?.(true);
+    }
+
     for (const part of choice?.delta?.tool_calls ?? []) {
+      replyBegan();
       const named = typeof part.function?.name === "string" && part.function.name ? part.function.name : "";
       // A piece with no index continues the last call, unless it names a new one.
       const at = typeof part.index === "number" ? part.index : Math.max(0, calls.length - (named ? 0 : 1));
@@ -177,6 +197,7 @@ export async function readStream(
 
     const piece = choice?.delta?.content;
     if (typeof piece === "string" && piece.length > 0) {
+      replyBegan();
       content += piece;
 
       if (onToken) {
