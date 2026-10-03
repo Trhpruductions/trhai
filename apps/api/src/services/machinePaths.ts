@@ -153,7 +153,10 @@ export function isCodeWork(mode: string, message: string): boolean {
 
   const text = message.toLowerCase();
   // A drive letter or a POSIX-looking path with a file extension on the end.
-  if (/[a-z]:[\\/][^\s]+\.[a-z0-9]{1,5}\b/.test(text)) return true;
+  // The drive letter stands on its own: "https://example.com" is a web
+  // address, not the drive "s:" - read as one, "what does https://example.com
+  // say?" went to the coding model whichever model the conversation had chosen.
+  if (/(?<![a-z])[a-z]:[\\/][^\s]+\.[a-z0-9]{1,5}\b/.test(text)) return true;
   if (/(?:^|\s)\/[^\s]+\.[a-z0-9]{1,5}\b/.test(text)) return true;
 
   return /\b(edit_file|write_file|read_file|refactor|the function|this file|the file)\b/.test(text);

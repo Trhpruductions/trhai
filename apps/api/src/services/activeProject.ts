@@ -147,7 +147,8 @@ export function resetTouchedFiles(): void {
 /** A file verb with a pronoun where its object should be, and no file named. */
 const filePronoun =
   /\b(?:to|in|into|of|from|at|on|inside)\s+(?:it|that|this|the\s+(?:same\s+)?(?:file|one))\b|\b(?:edit|change|update|fix|append\s+to|read|open|delete|remove|rewrite|save|overwrite|rename|show|print|cat)\s+(?:it|that|this)\b|\bthe\s+end\s+of\s+it\b|\bthe\s+top\s+of\s+it\b/i;
-const namesAPath = /[a-z]:[\\/]|(?:^|\s)\/[^\s]+\.[a-z0-9]{1,6}\b|\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i;
+// A drive letter stands on its own: the "s:/" in "https://" is not one (see drivePath in actionIntent.ts).
+const namesAPath = /(?<![a-z])[a-z]:[\\/]|(?:^|\s)\/[^\s]+\.[a-z0-9]{1,6}\b|\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i;
 
 /**
  * The request with "it" spelled out, or null when there is nothing to spell.
