@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "../../lib/api";
 import { normalisedToPeak } from "../../lib/telemetryHistory";
-import { reachWords, visibleAddresses, type Listening } from "../../lib/systemMonitor";
+import { reachWords, visibleAddresses, type Listening, type NetworkAccess } from "../../lib/systemMonitor";
 import { Icon } from "../ui/Icon";
 import { Trend } from "../ui/Trend";
 import { ViewFrame } from "../ui/ViewFrame";
+import { useNotify } from "../state/notify";
 import { formatBytesPerSecond, useSystem } from "../state/system";
 import "../home/home.css";
 import "./views.css";
@@ -19,11 +20,61 @@ import "./views.css";
 type NetworkInfo = {
   interfaces: Array<{ name: string; address: string; family: "IPv4" | "IPv6"; internal: boolean }>;
   service: Listening;
+  access: NetworkAccess;
   ollama: { baseUrl: string; reachable: boolean };
   apps: Array<{ project: string; port: number; url: string }>;
 };
 
 type InternetCheck = { reachable: boolean; latencyMs: number | null; target: string; status: number | null; at: Date };
+
+/**
+ * Whether other devices are let in, and how that changes. Kept out, it says
+ * how to let them in; let in, it shows the key each must send - hidden until
+ * asked for, since this page may be on a screen others can see.
+ */
+function AccessNote({ access }: { access: NetworkAccess }) {
+  const { notify } = useNotify();
+  const [shown, setShown] = useState(false);
+  if (!access.otherDevices) {
+    return (
+      <p className="os-faint os-small">
+        Other devices are kept out. To let them in, add <span className="os-mono">ASCEND_NETWORK_ACCESS=on</span> to the .env file in
+        the TRH AI folder and restart TRH AI; each device will then need the access key shown here.
+      </p>
+    );
+  }
+  const copy = async (key: string) => {
+    try {
+      await navigator.clipboard.writeText(key);
+      notify({ level: "success", title: "Access key copied", body: `Another device sends it in the ${access.header} header.`, source: "NETWORK" });
+    } catch {
+      notify({ level: "error", title: "Could not copy", body: "The clipboard is not available here.", source: "NETWORK" });
+    }
+  };
+  return (
+    <div className="os-stack">
+      <ul className="os-services">
+        <li className="os-access-row">
+          <span className={`os-dot ${access.key ? "accent" : "danger"}`} aria-hidden="true" />
+          <span>Access key</span>
+          <span className="os-mono os-access-key">{access.key ? (shown ? access.key : "•".repeat(12)) : "none could be read"}</span>
+        </li>
+      </ul>
+      {access.key ? (
+        <div className="os-view-actions">
+          <button type="button" className="os-btn os-btn-sm" aria-pressed={shown} onClick={() => setShown(!shown)}>
+            <Icon name={shown ? "eyeOff" : "eye"} size={14} />{shown ? "Hide" : "Show"}
+          </button>
+          <button type="button" className="os-btn os-btn-sm" onClick={() => void copy(access.key ?? "")}><Icon name="copy" size={14} />Copy</button>
+        </div>
+      ) : null}
+      <p className="os-faint os-small">
+        {access.key ? `Another device sends the key in the ${access.header} header; this PC never needs it. ` : "Without it, no other device can connect. "}
+        To keep other devices out again, remove ASCEND_NETWORK_ACCESS from the .env file and restart TRH AI.
+      </p>
+    </div>
+  );
+}
 
 export function NetworkView() {
   const { telemetry, history } = useSystem();
@@ -81,6 +132,7 @@ export function NetworkView() {
             <header className="os-panel-head"><h3 className="os-panel-title">TRH AI on the network</h3></header>
             <div className="os-panel-body os-stack">
               <p className={`os-small ${reach.fromNetwork ? "os-warn-text" : "os-faint"}`}>{reach.text}</p>
+              {info?.access ? <AccessNote access={info.access} /> : null}
               <ul className="os-services">
                 <li><span className="os-dot ok" aria-hidden="true" /><span>This page</span><span className="os-mono os-faint">{pageOrigin}</span></li>
                 <li><span className={`os-dot ${info?.service ? "ok" : ""}`} aria-hidden="true" /><span>TRH AI&rsquo;s service</span><span className="os-mono os-faint">port {info?.service?.port ?? "—"}</span></li>

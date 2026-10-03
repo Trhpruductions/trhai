@@ -20,10 +20,18 @@ test("when a model will be let go reads as how long, or that it is kept", () => 
 });
 
 test("who can reach the service follows from what it is bound to", () => {
-  assert.deepEqual(reachWords({ address: "::", port: 4000, family: "IPv6", fromNetwork: true }),
-    { text: "Listening on every address, port 4000: other devices on your network can reach it, unless a firewall blocks the port.", fromNetwork: true });
-  assert.deepEqual(reachWords({ address: "127.0.0.1", port: 4000, family: "IPv4", fromNetwork: false }),
+  const thisPc = [{ address: "127.0.0.1", family: "IPv4" }, { address: "::1", family: "IPv6" }];
+  assert.deepEqual(reachWords({ port: 4000, addresses: thisPc, fromNetwork: false, keyRequired: false }),
+    { text: "Listening on 127.0.0.1 and ::1, port 4000: only this PC can reach it.", fromNetwork: false });
+  assert.deepEqual(reachWords({ port: 4000, addresses: [thisPc[0]], fromNetwork: false, keyRequired: false }),
     { text: "Listening on 127.0.0.1, port 4000: only this PC can reach it.", fromNetwork: false });
+  const every = [{ address: "::", family: "IPv6" }];
+  assert.deepEqual(reachWords({ port: 4000, addresses: every, fromNetwork: true, keyRequired: true }), {
+    text: "Listening on every address, port 4000: other devices on your network can reach it, unless a firewall blocks the port, and only with the access key.",
+    fromNetwork: true
+  });
+  assert.deepEqual(reachWords({ port: 4000, addresses: every, fromNetwork: true, keyRequired: false }),
+    { text: "Listening on every address, port 4000: other devices on your network can reach it, unless a firewall blocks the port.", fromNetwork: true });
   assert.equal(reachWords(null).fromNetwork, null);
 });
 

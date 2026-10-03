@@ -533,8 +533,10 @@ function serverFile(spec: ProjectSpec): string {
     "});",
     "",
     "const port = Number(process.env.PORT ?? 4400);",
-    "server.listen(port, () => {",
-    "  console.log(\"[\" + " + JSON.stringify(spec.slug) + " + \"] listening on http://localhost:\" + port);",
+    "// This PC only: with no address, Node listens on every one, and anything",
+    "// on the same network could reach the app and its data.",
+    "server.listen(port, \"127.0.0.1\", () => {",
+    "  console.log(\"[\" + " + JSON.stringify(spec.slug) + " + \"] listening on http://127.0.0.1:\" + port);",
     "});",
     ""
   ]);
@@ -1262,7 +1264,7 @@ function readmeFile(spec: ProjectSpec): string {
     "node server.js",
     "```",
     "",
-    "Then open http://localhost:4400",
+    "Then open http://127.0.0.1:4400",
     "",
     "No dependencies and no install step — this runs on the Node standard library alone.",
     "",
@@ -1335,7 +1337,7 @@ function readmeFile(spec: ProjectSpec): string {
   lines.push("## Example");
   lines.push("");
   lines.push("```bash");
-  lines.push("curl -X POST http://localhost:4400/api/" + entity.plural + " \\");
+  lines.push("curl -X POST http://127.0.0.1:4400/api/" + entity.plural + " \\");
   lines.push("  -H 'Content-Type: application/json' \\");
   lines.push("  -d '{\"title\":\"First " + entity.name + "\"}'");
   lines.push("```");
@@ -1588,7 +1590,7 @@ function calculatorReadmeFile(spec: ProjectSpec): string {
     "node server.js",
     "```",
     "",
-    "Then open http://localhost:4400",
+    "Then open http://127.0.0.1:4400",
     "",
     "No dependencies and no install step — this runs on the Node standard library alone.",
     "",
@@ -1692,8 +1694,9 @@ function calculatorServerFile(): string {
     "});",
     "",
     "const port = Number(process.env.PORT ?? 4400);",
-    "server.listen(port, () => {",
-    "  console.log(\"listening on http://localhost:\" + port);",
+    "// This PC only: with no address, Node listens on every one.",
+    "server.listen(port, \"127.0.0.1\", () => {",
+    "  console.log(\"listening on http://127.0.0.1:\" + port);",
     "});",
     ""
   ].join("\n");
