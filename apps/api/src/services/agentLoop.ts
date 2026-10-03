@@ -25,6 +25,7 @@ import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
+import { resolvePlaceReference } from "./placeReference.js";
 import { activeProject, projectForPath, resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
 import { verifyBuiltProject } from "./buildVerification.js";
 import { resolveInWorkspace } from "./workspace.js";
@@ -1368,12 +1369,20 @@ export async function runAgent(
   // no file, so this was not a write, build_app stayed on offer, and the
   // model built an app called "Now Add A Line Saying". See activeProject.ts.
   const spelledOut = resolveFilePronoun(question, context.sessionId);
+  // "there" is said outright too, when the turn before settles which place it
+  // is: after "What's the capital of Australia?", "how many people live
+  // there?" was answered for Australia by both models. For the model alone -
+  // every gate below still reads the request as it was typed, so a note about
+  // "the previous answer" is never taken for an order to rewrite one. See
+  // placeReference.ts.
+  let place: ReturnType<typeof resolvePlaceReference> = null;
   if (spelledOut) {
     question = spelledOut.request;
     context = { ...context, impliedFile: spelledOut.file };
   } else {
     const project = resolveProjectReference(question, context.sessionId);
     if (project) question = project.request;
+    else place = resolvePlaceReference(question, context.conversation, [context.request ?? ""]);
   }
 
   const now = (context.now ?? (() => new Date()))();
@@ -1398,6 +1407,8 @@ export async function runAgent(
     ? await readMachineStatus(context, driveNamedIn(question))
     : null;
 
+  // The request as the model reads it.
+  const asked = place ? `${question}\n\n${place.note}` : question;
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -1426,9 +1437,9 @@ export async function runAgent(
     {
       role: "user",
       content: machineReadings
-        ? `${question}\n\nLive readings from this machine, taken just now. They are real: answer from them as `
+        ? `${asked}\n\nLive readings from this machine, taken just now. They are real: answer from them as `
           + `given, and do not give any other number for this machine.\n${machineReadings}`
-        : question
+        : asked
     }
   ];
   // The rules and the question: the two messages that are never shortened to
@@ -1446,7 +1457,7 @@ export async function runAgent(
   // of detecting it.
   const intent = classifyIntent(question);
   if (process.env.ASSIST_DEBUG) {
-    console.log(`[agent] question=${JSON.stringify(question.slice(0, 400))} intent=${JSON.stringify(intent)} impliedFile=${JSON.stringify(context.impliedFile ?? null)}`);
+    console.log(`[agent] question=${JSON.stringify(question.slice(0, 400))} intent=${JSON.stringify(intent)} impliedFile=${JSON.stringify(context.impliedFile ?? null)} there=${JSON.stringify(place?.place ?? null)}`);
   }
   let forcedRetry = false;
   let correctedContradiction = false;
