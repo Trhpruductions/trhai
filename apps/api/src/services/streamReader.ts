@@ -22,6 +22,8 @@
 export type StreamChunk = {
   message?: { content?: unknown; tool_calls?: unknown };
   done?: unknown;
+  /** On the final frame: "stop" when the model finished, "length" when the reply limit cut it off. */
+  done_reason?: unknown;
   model?: unknown;
 };
 
@@ -95,6 +97,8 @@ export type StreamResult = {
   /** Tool calls it asked for through the interface, if any. */
   toolCalls: unknown;
   model: string | null;
+  /** Why the stream ended, from its final frame: "length" means cut off, not finished. */
+  doneReason: string | null;
 };
 
 /**
@@ -118,6 +122,7 @@ export async function readStream(
   let emitted = 0;
   let toolCalls: unknown = undefined;
   let model: string | null = null;
+  let doneReason: string | null = null;
 
   for await (const line of lines) {
     const trimmed = line.trim();
@@ -135,6 +140,7 @@ export async function readStream(
 
     if (typeof chunk.model === "string") model = chunk.model;
     if (chunk.message?.tool_calls) toolCalls = chunk.message.tool_calls;
+    if (typeof chunk.done_reason === "string") doneReason = chunk.done_reason;
 
     const piece = chunk.message?.content;
     if (typeof piece === "string" && piece.length > 0) {
@@ -155,12 +161,14 @@ export async function readStream(
 
   // Anything held back that turned out to be ordinary text is released now,
   // so a reply that legitimately ends mid-object is never silently truncated
-  // on screen.
-  if (onToken && !looksLikeToolCall(content) && content.length > emitted) {
+  // on screen. Not one the reply limit cut off: that did not end, and what is
+  // held is most likely a tool call that never closed - a whole file, half
+  // written, as raw JSON.
+  if (onToken && doneReason !== "length" && !looksLikeToolCall(content) && content.length > emitted) {
     onToken(content.slice(emitted));
   }
 
-  return { content, toolCalls, model };
+  return { content, toolCalls, model, doneReason };
 }
 
 /** Split a byte stream into lines, keeping any partial line for the next read. */

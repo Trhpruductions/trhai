@@ -123,7 +123,9 @@ it documents every setting.
 - `OLLAMA_MODEL` — which local model answers. `OLLAMA_NUM_CTX` — the context
   window every request asks for, default 16384. The assistant's instructions and
   tool list need more than Ollama's own default of 4096; a smaller window cuts
-  them off without any error, so anything under 8192 is raised to 8192.
+  them off without any error, so anything under 8192 is raised to 8192. It is
+  also the longest a reply may be: a model that runs past it is stopped, and
+  the reply is reported as too long rather than shown.
 - `CORS_ORIGIN` — which browser origins may call the API. Defaults to this
   machine's own origins on any port. The API listening on localhost does not by
   itself stop a page on a site you visit from calling it, and the assistant,

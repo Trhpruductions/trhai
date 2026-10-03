@@ -110,6 +110,25 @@ test("text held back at the end is released rather than lost", async () => {
   assert.equal(seen.join(""), 'almost {"a": 1');
 });
 
+test("why the stream ended is kept, and a reply cut off at the limit keeps back what it held", async () => {
+  // The test above, cut off by the reply limit instead of ending: what is
+  // held is a tool call that never closed - a file, half written, as raw JSON.
+  const seen: string[] = [];
+  const cut = await readStream(fromLines([
+    frame("Writing it now: "),
+    frame('{"name": "write_file", "arguments": {"content": "line one'),
+    JSON.stringify({ model: "test", message: { role: "assistant", content: "" }, done: true, done_reason: "length" })
+  ]), (text) => seen.push(text));
+
+  assert.equal(cut.doneReason, "length");
+  assert.equal(seen.join(""), "Writing it now: ");
+  assert.match(cut.content, /line one/, "the caller still gets all of it, to decide what to do with");
+
+  const finished = await readStream(fromLines([frame("All done."), JSON.stringify({ model: "test", done: true, done_reason: "stop" })]));
+  assert.equal(finished.doneReason, "stop");
+  assert.equal(finished.content, "All done.");
+});
+
 test("tool calls sent through the interface are carried out", async () => {
   const withCall = JSON.stringify({
     model: "test",

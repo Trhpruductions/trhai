@@ -34,7 +34,7 @@ const png = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]);
 
 /** A stand-in Ollama: /api/tags lists `models`; any other call is recorded, address and body, and answered with `reply`. */
-function fakeOllama(models: string[], reply: { status?: number; content?: string } = {}) {
+function fakeOllama(models: string[], reply: { status?: number; content?: string; doneReason?: string } = {}) {
   const chats: Array<Record<string, unknown>> = [];
   const urls: string[] = [];
   const fetcher = (async (url: string, init?: RequestInit) => {
@@ -43,7 +43,10 @@ function fakeOllama(models: string[], reply: { status?: number; content?: string
     }
     urls.push(url);
     chats.push(JSON.parse(String(init?.body)));
-    return new Response(JSON.stringify({ message: { content: reply.content ?? "A screenshot of a settings page." } }), { status: reply.status ?? 200 });
+    return new Response(JSON.stringify({
+      message: { content: reply.content ?? "A screenshot of a settings page." },
+      ...(reply.doneReason ? { done_reason: reply.doneReason } : {})
+    }), { status: reply.status ?? 200 });
   }) as unknown as typeof fetch;
   return { chats, urls, fetcher };
 }
@@ -163,10 +166,12 @@ test("the image and the question go to the vision model together", async () => {
   const seen = await lookAtImages([{ name: "shot.png", data: png }], "What setting is switched on?", config, { fetcher: ollama.fetcher });
   assert.deepEqual(seen, { ok: true, text: "A screenshot of a settings page.", model: defaultVisionModel });
   const body = ollama.chats[0] as {
-    model: string; keep_alive: string; options: { num_ctx: number }; messages: Array<{ role: string; content: string; images?: string[] }>
+    model: string; keep_alive: string; options: { num_ctx: number; num_predict: number };
+    messages: Array<{ role: string; content: string; images?: string[] }>
   };
   assert.equal(body.model, defaultVisionModel);
   assert.equal(body.options.num_ctx, 8192, "one image fits the smallest window");
+  assert.equal(body.options.num_predict, 8192, "and the reply is no longer than that window");
   assert.equal(body.keep_alive, visionKeepAlive, "stays loaded for the next image");
   assert.match(body.messages[0].content, /Read any text in an image exactly as written/);
   assert.equal(body.messages[1].content, "What setting is switched on?");
@@ -211,6 +216,21 @@ test("what stops it from looking is said plainly", async () => {
 
   const tooMany = await lookAtImages(Array.from({ length: maxImagesPerTurn + 1 }, () => ({ name: "a.png", data: png })), "hi", config, { fetcher: fakeOllama([defaultVisionModel]).fetcher });
   assert.equal(tooMany.ok, false);
+});
+
+test("a description cut off at the length limit is reported as that, not shown", async () => {
+  // The same words twice, so what decides is Ollama's done_reason.
+  const words = "A settings page. The first switch reads";
+  const cut = await lookAtImages([{ name: "shot.png", data: png }], "What does it say?", config,
+    { fetcher: fakeOllama([defaultVisionModel], { content: words, doneReason: "length" }).fetcher });
+  assert.equal(cut.ok, false);
+  if (!cut.ok) {
+    assert.equal(cut.reason, `The vision model (${defaultVisionModel}) ran past the length limit (8,192 tokens) without finishing its reply.`);
+  }
+
+  const finished = await lookAtImages([{ name: "shot.png", data: png }], "What does it say?", config,
+    { fetcher: fakeOllama([defaultVisionModel], { content: words, doneReason: "stop" }).fetcher });
+  assert.deepEqual(finished, { ok: true, text: words, model: defaultVisionModel });
 });
 
 test("the vision model can be loaded before the question arrives, answering nothing", async () => {

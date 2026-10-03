@@ -273,6 +273,10 @@ export async function lookAtImages(
     };
   }
 
+  // The reply may be as long as the window and no longer, for the reason the
+  // chat model's is (see replyLimit in localModel.ts): past it, the images and
+  // the question have been pushed out of the model's view.
+  const windowTokens = visionWindowFor(images);
   try {
     const response = await fetcher(`${config.baseUrl}/api/chat`, {
       method: "POST",
@@ -280,7 +284,7 @@ export async function lookAtImages(
       body: JSON.stringify({
         model,
         stream: false,
-        options: { num_ctx: visionWindowFor(images) },
+        options: { num_ctx: windowTokens, num_predict: windowTokens },
         // Kept loaded for a while, so the next image is answered in seconds
         // rather than after another cold load.
         keep_alive: visionKeepAlive,
@@ -300,7 +304,15 @@ export async function lookAtImages(
       }
       return { ok: false, reason: `The vision model (${model}) answered ${response.status}${detail ? `: ${detail}` : ""}.` };
     }
-    const payload = await response.json() as { message?: { content?: unknown } };
+    const payload = await response.json() as { message?: { content?: unknown }; done_reason?: unknown };
+    // Cut off at that limit, not finished: a description that never ended is
+    // not shown as one.
+    if (payload.done_reason === "length") {
+      return {
+        ok: false,
+        reason: `The vision model (${model}) ran past the length limit (${windowTokens.toLocaleString("en-US")} tokens) without finishing its reply.`
+      };
+    }
     const text = typeof payload.message?.content === "string" ? payload.message.content.trim() : "";
     return text ? { ok: true, text, model } : { ok: false, reason: `The vision model (${model}) returned nothing.` };
   } catch (error) {
