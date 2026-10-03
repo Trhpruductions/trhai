@@ -1,5 +1,6 @@
 import {
-  contextWindow, modelOptions, noReplyWithin, promptTooLong, replyTooLong, unfinishedWithin, type LocalModelConfig
+  contextWindow, modelOptions, noReplyWithin, promptTooLong, replyTooLong, stillThinkingAfter, unfinishedWithin,
+  type LocalModelConfig
 } from "./localModel.js";
 import { loadEngineModel } from "./modelEngine.js";
 import { engineError, readCompletion, toWireMessages } from "./engineChat.js";
@@ -1815,6 +1816,9 @@ export async function runAgent(
     // Whether any of a streamed reply had arrived, so that running out of
     // time part way through it is not reported as no reply at all.
     let begun = false;
+    // And whether what had arrived was only the model's thoughts: time that
+    // runs out there is said as that, since none of the reply was on screen.
+    let stillThinking = false;
     try {
       const raw = await fetchImpl(`${config.baseUrl}/v1/chat/completions`, {
         method: "POST",
@@ -1875,7 +1879,13 @@ export async function runAgent(
           // What counts as "do not show this": the same parser that decides
           // whether the finished message was a call. Sharing it means the
           // screen and the loop can never disagree about what the reply was.
-          (text) => parseTextToolCalls(text).length > 0
+          (text) => parseTextToolCalls(text).length > 0,
+          // A thinking model's thoughts, as they start and as they give way
+          // to the reply. The stage follows what is actually arriving.
+          (thinking) => {
+            stillThinking = thinking;
+            enterStage(context.sessionId, thinking ? "reasoning" : "answering");
+          }
         );
         response = {
           model: streamed.model ?? config.model,
@@ -1910,7 +1920,7 @@ export async function runAgent(
       return {
         ok: false,
         reason: error instanceof Error && error.name === "AbortError"
-          ? (begun ? unfinishedWithin(config) : noReplyWithin(config))
+          ? (stillThinking ? stillThinkingAfter(config) : begun ? unfinishedWithin(config) : noReplyWithin(config))
           : "Local model unavailable: the request failed.",
         toolsUsed
       };
