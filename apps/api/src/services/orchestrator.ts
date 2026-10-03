@@ -592,6 +592,13 @@ export async function runAssistantOrchestrator(
     const nowPending = input.sessionId ? getPendingConfirmation(input.sessionId) : null;
     const described = nowPending ? describePendingAction(nowPending) : null;
 
+    // Stopped by the user, and said as that whatever was asked. Everything
+    // below answers for a model that failed, and the composer's fallback
+    // would be kept in the transcript as the reply to a turn the user ended.
+    if (!attempt.ok && attempt.kind === "stopped") {
+      return deterministicResult(effectiveMessage, attempt.reason, "stopped");
+    }
+
     // An order the model could not carry out is reported as that. The
     // fallback below is the composer's reply, and for a "plan" it is a
     // generic four-step template - "1. Write down what done looks like for
@@ -640,6 +647,31 @@ export async function runAssistantOrchestrator(
         strategy: "failed",
         toolsUsed: [],
         groundedOn: [],
+        groundedOnHistory: 0
+      };
+    }
+
+    // A model that took the work and came back without an answer - out of
+    // time, or past its length limit - says so, and why. The composer's reply
+    // is the fallback for when there is no model at all, and for a plan it is
+    // the generic four-step template: once the time limit could reach a
+    // streamed reply, a checklist that had been on screen for the whole limit
+    // was replaced by "1. Clarify the end state for the short checklist..."
+    // with nothing to say the model had run out of time. Any part already
+    // answered from the user's own notes is still given.
+    if (!attempt.ok && attempt.kind === "failed" && !deterministicBuild) {
+      const answered = isPartialAnswer ? modelReply.output : "";
+      const text = answered
+        ? `${answered}\n\nI couldn't finish the rest. ${attempt.reason} Try again in a moment.`
+        : `I couldn't finish that. ${attempt.reason} Try again in a moment.`;
+      return {
+        model: "memory",
+        assistantMessage: text,
+        inputTokens: modelReply.inputTokens,
+        outputTokens: estimateTokens(text),
+        strategy: "failed",
+        toolsUsed: [],
+        groundedOn: answered ? modelReply.groundedOn : [],
         groundedOnHistory: 0
       };
     }

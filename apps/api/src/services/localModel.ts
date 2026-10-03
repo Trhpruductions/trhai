@@ -129,8 +129,22 @@ export function modelOptions(config: Pick<LocalModelConfig, "contextTokens">): {
  * unavailable" sent anyone reading it looking for a model that was there.
  */
 export function noReplyWithin(config: Pick<LocalModelConfig, "model" | "timeoutMs">): string {
-  const allowed = config.timeoutMs >= 1000 ? `${Math.round(config.timeoutMs / 1000)} s` : `${config.timeoutMs} ms`;
-  return `${config.model} did not reply within ${allowed}.`;
+  return `${config.model} did not reply within ${allowedTime(config)}.`;
+}
+
+/**
+ * Why a streamed reply was given up on: it had begun, and the model was still
+ * writing it when the time ran out.
+ *
+ * Not noReplyWithin. The reply's first words had been on screen the whole
+ * time, and "did not reply" would contradict what the user had just watched.
+ */
+export function unfinishedWithin(config: Pick<LocalModelConfig, "model" | "timeoutMs">): string {
+  return `${config.model} did not finish its reply within ${allowedTime(config)}.`;
+}
+
+function allowedTime(config: Pick<LocalModelConfig, "timeoutMs">): string {
+  return config.timeoutMs >= 1000 ? `${Math.round(config.timeoutMs / 1000)} s` : `${config.timeoutMs} ms`;
 }
 
 /** Why a reply stopped by replyLimit is not used: it ran on and never finished. */

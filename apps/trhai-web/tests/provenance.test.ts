@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { answerCredit, answeredFromModelAlone, sourceLabels, sourcesFor } from "../src/components/provenance.js";
+import { answerCredit, answeredFromModelAlone, replyProvenance, sourceLabels, sourcesFor, unanswered } from "../src/components/provenance.js";
 
 // A badge saying where an answer came from is a claim about the answer, so
 // every case here is the same question: can it credit a source that did not
@@ -121,4 +121,25 @@ test("a stopped or failed turn claims nothing", () => {
 
 test("generated with no model recorded claims nothing", () => {
   assert.equal(answerCredit("generated", undefined), null);
+});
+
+// The line under a reply in Chat.
+
+test("the line under a reply in Chat says how it was produced", () => {
+  assert.equal(replyProvenance("generated", "ollama/qwen2.5-coder:7b"), "Written by qwen2.5-coder:7b");
+  assert.equal(replyProvenance("generated", "ollama/vexora:latest"), "Written by vexora");
+  assert.equal(replyProvenance("answer", "memory"), "Quoted from your saved notes");
+  assert.equal(replyProvenance("plan", "general-core-v1"), "Answered on this PC");
+  assert.equal(replyProvenance(undefined, undefined), null);
+});
+
+test("a reply saying why there is no answer is not labelled as an answer", () => {
+  // The API's "failed": a model that ran out of time or past its length
+  // limit, or an order it could not carry out. It read "Answered on this PC".
+  assert.equal(replyProvenance("failed", "memory"), "Not answered");
+  assert.equal(replyProvenance("stopped", undefined), "Stopped");
+  assert.equal(replyProvenance("error", undefined), null);
+  // And it is offered again as "Try again", not "Regenerate": there is no answer to replace.
+  for (const strategy of ["failed", "stopped", "error"]) assert.equal(unanswered(strategy), true, strategy);
+  for (const strategy of ["generated", "plan", "answer", undefined]) assert.equal(unanswered(strategy), false, String(strategy));
 });

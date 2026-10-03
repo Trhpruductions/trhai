@@ -15,6 +15,7 @@ import {
   readLocalModelConfig,
   replyLimit,
   replyTooLong,
+  unfinishedWithin,
   type LocalModelConfig, orderedCandidates } from "../src/services/localModel.js";
 
 /**
@@ -104,6 +105,8 @@ test("a reply may be as long as the window, and no longer", () => {
 test("a timeout and a cut-off reply are each said as what happened", () => {
   assert.equal(noReplyWithin({ model: "qwen2.5:3b", timeoutMs: 180000 }), "qwen2.5:3b did not reply within 180 s.");
   assert.equal(noReplyWithin({ model: "qwen2.5:3b", timeoutMs: 300 }), "qwen2.5:3b did not reply within 300 ms.");
+  // A streamed reply that had begun: its words were on screen, so not "did not reply".
+  assert.equal(unfinishedWithin({ model: "qwen2.5:3b", timeoutMs: 180000 }), "qwen2.5:3b did not finish its reply within 180 s.");
   assert.equal(replyTooLong({ model: "qwen2.5:3b" }),
     "The reply from qwen2.5:3b ran past the length limit (16,384 tokens) without finishing.");
 });

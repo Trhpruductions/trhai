@@ -72,6 +72,36 @@ export function answeredFromModelAlone(
 }
 
 /**
+ * How a reply was produced, in words: the line under it in Chat. Read from the
+ * API's own strategy field.
+ *
+ * "failed" is the API saying why there is no answer - a model that ran out of
+ * time or past its length limit, or an order it could not carry out - and is
+ * labelled as that. It fell through to "Answered on this PC", under a reply
+ * whose whole content was that nothing had been answered.
+ */
+export function replyProvenance(strategy: string | undefined, model: string | undefined): string | null {
+  const name = model?.replace(/^ollama\//, "").replace(/:latest$/, "");
+  switch (strategy) {
+    case "generated": return name ? `Written by ${name}` : "Written by the local model";
+    case "vision": return name ? `Looked at with ${name}` : "Looked at with the vision model";
+    case "answer": return "Quoted from your saved notes";
+    case "calendar": case "conversion": case "reading": return "Worked out on this PC";
+    case "message": return "Prepared on this PC - nothing is sent without your yes";
+    case "schedule": return "Saved on this PC";
+    case "stopped": return "Stopped";
+    case "failed": return "Not answered";
+    case "error": return null;
+    default: return strategy ? "Answered on this PC" : null;
+  }
+}
+
+/** A reply with no answer in it, which is tried again rather than regenerated. */
+export function unanswered(strategy: string | undefined): boolean {
+  return strategy === "error" || strategy === "stopped" || strategy === "failed";
+}
+
+/**
  * Who actually answered, for the line in the footer.
  *
  * The footer said "Answered by general-core-v1" — and there is no such model.
