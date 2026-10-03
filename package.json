@@ -29,6 +29,7 @@
     "health:api": "curl -fsS http://localhost:4000/health",
     "smoke:web-stack": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/smoke-web-stack.ps1",
     "smoke:video": "tsx scripts/smoke-video.ts",
-    "doctor": "tsx scripts/doctor.ts"
+    "doctor": "tsx scripts/doctor.ts",
+    "setup:engine": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-engine.ps1"
   }
 }

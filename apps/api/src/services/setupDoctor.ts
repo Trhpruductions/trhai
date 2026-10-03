@@ -1,7 +1,7 @@
 // Preflight checks for a fresh machine (the `npm run doctor` command).
 //
 // Pure decision + formatting logic, kept out of the runner (scripts/doctor.ts)
-// so it is unit-testable without touching Ollama, ffmpeg or the filesystem.
+// so it is unit-testable without touching the model engine, ffmpeg or the filesystem.
 // Nothing here is fatal on its own: the app starts without a model, without
 // ffmpeg and can create its workspace on first write. The point is to tell an
 // operator setting the app up on another PC what is ready and what is not,
@@ -34,15 +34,32 @@ export function checkOptionalTool(name: string, present: boolean, powers: string
 }
 
 /**
- * The local model, from checkAvailability's own verdict. Reachable with a usable
- * model is ok; anything else is a warning carrying checkAvailability's reason
- * (which already names the fix, e.g. "Run: ollama pull ..."). Not "missing",
- * because the app genuinely runs without a model - it just cannot generate.
+ * The model engine and its models, as they are on disk. Installed with at
+ * least one model is ok; anything else is a warning that names the fix. Not
+ * "missing", because the app genuinely runs without a model - it just cannot
+ * generate.
+ *
+ * Read from disk rather than asked over HTTP: the engine runs only while TRH
+ * AI does, and the doctor is for before it has ever been started.
  */
-export function checkOllama(available: boolean, detail: string): SetupCheck {
-  return available
-    ? { name: "Ollama + model", status: "ok", detail }
-    : { name: "Ollama + model", status: "warn", detail: `${detail} The app runs without it, but cannot generate replies.` };
+export function checkModelEngine(found: {
+  /** The installed engine's release, or null when there is none. */
+  build: string | null;
+  engineDir: string;
+  modelsDir: string;
+  models: string[];
+}): SetupCheck {
+  const without = "The app runs without it, but cannot generate replies.";
+  if (!found.build) {
+    return { name: "Model engine", status: "warn", detail: `llama.cpp is not installed in ${found.engineDir}. Run: npm run setup:engine. ${without}` };
+  }
+  if (found.models.length === 0) {
+    return {
+      name: "Model engine", status: "warn",
+      detail: `llama.cpp ${found.build} is installed, but there is no model in ${found.modelsDir}. Put a .gguf model file there. ${without}`
+    };
+  }
+  return { name: "Model engine", status: "ok", detail: `llama.cpp ${found.build}, with ${found.models.join(", ")}` };
 }
 
 const mark: Record<CheckStatus, string> = { ok: "OK  ", warn: "WARN", missing: "MISS" };

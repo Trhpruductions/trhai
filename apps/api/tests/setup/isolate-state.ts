@@ -35,3 +35,12 @@ process.env.TRHAI_ARM_FILE = path.join(
 // folder makes every run see what CI sees; a test that needs a device says so
 // with a stand-in. (The data-key store already keeps to a temp file in tests.)
 process.env.LOCALAPPDATA = mkdtempSync(path.join(tmpdir(), "trhai-test-localappdata-"));
+
+// And the same for the model engine. With nothing set, a model request goes to
+// TRH AI's own engine on this PC, which is running whenever the app is: a test
+// without a stand-in would be answered by the real model, and would load it
+// onto the graphics card of the PC the suite runs on. A port nothing listens
+// on makes "no model" the answer wherever a test has not supplied one - what
+// CI sees. Tests that restore this variable after their stand-in put this
+// value back, not the real engine's address.
+process.env.TRHAI_ENGINE_URL = "http://127.0.0.1:9";

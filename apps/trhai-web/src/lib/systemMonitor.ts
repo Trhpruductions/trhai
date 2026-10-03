@@ -1,8 +1,13 @@
-// The System and Network workspaces' wording: where a loaded model sits, when
-// it will be let go, and what the service's listen address means for who can
-// reach it. Pure, so it is testable without a screen.
+// The System and Network workspaces' wording: the window a loaded model was
+// given, when it will be let go, and what the service's listen address means
+// for who can reach it. Pure, so it is testable without a screen.
 
-export type LoadedModel = { name: string; sizeBytes: number; vramBytes: number; expiresAt: string | null };
+export type LoadedModel = {
+  name: string;
+  sizeBytes: number;
+  /** The context window the engine gave it on this card, in tokens. */
+  windowTokens: number | null;
+};
 export type Listening = {
   port: number;
   /** Every address the service bound: this PC's two, unless other devices are let in. */
@@ -14,27 +19,21 @@ export type Listening = {
 /** Whether other devices are let in, and - on this PC only - the key they need. */
 export type NetworkAccess = { otherDevices: boolean; header: string; key: string | null };
 
-/** Where a loaded model sits: on the graphics card, split, or in ordinary memory. */
-export function placement(model: LoadedModel): string {
-  if (model.sizeBytes <= 0) return "Loaded";
-  const share = model.vramBytes / model.sizeBytes;
-  if (share >= 0.99) return "All on the graphics card";
-  if (share <= 0.01) return "In memory - none on the graphics card";
-  return `${Math.round(share * 100)}% on the graphics card, the rest in memory`;
+/**
+ * The window a loaded model was given, in words: "9,216-token window". The
+ * engine fits it to the graphics card, so it differs from one model to the
+ * next. Null when the engine has not said.
+ */
+export function windowWords(model: LoadedModel): string | null {
+  return model.windowTokens && model.windowTokens > 0 ? `${model.windowTokens.toLocaleString("en-US")}-token window` : null;
 }
 
-/**
- * When Ollama will let a model go if nothing uses it. Ollama writes a date
- * centuries away for "keep it loaded", and nothing for one being unloaded.
- */
-export function unloadsWhen(expiresAt: string | null, now: Date): string {
-  const at = Date.parse(expiresAt ?? "");
-  if (!Number.isFinite(at)) return "being let go";
-  const ms = at - now.getTime();
-  if (ms > 24 * 60 * 60 * 1000) return "kept loaded";
-  if (ms <= 30_000) return "lets go any moment";
-  const minutes = Math.round(ms / 60_000);
-  return minutes < 60 ? `lets go in ${minutes} min unless used` : `lets go in ${Math.round(minutes / 60)} h unless used`;
+/** When a loaded model is let go if nothing uses it: "let go after 5 idle minutes". */
+export function idleWords(idleUnloadSeconds: number | null | undefined): string {
+  if (!idleUnloadSeconds || idleUnloadSeconds <= 0) return "kept loaded";
+  if (idleUnloadSeconds < 90) return `let go after ${Math.round(idleUnloadSeconds)} idle seconds`;
+  const minutes = Math.round(idleUnloadSeconds / 60);
+  return `let go after ${minutes} idle minute${minutes === 1 ? "" : "s"}`;
 }
 
 /** "127.0.0.1 and ::1", "every address" - what the service is bound to, in words. */

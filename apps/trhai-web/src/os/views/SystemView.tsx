@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "../../lib/api";
 import { formatBytes } from "../../lib/files";
-import { placement, reachWords, unloadsWhen, type LoadedModel, type Listening } from "../../lib/systemMonitor";
+import { idleWords, reachWords, windowWords, type LoadedModel, type Listening } from "../../lib/systemMonitor";
 import { Icon } from "../ui/Icon";
 import { Trend, type TrendTone } from "../ui/Trend";
 import { ViewFrame } from "../ui/ViewFrame";
@@ -15,13 +15,19 @@ import "./views.css";
 
 // This machine, measured live, and the parts of TRH AI that run on it: every
 // reading is taken when it is shown, and one that cannot be taken says why
-// instead of showing a number. The models Ollama is holding in memory are
-// listed with where they sit - and can be let go, to give a game or a stream
-// its graphics memory back.
+// instead of showing a number. The model TRH AI's engine is holding in memory
+// is listed with the window it was given - and can be let go, to give a game
+// or a stream its graphics memory back.
 
 type Runtime = {
   service: { pid: number; node: string; startedAt: string; uptimeSeconds: number; rssBytes: number; heapUsedBytes: number; listening: Listening };
-  ollama: { baseUrl: string; reachable: boolean; version: string | null; loaded: LoadedModel[]; installed: Array<{ name: string; sizeBytes: number }> };
+  engine: {
+    baseUrl: string; reachable: boolean; version: string | null; loaded: LoadedModel[];
+    installed: Array<{ name: string; sizeBytes: number }>;
+    idleUnloadSeconds: number;
+    /** Why the engine is not running, when the service knows. */
+    reason: string | null;
+  };
   stores: { failing: Array<{ store: string; error: string; at: string }>; locked: string[] };
 };
 
@@ -60,12 +66,10 @@ export function SystemView() {
   const { notify } = useNotify();
   const [runtime, setRuntime] = useState<Runtime | null>(null);
   const [unloading, setUnloading] = useState<string | null>(null);
-  const [now, setNow] = useState(() => new Date());
 
   const load = useCallback(async () => {
     const result = await apiGet<Runtime>("/v1/system/runtime");
     if (result.ok) setRuntime(result.data);
-    setNow(new Date());
   }, []);
 
   useEffect(() => {
@@ -117,22 +121,22 @@ export function SystemView() {
             <header className="os-panel-head">
               <h3 className="os-panel-title">Models in memory</h3>
               {runtime ? (
-                <span className={`os-chip ${runtime.ollama.reachable ? "ok" : "danger"}`}>
-                  {runtime.ollama.reachable ? `Ollama${runtime.ollama.version ? ` ${runtime.ollama.version}` : ""}` : "Ollama not answering"}
+                <span className={`os-chip ${runtime.engine.reachable ? "ok" : "danger"}`}>
+                  {runtime.engine.reachable ? `llama.cpp${runtime.engine.version ? ` ${runtime.engine.version}` : ""}` : "Model engine not answering"}
                 </span>
               ) : null}
             </header>
             <div className="os-panel-body os-stack">
-              {runtime === null ? <p className="os-faint">Asking Ollama…</p>
-                : !runtime.ollama.reachable ? <p className="os-faint os-small">Nothing answered at {runtime.ollama.baseUrl}. Start Ollama, and TRH AI can think again.</p>
-                  : runtime.ollama.loaded.length === 0 ? <p className="os-faint os-small">None. A model loads when TRH AI next needs one, and lets go after a few idle minutes.</p>
+              {runtime === null ? <p className="os-faint">Asking the model engine…</p>
+                : !runtime.engine.reachable ? <p className="os-faint os-small">{runtime.engine.reason ?? `Nothing answered at ${runtime.engine.baseUrl}. Start TRH AI again, and it can think again.`}</p>
+                  : runtime.engine.loaded.length === 0 ? <p className="os-faint os-small">None. A model loads when TRH AI next needs one, and is {idleWords(runtime.engine.idleUnloadSeconds)}.</p>
                     : (
                       <ul className="os-models">
-                        {runtime.ollama.loaded.map((model) => (
+                        {runtime.engine.loaded.map((model) => (
                           <li key={model.name}>
                             <div className="os-models-text">
                               <strong className="os-mono">{model.name}</strong>
-                              <span className="os-faint os-small">{formatBytes(model.sizeBytes)} · {placement(model)} · {unloadsWhen(model.expiresAt, now)}</span>
+                              <span className="os-faint os-small">{[formatBytes(model.sizeBytes), windowWords(model), idleWords(runtime.engine.idleUnloadSeconds)].filter(Boolean).join(" · ")}</span>
                             </div>
                             <button type="button" className="os-btn os-btn-sm" disabled={unloading !== null} onClick={() => void unload(model.name)}>
                               <Icon name="stop" size={13} />{unloading === model.name ? "Letting go…" : "Unload"}
@@ -141,11 +145,11 @@ export function SystemView() {
                         ))}
                       </ul>
                     )}
-              {runtime?.ollama.installed.length ? (
+              {runtime?.engine.installed.length ? (
                 <details className="os-models-installed">
-                  <summary>Installed · {runtime.ollama.installed.length}</summary>
+                  <summary>Installed · {runtime.engine.installed.length}</summary>
                   <ul>
-                    {runtime.ollama.installed.map((model) => (
+                    {runtime.engine.installed.map((model) => (
                       <li key={model.name}><span className="os-mono">{model.name}</span><span className="os-faint">{formatBytes(model.sizeBytes)}</span></li>
                     ))}
                   </ul>

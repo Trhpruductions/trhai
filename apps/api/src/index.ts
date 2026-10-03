@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./server.js";
 import { startScheduler, stopScheduler } from "./services/scheduler.js";
 import { noteListening } from "./services/runtimeStatus.js";
+import { startEngine, stopEngine } from "./services/modelEngine.js";
 import { listenOn, listenPlan, type Listener } from "./services/networkAccess.js";
 import { encryptPlainStores } from "./services/dataInventory.js";
 
@@ -75,6 +76,19 @@ listenOn(() => createServer(app), port, plan.hosts).then(({ listeners: bound, sk
   // requests at the local model during a test run. SCHEDULER=off disables it
   // for anyone who wants the API without the timers.
   if (process.env.SCHEDULER !== "off") startScheduler();
+  // The model engine, started here for the reason the scheduler is: the test
+  // suite builds an app on almost every file, and none of them should start
+  // llama.cpp. Not waited for: the API answers at once, and says the engine
+  // is starting until it is up. TRHAI_ENGINE=off leaves it to whoever runs one.
+  if (process.env.TRHAI_ENGINE !== "off") {
+    void startEngine().then((engine) => {
+      console.log(engine.status === "running"
+        ? `model engine running at ${engine.url} (llama.cpp ${engine.build ?? "of an unknown build"}, ${engine.models} model${engine.models === 1 ? "" : "s"})`
+        : engine.status === "external"
+          ? `model engine: using the one at ${engine.url}`
+          : `model engine not running: ${engine.reason}`);
+    });
+  }
 }).catch((error: NodeJS.ErrnoException) => {
   if (error.code === "EADDRINUSE") {
     console.error(`Port ${port} is already in use.`);
@@ -107,6 +121,9 @@ function shutdown(signal: string): void {
   shuttingDown = true;
 
   stopScheduler();
+  // The engine and the model it holds go with the API: nothing else would
+  // stop them, and the model keeps the graphics card's memory until they do.
+  stopEngine();
   let open = listeners.length;
   const closed = () => {
     console.log(`ascend-api stopped (${signal})`);
@@ -132,3 +149,8 @@ function shutdown(signal: string): void {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => shutdown(signal));
 }
+
+// Every other way out that runs code at all - an uncaught error, the port
+// already taken. A no-op when shutdown() has already stopped it. A kill that
+// runs no code is covered at the next start: see stopLeftoverEngine.
+process.on("exit", () => stopEngine());

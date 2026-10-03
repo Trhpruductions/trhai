@@ -1,4 +1,4 @@
-// Optional local model backend (Ollama).
+// The local model, asked through TRH AI's model engine (llama.cpp; see modelEngine.ts).
 //
 // Everything else in this API is deterministic, and that was a hard ceiling:
 // the assistant could only ever repeat what someone had told it or quote a
@@ -16,16 +16,22 @@
 // presented as one; the caller reports a different strategy and model name so
 // provenance stays truthful.
 //
-// Absence is normal, not an error. No Ollama means today's behaviour exactly,
-// with the capability reply saying so plainly rather than the app looking broken.
+// Absence is normal, not an error. No engine, or no model in it, means the
+// deterministic behaviour exactly, with the capability reply saying so plainly
+// rather than the app looking broken.
+
+import {
+  engineOffReason, enginePaths, engineUrl, findEngineModel, isModelOrSize, listEngineModels, type EngineModel
+} from "./modelEngine.js";
+import { engineError, readCompletion } from "./engineChat.js";
 
 export type LocalModelConfig = {
-  /** Where the Ollama server is listening. */
+  /** Where the model engine is listening. */
   baseUrl: string;
-  /** Which pulled model to ask. */
+  /** Which model to ask, by its name in the models folder. */
   model: string;
   /**
-   * Whether `model` came from OLLAMA_MODEL or is just the built-in default.
+   * Whether `model` came from TRHAI_MODEL or is just the built-in default.
    *
    * Without this the two are indistinguishable, and the preference list below
    * never runs: the default is itself an installed model, so it always looked
@@ -36,18 +42,24 @@ export type LocalModelConfig = {
   /** How long to wait before giving up on a reply. */
   timeoutMs: number;
   /**
-   * The context window to run the model with, in tokens. Optional so a config
-   * built by hand still works; contextWindow() supplies the default.
+   * The context window the model runs with, in tokens: what the engine gave
+   * it when it loaded it (see loadEngineModel). Optional so a config built by
+   * hand still works; contextWindow() supplies a default until then.
    */
   contextTokens?: number;
 };
 
 /**
- * The context window every request asks for, unless OLLAMA_NUM_CTX says
- * otherwise.
+ * The context window assumed for a model until the engine says what it gave
+ * it, and the least TRHAI_CONTEXT_TOKENS may set.
  *
- * Ollama runs a model with a 4,096-token window unless the request names one,
- * and the assistant's own prompt is bigger than that: about 1,400 tokens of
+ * The engine fits each model's window to the graphics card when it loads the
+ * model (modelEngine.ts), and the agent loop asks for that figure before it
+ * measures a prompt against it. This stands in where nothing has said yet.
+ *
+ * It is this large for a reason learned under Ollama, which ran a model with
+ * a 4,096-token window unless the request named one. The assistant's own
+ * prompt is bigger than that: about 1,400 tokens of
  * instructions and up to 5,000 of tool descriptions, before the question. A
  * prompt that does not fit is not refused. It is cut, silently, keeping only
  * the last half of the window, which is the end of the tool list and the
@@ -99,9 +111,9 @@ export function contextWindow(config: Pick<LocalModelConfig, "contextTokens">): 
  * included. What it writes after that continues its own text; it is no
  * longer answering anything.
  *
- * Taken from the window rather than fixed, so raising OLLAMA_NUM_CTX for
- * longer work raises this with it. A reply stopped here comes back with
- * done_reason "length" and is reported as one that ran too long (see
+ * Taken from the window rather than fixed, so a model the engine gives a
+ * larger window may write a longer reply. One stopped here comes back with
+ * the finish reason "length" and is reported as one that ran too long (see
  * replyTooLong), never as an answer.
  */
 export function replyLimit(config: Pick<LocalModelConfig, "contextTokens">): number {
@@ -109,16 +121,14 @@ export function replyLimit(config: Pick<LocalModelConfig, "contextTokens">): num
 }
 
 /**
- * The options sent with every request to the model.
+ * What a request to the model carries besides its messages: the reply limit.
  *
- * The same on every call, so the model is not reloaded between them: Ollama
- * restarts a model whose window changes, and a different window for the agent
- * and for app authoring would reload it on every switch. The reply limit would
- * not - measured, a request with a different num_predict found the model still
- * loaded, in 3 ms - but it is the same everywhere regardless.
+ * The window is not asked for with each request any more. The engine fixes
+ * it when it loads the model, so nothing a request says can make it load the
+ * model again - which a changed window did, under Ollama.
  */
-export function modelOptions(config: Pick<LocalModelConfig, "contextTokens">): { num_ctx: number; num_predict: number } {
-  return { num_ctx: contextWindow(config), num_predict: replyLimit(config) };
+export function modelOptions(config: Pick<LocalModelConfig, "contextTokens">): { max_tokens: number } {
+  return { max_tokens: replyLimit(config) };
 }
 
 /**
@@ -182,12 +192,32 @@ export function replyTooLong(config: Pick<LocalModelConfig, "model" | "contextTo
     + `(${replyLimit(config).toLocaleString("en-US")} tokens) without finishing.`;
 }
 
+/**
+ * Why a request the engine refused was not answered: it does not fit the
+ * model's window.
+ *
+ * The engine refuses a prompt longer than the window, where Ollama cut it
+ * from the front without a word. Earlier results and earlier turns have
+ * already given way by then (fitPromptToWindow in contextBudget.ts), so what
+ * is left is the request itself - and asking again would be refused again.
+ */
+export function promptTooLong(config: Pick<LocalModelConfig, "model" | "contextTokens">): string {
+  return `That is more than ${config.model} can take in at once (its window is `
+    + `${contextWindow(config).toLocaleString("en-US")} tokens). Ask about less of it at a time.`;
+}
+
+/** The model asked for when none is named: the head of preferredModels. */
+export const defaultModel = "qwen2.5-coder";
+
 export function readLocalModelConfig(env: NodeJS.ProcessEnv = process.env): LocalModelConfig {
+  // OLLAMA_MODEL is still read: a .env written when the models were Ollama's
+  // names one, and its "name:size" spelling is read as the same model.
+  const named = env.TRHAI_MODEL?.trim() || env.OLLAMA_MODEL?.trim() || "";
   return {
-    baseUrl: (env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/+$/, ""),
-    model: env.OLLAMA_MODEL ?? "vexora:latest",
-    modelFromEnv: Boolean(env.OLLAMA_MODEL),
-    contextTokens: contextWindow({ contextTokens: env.OLLAMA_NUM_CTX ? Number(env.OLLAMA_NUM_CTX) : undefined }),
+    baseUrl: engineUrl(env),
+    model: named || defaultModel,
+    modelFromEnv: Boolean(named),
+    contextTokens: contextWindow({ contextTokens: env.TRHAI_CONTEXT_TOKENS ? Number(env.TRHAI_CONTEXT_TOKENS) : undefined }),
     // Local inference on CPU is slow, and the first request after a launch is
     // slower still: the model has to be read into memory before it can answer
     // anything, which for an 8B model is several gigabytes off disk.
@@ -198,7 +228,7 @@ export function readLocalModelConfig(env: NodeJS.ProcessEnv = process.env): Loca
     // that answers that" — which reads as the feature being broken rather than
     // as it still starting up. Measured: the same question failed on the first
     // ask and answered in about a second on the second.
-    timeoutMs: Number(env.OLLAMA_TIMEOUT_MS ?? 180000)
+    timeoutMs: Number(env.TRHAI_MODEL_TIMEOUT_MS ?? env.OLLAMA_TIMEOUT_MS ?? 180000)
   };
 }
 
@@ -207,16 +237,6 @@ export type ModelAvailability =
   | { available: false; reason: string };
 
 type FetchLike = typeof fetch;
-
-async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    return await run(controller.signal);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /**
  * Ask the server what it has.
@@ -235,15 +255,18 @@ async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<
  * reliably, so if one is installed it should be used.
  *
  * Only consulted when the configured model is not itself installed, so an
- * explicit OLLAMA_MODEL always wins — this picks a good default, it does not
+ * explicit TRHAI_MODEL always wins — this picks a good default, it does not
  * overrule a choice.
  */
 const preferredModels = [
-  "vexora:latest",
-  "vexora",
-  // Tuned for code and the best tool-caller of these when it is installed.
-  "qwen2.5-coder",
+  // Tuned for code, the best tool-caller of these, and the one the assistant
+  // was measured with (84% of 54 tasks).
+  defaultModel,
+  // Thinks before it answers and scored higher (93%), at about six times the
+  // wait: a choice for a conversation, not the default.
+  "qwen3",
   "qwen2.5",
+  "vexora",
   // Ranked above llama3.2 because it is the 8B and llama3.2 is the 3B. The
   // note above is specifically about preferring the larger model, and this
   // list did not contain llama3.1 at all - so on a machine with 3.1 and 3.2
@@ -267,7 +290,7 @@ const preferredModels = [
  * Every installed model worth trying, best first.
  *
  * A model that is listed is not necessarily a model that will load: asked to
- * run, Ollama can answer 500 with "cudaMalloc failed: out of memory" or a
+ * run, it can fail with "cudaMalloc failed: out of memory" or a
  * failed CPU buffer allocation, and which models fit depends on what else the
  * machine is doing at that moment. So the caller gets an order to work down
  * rather than a single answer to fail on.
@@ -277,8 +300,8 @@ export function orderedCandidates(
   installed: string[],
   fromEnv = true
 ): string[] {
-  const matches = (candidate: string, name: string) =>
-    name === candidate || name.split(":")[0] === candidate;
+  // The model itself, or a size of it - however each name is spelt.
+  const matches = isModelOrSize;
 
   const ordered: string[] = [];
   const take = (name: string | undefined) => {
@@ -304,8 +327,8 @@ export function pickModel(
   /** False when `configured` is the built-in default rather than a real choice. */
   fromEnv = true
 ): string | null {
-  const matches = (candidate: string, name: string) =>
-    name === candidate || name.split(":")[0] === candidate;
+  // The model itself, or a size of it - however each name is spelt.
+  const matches = isModelOrSize;
 
   // Only a model the user actually named short-circuits the preference list.
   if (fromEnv) {
@@ -325,37 +348,37 @@ export async function checkAvailability(
   config: LocalModelConfig,
   fetchImpl: FetchLike = fetch
 ): Promise<ModelAvailability> {
+  let models: EngineModel[];
   try {
-    const response = await withTimeout(Math.min(config.timeoutMs, 4000), (signal) =>
-      fetchImpl(`${config.baseUrl}/api/tags`, { signal }));
-
-    if (!response.ok) {
-      return { available: false, reason: `Ollama answered ${response.status} at ${config.baseUrl}.` };
-    }
-
-    const payload = await response.json() as { models?: Array<{ name?: string }> };
-    const installed = (payload.models ?? [])
-      .map((entry) => entry.name)
-      .filter((name): name is string => typeof name === "string");
-
-    // Ollama reports "llama3.2:latest" for a model pulled as "llama3.2".
-    const match = pickModel(config.model, installed, config.modelFromEnv ?? true);
-    if (!match) {
-      return {
-        available: false,
-        reason: installed.length === 0
-          ? `Ollama is running at ${config.baseUrl} but has no models pulled. Run: ollama pull ${config.model}`
-          : `Ollama is running but "${config.model}" is not pulled. Available: ${installed.join(", ")}`
-      };
-    }
-
-    return { available: true, model: match, installedModels: installed };
+    models = await listEngineModels(config.baseUrl, fetchImpl, AbortSignal.timeout(Math.min(config.timeoutMs, 4000)));
   } catch (error) {
-    const detail = error instanceof Error && error.name === "AbortError"
+    if (error instanceof Error && /^The model engine answered \d+/.test(error.message)) {
+      return { available: false, reason: `${error.message.replace(/\.$/, "")} at ${config.baseUrl}.` };
+    }
+    // When this process is the one that should be running the engine, why it
+    // is not is more use than "nothing is listening": not installed and
+    // stopped need different things done.
+    const why = config.baseUrl === engineUrl() ? engineOffReason() : null;
+    if (why) return { available: false, reason: `No local model: ${why}` };
+    const detail = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")
       ? "it did not respond in time"
       : "nothing is listening";
     return { available: false, reason: `No local model: ${detail} at ${config.baseUrl}.` };
   }
+
+  // The models that can hold a conversation. The vision model is not one: it
+  // answers about images, on its own route.
+  const installed = models.filter((model) => !model.vision).map((model) => model.id);
+  const match = pickModel(config.model, installed, config.modelFromEnv ?? true);
+  if (!match) {
+    return {
+      available: false,
+      reason: `The model engine is running at ${config.baseUrl} but has no model to answer with. `
+        + `Put a .gguf model file in ${enginePaths().modelsDir} and start TRH AI again.`
+    };
+  }
+
+  return { available: true, model: match, installedModels: installed };
 }
 
 export type GenerationRequest = {
@@ -406,6 +429,16 @@ export function buildPrompt(request: GenerationRequest): string {
   return parts.join("\n");
 }
 
+/** The window the engine has `config.model` loaded with, for saying what limit a reply ran past. */
+async function loadedWindow(config: LocalModelConfig, fetchImpl: FetchLike): Promise<number | undefined> {
+  try {
+    const models = await listEngineModels(config.baseUrl, fetchImpl);
+    return findEngineModel(models, config.model)?.windowTokens ?? config.contextTokens;
+  } catch {
+    return config.contextTokens;
+  }
+}
+
 export async function generate(
   config: LocalModelConfig,
   request: GenerationRequest,
@@ -417,42 +450,41 @@ export async function generate(
   cancel?: AbortSignal
 ): Promise<GenerationResult> {
   try {
-    const response = await fetchImpl(`${config.baseUrl}/api/generate`, {
+    const response = await fetchImpl(`${config.baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // Streaming would let the UI show tokens as they arrive, but this API
-      // returns one JSON reply per request, so a single response is simpler
-      // and the client is not built for a stream yet.
+      // One reply per request, unstreamed: the callers - a summary's sections,
+      // app authoring - have nothing to show until it is whole.
       body: JSON.stringify({
         model: config.model,
-        prompt: request.rawPrompt ?? buildPrompt(request),
-        stream: false,
-        options: modelOptions(config)
+        // The prompt as one user turn; the engine wraps it in the model's own
+        // chat template. No reply limit of its own: the engine stops a reply
+        // when the model's window is full, which is the limit that matters
+        // for a whole application written in one go.
+        messages: [{ role: "user", content: request.rawPrompt ?? buildPrompt(request) }],
+        stream: false
       }),
       signal: deadlineOrStop(config.timeoutMs, cancel)
     });
 
     if (!response.ok) {
-      return { ok: false, reason: `Ollama answered ${response.status}.` };
+      const detail = engineError(await response.text().catch(() => "")).replace(/\.$/, "");
+      return { ok: false, reason: `The model engine answered ${response.status}${detail ? `: ${detail}` : ""}.` };
     }
 
-    const payload = await response.json() as { response?: unknown; model?: unknown; done_reason?: unknown };
-    // Cut off at replyLimit rather than finished. An answer that stops
-    // mid-sentence is not an answer, and for app authoring it is worse: a file
-    // cut off mid-line can still pass for a whole one.
-    if (payload.done_reason === "length") {
-      return { ok: false, reason: replyTooLong(config) };
+    const reply = readCompletion(await response.json(), config.model);
+    // Cut off because the window filled, rather than finished. An answer that
+    // stops mid-sentence is not an answer, and for app authoring it is worse:
+    // a file cut off mid-line can still pass for a whole one.
+    if (reply.finishReason === "length") {
+      return { ok: false, reason: replyTooLong({ model: config.model, contextTokens: await loadedWindow(config, fetchImpl) }) };
     }
-    const text = typeof payload.response === "string" ? payload.response.trim() : "";
+    const text = reply.content.trim();
     if (!text) {
       return { ok: false, reason: "The local model returned an empty reply." };
     }
 
-    return {
-      ok: true,
-      text,
-      model: typeof payload.model === "string" ? payload.model : config.model
-    };
+    return { ok: true, text, model: reply.model };
   } catch (error) {
     // Stopped on purpose, not out of time: both end the request, and the
     // caller's own signal says which it was.

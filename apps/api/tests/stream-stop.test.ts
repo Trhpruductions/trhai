@@ -7,17 +7,18 @@ import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
+import { modelsBody, streamEvent } from "./helpers/fakeEngine.js";
 
 // A streamed reply that is still being written: Stop, and the time limit, must
-// both reach it. fetch() resolves when a reply's headers arrive, and Ollama
+// both reach it. fetch() resolves when a reply's headers arrive, and the engine
 // sends those with the reply's first words. The time limit and the Stop relay
 // were both let go of at that moment, so once a reply had begun nothing ended
 // it: the model wrote on until it was done, holding the GPU, while Stop closed
 // only the browser's own connection.
 //
-// The stand-in Ollama below sends the start of a reply and then holds the
+// The stand-in engine below sends the start of a reply and then holds the
 // request open - what a model that writes on and on looks like from outside -
-// and notes when the asker lets go of it, which is what makes a real Ollama
+// and notes when the asker lets go of it, which is what makes a real engine
 // stop generating. Every store the route touches is pointed at a temporary
 // directory before server.js loads, as in reply-limit.test.ts.
 const dataDir = mkdtempSync(path.join(tmpdir(), "ascend-stream-stop-"));
@@ -36,19 +37,19 @@ test.after(() => {
 });
 
 /** A turn that reaches the model, the way the web client sends it. */
-const checklist = { mode: "general", model: "qwen2.5:3b", message: "Write a short checklist, eight items, for reviewing a pull request." };
+const checklist = { mode: "general", model: "qwen2.5-3b", message: "Write a short checklist, eight items, for reviewing a pull request." };
 /** The start of the reply. The rest never comes. */
 const opening = "Here is a checklist:\n1. Read the description.\n";
 
 type ChatRequest = { model?: string; stream?: boolean };
 
 /**
- * A stand-in Ollama whose streamed reply begins and never ends. `abandoned`
+ * A stand-in engine whose streamed reply begins and never ends. `abandoned`
  * resolves when a request for one is let go of before it ended. Two models are
  * installed, so handing the work to a second one would be possible - and would
  * show in `chats`.
  */
-function endlessOllama() {
+function endlessEngine() {
   const chats: ChatRequest[] = [];
   let markAbandoned!: () => void;
   const abandoned = new Promise<void>((resolve) => { markAbandoned = resolve; });
@@ -57,9 +58,9 @@ function endlessOllama() {
       const chunks: Buffer[] = [];
       request.on("data", (chunk) => chunks.push(chunk as Buffer));
       request.on("end", () => {
-        if (request.url?.startsWith("/api/tags")) {
+        if (request.url === "/models") {
           response.writeHead(200, { "Content-Type": "application/json" });
-          response.end(JSON.stringify({ models: [{ name: "qwen2.5:3b" }, { name: "llama3.2:latest" }] }));
+          response.end(JSON.stringify(modelsBody(["qwen2.5-3b", "llama3.2-3b"])));
           return;
         }
         const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as ChatRequest;
@@ -67,9 +68,10 @@ function endlessOllama() {
         response.on("close", () => {
           if (!response.writableEnded) markAbandoned();
         });
-        response.writeHead(200, { "Content-Type": "application/x-ndjson" });
+        response.writeHead(200, { "Content-Type": "text/event-stream" });
+        response.write(streamEvent(body.model ?? "", { role: "assistant", content: null }));
         for (const line of opening.split(/(?<=\n)/)) {
-          response.write(`${JSON.stringify({ model: body.model, message: { role: "assistant", content: line }, done: false })}\n`);
+          response.write(streamEvent(body.model ?? "", { content: line }));
         }
         // ...and nothing after that.
       });
@@ -80,10 +82,10 @@ function endlessOllama() {
   });
 }
 
-/** The API, asking `ollama`, with `env` set for as long as `use` runs. */
-async function withApi(ollama: { baseUrl: string }, env: Record<string, string>, use: (base: string) => Promise<void>) {
+/** The API, asking `engine`, with `env` set for as long as `use` runs. */
+async function withApi(engine: { baseUrl: string }, env: Record<string, string>, use: (base: string) => Promise<void>) {
   const saved = new Map<string, string | undefined>();
-  for (const [name, value] of Object.entries({ OLLAMA_BASE_URL: ollama.baseUrl, ...env })) {
+  for (const [name, value] of Object.entries({ TRHAI_ENGINE_URL: engine.baseUrl, ...env })) {
     saved.set(name, process.env[name]);
     process.env[name] = value;
   }
@@ -131,8 +133,8 @@ async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, patter
 }
 
 /** Whether the request to the model was let go of within `ms`. */
-async function letGoWithin(ollama: { abandoned: Promise<void> }, ms: number): Promise<"let go" | "held"> {
-  return Promise.race([ollama.abandoned.then(() => "let go" as const), delay(ms).then(() => "held" as const)]);
+async function letGoWithin(engine: { abandoned: Promise<void> }, ms: number): Promise<"let go" | "held"> {
+  return Promise.race([engine.abandoned.then(() => "let go" as const), delay(ms).then(() => "held" as const)]);
 }
 
 /** The session's task once it has stopped running, as the Task center reads it. */
@@ -170,8 +172,8 @@ async function storedReply(base: string, sessionId: string) {
 }
 
 test("Stop reaches a reply that is already streaming, and the model is let go of", async () => {
-  const ollama = await endlessOllama();
-  await withApi(ollama, {}, async (base) => {
+  const engine = await endlessEngine();
+  await withApi(engine, {}, async (base) => {
     const stop = new AbortController();
     try {
       const reader = await startTurn(base, "stream-stop", stop);
@@ -181,11 +183,11 @@ test("Stop reaches a reply that is already streaming, and the model is let go of
       assert.match(shown, /event: token\ndata: \{"text":"Here is a checklist/, "the reply had started on screen");
       // The control. Left alone, the request stays open while the reply is
       // written, so "let go of" below is the Stop and nothing else.
-      assert.equal(await letGoWithin(ollama, 500), "held", "nothing ends a reply that is still being written but Stop or the time limit");
+      assert.equal(await letGoWithin(engine, 500), "held", "nothing ends a reply that is still being written but Stop or the time limit");
 
       stop.abort(); // what the Stop button does
-      assert.equal(await letGoWithin(ollama, 5000), "let go", "Stop let go of the request to the model, which is what stops it generating");
-      assert.deepEqual(ollama.chats.map((chat) => chat.stream), [true], "asked once, streamed, and not handed to another model to start again");
+      assert.equal(await letGoWithin(engine, 5000), "let go", "Stop let go of the request to the model, which is what stops it generating");
+      assert.deepEqual(engine.chats.map((chat) => chat.stream), [true], "asked once, streamed, and not handed to another model to start again");
 
       const task = await settledTask(base, "stream-stop");
       assert.equal(task.running, false);
@@ -196,40 +198,40 @@ test("Stop reaches a reply that is already streaming, and the model is let go of
       assert.deepEqual(await storedReply(base, "stream-stop"), { content: "Stopped before it finished.", strategy: "stopped" });
     } finally {
       stop.abort();
-      ollama.server.closeAllConnections();
-      ollama.server.close();
+      engine.server.closeAllConnections();
+      engine.server.close();
     }
   });
 });
 
 test("the time limit reaches a reply that is already streaming, and says it began and did not finish", async () => {
-  const ollama = await endlessOllama();
-  await withApi(ollama, { OLLAMA_TIMEOUT_MS: "1000" }, async (base) => {
+  const engine = await endlessEngine();
+  await withApi(engine, { TRHAI_MODEL_TIMEOUT_MS: "1000" }, async (base) => {
     const leave = new AbortController();
     try {
       const reader = await startTurn(base, "stream-time-limit", leave);
       const events = await readUntil(reader, /event: (done|failed)/, 10_000);
       assert.match(events, /event: token\ndata: \{"text":"Here is a checklist/, "the reply had started on screen before the time ran out");
       assert.match(events, /event: done/, "the turn ended: the time limit reached a reply already under way");
-      assert.equal(await letGoWithin(ollama, 2000), "let go", "and the request to the model was let go of");
-      assert.deepEqual(ollama.chats.map((chat) => chat.model), ["qwen2.5:3b"], "asked once: not handed to the other installed model to start over");
+      assert.equal(await letGoWithin(engine, 2000), "let go", "and the request to the model was let go of");
+      assert.deepEqual(engine.chats.map((chat) => chat.model), ["qwen2.5-3b"], "asked once: not handed to the other installed model to start over");
 
       // What replaces the words on screen: why there is no answer. Not the
       // unfinished reply, and not the composer's generic plan, which is what
       // this turn fell back to before ("1. Clarify the end state for the
       // short checklist...").
       const done = JSON.parse(/event: done\ndata: (.+)/.exec(events)![1]) as { assistantMessage: string; strategy: string };
-      assert.equal(done.assistantMessage, "I couldn't finish that. qwen2.5:3b did not finish its reply within 1 s. Try again in a moment.");
+      assert.equal(done.assistantMessage, "I couldn't finish that. qwen2.5-3b did not finish its reply within 1 s. Try again in a moment.");
       assert.equal(done.strategy, "failed");
 
       const task = await settledTask(base, "stream-time-limit");
       assert.equal(task.status, "failed", "a model took it and came back without an answer");
       // Not "did not reply": its first words had been on screen the whole time.
-      assert.equal(task.error, "qwen2.5:3b did not finish its reply within 1 s.");
+      assert.equal(task.error, "qwen2.5-3b did not finish its reply within 1 s.");
     } finally {
       leave.abort();
-      ollama.server.closeAllConnections();
-      ollama.server.close();
+      engine.server.closeAllConnections();
+      engine.server.close();
     }
   });
 });

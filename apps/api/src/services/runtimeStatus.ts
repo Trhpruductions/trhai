@@ -1,5 +1,8 @@
 import os from "node:os";
 import type { AddressInfo } from "node:net";
+import {
+  discoverModels, engineOffReason, enginePaths, idleUnloadSeconds, listEngineModels, unloadEngineModel
+} from "./modelEngine.js";
 
 // TRH AI's own service, the local model runtime it depends on, and this PC's
 // network, as they are right now - for the System and Network workspaces.
@@ -45,65 +48,59 @@ export function serviceStatus() {
   };
 }
 
-export type LoadedModel = { name: string; sizeBytes: number; vramBytes: number; expiresAt: string | null };
-export type OllamaRuntime = {
+export type LoadedModel = {
+  name: string;
+  sizeBytes: number;
+  /** The context window the engine gave it on this card, in tokens. */
+  windowTokens: number | null;
+};
+export type EngineRuntime = {
   reachable: boolean;
+  /** The engine's build, as it says it: "b11366-2923cf286". */
   version: string | null;
-  /** Models in memory now, with how much of each sits on the graphics card. */
+  /** The model in memory now. One at most: the engine lets it go to load another. */
   loaded: LoadedModel[];
   installed: Array<{ name: string; sizeBytes: number }>;
+  /** A loaded model that nothing uses is let go after this long. */
+  idleUnloadSeconds: number;
+  /** Why the engine is not running, when this service is the one that starts it. */
+  reason: string | null;
 };
 
-async function getJson(url: string, fetchImpl: typeof fetch): Promise<unknown> {
-  const response = await fetchImpl(url, { signal: AbortSignal.timeout(4000) });
-  if (!response.ok) throw new Error(`${response.status}`);
-  return response.json();
-}
-
-/** What Ollama has loaded and installed, read from Ollama itself. */
-export async function ollamaRuntime(baseUrl: string, fetchImpl: typeof fetch = fetch): Promise<OllamaRuntime> {
+/** What the model engine has loaded and installed, read from the engine itself. */
+export async function engineRuntime(baseUrl: string, fetchImpl: typeof fetch = fetch): Promise<EngineRuntime> {
+  // The engine gives a model's size only once it has loaded it; the files in
+  // the models folder give the rest.
+  const onDisk = new Map(discoverModels(enginePaths().modelsDir).map((model) => [model.id, model.sizeBytes]));
   try {
-    const [ps, tags, version] = await Promise.all([
-      getJson(`${baseUrl}/api/ps`, fetchImpl) as Promise<{ models?: Array<Record<string, unknown>> }>,
-      getJson(`${baseUrl}/api/tags`, fetchImpl) as Promise<{ models?: Array<Record<string, unknown>> }>,
-      getJson(`${baseUrl}/api/version`, fetchImpl).catch(() => null) as Promise<{ version?: unknown } | null>
+    const [models, build] = await Promise.all([
+      listEngineModels(baseUrl, fetchImpl),
+      fetchImpl(`${baseUrl}/props`, { signal: AbortSignal.timeout(4000) })
+        .then((response) => (response.ok ? response.json() as Promise<{ build_info?: unknown }> : null))
+        .then((props) => (typeof props?.build_info === "string" ? props.build_info : null))
+        .catch(() => null)
     ]);
-    const text = (value: unknown) => (typeof value === "string" ? value : "");
-    const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+    const size = (model: { id: string; sizeBytes: number | null }) => model.sizeBytes ?? onDisk.get(model.id) ?? 0;
     return {
       reachable: true,
-      version: typeof version?.version === "string" ? version.version : null,
-      loaded: (ps.models ?? []).map((model) => ({
-        name: text(model.name),
-        sizeBytes: count(model.size),
-        vramBytes: count(model.size_vram),
-        expiresAt: text(model.expires_at) || null
-      })).filter((model) => model.name),
-      installed: (tags.models ?? []).map((model) => ({ name: text(model.name), sizeBytes: count(model.size) })).filter((model) => model.name)
+      version: build,
+      loaded: models.filter((model) => model.status === "loaded")
+        .map((model) => ({ name: model.id, sizeBytes: size(model), windowTokens: model.windowTokens })),
+      installed: models.map((model) => ({ name: model.id, sizeBytes: size(model) })),
+      idleUnloadSeconds,
+      reason: null
     };
   } catch {
-    return { reachable: false, version: null, loaded: [], installed: [] };
+    return { reachable: false, version: null, loaded: [], installed: [], idleUnloadSeconds, reason: engineOffReason() };
   }
 }
 
 /**
- * Take a model out of memory now, rather than when its keep-alive runs out.
- * The way Ollama itself offers: a request with keep_alive 0 and no prompt.
+ * Take a model out of memory now, rather than after it has sat idle.
  * Nothing is lost - the next request that needs it loads it again.
  */
 export async function unloadModel(baseUrl: string, name: string, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; reason: string }> {
-  try {
-    const response = await fetchImpl(`${baseUrl}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: name, keep_alive: 0 }),
-      signal: AbortSignal.timeout(15_000)
-    });
-    if (!response.ok) return { ok: false, reason: `Ollama answered with ${response.status}.` };
-    return { ok: true };
-  } catch {
-    return { ok: false, reason: "Ollama is not answering." };
-  }
+  return unloadEngineModel(baseUrl, name, fetchImpl);
 }
 
 /** This PC's network addresses, as the operating system lists them. */

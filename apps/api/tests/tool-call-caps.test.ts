@@ -1,7 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
-import { AddressInfo } from "node:net";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,6 +10,7 @@ process.env.ASCEND_WORKSPACE = testWorkspace;
 import { maxCallsPerRound, runAgent } from "../src/services/agentLoop.js";
 import type { ToolContext } from "../src/services/agentTools.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
+import { fakeEngine, type ScriptedReply } from "./helpers/fakeEngine.js";
 
 // How many tool calls one reply may carry, and how many of them may change
 // something. Found live: told that forget needed its fact filled in, the
@@ -29,28 +28,10 @@ const context: ToolContext = {
   now: () => new Date("2026-08-17T12:00:00Z")
 };
 
-/** A stand-in Ollama driven by a script of replies; records what it was sent. */
-function fakeModel(turns: Array<Record<string, unknown>>) {
-  const received: Array<Record<string, unknown>> = [];
-
-  return new Promise<{ server: Server; baseUrl: string; received: typeof received }>((resolve) => {
-    let turn = 0;
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(chunk as Buffer));
-      request.on("end", () => {
-        received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        const body = turns[Math.min(turn, turns.length - 1)];
-        turn += 1;
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ model: "llama3.2:latest", ...body }));
-      });
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received });
-    });
-  });
+/** A stand-in engine driven by a script of replies; records what it was sent. */
+async function fakeModel(turns: ScriptedReply[]) {
+  const engine = await fakeEngine({ reply: turns });
+  return { server: engine.server, baseUrl: engine.baseUrl, received: engine.chats };
 }
 
 const configFor = (baseUrl: string): LocalModelConfig =>

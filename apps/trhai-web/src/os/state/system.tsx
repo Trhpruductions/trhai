@@ -117,7 +117,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
   // What changes when something is done - a reply, a save - rather than by
   // itself: counts, the model's availability, the latest rendering. These
   // used to be read with the gauges every four seconds, which meant a walk of
-  // up to 5,000 workspace entries and two questions to Ollama, every four
+  // up to 5,000 workspace entries and two questions to the model engine, every four
   // seconds, for figures that change a few times an hour. Now every twenty,
   // and at once after anything that changes them - see refresh().
   const readSettled = useCallback(async () => {
@@ -218,7 +218,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
     writeDismissedRendering(window.localStorage, key);
   }, [rendering]);
 
-  const modelName = model?.available && model.model ? model.model.replace(/^ollama\//, "").replace(/:latest$/, "") : null;
+  const modelName = model?.available && model.model ? model.model.replace(/^(?:local|ollama)\//, "").replace(/:latest$/, "") : null;
   const renderingDismissed = rendering ? renderingKey(rendering) === dismissedRendering : true;
 
   const value = useMemo<SystemState>(() => ({

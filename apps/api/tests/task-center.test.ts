@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
+import { fakeEngine } from "./helpers/fakeEngine.js";
 
 // The Task center: the work TRH AI has finished and how each piece went, what
 // is running right now, and every run of every schedule. Every store is
@@ -264,31 +264,18 @@ async function call(baseUrl: string, method: string, route: string, options: { b
   return { status: response.status, body: text ? JSON.parse(text) as any : null };
 }
 
-/** A stand-in Ollama that answers every chat, so a turn reaches the agent and finishes. */
-function fakeOllama() {
-  return new Promise<{ server: Server; baseUrl: string }>((resolve) => {
-    const server = createServer((request, response) => {
-      request.resume();
-      request.on("end", () => {
-        response.writeHead(200, { "Content-Type": "application/json" });
-        if (request.url?.startsWith("/api/tags")) {
-          response.end(JSON.stringify({ models: [{ name: "llama3.2:latest" }] }));
-          return;
-        }
-        response.end(JSON.stringify({ model: "llama3.2:latest", message: { content: "Short sentences, and say what to do next." } }));
-      });
-    });
-    server.listen(0, "127.0.0.1", () => resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}` }));
-  });
+/** A stand-in engine that answers every chat, so a turn reaches the agent and finishes. */
+function standInModel() {
+  return fakeEngine({ reply: { message: { content: "Short sentences, and say what to do next." } } });
 }
 
 test("a signed-in user's task, history and steps are read under their account, not the browser", async () => {
   fresh();
   resetAccounts();
   resetRateLimits();
-  const model = await fakeOllama();
-  const previous = process.env.OLLAMA_BASE_URL;
-  process.env.OLLAMA_BASE_URL = model.baseUrl;
+  const model = await standInModel();
+  const previous = process.env.TRHAI_ENGINE_URL;
+  process.env.TRHAI_ENGINE_URL = model.baseUrl;
   const server = await startTestServer();
   try {
     const registered = await call(server.baseUrl, "POST", "/v1/auth/register", { body: { email: "tasks@example.com", password: "correct horse battery" } });
@@ -320,8 +307,8 @@ test("a signed-in user's task, history and steps are read under their account, n
     assert.deepEqual(steps.body.data.events.map((event: { label: string }) => event.label), ["Reading the style guide"]);
     assert.deepEqual((await call(server.baseUrl, "GET", "/v1/execution?sessionId=browser-a")).body.data.events, []);
   } finally {
-    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
-    else process.env.OLLAMA_BASE_URL = previous;
+    if (previous === undefined) delete process.env.TRHAI_ENGINE_URL;
+    else process.env.TRHAI_ENGINE_URL = previous;
     await server.close();
     model.server.close();
   }

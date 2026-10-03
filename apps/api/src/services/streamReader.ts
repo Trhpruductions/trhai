@@ -1,7 +1,8 @@
-// Reading Ollama's streamed reply, safely.
+// Reading the model engine's streamed reply, safely.
 //
-// Ollama streams NDJSON: one JSON object per line, each carrying a fragment
-// of message.content, until a final object with done: true. Turning that into
+// The engine streams server-sent events: a "data:" line per frame, each
+// carrying a fragment of the reply (delta.content), until a frame with a
+// finish_reason and then "[DONE]". Turning that into
 // tokens on a screen is easy. Turning it into tokens on a screen *without
 // showing the user things they should never see* is the actual problem, and
 // it is the reason this is a separate, tested unit rather than a few lines
@@ -20,11 +21,20 @@
 // buffer is flushed if the object turns out to be ordinary content.
 
 export type StreamChunk = {
-  message?: { content?: unknown; tool_calls?: unknown };
-  done?: unknown;
-  /** On the final frame: "stop" when the model finished, "length" when the reply limit cut it off. */
-  done_reason?: unknown;
+  choices?: Array<{
+    /** On the last frame: "stop" when the model finished, "tool_calls", or "length" when the reply limit cut it off. */
+    finish_reason?: unknown;
+    delta?: {
+      content?: unknown;
+      /** A thinking model's thoughts. Never shown, and never part of the reply. */
+      reasoning_content?: unknown;
+      /** A tool call, in pieces: each says which call it belongs to. */
+      tool_calls?: Array<{ index?: unknown; function?: { name?: unknown; arguments?: unknown } }>;
+    };
+  }>;
   model?: unknown;
+  /** Sent instead of a reply when the engine gives up part way. */
+  error?: unknown;
 };
 
 /**
@@ -102,7 +112,7 @@ export type StreamResult = {
 };
 
 /**
- * Consume an NDJSON stream, emitting only text that is safe to show.
+ * Consume the engine's event stream, emitting only text that is safe to show.
  *
  * `onToken` receives text in order, and never receives anything twice — it is
  * given the newly-safe slice, not the whole accumulated string. A caller can
@@ -110,7 +120,8 @@ export type StreamResult = {
  *
  * It is called with prose only. If the reply turns out to be a text-encoded
  * tool call, the JSON is never emitted, and the caller decides what to do
- * with the complete content it gets back at the end.
+ * with the complete content it gets back at the end. A thinking model's
+ * thoughts (delta.reasoning_content) are not the reply and are never emitted.
  */
 export async function readStream(
   lines: AsyncIterable<string>,
@@ -120,17 +131,23 @@ export async function readStream(
 ): Promise<StreamResult> {
   let content = "";
   let emitted = 0;
-  let toolCalls: unknown = undefined;
+  // Tool calls arrive in pieces: a name, then its arguments a few characters
+  // at a time, each piece saying which call it belongs to.
+  const calls: Array<{ name: string; arguments: string }> = [];
   let model: string | null = null;
   let doneReason: string | null = null;
 
   for await (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed) continue;
+    // Server-sent events: only "data:" lines carry a frame; the blank lines
+    // between them, and a comment line, carry nothing.
+    if (!trimmed.startsWith("data:")) continue;
+    const data = trimmed.slice(5).trim();
+    if (!data || data === "[DONE]") continue;
 
     let chunk: StreamChunk;
     try {
-      chunk = JSON.parse(trimmed) as StreamChunk;
+      chunk = JSON.parse(data) as StreamChunk;
     } catch {
       // A partial or malformed line is skipped rather than throwing. The
       // stream is still running, and one unreadable frame is not a reason to
@@ -138,11 +155,27 @@ export async function readStream(
       continue;
     }
 
-    if (typeof chunk.model === "string") model = chunk.model;
-    if (chunk.message?.tool_calls) toolCalls = chunk.message.tool_calls;
-    if (typeof chunk.done_reason === "string") doneReason = chunk.done_reason;
+    // The engine gave up part way. A failed request, not a reply that
+    // happened to stop there.
+    if (chunk.error) {
+      const said = (chunk.error as { message?: unknown } | null)?.message;
+      throw new Error(typeof said === "string" && said ? said : "The model engine reported an error part way through the reply.");
+    }
 
-    const piece = chunk.message?.content;
+    if (typeof chunk.model === "string") model = chunk.model;
+    const choice = chunk.choices?.[0];
+    if (typeof choice?.finish_reason === "string") doneReason = choice.finish_reason;
+
+    for (const part of choice?.delta?.tool_calls ?? []) {
+      const named = typeof part.function?.name === "string" && part.function.name ? part.function.name : "";
+      // A piece with no index continues the last call, unless it names a new one.
+      const at = typeof part.index === "number" ? part.index : Math.max(0, calls.length - (named ? 0 : 1));
+      calls[at] ??= { name: "", arguments: "" };
+      if (named) calls[at].name = named;
+      if (typeof part.function?.arguments === "string") calls[at].arguments += part.function.arguments;
+    }
+
+    const piece = choice?.delta?.content;
     if (typeof piece === "string" && piece.length > 0) {
       content += piece;
 
@@ -168,6 +201,12 @@ export async function readStream(
     onToken(content.slice(emitted));
   }
 
+  // In the shape an unstreamed reply carries them: the arguments still a JSON
+  // string, which the loop parses.
+  const asked = calls.filter((call) => call?.name);
+  const toolCalls = asked.length > 0
+    ? asked.map((call) => ({ function: { name: call.name, arguments: call.arguments } }))
+    : undefined;
   return { content, toolCalls, model, doneReason };
 }
 

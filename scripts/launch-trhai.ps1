@@ -135,55 +135,10 @@ function Start-Service-IfDown([int]$port, [string]$name, [string]$argumentList, 
     }
 }
 
-# Ollama, which the assistant answers with.
-#
-# It installs into the Startup folder rather than as a service, so it is
-# usually already running — but if it has been closed, the app would open with
-# no model and only a small "none" on the System panel to explain why. Starting
-# it here is the difference between the shortcut opening a working assistant
-# and opening one that cannot answer.
-#
-# Found by looking rather than assumed: `ollama` is on PATH, and `ollama serve`
-# is the process the API actually talks to on 11434.
-function Start-Ollama-IfDown {
-    if (Test-Port 11434) {
-        Write-Log "ollama already listening on 11434"
-        return
-    }
-
-    # The tray app, not `ollama serve`.
-    #
-    # This mattered and was nearly missed. Starting `ollama serve` directly
-    # brought 11434 up and reported llama3.1 and llama3.2 as the installed
-    # models — when the models actually installed on this machine are
-    # vexora:latest, qwen2.5-coder:7b and qwen2.5:3b. The bare server resolves
-    # a different model store from the one the tray app uses, so the launcher
-    # would have "recovered" Ollama into a state where the assistant's own
-    # model did not exist. Starting it the way Windows does at login is the
-    # only version that gives the same machine back.
-    $tray = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama app.exe"
-    if (Test-Path $tray) {
-        Write-Log "starting ollama (tray app)"
-        Start-Process -FilePath $tray
-        return
-    }
-
-    # Fallback for an install without the tray app. Better than nothing, and
-    # the model list on the System panel will show what it actually found.
-    $ollama = Get-Command ollama -ErrorAction SilentlyContinue
-    if (-not $ollama) {
-        # Not an error to stop the launch for. The app runs without it and says
-        # plainly that no model is loaded, which is more useful than refusing
-        # to open at all.
-        Write-Log "ollama is not installed; the app will open without a model"
-        return
-    }
-
-    Write-Log "starting ollama (serve)"
-    Start-Process -FilePath $ollama.Source -ArgumentList "serve" -WindowStyle Hidden
-}
-
-Start-Ollama-IfDown
+# The model engine is not started here. The API starts it (llama.cpp, from
+# %LOCALAPPDATA%\TRHAI\runtime) and stops it when it stops, so there is no
+# second application to keep running. `npm run setup:engine` installs it, and
+# the System panel says why when it is not there.
 Start-Service-IfDown 4000 "API" "run start --workspace @ascend/api" "api"
 Start-Service-IfDown 3210 "app" "run start --workspace trhai-web -- -p 3210" "web"
 
@@ -209,19 +164,34 @@ if (-not $ready) {
 }
 
 # Reported separately, and not as failures. The app serves pages without the
-# API, and answers without Ollama only to say it cannot — in both cases it
+# API, and answers without a model only to say it cannot — in both cases it
 # shows the gap plainly on screen, so opening it is still the right move.
 # Saying so here means you know before you look.
 if (-not (Test-Port 4000)) {
     Write-Log "app is up but the API is not answering on 4000"
     Write-Host "The app started, but the local API is not answering."
     Write-Host "TRHAI will open and show that plainly. See $log."
-}
-
-if (-not (Test-Port 11434)) {
-    Write-Log "app is up but ollama is not answering on 11434"
-    Write-Host "The app started, but Ollama is not running, so TRHAI cannot generate replies."
-    Write-Host "Everything else works: files, schedules, memory and the machine readings."
+} else {
+    # The model, asked of the API rather than guessed from a port: it knows
+    # whether the engine is installed, whether it started, and whether it has
+    # a model to answer with. The engine starts just after the API does, so it
+    # is given a few seconds before anything is said.
+    $model = $null
+    $until = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $until) {
+        try {
+            $model = (Invoke-RestMethod -Uri "http://127.0.0.1:4000/v1/assist/model" -TimeoutSec 5).data
+            if ($model.available) { break }
+        } catch {}
+        Start-Sleep -Milliseconds 750
+    }
+    if (-not $model -or -not $model.available) {
+        $why = if ($model -and $model.reason) { $model.reason } else { "The API did not say why." }
+        Write-Log "app is up but no model is answering: $why"
+        Write-Host "The app started, but no model is answering, so TRHAI cannot generate replies."
+        Write-Host $why
+        Write-Host "Everything else works: files, schedules, memory and the machine readings."
+    }
 }
 
 Write-Log "opening"

@@ -44,7 +44,7 @@ export function useHealth() {
     const modules: Array<{ name: string; state: ModuleState; detail: string }> = [
       {
         name: "Neural processor", state: model?.available ? "online" : "offline",
-        detail: model?.available ? (model.model ?? "local model").replace(/^ollama\//, "") : model?.reason ?? "No local model"
+        detail: model?.available ? (model.model ?? "local model").replace(/^(?:local|ollama)\//, "") : model?.reason ?? "No local model"
       },
       {
         name: "Voice engine", state: speech.engine !== "none" ? "online" : "offline",

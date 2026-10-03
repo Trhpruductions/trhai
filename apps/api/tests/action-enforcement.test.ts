@@ -1,10 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { runAgent } from "../src/services/agentLoop.js";
 import type { LocalModelConfig } from "../src/services/localModel.js";
 import type { ToolContext } from "../src/services/agentTools.js";
+import { fakeEngine, type ScriptedReply } from "./helpers/fakeEngine.js";
 
 // An order answered with prose is not an answer.
 //
@@ -17,27 +16,9 @@ import type { ToolContext } from "../src/services/agentTools.js";
 // specific question, or a truthful failure. Never an acknowledgement.
 
 /** Serves scripted model turns, and records what was sent to it. */
-function fakeModel(turns: Array<Record<string, unknown>>) {
-  const received: Array<Record<string, unknown>> = [];
-
-  return new Promise<{ server: Server; baseUrl: string; received: typeof received }>((resolve) => {
-    let turn = 0;
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(chunk as Buffer));
-      request.on("end", () => {
-        received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        const body = turns[Math.min(turn, turns.length - 1)];
-        turn += 1;
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ model: "llama3.2:latest", ...body }));
-      });
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received });
-    });
-  });
+async function fakeModel(turns: ScriptedReply[]) {
+  const engine = await fakeEngine({ reply: turns });
+  return { server: engine.server, baseUrl: engine.baseUrl, received: engine.chats };
 }
 
 const configFor = (baseUrl: string): LocalModelConfig =>
@@ -52,7 +33,7 @@ const context: ToolContext = { memories: [], knowledge: [] };
 /** The exact shape of the bug: a polite acknowledgement and no action. */
 const acknowledgement = answer("Got it — I'll keep that in mind for this conversation.");
 
-async function ask(question: string, turns: Array<Record<string, unknown>>) {
+async function ask(question: string, turns: ScriptedReply[]) {
   const { server, baseUrl, received } = await fakeModel(turns);
   try {
     const result = await runAgent(configFor(baseUrl), question, context);

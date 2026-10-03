@@ -1,7 +1,7 @@
 import test from "node:test";
 import { armCommands, commandsArmed, disarmCommands } from "../src/services/commandRunner.js";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
+import { createServer } from "node:http";
 import { AddressInfo } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,6 +20,8 @@ import {
 import { appTheUserNamed, availableTools, runTool, toolDefinitions, type ToolContext } from "../src/services/agentTools.js";
 import { mentionsDocument, namesAFilePath } from "../src/services/actionIntent.js";
 import { defaultContextTokens, minimumContextTokens, type LocalModelConfig } from "../src/services/localModel.js";
+import { estimateTokens, promptBudgetTokens } from "../src/services/contextBudget.js";
+import { fakeEngine, fakeWindow, type ScriptedReply } from "./helpers/fakeEngine.js";
 
 const at = new Date("2026-08-17T12:00:00Z").toISOString();
 
@@ -38,32 +40,16 @@ const context: ToolContext = {
 };
 
 /**
- * A stand-in Ollama driven by a script of turns.
+ * A stand-in model engine driven by a script of turns.
  *
  * Each entry is one reply. This exercises the real loop — HTTP, JSON, tool
  * dispatch, message threading — against a model whose behaviour is known.
+ * `received` is every chat request, in order; asking which models there are
+ * is not one.
  */
-function fakeModel(turns: Array<Record<string, unknown>>) {
-  const received: Array<Record<string, unknown>> = [];
-
-  return new Promise<{ server: Server; baseUrl: string; received: typeof received }>((resolve) => {
-    let turn = 0;
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(chunk as Buffer));
-      request.on("end", () => {
-        received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        const body = turns[Math.min(turn, turns.length - 1)];
-        turn += 1;
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ model: "llama3.2:latest", ...body }));
-      });
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received });
-    });
-  });
+async function fakeModel(turns: ScriptedReply[]) {
+  const engine = await fakeEngine({ reply: turns });
+  return { server: engine.server, baseUrl: engine.baseUrl, received: engine.chats };
 }
 
 const configFor = (baseUrl: string): LocalModelConfig =>
@@ -254,7 +240,7 @@ test("a tool the model invented is refused without ending the conversation", asy
 });
 
 test("arguments arriving as a JSON string are still understood", async () => {
-  // Ollama builds differ on this; a parse failure here would lose the reply.
+  // How the engine always sends them; a parse failure here would lose the reply.
   const { server, baseUrl, received } = await fakeModel([
     { message: { content: "", tool_calls: [{ function: { name: "search_memory", arguments: '{"query":"billing database"}' } }] } },
     answer("Postgres 16.")
@@ -1025,14 +1011,29 @@ test("list_files refuses to list outside the workspace when access is off", asyn
 });
 
 test("a model that cannot be loaded is reported as unusable, not just failed", async () => {
-  // Ollama answers 500 with "cudaMalloc failed: out of memory" when a model
-  // does not fit. The caller can act on that by trying a smaller one — but
-  // only if the difference is reported.
-  const server = createServer((_request, response) => {
-    response.writeHead(500, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({
-      error: "llama-server process has terminated: exit status 1: cudaMalloc failed: out of memory"
-    }));
+  // A model that does not fit never becomes loaded: the engine takes the
+  // request to load it, and then lists it as unloaded again, and failed. The
+  // caller can act on that by trying a smaller one — but only if the
+  // difference is reported.
+  let loadsAsked = 0;
+  let chatsAsked = 0;
+  const server = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      if (request.url === "/models") {
+        // As the engine was recorded listing a model whose load had failed.
+        response.end(JSON.stringify({ data: [{
+          id: "llama3.2",
+          status: loadsAsked > 0 ? { value: "unloaded", failed: true, exit_code: 1 } : { value: "unloaded" },
+          architecture: { input_modalities: ["text"] }
+        }] }));
+        return;
+      }
+      if (request.url === "/models/load") loadsAsked += 1;
+      else chatsAsked += 1;
+      response.end(JSON.stringify({ success: true }));
+    });
   });
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -1043,31 +1044,89 @@ test("a model that cannot be loaded is reported as unusable, not just failed", a
     assert.equal(result.ok, false);
     if (result.ok) return;
     assert.equal(result.modelUnusable, true);
-    assert.match(result.reason, /could not be loaded/);
-    assert.match(result.reason, /out of memory/);
+    assert.match(result.reason, /^llama3\.2 could not be loaded by the model engine\./);
+    assert.match(result.reason, /engine\.log/, "the engine writes why in its log, and the reason says where that is");
+    assert.ok(loadsAsked >= 1, "it was asked to load");
+    assert.equal(chatsAsked, 0, "and a model that is not loaded is asked nothing");
   } finally {
     server.close();
+  }
+});
+
+test("a model that runs out of memory when it is asked is reported as unusable too", async () => {
+  // Loaded, and then no memory for the request itself: the engine answers 500
+  // with the allocator's own words.
+  const engine = await fakeEngine({
+    reply: () => ({ status: 500, body: { error: { code: 500, message: "cudaMalloc failed: out of memory", type: "server_error" } } })
+  });
+
+  try {
+    const result = await runAgent(configFor(engine.baseUrl), "anything", context);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.modelUnusable, true);
+    assert.match(result.reason, /could not be loaded/);
+    assert.match(result.reason, /out of memory/);
+    assert.doesNotMatch(result.reason, /[{}]/, "the engine's sentence, not the JSON it came in");
+  } finally {
+    await engine.close();
   }
 });
 
 test("an ordinary failure is not mistaken for an unusable model", async () => {
   // A 400 means the request was wrong, and trying every other installed model
   // against it would just make the user wait.
-  const server = createServer((_request, response) => {
-    response.writeHead(400, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ error: "bad request" }));
+  const engine = await fakeEngine({
+    reply: () => ({ status: 400, body: { error: { code: 400, message: "bad request", type: "invalid_request_error" } } })
   });
 
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-
   try {
-    const result = await runAgent(configFor(baseUrl), "anything", context);
+    const result = await runAgent(configFor(engine.baseUrl), "anything", context);
     assert.equal(result.ok, false);
     if (result.ok) return;
     assert.notEqual(result.modelUnusable, true);
   } finally {
-    server.close();
+    await engine.close();
+  }
+});
+
+test("a prompt the engine refuses as longer than the window is reported as that", async () => {
+  const engine = await fakeEngine({
+    window: 9216,
+    reply: () => ({
+      status: 400,
+      body: { error: {
+        code: 400, message: "request (10804 tokens) exceeds the available context size (9216 tokens), try increasing it",
+        type: "exceed_context_size_error", n_prompt_tokens: 10804, n_ctx: 9216
+      } }
+    })
+  });
+
+  try {
+    const result = await runAgent(configFor(engine.baseUrl), "anything", context);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    // With the window the engine gave the model, not one assumed.
+    assert.equal(result.reason, "That is more than llama3.2:latest can take in at once (its window is 9,216 tokens). Ask about less of it at a time.");
+    assert.equal(result.tooLong, true);
+    assert.notEqual(result.modelUnusable, true, "not handed to another model, whose window it would not fit either");
+    assert.equal(engine.chats.length, 1, "and not asked again");
+  } finally {
+    await engine.close();
+  }
+});
+
+test("a model the engine does not have is said to be missing, by name", async () => {
+  const engine = await fakeEngine({ models: ["qwen3-8b"] });
+  try {
+    const result = await runAgent({ ...configFor(engine.baseUrl), model: "mistral-7b" }, "anything", context);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.reason, "mistral-7b is not one of the models in TRH AI's models folder.");
+    assert.equal(result.modelUnusable, true, "another model may well be there");
+    assert.equal(engine.chats.length, 0);
+  } finally {
+    await engine.close();
   }
 });
 
@@ -1274,11 +1333,13 @@ test("the current date is stated to the model, not left to a tool call", async (
   }
 });
 
-test("every request asks for a context window the whole prompt fits in", async () => {
-  // Ollama ran the model at its 4,096-token default, and the prompt - rules
-  // plus tool descriptions - is bigger than that. It was cut from the front on
-  // nearly every turn ("truncating input prompt limit=2050 prompt=4443"), so
-  // the model never saw its instructions.
+test("the prompt fits the smallest window a model is given, with room for results and the reply", async () => {
+  // Under Ollama the model ran at a 4,096-token default, and the prompt -
+  // rules plus tool descriptions - is bigger than that. It was cut from the
+  // front on nearly every turn ("truncating input prompt limit=2050
+  // prompt=4443"), so the model never saw its instructions. The engine gives
+  // each model the largest window the card holds and never less than
+  // minimumContextTokens, so that is the window the prompt has to fit.
   const { server, baseUrl, received } = await fakeModel([
     toolCall("current_datetime", {}),
     answer("It is Monday.")
@@ -1288,30 +1349,43 @@ test("every request asks for a context window the whole prompt fits in", async (
     await runAgent(configFor(baseUrl), "what day is it today?", context);
 
     assert.equal(received.length, 2);
-    for (const request of received as Array<{ options?: { num_ctx?: number } }>) {
-      assert.equal(request.options?.num_ctx, defaultContextTokens, "each round, not only the first");
+    // No window is asked for: the engine fixed it when it loaded the model.
+    for (const request of received) {
+      assert.equal(request.options, undefined, "nothing a request says can make the engine load the model again");
+      assert.equal(request.num_ctx, undefined);
     }
-    // The prompt this window has to hold, measured rather than assumed.
+    // The prompt the window has to hold, measured rather than assumed.
     const firstRequest = received[0] as { messages: Array<{ content: string }>; tools?: unknown[] };
     const promptChars = JSON.stringify(firstRequest.messages).length + JSON.stringify(firstRequest.tools ?? []).length;
     assert.ok(promptChars / 3 < defaultContextTokens / 2,
-      `${promptChars} characters of prompt should leave at least half the window for results and the reply`);
+      `${promptChars} characters of prompt should leave at least half of a 16,384-token window for results and the reply`);
+    // And the smallest window holds it by the loop's own measure, with the
+    // reply's reserve kept free and room for a tool result besides.
+    const promptTokens = estimateTokens(JSON.stringify(firstRequest.messages)) + estimateTokens(JSON.stringify(firstRequest.tools ?? []));
+    const room = promptBudgetTokens(minimumContextTokens) - promptTokens;
+    assert.ok(room > 2000,
+      `a prompt of about ${promptTokens} tokens leaves ${room} of the smallest window's budget for results; at least 2,000 are needed`);
   } finally {
     server.close();
   }
 });
 
-test("a configured window is used, and one too small to hold the prompt is raised", async () => {
-  const { server, baseUrl, received } = await fakeModel([answer("Hello."), answer("Hello.")]);
+test("the window is the one the engine gave the model, whatever the settings assumed", async () => {
+  // Measured on an 8 GB card: 9,216 tokens for an 8B model, 31,232 for a 7B.
+  // The loop asks the engine and works to that - the reply limit here, and the
+  // prompt's budget (context-budget.test.ts) - not to a figure in the config.
+  const small = await fakeEngine({ window: 9216, reply: { message: { content: "Hello." } } });
+  const large = await fakeEngine({ window: 31232, reply: { message: { content: "Hello." } } });
 
   try {
-    await runAgent({ ...configFor(baseUrl), contextTokens: 32768 }, "hello", context);
-    await runAgent({ ...configFor(baseUrl), contextTokens: 2048 }, "hello", context);
+    await runAgent({ ...configFor(small.baseUrl), contextTokens: 32768 }, "hello", context);
+    await runAgent({ ...configFor(large.baseUrl), contextTokens: 2048 }, "hello", context);
 
-    const windows = (received as Array<{ options?: { num_ctx?: number } }>).map((request) => request.options?.num_ctx);
-    assert.deepEqual(windows, [32768, minimumContextTokens]);
+    assert.equal(small.chats[0].max_tokens, 9216, "not the 32,768 the settings claimed");
+    assert.equal(large.chats[0].max_tokens, 31232, "and not the 2,048 either");
   } finally {
-    server.close();
+    await small.close();
+    await large.close();
   }
 });
 
@@ -1319,19 +1393,18 @@ test("a configured window is used, and one too small to hold the prompt is raise
 // the timeout: qwen2.5:3b, asked for an eight-item checklist, wrote past
 // 13,000 tokens and was then reported as no model at all. See replyLimit.
 
-test("every round caps the reply at the window, and a configured window moves the cap with it", async () => {
+test("every round caps the reply at the model's window", async () => {
   const { server, baseUrl, received } = await fakeModel([
     toolCall("current_datetime", {}),
-    answer("It is Monday."),
-    answer("Hello.")
+    answer("It is Monday.")
   ]);
 
   try {
     await runAgent(configFor(baseUrl), "what day is it today?", context);
-    await runAgent({ ...configFor(baseUrl), contextTokens: 32768 }, "hello", context);
 
-    const caps = (received as Array<{ options?: { num_predict?: number } }>).map((request) => request.options?.num_predict);
-    assert.deepEqual(caps, [defaultContextTokens, defaultContextTokens, 32768], "each round, not only the first");
+    const caps = received.map((request) => request.max_tokens);
+    assert.deepEqual(caps, [fakeWindow, fakeWindow], "each round, not only the first");
+    assert.equal(fakeWindow, defaultContextTokens, "the stand-in's window is the one assumed where nothing has said");
   } finally {
     server.close();
   }
@@ -1339,7 +1412,7 @@ test("every round caps the reply at the window, and a configured window moves th
 
 test("a reply cut off at the length limit is reported as too long, never as the answer", async () => {
   // The same words twice, once cut off and once finished, so what decides is
-  // Ollama's done_reason and nothing in the text.
+  // the engine's finish reason and nothing in the text.
   const words = "1. Read the description.\n2. Run the tests.\n3. Read the diff.";
   const { server, baseUrl, received } = await fakeModel([
     { message: { content: words }, done_reason: "length" },
@@ -1352,7 +1425,8 @@ test("a reply cut off at the length limit is reported as too long, never as the 
     assert.equal(received.length, 1, "asked once - a cut-off reply is not followed by another round");
     assert.equal(cut.ok, false);
     if (cut.ok) return;
-    assert.equal(cut.reason, "The reply from llama3.2 ran past the length limit (16,384 tokens) without finishing.");
+    // Named as the engine names it, which is the model that was asked.
+    assert.equal(cut.reason, "The reply from llama3.2:latest ran past the length limit (16,384 tokens) without finishing.");
     assert.notEqual(cut.modelUnusable, true, "not handed to another model, which would start it over");
     assert.notEqual(cut.stopped, true, "and not mistaken for the user stopping it");
 
@@ -2873,25 +2947,11 @@ test("a model that fails after making a change still reports the change", async 
   // Out of memory mid-turn used to mean "try the next model" - which starts
   // the request from the beginning and makes the change a second time.
   const file = makeNotes("failed-after-change");
-  let turn = 0;
-  const server = createServer((request, response) => {
-    request.resume();
-    request.on("end", () => {
-      turn += 1;
-      if (turn === 1) {
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({
-          model: "llama3.2:latest",
-          ...toolCall("edit_file", { path: "failed-after-change/notes.txt", append: "beta" })
-        }));
-        return;
-      }
-      response.writeHead(500, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ error: "cudaMalloc failed: out of memory" }));
-    });
+  const { server, baseUrl } = await fakeEngine({
+    reply: (_body, index) => (index === 0
+      ? toolCall("edit_file", { path: "failed-after-change/notes.txt", append: "beta" })
+      : { status: 500, body: { error: { code: 500, message: "cudaMalloc failed: out of memory", type: "server_error" } } })
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
     const result = await runAgent(configFor(baseUrl), "add beta and gamma to failed-after-change/notes.txt", context);
     assert.equal(result.ok, true, "not modelUnusable: the caller must not start over");

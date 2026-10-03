@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
+import { fakeEngine } from "./helpers/fakeEngine.js";
 
 // The active agent, end to end: an id on the request, looked up in the shared
 // catalogue by the route, and written into the system prompt the model is
@@ -24,38 +24,15 @@ test.after(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-/** A stand-in Ollama that records every chat request and answers each one. */
-function fakeOllama() {
-  const chats: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
-  return new Promise<{ server: Server; baseUrl: string; chats: typeof chats }>((resolve) => {
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(chunk as Buffer));
-      request.on("end", () => {
-        response.writeHead(200, { "Content-Type": "application/json" });
-        if (request.url?.startsWith("/api/tags")) {
-          response.end(JSON.stringify({ models: [{ name: "llama3.2:latest" }] }));
-          return;
-        }
-        if (request.url?.startsWith("/api/chat") && chunks.length) {
-          chats.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        }
-        response.end(JSON.stringify({
-          model: "llama3.2:latest",
-          message: { content: "Keep each message short and say what to do next." }
-        }));
-      });
-    });
-    server.listen(0, "127.0.0.1", () => {
-      resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, chats });
-    });
-  });
+/** A stand-in engine that records every chat request and answers each one. */
+function standInModel() {
+  return fakeEngine({ reply: { message: { content: "Keep each message short and say what to do next." } } });
 }
 
 async function ask(body: Record<string, unknown>) {
-  const model = await fakeOllama();
-  const previous = process.env.OLLAMA_BASE_URL;
-  process.env.OLLAMA_BASE_URL = model.baseUrl;
+  const model = await standInModel();
+  const previous = process.env.TRHAI_ENGINE_URL;
+  process.env.TRHAI_ENGINE_URL = model.baseUrl;
   const app = createApp().listen(0, "127.0.0.1");
   await once(app, "listening");
   try {
@@ -68,8 +45,8 @@ async function ask(body: Record<string, unknown>) {
     const system = model.chats[0]?.messages?.find((message) => message.role === "system")?.content ?? "";
     return { system, chats: model.chats.length };
   } finally {
-    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
-    else process.env.OLLAMA_BASE_URL = previous;
+    if (previous === undefined) delete process.env.TRHAI_ENGINE_URL;
+    else process.env.TRHAI_ENGINE_URL = previous;
     await new Promise<void>((resolve) => app.close(() => resolve()));
     model.server.close();
   }

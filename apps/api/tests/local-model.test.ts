@@ -9,6 +9,7 @@ import {
   checkAvailability,
   contextWindow,
   defaultContextTokens,
+  defaultModel,
   generate,
   minimumContextTokens,
   modelOptions,
@@ -19,15 +20,17 @@ import {
   replyTooLong,
   unfinishedWithin,
   type LocalModelConfig, orderedCandidates } from "../src/services/localModel.js";
+import { defaultEnginePort } from "../src/services/modelEngine.js";
+import { completionBody, modelsBody } from "./helpers/fakeEngine.js";
 
 /**
- * A stand-in speaking Ollama's protocol.
+ * A stand-in speaking the model engine's protocol, one answer per request.
  *
- * Ollama is not installed on the machine this was written on, so the client is
- * exercised against a server that answers the same shapes. Everything but the
- * inference itself is real: a socket, HTTP, JSON, timeouts.
+ * No engine has to be installed where this runs: the client is exercised
+ * against a server that answers the same shapes. Everything but the inference
+ * itself is real: a socket, HTTP, JSON, timeouts.
  */
-function fakeOllama(handler: (url: string, body: unknown) => { status: number; payload: unknown } | "hang") {
+function standIn(handler: (url: string, body: unknown) => { status: number; payload: unknown } | "hang") {
   return new Promise<{ server: Server; baseUrl: string }>((resolve) => {
     const server = createServer((request, response) => {
       const chunks: Buffer[] = [];
@@ -54,28 +57,42 @@ function configFor(baseUrl: string, overrides: Partial<LocalModelConfig> = {}): 
 test("configuration falls back to the usual local defaults", () => {
   const config = readLocalModelConfig({} as NodeJS.ProcessEnv);
 
-  assert.equal(config.baseUrl, "http://127.0.0.1:11434");
-  // Must match the head of preferredModels in localModel.ts. That list is
-  // private, so this is coupled by hand: if the default is renamed again,
-  // this is the assertion that says so.
-  assert.equal(config.model, "vexora:latest");
+  // TRH AI's own engine, on this PC, on its own port.
+  assert.equal(config.baseUrl, `http://127.0.0.1:${defaultEnginePort}`);
+  // The head of preferredModels in localModel.ts: the model the assistant was
+  // measured with.
+  assert.equal(config.model, defaultModel);
+  assert.equal(defaultModel, "qwen2.5-coder");
   assert.ok(config.timeoutMs >= 10000, "local inference is slow; a short timeout abandons live replies");
 });
 
 test("configuration is overridable and a trailing slash does not break the URL", () => {
   const config = readLocalModelConfig({
-    OLLAMA_BASE_URL: "http://192.168.1.5:11434/",
-    OLLAMA_MODEL: "mistral",
-    OLLAMA_TIMEOUT_MS: "1234"
+    TRHAI_ENGINE_URL: "http://192.168.1.5:8080/",
+    TRHAI_MODEL: "mistral",
+    TRHAI_MODEL_TIMEOUT_MS: "1234"
   } as NodeJS.ProcessEnv);
 
-  assert.equal(config.baseUrl, "http://192.168.1.5:11434");
+  assert.equal(config.baseUrl, "http://192.168.1.5:8080");
   assert.equal(config.model, "mistral");
   assert.equal(config.timeoutMs, 1234);
+  assert.equal(readLocalModelConfig({ TRHAI_ENGINE_PORT: "4555" } as NodeJS.ProcessEnv).baseUrl, "http://127.0.0.1:4555");
+});
+
+test("a model named in a .env written when the models were Ollama's is still the one asked for", () => {
+  // The setting was OLLAMA_MODEL, and its value "name:size". Both are still
+  // read, so an existing .env keeps its model through the change of engine.
+  const old = readLocalModelConfig({ OLLAMA_MODEL: "qwen2.5-coder:7b" } as NodeJS.ProcessEnv);
+  assert.equal(old.model, "qwen2.5-coder:7b");
+  assert.equal(old.modelFromEnv, true);
+  assert.equal(pickModel(old.model, ["qwen2.5-3b", "qwen2.5-coder-7b", "qwen3-8b"], old.modelFromEnv), "qwen2.5-coder-7b");
+  // The new name wins when both are set.
+  assert.equal(readLocalModelConfig({ OLLAMA_MODEL: "qwen2.5:3b", TRHAI_MODEL: "qwen3-8b" } as NodeJS.ProcessEnv).model, "qwen3-8b");
 });
 
 test("the context window defaults to one the assistant's prompt fits in", () => {
-  // Ollama's own default is 4,096 tokens, and the prompt is bigger than that:
+  // Stands in until the engine says what it gave the model. Under Ollama the
+  // default was 4,096 tokens, and the prompt is bigger than that:
   // it was cut from the front on nearly every turn, rules first.
   assert.equal(readLocalModelConfig({} as NodeJS.ProcessEnv).contextTokens, defaultContextTokens);
   assert.ok(defaultContextTokens >= 16384);
@@ -83,7 +100,7 @@ test("the context window defaults to one the assistant's prompt fits in", () => 
 });
 
 test("the context window can be set, but never below what the prompt needs", () => {
-  const read = (value: string) => readLocalModelConfig({ OLLAMA_NUM_CTX: value } as NodeJS.ProcessEnv).contextTokens;
+  const read = (value: string) => readLocalModelConfig({ TRHAI_CONTEXT_TOKENS: value } as NodeJS.ProcessEnv).contextTokens;
 
   assert.equal(read("32768"), 32768);
   // Smaller than the prompt is never what was meant: raised, not obeyed.
@@ -91,7 +108,9 @@ test("the context window can be set, but never below what the prompt needs", () 
   // Not a number at all is ignored rather than sent to the model as NaN.
   assert.equal(read("lots"), defaultContextTokens);
   assert.equal(read("0"), defaultContextTokens);
-  assert.deepEqual(modelOptions({ contextTokens: 20000.7 }), { num_ctx: 20000, num_predict: 20000 });
+  // What a request carries is the reply limit alone: the engine fixed the
+  // window when it loaded the model.
+  assert.deepEqual(modelOptions({ contextTokens: 20000.7 }), { max_tokens: 20000 });
 });
 
 test("a reply may be as long as the window, and no longer", () => {
@@ -101,7 +120,7 @@ test("a reply may be as long as the window, and no longer", () => {
   assert.equal(replyLimit({}), defaultContextTokens);
   assert.equal(replyLimit({ contextTokens: 32768 }), 32768, "a larger window allows a longer reply");
   assert.equal(replyLimit({ contextTokens: 4096 }), minimumContextTokens, "and follows the window's own floor");
-  assert.equal(modelOptions({}).num_predict, modelOptions({}).num_ctx);
+  assert.equal(modelOptions({}).max_tokens, contextWindow({}));
 });
 
 test("a timeout and a cut-off reply are each said as what happened", () => {
@@ -122,17 +141,17 @@ test("no server at all is reported as unavailable, not as an error", async () =>
   assert.match(result.reason, /nothing is listening/);
 });
 
-test("a running server with the model pulled is available", async () => {
-  const { server, baseUrl } = await fakeOllama(() => ({
+test("a running engine with the model in it is available", async () => {
+  const { server, baseUrl } = await standIn(() => ({
     status: 200,
-    payload: { models: [{ name: "llama3.2:latest" }, { name: "mistral:latest" }] }
+    payload: modelsBody(["llama3.2:latest", "mistral:latest"])
   }));
 
   try {
     const result = await checkAvailability(configFor(baseUrl));
     assert.equal(result.available, true);
     if (!result.available) return;
-    // Pulled as "llama3.2", reported as "llama3.2:latest".
+    // Asked for as "llama3.2", listed as "llama3.2:latest": the same model.
     assert.equal(result.model, "llama3.2:latest");
   } finally {
     server.close();
@@ -141,12 +160,12 @@ test("a running server with the model pulled is available", async () => {
 
 test("another installed model is used rather than refusing outright", async () => {
   // This used to report unavailable, and the assistant went dark whenever the
-  // configured model was not the one that happened to be pulled. A model the
+  // configured model was not the one that happened to be installed. A model the
   // user did not name is still a working assistant, and which model answered
   // is shown on every reply — so falling back is visible, not silent.
-  const { server, baseUrl } = await fakeOllama(() => ({
+  const { server, baseUrl } = await standIn(() => ({
     status: 200,
-    payload: { models: [{ name: "codellama:latest" }] }
+    payload: modelsBody(["codellama:latest"])
   }));
 
   try {
@@ -159,31 +178,60 @@ test("another installed model is used rather than refusing outright", async () =
   }
 });
 
-test("a server with nothing pulled says how to pull it", async () => {
-  const { server, baseUrl } = await fakeOllama(() => ({ status: 200, payload: { models: [] } }));
+test("an engine with no model in it says where to put one", async () => {
+  const { server, baseUrl } = await standIn(() => ({ status: 200, payload: modelsBody([]) }));
 
   try {
     const result = await checkAvailability(configFor(baseUrl));
     assert.equal(result.available, false);
     if (result.available) return;
-    assert.match(result.reason, /ollama pull llama3\.2/);
+    assert.match(result.reason, /has no model to answer with/);
+    assert.match(result.reason, /Put a \.gguf model file in .*models/);
+    assert.doesNotMatch(result.reason, /ollama/i);
+  } finally {
+    server.close();
+  }
+});
+
+test("the vision model is not one that answers a conversation", async () => {
+  // It answers about images, on its own route. Listed alone, there is nothing
+  // to chat with; listed beside a chat model, it is not among the candidates.
+  const only = await standIn(() => ({ status: 200, payload: modelsBody(["qwen2.5-vl-3b"], { vision: ["qwen2.5-vl-3b"] }) }));
+  const both = await standIn(() => ({ status: 200, payload: modelsBody(["qwen2.5-vl-3b", "qwen3-8b"], { vision: ["qwen2.5-vl-3b"] }) }));
+  try {
+    assert.equal((await checkAvailability(configFor(only.baseUrl))).available, false);
+    const result = await checkAvailability(configFor(both.baseUrl));
+    assert.deepEqual(result, { available: true, model: "qwen3-8b", installedModels: ["qwen3-8b"] });
+  } finally {
+    only.server.close();
+    both.server.close();
+  }
+});
+
+test("an engine that answers with an error is said to have, with its status", async () => {
+  const { server, baseUrl } = await standIn(() => ({ status: 503, payload: { error: { message: "Loading" } } }));
+  try {
+    const result = await checkAvailability(configFor(baseUrl));
+    assert.equal(result.available, false);
+    if (!result.available) assert.equal(result.reason, `The model engine answered 503 at ${baseUrl}.`);
   } finally {
     server.close();
   }
 });
 
 test("a generated answer comes back with the model that produced it", async () => {
-  const { server, baseUrl } = await fakeOllama((url, body) => {
-    assert.equal(url, "/api/generate");
-    const request = body as { model: string; stream: boolean; prompt: string; options?: { num_ctx?: number; num_predict?: number } };
+  const { server, baseUrl } = await standIn((url, body) => {
+    assert.equal(url, "/v1/chat/completions");
+    const request = body as { model: string; stream: boolean; messages: Array<{ role: string; content: string }>; max_tokens?: number };
     assert.equal(request.stream, false);
-    assert.match(request.prompt, /Question: What is the capital of France\?/);
-    // The same window as the agent's requests, so switching between them does
-    // not make Ollama reload the model.
-    assert.equal(request.options?.num_ctx, defaultContextTokens);
-    // And the same reply limit: authoring and summaries go this way too.
-    assert.equal(request.options?.num_predict, defaultContextTokens);
-    return { status: 200, payload: { model: "llama3.2:latest", response: "  Paris.  " } };
+    // The prompt as one user turn; the engine wraps it in the model's own template.
+    assert.equal(request.messages.length, 1);
+    assert.equal(request.messages[0].role, "user");
+    assert.match(request.messages[0].content, /Question: What is the capital of France\?/);
+    // No reply limit of its own: the engine stops a reply when the model's
+    // window is full, and a whole application is written through here.
+    assert.equal(request.max_tokens, undefined);
+    return { status: 200, payload: completionBody("llama3.2:latest", { message: { content: "  Paris.  " } }) };
   });
 
   try {
@@ -199,7 +247,7 @@ test("a generated answer comes back with the model that produced it", async () =
 
 test("an empty reply is a failure, not an empty answer", async () => {
   // Returning "" would render as the assistant saying nothing at all.
-  const { server, baseUrl } = await fakeOllama(() => ({ status: 200, payload: { response: "   " } }));
+  const { server, baseUrl } = await standIn(() => ({ status: 200, payload: completionBody("llama3.2:latest", { message: { content: "   " } }) }));
 
   try {
     const result = await generate(configFor(baseUrl), { question: "anything", context: [] });
@@ -212,20 +260,21 @@ test("an empty reply is a failure, not an empty answer", async () => {
 test("a reply cut off at the length limit is a failure that says so, not a shorter answer", async () => {
   // For app authoring a cut-off reply is worse than a short one: the last file
   // stops mid-line and can still pass for a whole one. The same words twice,
-  // so what decides is Ollama's done_reason.
+  // so what decides is the engine's finish reason.
   const words = "=== FILE: README.md\n# Snake\n\nUse the arrow keys to";
-  let doneReason = "length";
-  const { server, baseUrl } = await fakeOllama(() => ({
-    status: 200, payload: { model: "llama3.2:latest", response: words, done: true, done_reason: doneReason }
-  }));
+  let finish = "length";
+  const { server, baseUrl } = await standIn((url) => (url === "/models"
+    // The window the engine has the model loaded with: the limit it ran past.
+    ? { status: 200, payload: modelsBody(["llama3.2:latest"], { window: 9216 }) }
+    : { status: 200, payload: completionBody("llama3.2:latest", { message: { content: words }, done_reason: finish }) }));
 
   try {
     const cut = await generate(configFor(baseUrl), { question: "anything", context: [], rawPrompt: "write an app" });
     assert.equal(cut.ok, false);
     if (cut.ok) return;
-    assert.equal(cut.reason, "The reply from llama3.2 ran past the length limit (16,384 tokens) without finishing.");
+    assert.equal(cut.reason, "The reply from llama3.2 ran past the length limit (9,216 tokens) without finishing.");
 
-    doneReason = "stop";
+    finish = "stop";
     const finished = await generate(configFor(baseUrl), { question: "anything", context: [], rawPrompt: "write an app" });
     assert.equal(finished.ok, true);
     if (finished.ok) assert.equal(finished.text, words);
@@ -235,7 +284,7 @@ test("a reply cut off at the length limit is a failure that says so, not a short
 });
 
 test("a server that never replies gives up rather than hanging the request", async () => {
-  const { server, baseUrl } = await fakeOllama(() => "hang");
+  const { server, baseUrl } = await standIn(() => "hang");
 
   try {
     const result = await generate(configFor(baseUrl, { timeoutMs: 300 }), { question: "anything", context: [] });
@@ -250,8 +299,8 @@ test("a server that never replies gives up rather than hanging the request", asy
 
 test("a request the turn stops is let go of at once, and said as stopped rather than as no reply", async () => {
   // App authoring and a long summary run during a turn, for minutes. Stop has
-  // to end the request - Ollama stops writing when its asker lets go - and it
-  // is not the model failing to answer in time: the time had not run out.
+  // to end the request - the engine stops writing when its asker lets go - and
+  // it is not the model failing to answer in time: the time had not run out.
   let asked = 0;
   let markArrived!: () => void;
   const arrived = new Promise<void>((resolve) => { markArrived = resolve; });
@@ -295,13 +344,16 @@ test("a request the turn stops is let go of at once, and said as stopped rather 
 });
 
 test("an error status is reported rather than treated as an answer", async () => {
-  const { server, baseUrl } = await fakeOllama(() => ({ status: 500, payload: { error: "boom" } }));
+  // In the engine's own words, taken out of its error body.
+  const { server, baseUrl } = await standIn(() => ({
+    status: 500, payload: { error: { code: 500, message: "model name=llama3.2 failed to load", type: "server_error" } }
+  }));
 
   try {
     const result = await generate(configFor(baseUrl), { question: "anything", context: [] });
     assert.equal(result.ok, false);
     if (result.ok) return;
-    assert.match(result.reason, /500/);
+    assert.equal(result.reason, "The model engine answered 500: model name=llama3.2 failed to load.");
   } finally {
     server.close();
   }
@@ -353,12 +405,33 @@ test("nothing installed means nothing to pick", () => {
   assert.equal(pickModel("llama3.2", []), null);
 });
 
-test("a bare name matches the tagged form Ollama reports", () => {
+test("a bare name matches the tagged form, and an old spelling the new one", () => {
   assert.equal(pickModel("llama3.2", ["llama3.2:latest"]), "llama3.2:latest");
+  // "name:size" is how a model was named under Ollama; "name-size" is its
+  // file's name in TRH AI's models folder.
+  assert.equal(pickModel("qwen2.5-coder:7b", ["qwen3-8b", "qwen2.5-coder-7b"]), "qwen2.5-coder-7b");
+  assert.equal(pickModel("QWEN3:8B", ["qwen2.5-coder-7b", "qwen3-8b"]), "qwen3-8b", "whatever its capitals");
+});
+
+test("a name is a model or a size of it, never another model that starts the same way", () => {
+  // "qwen2.5" is the general model. "qwen2.5-coder-7b" starts with the same
+  // letters and is a different one.
+  assert.equal(pickModel("qwen2.5", ["qwen2.5-coder-7b", "qwen2.5-3b"]), "qwen2.5-3b");
+  assert.equal(pickModel("qwen2.5", ["qwen2.5-coder-7b", "phi3"], true), "qwen2.5-coder-7b", "not installed: the preference list, as for any absent name");
+  assert.deepEqual(orderedCandidates("qwen2.5", ["qwen2.5-coder-7b", "qwen2.5-3b"], true), ["qwen2.5-3b", "qwen2.5-coder-7b"]);
+});
+
+test("with nothing named, the coding model answers, then the thinking one", () => {
+  // The order the two were measured in on the same 54 tasks: the coder is the
+  // default, and Qwen3 - better, and six times slower - comes next.
+  assert.equal(pickModel(defaultModel, ["qwen2.5-3b", "qwen3-8b", "qwen2.5-coder-7b"], false), "qwen2.5-coder-7b");
+  assert.equal(pickModel(defaultModel, ["qwen2.5-3b", "qwen3-8b"], false), "qwen3-8b");
+  assert.deepEqual(orderedCandidates(defaultModel, ["qwen2.5-3b", "qwen3-8b", "qwen2.5-coder-7b"], false),
+    ["qwen2.5-coder-7b", "qwen3-8b", "qwen2.5-3b"]);
 });
 
 test("the built-in default does not block a better model", () => {
-  // The bug this exists to stop: with OLLAMA_MODEL unset the config still
+  // The bug this exists to stop: with TRHAI_MODEL unset the config still
   // carries a model name, and that name is often itself installed — so it
   // looked like a deliberate choice and a higher-ranked model sitting next to
   // it was never picked up. Pulling a better model changed nothing at all.
@@ -381,7 +454,7 @@ test("a model named in the environment still wins", () => {
 test("the config records whether the model was actually chosen", () => {
   assert.equal(readLocalModelConfig({} as NodeJS.ProcessEnv).modelFromEnv, false);
   assert.equal(
-    readLocalModelConfig({ OLLAMA_MODEL: "mistral" } as NodeJS.ProcessEnv).modelFromEnv,
+    readLocalModelConfig({ TRHAI_MODEL: "mistral" } as NodeJS.ProcessEnv).modelFromEnv,
     true
   );
 });
@@ -396,7 +469,7 @@ test("the default timeout allows for a cold model load", () => {
 });
 
 test("the timeout can still be set explicitly", () => {
-  const config = readLocalModelConfig({ OLLAMA_TIMEOUT_MS: "5000" } as NodeJS.ProcessEnv);
+  const config = readLocalModelConfig({ TRHAI_MODEL_TIMEOUT_MS: "5000" } as NodeJS.ProcessEnv);
   assert.equal(config.timeoutMs, 5000);
 });
 

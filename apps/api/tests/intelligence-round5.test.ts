@@ -390,15 +390,15 @@ test("an order the model could not carry out is reported, not planned", async ()
   // Verbatim: "1. Write down what done looks like for now add a line saying
   // omega to the end of it" - the composer's plan template, returned for a
   // request to append one line, after the model loop failed.
-  const previous = process.env.OLLAMA_BASE_URL;
-  process.env.OLLAMA_BASE_URL = "http://127.0.0.1:1";
+  const previous = process.env.TRHAI_ENGINE_URL;
+  process.env.TRHAI_ENGINE_URL = "http://127.0.0.1:1";
   try {
     const reply = await runAssistantOrchestrator({ mode: "general", userMessage: "add a line saying omega to the end of notes.txt", sessionId: "order-failed" });
     assert.notEqual(reply.strategy, "plan", reply.assistantMessage);
     assert.doesNotMatch(reply.assistantMessage, /Write down what done looks like/);
   } finally {
-    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
-    else process.env.OLLAMA_BASE_URL = previous;
+    if (previous === undefined) delete process.env.TRHAI_ENGINE_URL;
+    else process.env.TRHAI_ENGINE_URL = previous;
   }
 });
 

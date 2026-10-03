@@ -1,16 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { AddressInfo } from "node:net";
 import { once } from "node:events";
+import { fakeEngine, fakeWindow } from "./helpers/fakeEngine.js";
 
 // A model that does not stop, end to end. On 2 October qwen2.5:3b, sent the
 // turn below, wrote past 13,000 tokens until the 180 s timeout gave up on it,
 // and the task was recorded as "No local model was available to run this".
-// Here a stand-in Ollama does what it did - or finishes, or never answers -
+// Here a stand-in engine does what the model did - or finishes, or never answers -
 // and the checks read what the Task center is then told, through
 // /v1/agent-tasks and /v1/agent-tasks/history. Every store the route touches
 // is pointed at a temporary directory before server.js loads, as in
@@ -25,74 +25,47 @@ process.env.ASSIST_TASK_HISTORY_FILE = path.join(dataDir, "task-history.json");
 process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 
 const { createApp } = await import("../src/server.js");
-const { defaultContextTokens } = await import("../src/services/localModel.js");
 
 test.after(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-/** The turn from 2 October, with the model it named. */
+/**
+ * The turn from 2 October, with the model it named - in the spelling it had
+ * then, when the models were Ollama's. The engine's name for it is qwen2.5-3b.
+ */
 const checklist = { mode: "general", model: "qwen2.5:3b", message: "Write a short checklist, eight items, for reviewing a pull request." };
 /** Where the model got to before it was cut off, or the whole of it when it finishes. */
 const written = "1. Read the description.\n2. Run the tests.\n3. Read the diff.\n4. Run the tests.\n";
 
 type Ending = "stop" | "length" | "never";
-type ChatRequest = { model?: string; stream?: boolean; options?: { num_ctx?: number; num_predict?: number } };
 
 /**
- * A stand-in Ollama with the two models this PC had. Every chat request is
- * recorded and answered with `written`, ending as `ending` says: "stop" is a
- * model that finished, "length" one the reply limit cut off, "never" one that
- * is still going when the request gives up. Streamed when the request asks for
- * a stream, as NDJSON frames, the way the web client's route is answered.
+ * A stand-in engine with two models. Every chat request is recorded and
+ * answered with `written`, ending as `ending` says: "stop" is a model that
+ * finished, "length" one the reply limit cut off, "never" one that is still
+ * going when the request gives up. Streamed when the request asks for a
+ * stream, the way the web client's route is answered.
  */
-function fakeOllama(ending: Ending, installed = ["qwen2.5:3b", "llama3.2:latest"]) {
-  const chats: ChatRequest[] = [];
-  return new Promise<{ server: Server; baseUrl: string; chats: ChatRequest[] }>((resolve) => {
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(chunk as Buffer));
-      request.on("end", () => {
-        if (request.url?.startsWith("/api/tags")) {
-          response.writeHead(200, { "Content-Type": "application/json" });
-          response.end(JSON.stringify({ models: installed.map((name) => ({ name })) }));
-          return;
-        }
-        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as ChatRequest;
-        chats.push(body);
-        if (ending === "never") return; // holds the request open, generating as far as anyone can tell
-        const model = body.model ?? "qwen2.5:3b";
-        const last = { model, message: { role: "assistant", content: "" }, done: true, done_reason: ending };
-        if (body.stream) {
-          response.writeHead(200, { "Content-Type": "application/x-ndjson" });
-          for (const line of written.split(/(?<=\n)/)) {
-            response.write(`${JSON.stringify({ model, message: { role: "assistant", content: line }, done: false })}\n`);
-          }
-          response.end(`${JSON.stringify(last)}\n`);
-          return;
-        }
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ ...last, message: { role: "assistant", content: written } }));
-      });
-    });
-    server.listen(0, "127.0.0.1", () => {
-      resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, chats });
-    });
+function standIn(ending: Ending, installed = ["qwen2.5-3b", "llama3.2-3b"]) {
+  return fakeEngine({
+    models: installed,
+    reply: () => (ending === "never" ? "hang" : { message: { content: written }, done_reason: ending })
   });
 }
 
 /**
- * One turn against `ollama`, then what the Task center reads for that
+ * One turn against `engine`, then what the Task center reads for that
  * session: the current task and the history. `stream` sends it the way the
  * web client does.
  */
 async function turn(
-  ollama: { baseUrl: string },
+  engine: { baseUrl: string },
   sessionId: string,
   options: { stream?: boolean; body?: Record<string, unknown> } = {}
 ) {
-  const previous = process.env.OLLAMA_BASE_URL;
-  process.env.OLLAMA_BASE_URL = ollama.baseUrl;
+  const previous = process.env.TRHAI_ENGINE_URL;
+  process.env.TRHAI_ENGINE_URL = engine.baseUrl;
   const app = createApp().listen(0, "127.0.0.1");
   await once(app, "listening");
   const base = `http://127.0.0.1:${(app.address() as AddressInfo).port}`;
@@ -122,8 +95,8 @@ async function turn(
     assert.equal(history.data.history.length, 1, "and was kept in the history when it ended");
     return { reply, task: current.data.tasks[0], finished: history.data.history[0] };
   } finally {
-    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
-    else process.env.OLLAMA_BASE_URL = previous;
+    if (previous === undefined) delete process.env.TRHAI_ENGINE_URL;
+    else process.env.TRHAI_ENGINE_URL = previous;
     await new Promise<void>((resolve) => app.close(() => resolve()));
   }
 }
@@ -131,105 +104,132 @@ async function turn(
 test("every request carries the reply limit, and a reply that finishes is the answer", async () => {
   // The control for the tests below: the same stand-in, the same words, and
   // only the ending differs.
-  const ollama = await fakeOllama("stop");
+  const engine = await standIn("stop");
   try {
-    const { reply, task, finished } = await turn(ollama, "limit-finishes");
-    assert.ok(ollama.chats.length > 0, "the request reached the model");
-    for (const chat of ollama.chats) {
-      assert.equal(chat.options?.num_predict, defaultContextTokens, "no reply may run past one window");
-      assert.equal(chat.options?.num_ctx, defaultContextTokens);
+    const { reply, task, finished } = await turn(engine, "limit-finishes");
+    assert.ok(engine.chats.length > 0, "the request reached the model");
+    for (const chat of engine.chats) {
+      assert.equal(chat.max_tokens, fakeWindow, "no reply may run past one window: the one the engine gave the model");
     }
     assert.match(reply, /Read the description/);
     assert.equal(task.status, "succeeded");
     assert.equal(task.error, undefined);
     assert.equal(finished.status, "succeeded");
   } finally {
-    ollama.server.close();
+    await engine.close();
   }
 });
 
 test("a reply cut off at the length limit is recorded as too long - not as the answer, and not as no model", async () => {
-  const ollama = await fakeOllama("length");
+  const engine = await standIn("length");
   try {
-    const { reply, task, finished } = await turn(ollama, "limit-runs-on");
+    const { reply, task, finished } = await turn(engine, "limit-runs-on");
     // Asked once, of the model the turn named: a reply that ran on is not
     // handed to the next installed model, which would start it over.
-    assert.deepEqual(ollama.chats.map((chat) => chat.model), ["qwen2.5:3b"]);
+    assert.deepEqual(engine.chats.map((chat) => chat.model), ["qwen2.5-3b"]);
     assert.doesNotMatch(reply, /Read the description|Run the tests/, "none of the cut-off reply is shown as the answer");
 
-    const tooLong = "The reply from qwen2.5:3b ran past the length limit (16,384 tokens) without finishing.";
+    const tooLong = "The reply from qwen2.5-3b ran past the length limit (16,384 tokens) without finishing.";
     assert.equal(task.status, "failed", "a model took it and came back without an answer");
     assert.equal(task.error, tooLong);
     assert.equal(task.running, false);
     assert.equal(finished.status, "failed");
     assert.equal(finished.error, tooLong);
   } finally {
-    ollama.server.close();
+    await engine.close();
   }
 });
 
 test("the same, streamed - the way the web client asks", async () => {
-  const ollama = await fakeOllama("length");
+  const engine = await standIn("length");
   try {
-    const { reply, task, finished } = await turn(ollama, "limit-runs-on-streamed", { stream: true });
-    assert.deepEqual(ollama.chats.map((chat) => chat.stream), [true], "the streamed path, which reads the reason from the last frame");
+    const { reply, task, finished } = await turn(engine, "limit-runs-on-streamed", { stream: true });
+    assert.deepEqual(engine.chats.map((chat) => chat.stream), [true], "the streamed path, which reads the reason from the last frame");
     assert.doesNotMatch(reply, /Read the description|Run the tests/, "the done event does not carry the cut-off reply as the answer");
     assert.equal(task.status, "failed");
-    assert.match(task.error ?? "", /^The reply from qwen2\.5:3b ran past the length limit \(16,384 tokens\)/);
+    assert.match(task.error ?? "", /^The reply from qwen2\.5-3b ran past the length limit \(16,384 tokens\)/);
     assert.equal(finished.error, task.error);
   } finally {
-    ollama.server.close();
+    await engine.close();
   }
 });
 
 test("a model that does not reply in time is recorded as that, with the time it was given", async () => {
-  const ollama = await fakeOllama("never");
-  const previousTimeout = process.env.OLLAMA_TIMEOUT_MS;
-  process.env.OLLAMA_TIMEOUT_MS = "1000";
+  const engine = await standIn("never");
+  const previousTimeout = process.env.TRHAI_MODEL_TIMEOUT_MS;
+  process.env.TRHAI_MODEL_TIMEOUT_MS = "1000";
   try {
-    const { task, finished } = await turn(ollama, "limit-times-out");
+    const { task, finished } = await turn(engine, "limit-times-out");
     // The model was asked: the time ran out on the reply, not on reaching it.
-    assert.deepEqual(ollama.chats.map((chat) => chat.model), ["qwen2.5:3b"]);
+    assert.deepEqual(engine.chats.map((chat) => chat.model), ["qwen2.5-3b"]);
     assert.equal(task.status, "failed");
-    assert.equal(task.error, "qwen2.5:3b did not reply within 1 s.");
+    assert.equal(task.error, "qwen2.5-3b did not reply within 1 s.");
     assert.doesNotMatch(task.error ?? "", /no local model|unavailable/i);
     assert.equal(finished.error, task.error);
   } finally {
-    if (previousTimeout === undefined) delete process.env.OLLAMA_TIMEOUT_MS;
-    else process.env.OLLAMA_TIMEOUT_MS = previousTimeout;
-    ollama.server.closeAllConnections();
-    ollama.server.close();
+    if (previousTimeout === undefined) delete process.env.TRHAI_MODEL_TIMEOUT_MS;
+    else process.env.TRHAI_MODEL_TIMEOUT_MS = previousTimeout;
+    await engine.close();
   }
 });
 
 test("no model installed is recorded as that, and as blocked rather than failed", async () => {
   // The one case the old words were true of - and still worded from what
-  // Ollama said, rather than a sentence fixed in advance.
-  const ollama = await fakeOllama("stop", []);
+  // the engine said, rather than a sentence fixed in advance.
+  const engine = await standIn("stop", []);
   try {
-    const { task, finished } = await turn(ollama, "limit-no-model");
-    assert.equal(ollama.chats.length, 0, "there was nothing to ask");
+    const { task, finished } = await turn(engine, "limit-no-model");
+    assert.equal(engine.chats.length, 0, "there was nothing to ask");
     assert.equal(task.status, "blocked", "the work never ran");
-    assert.match(task.error ?? "", /^Ollama is running at http:\/\/127\.0\.0\.1:\d+ but has no models pulled\./);
+    assert.match(task.error ?? "", /^The model engine is running at http:\/\/127\.0\.0\.1:\d+ but has no model to answer with\./);
     assert.equal(finished.status, "blocked");
   } finally {
-    ollama.server.close();
+    await engine.close();
+  }
+});
+
+test("a request too long for the model's window is said as that, and trying again is not suggested", async () => {
+  // What the engine answers when a prompt does not fit its window. Under
+  // Ollama the prompt was cut from the front instead, without a word.
+  const refuses = (message: string, type: string) => fakeEngine({
+    models: ["qwen2.5-3b", "llama3.2-3b"],
+    reply: () => ({ status: 400, body: { error: { code: 400, message, type } } })
+  });
+  const tooLong = await refuses(
+    "request (20804 tokens) exceeds the available context size (16384 tokens), try increasing it", "exceed_context_size_error"
+  );
+  const other = await refuses("something else was wrong with the request", "invalid_request_error");
+  const why = "That is more than qwen2.5-3b can take in at once (its window is 16,384 tokens). Ask about less of it at a time.";
+  try {
+    const { reply, task, finished } = await turn(tooLong, "limit-too-long");
+    assert.equal(reply, `I couldn't finish that. ${why}`);
+    assert.deepEqual(tooLong.chats.map((chat) => chat.model), ["qwen2.5-3b"], "asked once: the other model would refuse it too");
+    assert.equal(task.status, "failed");
+    assert.equal(task.error, why);
+    assert.equal(finished.error, why);
+
+    // The control: any other refusal may be worth another try, and says so.
+    const control = await turn(other, "limit-other-refusal");
+    assert.equal(control.reply, "I couldn't finish that. The local model answered 400. Try again in a moment.");
+  } finally {
+    await tooLong.close();
+    await other.close();
   }
 });
 
 test("a web search whose model ran on says so, not that there is no model", async () => {
   // orchestrator-generation.test.ts covers the search with no model at all,
   // which still says the model is not available.
-  const ollama = await fakeOllama("length");
+  const engine = await standIn("length");
   try {
-    const { reply, task } = await turn(ollama, "limit-web-search", {
+    const { reply, task } = await turn(engine, "limit-web-search", {
       body: { message: "search the web for the official Node.js release schedule" }
     });
-    assert.ok(ollama.chats.length > 0, "the request reached the model");
-    assert.match(reply, /^I couldn't finish that web search\. The reply from qwen2\.5:3b ran past the length limit/);
+    assert.ok(engine.chats.length > 0, "the request reached the model");
+    assert.match(reply, /^I couldn't finish that web search\. The reply from qwen2\.5-3b ran past the length limit/);
     assert.doesNotMatch(reply, /isn't available/);
     assert.equal(task.status, "failed");
   } finally {
-    ollama.server.close();
+    await engine.close();
   }
 });

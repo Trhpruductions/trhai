@@ -10,10 +10,10 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
-import { readLocalModelConfig, checkAvailability } from "../apps/api/src/services/localModel.js";
+import { discoverModels, enginePaths } from "../apps/api/src/services/modelEngine.js";
 import { workspaceRoot } from "../apps/api/src/services/workspace.js";
 import {
-  checkNodeVersion, checkOptionalTool, checkOllama, formatSetupReport, type SetupCheck
+  checkModelEngine, checkNodeVersion, checkOptionalTool, formatSetupReport, type SetupCheck
 } from "../apps/api/src/services/setupDoctor.js";
 
 async function main(): Promise<void> {
@@ -21,14 +21,16 @@ async function main(): Promise<void> {
 
   checks.push(checkNodeVersion(process.version));
 
-  // The local model, via the app's own availability check (reachable + a usable
-  // model pulled), so the doctor and the running app agree on what "ready" means.
-  const config = readLocalModelConfig();
-  const avail = await checkAvailability(config);
-  checks.push(checkOllama(
-    avail.available,
-    avail.available ? `${config.baseUrl}, "${avail.model}" ready.` : avail.reason
-  ));
+  // The model engine and its models, from the folder the app itself reads
+  // (see modelEngine.ts), so the doctor and the running app agree on what is
+  // installed.
+  const engine = enginePaths();
+  checks.push(checkModelEngine({
+    build: engine.exe ? engine.build : null,
+    engineDir: path.join(engine.runtimeDir, "engine"),
+    modelsDir: engine.modelsDir,
+    models: discoverModels(engine.modelsDir).map((model) => model.id)
+  }));
 
   // ffmpeg powers make_video only; a fixed command, shell:true so Windows PATH
   // resolution finds ffmpeg.exe.

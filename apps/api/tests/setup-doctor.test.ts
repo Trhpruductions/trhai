@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkNodeVersion, checkOptionalTool, checkOllama, formatSetupReport } from "../src/services/setupDoctor.js";
+import { checkModelEngine, checkNodeVersion, checkOptionalTool, formatSetupReport } from "../src/services/setupDoctor.js";
 
 test("checkNodeVersion passes at or above the minimum and warns below it", () => {
   assert.equal(checkNodeVersion("v24.4.0").status, "ok");
@@ -18,18 +18,31 @@ test("checkOptionalTool: present is ok, absent warns and names the feature it po
   assert.match(absent.detail, /everything else works/);
 });
 
-test("checkOllama: available is ok; unavailable warns with the reason and reassurance", () => {
-  assert.equal(checkOllama(true, "reachable, model ready.").status, "ok");
-  const down = checkOllama(false, "Ollama is not reachable.");
-  assert.equal(down.status, "warn");
-  assert.match(down.detail, /not reachable/);
-  assert.match(down.detail, /runs without it/);
+test("checkModelEngine: installed with a model is ok; each thing missing warns with what to do", () => {
+  const where = { engineDir: "C:\\runtime\\engine", modelsDir: "C:\\runtime\\models" };
+
+  const ready = checkModelEngine({ ...where, build: "b11366", models: ["qwen2.5-coder-7b", "qwen3-8b"] });
+  assert.equal(ready.status, "ok");
+  assert.match(ready.detail, /b11366/);
+  assert.match(ready.detail, /qwen2\.5-coder-7b, qwen3-8b/);
+
+  const noEngine = checkModelEngine({ ...where, build: null, models: ["qwen3-8b"] });
+  assert.equal(noEngine.status, "warn", "the app runs without it, so not missing");
+  assert.match(noEngine.detail, /npm run setup:engine/);
+  assert.match(noEngine.detail, /C:\\runtime\\engine/);
+  assert.match(noEngine.detail, /runs without it/);
+
+  const noModel = checkModelEngine({ ...where, build: "b11366", models: [] });
+  assert.equal(noModel.status, "warn");
+  assert.match(noModel.detail, /no model in C:\\runtime\\models/);
+  assert.match(noModel.detail, /\.gguf/);
+  assert.doesNotMatch(noModel.detail, /setup:engine/, "the engine is there; only a model is not");
 });
 
 test("formatSetupReport summarises the count and lists every check with its mark", () => {
   const allOk = formatSetupReport([
     { name: "Node.js", status: "ok", detail: "v24" },
-    { name: "Ollama + model", status: "ok", detail: "ready" }
+    { name: "Model engine", status: "ok", detail: "ready" }
   ]);
   assert.match(allOk, /all good/);
   assert.match(allOk, /\[OK {2}\] Node\.js/);

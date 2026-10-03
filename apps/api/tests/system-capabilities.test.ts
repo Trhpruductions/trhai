@@ -17,7 +17,7 @@ test("every tool actually on offer is reported, and nothing else is", () => {
   // is withheld while machine control is off, and a report that listed it
   // anyway would describe a capability the loop refuses — the exact drift
   // this module exists to prevent.
-  const capabilities = getSystemCapabilities("ollama/test-model");
+  const capabilities = getSystemCapabilities("local/test-model");
   const reported = capabilities.tools.map((tool) => tool.name).sort();
   const offered = availableTools(commandsArmed()).map((definition) => definition.function.name).sort();
 
@@ -65,7 +65,7 @@ test("confirmation is required for exactly the destructive and external tools", 
 });
 
 test("the model is reported exactly as given, including absence", () => {
-  assert.equal(getSystemCapabilities("ollama/llama3.2:latest").model, "ollama/llama3.2:latest");
+  assert.equal(getSystemCapabilities("local/llama3.2:latest").model, "local/llama3.2:latest");
   assert.equal(getSystemCapabilities(null).model, null);
 });
 

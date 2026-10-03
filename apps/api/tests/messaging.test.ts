@@ -1,10 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fakeEngine, type ScriptedReply } from "./helpers/fakeEngine.js";
 
 const {
   describeHeldMessage, explainSendFailure, formatPhoneNumber, mailtoLink, messageProblem, normalizePhoneNumber,
@@ -373,41 +372,16 @@ test("'send it' approves a waiting message, and only as the whole reply", () => 
 
 // ------------------------------------------------------------- end to end
 
-/** A stand-in Ollama that answers each chat request with the next scripted reply. */
-function scriptedOllama(replies: Array<Record<string, unknown>>) {
-  const chats: Array<Record<string, unknown>> = [];
-  return new Promise<{ server: Server; baseUrl: string; chats: typeof chats }>((resolve) => {
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(chunk as Buffer));
-      request.on("end", () => {
-        response.writeHead(200, { "Content-Type": "application/json" });
-        if (request.url?.startsWith("/api/tags")) {
-          response.end(JSON.stringify({ models: [{ name: "llama3.2:latest" }] }));
-          return;
-        }
-        if (request.url?.startsWith("/api/chat")) {
-          chats.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-          const reply = replies[Math.min(chats.length - 1, replies.length - 1)];
-          response.end(JSON.stringify({ model: "llama3.2:latest", ...reply }));
-          return;
-        }
-        response.end(JSON.stringify({ model: "llama3.2:latest", response: "ok" }));
-      });
-    });
-    server.listen(0, "127.0.0.1", () => resolve({ server, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, chats }));
-  });
-}
-
-async function withScriptedModel<T>(replies: Array<Record<string, unknown>>, run: (chats: Array<Record<string, unknown>>) => Promise<T>): Promise<T> {
-  const { server, baseUrl, chats } = await scriptedOllama(replies);
-  const previous = process.env.OLLAMA_BASE_URL;
-  process.env.OLLAMA_BASE_URL = baseUrl;
+/** A stand-in engine that answers each chat request with the next scripted reply. */
+async function withScriptedModel<T>(replies: ScriptedReply[], run: (chats: Array<Record<string, unknown>>) => Promise<T>): Promise<T> {
+  const { server, baseUrl, chats } = await fakeEngine({ reply: replies });
+  const previous = process.env.TRHAI_ENGINE_URL;
+  process.env.TRHAI_ENGINE_URL = baseUrl;
   try {
     return await run(chats);
   } finally {
-    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
-    else process.env.OLLAMA_BASE_URL = previous;
+    if (previous === undefined) delete process.env.TRHAI_ENGINE_URL;
+    else process.env.TRHAI_ENGINE_URL = previous;
     server.close();
   }
 }
@@ -480,7 +454,7 @@ test("with an iPhone, the held text says what yes will do, and yes copies it and
 
 test("a model that only says 'Understood.' is told to make the message, once", async () => {
   const { runAgent } = await import("../src/services/agentLoop.js");
-  const { server, baseUrl, chats } = await scriptedOllama([{ message: { content: "Understood." } }, textCall, { message: { content: "Ready." } }]);
+  const { server, baseUrl, chats } = await fakeEngine({ reply: [{ message: { content: "Understood." } }, textCall, { message: { content: "Ready." } }] });
   try {
     const result = await runAgent({ baseUrl, model: "llama3.2", modelFromEnv: true, timeoutMs: 4000 },
       "text 555-010-0123 that I'm running late", { memories: [], knowledge: [], messaging: { open: async () => true, copy: async () => true, phoneLink: "linked" as const } });
@@ -493,7 +467,7 @@ test("a model that only says 'Understood.' is told to make the message, once", a
     server.close();
   }
 
-  const asking = await scriptedOllama([{ message: { content: "What's their number?" } }]);
+  const asking = await fakeEngine({ reply: [{ message: { content: "What's their number?" } }] });
   try {
     const result = await runAgent({ baseUrl: asking.baseUrl, model: "llama3.2", modelFromEnv: true, timeoutMs: 4000 },
       "text my sister that I'm running late", { memories: [], knowledge: [] });
@@ -504,7 +478,7 @@ test("a model that only says 'Understood.' is told to make the message, once", a
     asking.server.close();
   }
 
-  const stubborn = await scriptedOllama([{ message: { content: "Understood." } }]);
+  const stubborn = await fakeEngine({ reply: [{ message: { content: "Understood." } }] });
   try {
     const result = await runAgent({ baseUrl: stubborn.baseUrl, model: "llama3.2", modelFromEnv: true, timeoutMs: 4000 },
       "text 555-010-0123 that I'm running late", { memories: [], knowledge: [] });

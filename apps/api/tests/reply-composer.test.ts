@@ -662,17 +662,18 @@ test("the capability reply states which backend is actually answering", () => {
   // would be as wrong as promising one that was never installed.
   const withoutModel = buildCapabilityReply();
   assert.match(withoutModel, /no language model behind me/i);
-  assert.match(withoutModel, /Install Ollama/i);
+  assert.match(withoutModel, /Put a model file in TRH AI's models folder/);
 
-  const withModel = buildCapabilityReply("ollama/llama3.2:latest");
-  assert.match(withModel, /ollama\/llama3\.2:latest/);
+  const withModel = buildCapabilityReply("local/llama3.2:latest");
+  assert.match(withModel, /local\/llama3\.2:latest/);
+  assert.doesNotMatch(withoutModel + withModel, /ollama/i);
   assert.doesNotMatch(withModel, /no language model behind me/i);
   // Even with a model, sourcing stays distinguished from generation.
   assert.match(withModel, /quoted with its source/i);
 });
 
 test("both capability replies still describe what the app does", () => {
-  for (const reply of [buildCapabilityReply(), buildCapabilityReply("ollama/x")]) {
+  for (const reply of [buildCapabilityReply(), buildCapabilityReply("local/x")]) {
     assert.match(reply, /Remember what you tell me/i);
     assert.match(reply, /Knowledge/);
     assert.match(reply, /Build a working app/i);
@@ -682,7 +683,7 @@ test("both capability replies still describe what the app does", () => {
 });
 
 test("the capability reply lists real tool names read from the registry", () => {
-  const reply = buildCapabilityReply("ollama/x");
+  const reply = buildCapabilityReply("local/x");
 
   // Not a claim invented for the reply — these are tool names runTool
   // actually dispatches on, so the reply and the permission gate can never
@@ -768,7 +769,7 @@ test("asking about TRHAI by name is an identity question, answered as a capabili
 
 test("the capability reply names itself TRHAI, with or without a model", () => {
   assert.match(buildCapabilityReply(), /\bTRHAI\b/);
-  assert.match(buildCapabilityReply("ollama/qwen2.5-coder:7b"), /\bTRHAI\b/);
+  assert.match(buildCapabilityReply("local/qwen2.5-coder:7b"), /\bTRHAI\b/);
 });
 
 // The other half of the fix: broadening the pattern must not turn genuine

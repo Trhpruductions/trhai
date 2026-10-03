@@ -1,22 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { placement, reachWords, unloadsWhen, visibleAddresses } from "../src/lib/systemMonitor.js";
+import { idleWords, reachWords, visibleAddresses, windowWords } from "../src/lib/systemMonitor.js";
 
 // The System and Network workspaces' wording.
 
-test("a loaded model says where it sits", () => {
-  assert.equal(placement({ name: "a", sizeBytes: 100, vramBytes: 100, expiresAt: null }), "All on the graphics card");
-  assert.equal(placement({ name: "a", sizeBytes: 100, vramBytes: 0, expiresAt: null }), "In memory - none on the graphics card");
-  assert.equal(placement({ name: "a", sizeBytes: 100, vramBytes: 62, expiresAt: null }), "62% on the graphics card, the rest in memory");
+test("a loaded model says the window it was given", () => {
+  // The engine fits each model's window to the graphics card, so it is the
+  // figure that differs from one model to the next: measured on an 8 GB card.
+  assert.equal(windowWords({ name: "qwen3-8b", sizeBytes: 5_200_000_000, windowTokens: 9216 }), "9,216-token window");
+  assert.equal(windowWords({ name: "qwen2.5-coder-7b", sizeBytes: 4_700_000_000, windowTokens: 31232 }), "31,232-token window");
+  assert.equal(windowWords({ name: "a", sizeBytes: 100, windowTokens: null }), null, "not said until the engine says it");
+  assert.equal(windowWords({ name: "a", sizeBytes: 100, windowTokens: 0 }), null);
 });
 
-test("when a model will be let go reads as how long, or that it is kept", () => {
-  const now = new Date("2026-10-02T10:00:00Z");
-  assert.equal(unloadsWhen("2026-10-02T10:04:00Z", now), "lets go in 4 min unless used");
-  assert.equal(unloadsWhen("2026-10-02T12:00:00Z", now), "lets go in 2 h unless used");
-  assert.equal(unloadsWhen("2318-01-01T00:00:00Z", now), "kept loaded", "Ollama's date for keep it loaded");
-  assert.equal(unloadsWhen("2026-10-02T10:00:10Z", now), "lets go any moment");
-  assert.equal(unloadsWhen(null, now), "being let go");
+test("when a model will be let go reads as how long it may sit idle, or that it is kept", () => {
+  assert.equal(idleWords(300), "let go after 5 idle minutes");
+  assert.equal(idleWords(60), "let go after 60 idle seconds");
+  assert.equal(idleWords(90), "let go after 2 idle minutes");
+  assert.equal(idleWords(120), "let go after 2 idle minutes");
+  assert.equal(idleWords(0), "kept loaded");
+  assert.equal(idleWords(null), "kept loaded");
 });
 
 test("who can reach the service follows from what it is bound to", () => {
