@@ -659,6 +659,13 @@ export function isExplanatoryQuestion(message: string): boolean {
 const asksForContents =
   /\b(?:what(?:'s|s| is| are)?\s+(?:in|inside)|contains?|contain|says?|written in|inside)\b/i;
 
+/**
+ * "save it to example.html", "export my schedules to schedules.json", "save a
+ * copy as notes-backup.txt": something is to be kept, and the file to keep it
+ * in follows. Not "to save time, read config.json", where nothing says where.
+ */
+const keepsInANamedFile = /\b(save|export)\b[^.?!\n]{0,60}?\b(?:to|as|in|into)\s+\S*\.[a-z0-9]{1,6}\b/;
+
 export function classifyIntent(message: string): IntentVerdict {
   const text = normalizeSpelling((message ?? "").trim().toLowerCase());
 
@@ -715,6 +722,22 @@ export function classifyIntent(message: string): IntentVerdict {
   // A question stays a question even when it mentions doing something.
   if (startsWithExplanatory(text)) {
     return { action: false, hasTarget: false, reason: "asks about something", expects: [] };
+  }
+
+  // Keeping something in a named file is a write, whatever verb the sentence
+  // opens with. "fetch https://example.com and save it to example.html" opens
+  // with a lookup, and filed as a lookup it was offered nothing that writes:
+  // the page could be read and never saved. The same for "read notes.txt and
+  // save a copy as notes-backup.txt".
+  const kept = keepsInANamedFile.exec(text);
+  if (namesAFile && kept && !negatedBefore(text, kept[1])) {
+    return {
+      action: true,
+      kind: "write",
+      hasTarget: true,
+      reason: `"${kept[1]}" keeps something in a named file`,
+      expects: ["write_file", "edit_file"]
+    };
   }
 
   for (const group of actionVerbs) {
