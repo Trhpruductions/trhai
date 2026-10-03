@@ -152,5 +152,5 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 // Every other way out that runs code at all - an uncaught error, the port
 // already taken. A no-op when shutdown() has already stopped it. A kill that
-// runs no code is covered at the next start: see stopLeftoverEngine.
+// runs no code is covered at the next start: see leftoverEngine in modelEngine.ts.
 process.on("exit", () => stopEngine());

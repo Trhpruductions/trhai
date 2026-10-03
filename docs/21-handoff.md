@@ -12,7 +12,8 @@ them is wrong even if it works.
 
 1. **No cloud APIs and no third-party API keys.** Ever. Do not add one, do not
    suggest adding one, do not leave an `API_KEY` env fallback in the code.
-2. **Everything runs locally on this machine.** Ollama, Piper, whisper.
+2. **Everything runs locally on this machine.** The model engine (llama.cpp's
+   server, started by the API), Piper, whisper.
 3. **Generated apps have zero npm dependencies.** They must run with
    `node server.js` and no install step. `findForeignImport` in
    `apps/api/src/services/appAuthor.ts` enforces this — do not relax it.
@@ -38,8 +39,8 @@ them is wrong even if it works.
 | ffmpeg | **8.0.1 full build**, on PATH |
 | Hardware encoders | `h264_nvenc`, `av1_nvenc`, `h264_amf` |
 | ffmpeg filters | `xfade`, `zoompan`, `drawtext`, `gblur`, `overlay` |
-| Ollama models | `qwen2.5-coder:7b` (pinned in `.env`, answers chat and authors apps), `vexora:latest`, `qwen2.5:3b` - **this list changes; check `curl 127.0.0.1:11434/api/tags` before assuming** |
-| Ollama store | `D:\Ollama\models` (env `OLLAMA_MODELS`) — **C: has only ~9 GB free** |
+| Models | `qwen2.5-coder-7b` (pinned in `.env`, answers chat and authors apps), `qwen3-8b`, `qwen2.5-3b`, and `qwen2.5-vl-3b` for images - **this list changes; check `curl 127.0.0.1:4040/models` while the app runs, or the models folder, before assuming** |
+| Model engine | llama.cpp `b11366` (CUDA), started by the API on port 4040; the engine and the models are in `%LOCALAPPDATA%\TRHAI\runtime`, on the SSD |
 | Node | v24.4.0 local; `package.json` declares `>=20`; CI pins 22 |
 | Piper / whisper | both work; `ggml-base.en` |
 

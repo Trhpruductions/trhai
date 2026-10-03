@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -26,6 +26,11 @@ import path from "node:path";
 //   <runtime>/models/name/*.gguf                a model with a vision part
 //                                               (an mmproj*.gguf beside it)
 //   <runtime>/presets.ini                       written here at every start
+//   <runtime>/engine.pid                        the running engine, and the API
+//                                               that started it
+//
+// Two copies of the app on one PC share the engine: the second finds the
+// first's still in use and asks it too, rather than ending it (leftoverEngine).
 
 /** The port the engine listens on, on this PC's own address only. */
 export const defaultEnginePort = 4040;
@@ -157,7 +162,7 @@ export function presetsText(models: EngineModelFile[], options: { contextTokens?
     "version = 1",
     "",
     "; Written by TRH AI at every start, from the models folder. Edits here are lost;",
-    "; add a model by putting its .gguf file in the folder beside this file.",
+    "; add a model by putting its .gguf file in the models folder beside this file.",
     "[*]",
     "fit = on",
     `fit-target = ${fitMarginMiB}`,
@@ -215,12 +220,16 @@ export function enginePaths(env: NodeJS.ProcessEnv = process.env): EnginePaths {
   const engine = named && existsSync(named)
     ? { exe: named, build: path.basename(path.dirname(named)) }
     : findEngine(path.join(root, "engine"));
+  // An engine on a port of its own - a second copy of the app, a test - keeps
+  // files of its own, so neither it nor the usual one writes over the other's.
+  const port = enginePort(env);
+  const tag = port === defaultEnginePort ? "" : `-${port}`;
   return {
     runtimeDir: root,
     modelsDir: path.join(root, "models"),
-    presetsFile: path.join(root, "presets.ini"),
-    pidFile: path.join(root, "engine.pid"),
-    logFile: path.join(path.dirname(root), "engine.log"),
+    presetsFile: path.join(root, `presets${tag}.ini`),
+    pidFile: path.join(root, `engine${tag}.pid`),
+    logFile: path.join(path.dirname(root), `engine${tag}.log`),
     exe: engine?.exe ?? null,
     build: engine?.build ?? null
   };
@@ -229,12 +238,17 @@ export function enginePaths(env: NodeJS.ProcessEnv = process.env): EnginePaths {
 export type EngineState =
   /** Started here, and answering. */
   | { status: "running"; url: string; pid: number; build: string | null; models: number }
-  /** Someone else's engine, named by TRHAI_ENGINE_URL. */
+  /**
+   * Someone else's engine: one named by TRHAI_ENGINE_URL, or the one another
+   * copy of the API on this PC started first. Used, and never stopped from here.
+   */
   | { status: "external"; url: string }
   /** Not running, and why - in words a person can act on. */
   | { status: "off"; url: string; reason: string };
 
 let child: ChildProcess | null = null;
+/** Where the running engine's process id was written, to take it away again when it stops. */
+let pidFileWritten: string | null = null;
 let attempted = false;
 let state: EngineState = { status: "off", url: engineUrl(), reason: "The model engine has not been started." };
 
@@ -260,29 +274,46 @@ function killTree(pid: number): void {
   try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
 }
 
+/** The name of the program a process id belongs to, or null when no process has it. */
+export function processName(pid: number): string | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  if (process.platform === "win32") {
+    const listed = spawnSync("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], { windowsHide: true, encoding: "utf8" });
+    // A row is "name","pid",...; with no such process it is a sentence instead.
+    return /^"([^"]+)"/.exec((listed.stdout ?? "").trim())?.[1] ?? null;
+  }
+  const listed = spawnSync("ps", ["-p", String(pid), "-o", "comm="], { encoding: "utf8" });
+  return (listed.stdout ?? "").trim() || null;
+}
+
 /**
- * Ends an engine a previous run of the API left behind.
+ * The engine an earlier start left running, from the file its process id was
+ * kept in, and whether the API that started it is still running too.
  *
  * The API is usually stopped by being killed - the launcher and the desktop
  * app both do - and a killed process cannot stop its children. The engine it
  * started would keep the port, the card's memory, and a preset file that no
- * longer matches the models folder. Its process id is kept in a file for this.
+ * longer matches the models folder: that one is ended (see startEngine).
+ *
+ * But an engine whose API is still running was not left behind. It belongs to
+ * another copy of the app on this PC - a second window, a developer's own, a
+ * test - and ending it would cut off a reply someone is reading.
+ *
+ * Null when the file names no engine. Process ids are reused, so one that now
+ * belongs to some other program is not an engine and is never touched.
  */
-function stopLeftoverEngine(pidFile: string): void {
-  let pid = 0;
-  try { pid = Number(readFileSync(pidFile, "utf8").trim()); } catch { return; }
-  if (!Number.isInteger(pid) || pid <= 0) return;
-  if (process.platform === "win32") {
-    // Only if that process id is still an engine: ids are reused.
-    const listed = spawnSync("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], { windowsHide: true, encoding: "utf8" });
-    if (!/llama-server/i.test(listed.stdout ?? "")) return;
-  }
-  killTree(pid);
+export function leftoverEngine(pidFile: string): { pid: number; ownerRunning: boolean } | null {
+  let recorded: string;
+  try { recorded = readFileSync(pidFile, "utf8"); } catch { return null; }
+  const [pid, owner] = recorded.trim().split(/\s+/).map(Number);
+  if (!/llama-server/i.test(processName(pid) ?? "")) return null;
+  return { pid, ownerRunning: owner !== process.pid && /^node/i.test(processName(owner) ?? "") };
 }
 
-async function answersHealth(url: string, withinMs: number): Promise<boolean> {
+/** Whether the engine answers within `withinMs`. Gives up early once `waitingFor` says there is nothing left to wait for. */
+async function answersHealth(url: string, withinMs: number, waitingFor: () => boolean = () => true): Promise<boolean> {
   const until = Date.now() + withinMs;
-  while (Date.now() < until) {
+  while (Date.now() < until && waitingFor()) {
     try {
       const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(1500) });
       if (response.ok) return true;
@@ -292,17 +323,57 @@ async function answersHealth(url: string, withinMs: number): Promise<boolean> {
   return false;
 }
 
+/** A start that is under way, so a second caller waits for it instead of starting another. */
+let starting: Promise<EngineState> | null = null;
+/** When the last start began, and what it was started with: reviveEngine starts it the same way. */
+let lastStartAt = 0;
+let startedWith: NodeJS.ProcessEnv = process.env;
+/** True once the engine has been stopped on purpose; it is not started again after that. */
+let closing = false;
+/** The least time between two tries at starting an engine that keeps stopping. */
+const reviveEveryMs = 15_000;
+
 /**
  * Starts the engine, unless one is named or none is installed. Never throws:
  * the app runs without a model and says so, as it did with no Ollama.
  */
-export async function startEngine(env: NodeJS.ProcessEnv = process.env): Promise<EngineState> {
+export function startEngine(env: NodeJS.ProcessEnv = process.env): Promise<EngineState> {
+  if (starting) return starting;
+  closing = false;
+  starting = launch(env).finally(() => { starting = null; });
+  return starting;
+}
+
+/**
+ * Starts the engine again when it has stopped: it crashed, or it was another
+ * copy of the app's and that copy has closed. Resolves true when an engine is
+ * answering again.
+ *
+ * Only in a process that runs the engine itself, never after it was stopped
+ * on purpose, and not more often than every fifteen seconds - an engine that
+ * will not start must not hold up every request that asks after it.
+ */
+export async function reviveEngine(): Promise<boolean> {
+  if (!attempted || closing) return false;
+  if (starting) return (await starting).status !== "off";
+  if (child || Date.now() - lastStartAt < reviveEveryMs) return false;
+  // Said where the API's log is read: a model that vanished and came back
+  // would otherwise leave no trace of having done either.
+  console.warn(`[engine] the model engine is not answering${state.status === "off" ? ` (${state.reason})` : ""}; starting it`);
+  const revived = await startEngine(startedWith);
+  console.warn(revived.status === "off" ? `[engine] it did not start: ${revived.reason}` : `[engine] the model engine is answering again at ${revived.url}`);
+  return revived.status !== "off";
+}
+
+async function launch(env: NodeJS.ProcessEnv): Promise<EngineState> {
   const url = engineUrl(env);
   if (env.TRHAI_ENGINE_URL?.trim()) {
     state = { status: "external", url };
     return state;
   }
   attempted = true;
+  lastStartAt = Date.now();
+  startedWith = env;
   state = { status: "off", url, reason: "The model engine is starting. Try again in a few seconds." };
   const paths = enginePaths(env);
   if (!paths.exe) {
@@ -316,9 +387,25 @@ export async function startEngine(env: NodeJS.ProcessEnv = process.env): Promise
     mkdirSync(paths.modelsDir, { recursive: true });
     const models = discoverModels(paths.modelsDir);
     const forced = Number(env.TRHAI_CONTEXT_TOKENS);
+    const leftover = leftoverEngine(paths.pidFile);
+    if (leftover?.ownerRunning) {
+      // Another copy of the API started the engine on this port and is still
+      // running. Its engine is used as it is, and is its to stop.
+      state = await answersHealth(url, 20_000)
+        ? { status: "external", url }
+        : {
+          status: "off", url,
+          reason: `Another copy of TRH AI is running the model engine on port ${enginePort(env)}, and it is not answering.`
+        };
+      return state;
+    }
+    if (leftover) killTree(leftover.pid);
     writeFileSync(paths.presetsFile, presetsText(models, { contextTokens: Number.isFinite(forced) && forced > 0 ? forced : undefined }));
-    stopLeftoverEngine(paths.pidFile);
 
+    // The log of the engine that ran before is kept beside the new one: when
+    // an engine is started again because it stopped, that log is the only
+    // place that says why.
+    try { renameSync(paths.logFile, `${paths.logFile}.prev`); } catch { /* there was none */ }
     const log = openSync(paths.logFile, "w");
     const started = spawn(paths.exe, [
       "--models-preset", paths.presetsFile,
@@ -330,7 +417,11 @@ export async function startEngine(env: NodeJS.ProcessEnv = process.env): Promise
       "--port", String(enginePort(env))
     ], { cwd: path.dirname(paths.exe), windowsHide: true, stdio: ["ignore", log, log] });
     child = started;
-    if (started.pid) writeFileSync(paths.pidFile, String(started.pid));
+    // The engine's process id, and this one's: who to ask whether it is still in use.
+    if (started.pid) {
+      writeFileSync(paths.pidFile, `${started.pid} ${process.pid}`);
+      pidFileWritten = paths.pidFile;
+    }
     started.once("exit", (code) => {
       if (child !== started) return;
       child = null;
@@ -342,10 +433,12 @@ export async function startEngine(env: NodeJS.ProcessEnv = process.env): Promise
       state = { status: "off", url, reason: `The model engine could not be started: ${error.message}` };
     });
 
-    if (await answersHealth(url, 20_000) && child === started && started.pid) {
+    // Not waited for once it has exited: an engine that could not take its
+    // port is gone in a second, and there is nothing left to answer.
+    if (await answersHealth(url, 20_000, () => child === started) && child === started && started.pid) {
       state = { status: "running", url, pid: started.pid, build: paths.build, models: models.length };
     } else if (child === started) {
-      stopEngine();
+      endEngine();
       state = { status: "off", url, reason: `The model engine did not answer within 20 s of starting. Its log is ${paths.logFile}.` };
     }
   } catch (error) {
@@ -354,14 +447,23 @@ export async function startEngine(env: NodeJS.ProcessEnv = process.env): Promise
   return state;
 }
 
-/** Stops the engine this process started, and the model it has loaded. */
-export function stopEngine(): void {
+/** Ends the engine this process started, and the model it has loaded. */
+function endEngine(): void {
   const running = child;
   child = null;
   if (!running?.pid) return;
   killTree(running.pid);
-  try { rmSync(enginePaths().pidFile, { force: true }); } catch { /* nothing to remove */ }
+  if (pidFileWritten) {
+    try { rmSync(pidFileWritten, { force: true }); } catch { /* nothing to remove */ }
+    pidFileWritten = null;
+  }
   state = { status: "off", url: state.url, reason: "The model engine was stopped." };
+}
+
+/** Stops the engine for good: the API is closing. It is not started again by a request that finds it gone. */
+export function stopEngine(): void {
+  closing = true;
+  endEngine();
 }
 
 // ---------------------------------------------------------------- asking it

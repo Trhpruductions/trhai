@@ -1,8 +1,10 @@
 // Keeping every request inside the model's context window.
 //
-// Ollama does not refuse a prompt that is longer than the window. It cuts it
-// from the front, silently, and the front is the rules: the system prompt,
-// the date, the workspace and the active agent (see defaultContextTokens in
+// A prompt longer than the window does not get answered. The engine refuses
+// it outright (promptTooLong in localModel.ts is what the user is then told).
+// Ollama, which ran the models before, did worse: it cut the prompt from the
+// front, silently, and the front is the rules - the system prompt, the date,
+// the workspace and the active agent (see defaultContextTokens in
 // localModel.ts, which is how that was found). A bigger window made the usual
 // turn fit; it did not make every turn fit. read_file returned up to 100,000
 // bytes - about 28,000 tokens on its own - and a command's output up to

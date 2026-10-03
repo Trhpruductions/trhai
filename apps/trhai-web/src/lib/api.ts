@@ -1,8 +1,8 @@
 // The backend TRHAI actually talks to.
 //
 // This is not a new service — it is the same local API the rest of this
-// monorepo already built and tested: an Express process that talks to Ollama
-// on this machine and nothing beyond it. A rewrite of the interface does not
+// monorepo already built and tested: an Express process that talks to a model
+// engine on this machine and nothing beyond it. A rewrite of the interface does not
 // require a rewrite of the parts that already work honestly, and duplicating
 // a tested orchestration layer to satisfy a tech-stack wishlist would be the
 // wrong kind of rebuild.

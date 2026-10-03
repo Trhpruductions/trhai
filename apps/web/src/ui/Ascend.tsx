@@ -24,7 +24,7 @@ import "./surfaces/surfaces.css";
  * Whether a local model is answering.
  *
  * Asked at startup and then on a slow interval, because the user can start or
- * stop Ollama at any time and a stale indicator would misreport what the
+ * stop the model engine at any time and a stale indicator would misreport what the
  * assistant can do. The question goes to our own API, so the browser never has
  * to reach a second origin.
  */

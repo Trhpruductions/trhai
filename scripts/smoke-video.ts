@@ -5,7 +5,7 @@
 // videoRender.ts, or the desktop workspace's Electron install.
 //
 // A fixed two-scene script, not a model call: this checks the render
-// pipeline, not the local model, and should not fail because Ollama is not
+// pipeline, not the local model, and should not fail because no model is
 // running.
 
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";

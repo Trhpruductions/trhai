@@ -1,5 +1,5 @@
 import { deadlineOrStop, stoppedBeforeFinishing, type LocalModelConfig } from "./localModel.js";
-import { enginePaths, listEngineModels, loadEngineModel, sameModel } from "./modelEngine.js";
+import { enginePaths, engineUrl, listEngineModels, loadEngineModel, reviveEngine, sameModel } from "./modelEngine.js";
 import { engineError, readCompletion } from "./engineChat.js";
 
 // Looking at an image, with a local vision model.
@@ -231,7 +231,12 @@ export async function lookAtImages(
 
   const fetcher = options.fetcher ?? fetch;
   const wanted = options.model ?? visionModelName();
-  const found = await findVisionModel(config.baseUrl, wanted, fetcher);
+  let found = await findVisionModel(config.baseUrl, wanted, fetcher);
+  // This process's own engine, stopped: started again before giving up, as
+  // for a chat turn (see checkAvailability in localModel.ts).
+  if (!found.reachable && config.baseUrl === engineUrl() && await reviveEngine()) {
+    found = await findVisionModel(config.baseUrl, wanted, fetcher);
+  }
   if (!found.reachable) {
     return { ok: false, reason: "The model engine is not answering, so the image could not be looked at. Start TRH AI again and try once more." };
   }

@@ -1992,7 +1992,7 @@ async function answerWithLocalModel(
   // Worked down in order rather than betting on one.
   //
   // A model that is listed is not a model that will load. Asked to answer,
-  // Ollama returned 500 "cudaMalloc failed: out of memory" for the 8B model
+  // the engine returned 500 "cudaMalloc failed: out of memory" for the 8B model
   // and a failed CPU buffer allocation for the 3B one — while the app went on
   // reporting the first as available and silently falling back on every single
   // question, with nothing on screen to say why.

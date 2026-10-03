@@ -11,10 +11,13 @@ no API key, no third-party service. That is a deliberate constraint, and it is
 enforced by tests: the build fails if anyone adds a hosted provider key, a hosted
 provider SDK, or a non-loopback URL to the model client.
 
-Answers come from a local model through [Ollama](https://ollama.com) when one is
-installed, and the app starts and stops that server itself — opening Vexora is the
-only thing you have to do. With no model installed it still runs, answering from
-your saved memory and your documents and saying plainly when it has neither.
+Answers come from a local model when one is installed. The app runs it in its own
+model engine — [llama.cpp](https://github.com/ggml-org/llama.cpp)'s server, which
+it starts and stops itself — so opening Vexora is the only thing you have to do,
+and there is no second application to install or keep running. `npm run
+setup:engine` puts the engine in place once, and a model is a `.gguf` file in the
+app's models folder. With no model installed it still runs, answering from your
+saved memory and your documents and saying plainly when it has neither.
 
 The assistant has tools it can call and chain, so it can look something up, do
 arithmetic exactly, work out a date, write a file, and build a working app. Two rules
@@ -120,12 +123,13 @@ Copy `.env.example` to `.env` at the repository root to change any of these;
 it documents every setting.
 
 - `PORT` — API port, default 4000.
-- `OLLAMA_MODEL` — which local model answers. `OLLAMA_NUM_CTX` — the context
-  window every request asks for, default 16384. The assistant's instructions and
-  tool list need more than Ollama's own default of 4096; a smaller window cuts
-  them off without any error, so anything under 8192 is raised to 8192. It is
-  also the longest a reply may be: a model that runs past it is stopped, and
-  the reply is reported as too long rather than shown.
+- `TRHAI_MODEL` — which local model answers, by its file's name in the models
+  folder (`%LOCALAPPDATA%\TRHAI\runtime\models`; `TRHAI_RUNTIME_DIR` moves it).
+  Each model runs with the largest context window that fits the graphics card,
+  and never less than 8192 tokens, which the assistant's instructions and tool
+  list need. `TRHAI_CONTEXT_TOKENS` forces one window on every model instead.
+  The window is also the longest a reply may be: a model that runs past it is
+  stopped, and the reply is reported as too long rather than shown.
 - `CORS_ORIGIN` — which browser origins may call the API. Defaults to this
   machine's own origins on any port. The API listening on localhost does not by
   itself stop a page on a site you visit from calling it, and the assistant,

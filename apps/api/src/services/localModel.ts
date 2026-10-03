@@ -21,7 +21,7 @@
 // rather than the app looking broken.
 
 import {
-  engineOffReason, enginePaths, engineUrl, findEngineModel, isModelOrSize, listEngineModels, type EngineModel
+  engineOffReason, enginePaths, engineUrl, findEngineModel, isModelOrSize, listEngineModels, reviveEngine, type EngineModel
 } from "./modelEngine.js";
 import { engineError, readCompletion } from "./engineChat.js";
 
@@ -348,22 +348,36 @@ export async function checkAvailability(
   config: LocalModelConfig,
   fetchImpl: FetchLike = fetch
 ): Promise<ModelAvailability> {
+  const list = () => listEngineModels(config.baseUrl, fetchImpl, AbortSignal.timeout(Math.min(config.timeoutMs, 4000)));
+  const answeredWithError = (error: unknown) => error instanceof Error && /^The model engine answered \d+/.test(error.message);
+  const ours = config.baseUrl === engineUrl();
   let models: EngineModel[];
   try {
-    models = await listEngineModels(config.baseUrl, fetchImpl, AbortSignal.timeout(Math.min(config.timeoutMs, 4000)));
-  } catch (error) {
-    if (error instanceof Error && /^The model engine answered \d+/.test(error.message)) {
-      return { available: false, reason: `${error.message.replace(/\.$/, "")} at ${config.baseUrl}.` };
+    models = await list();
+  } catch (first) {
+    let error = first;
+    let revived: EngineModel[] | null = null;
+    // This process's own engine, and not answering: it stopped, or it was
+    // another copy of the app's and that copy has closed. It is started again
+    // before anyone is told there is no model.
+    if (ours && !answeredWithError(first) && await reviveEngine()) {
+      try { revived = await list(); } catch (second) { error = second; }
     }
-    // When this process is the one that should be running the engine, why it
-    // is not is more use than "nothing is listening": not installed and
-    // stopped need different things done.
-    const why = config.baseUrl === engineUrl() ? engineOffReason() : null;
-    if (why) return { available: false, reason: `No local model: ${why}` };
-    const detail = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")
-      ? "it did not respond in time"
-      : "nothing is listening";
-    return { available: false, reason: `No local model: ${detail} at ${config.baseUrl}.` };
+    if (!revived) {
+      if (answeredWithError(error)) {
+        return { available: false, reason: `${(error as Error).message.replace(/\.$/, "")} at ${config.baseUrl}.` };
+      }
+      // When this process is the one that should be running the engine, why it
+      // is not is more use than "nothing is listening": not installed and
+      // stopped need different things done.
+      const why = ours ? engineOffReason() : null;
+      if (why) return { available: false, reason: `No local model: ${why}` };
+      const detail = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")
+        ? "it did not respond in time"
+        : "nothing is listening";
+      return { available: false, reason: `No local model: ${detail} at ${config.baseUrl}.` };
+    }
+    models = revived;
   }
 
   // The models that can hold a conversation. The vision model is not one: it

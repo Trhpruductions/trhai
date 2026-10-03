@@ -89,7 +89,7 @@ function provenanceOf(message: ChatMessage): { label: string; tone: string } | n
     case "generated":
       // Same shape as the status bar shows, so the two never look like they
       // are naming different models.
-      return { label: message.model?.replace(/^ollama\//, "").replace(/:latest$/, "") ?? "local model", tone: "chip-live" };
+      return { label: message.model?.replace(/^(?:local|ollama)\//, "").replace(/:latest$/, "") ?? "local model", tone: "chip-live" };
     case "answer":
       return { label: "from your notes", tone: "chip-ok" };
     case "no-answer":

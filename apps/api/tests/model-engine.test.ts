@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   defaultEnginePort, discoverModels, engineOffReason, enginePaths, enginePort, engineState, engineUrl, findEngineModel,
-  isModelOrSize, listEngineModels, loadEngineModel, modelKey, presetsText, runtimeDir, sameModel, startEngine, stopEngine,
-  unloadEngineModel
+  isModelOrSize, leftoverEngine, listEngineModels, loadEngineModel, modelKey, presetsText, processName, reviveEngine,
+  runtimeDir, sameModel, startEngine, stopEngine, unloadEngineModel
 } from "../src/services/modelEngine.js";
 import { engineError, readCompletion, toWireMessages } from "../src/services/engineChat.js";
 import { checkAvailability } from "../src/services/localModel.js";
@@ -151,9 +151,44 @@ test("the newest engine in the engine folder is the one used", () => {
 
   const none = enginePaths(env({ TRHAI_RUNTIME_DIR: path.join(scratch, "nothing-here") }));
   assert.deepEqual([none.exe, none.build], [null, null]);
+
+  // An engine on a port of its own keeps its own files, so a second copy of
+  // the app never writes over the first one's presets, log or process id.
+  const usual = enginePaths(env({ TRHAI_RUNTIME_DIR: root }));
+  const other = enginePaths(env({ TRHAI_RUNTIME_DIR: root, TRHAI_ENGINE_PORT: "4140" }));
+  assert.equal(usual.pidFile, path.join(root, "engine.pid"));
+  assert.deepEqual([other.presetsFile, other.pidFile, other.logFile],
+    [path.join(root, "presets-4140.ini"), path.join(root, "engine-4140.pid"), path.join(path.dirname(root), "engine-4140.log")]);
+  assert.equal(other.modelsDir, usual.modelsDir, "the models are the same ones");
+});
+
+test("only a process that is an engine is ever taken for one left running", () => {
+  // The engine's process id is kept in a file so that one left behind by a
+  // killed API can be ended at the next start. Process ids are reused: a file
+  // naming a process that is now something else names no engine.
+  assert.match(processName(process.pid) ?? "", /^node/i, "this test's own process is found, by name");
+  assert.equal(processName(0), null);
+  assert.equal(processName(2 ** 31 - 2), null, "no process has this id");
+
+  const file = path.join(scratch, "engine.pid");
+  assert.equal(leftoverEngine(file), null, "no file: nothing was left");
+  writeFileSync(file, `${process.pid} 1`);
+  assert.equal(leftoverEngine(file), null, "a running process that is not an engine is never touched");
+  writeFileSync(file, "not a process id");
+  assert.equal(leftoverEngine(file), null);
+  writeFileSync(file, "");
+  assert.equal(leftoverEngine(file), null);
 });
 
 // ---------------------------------------------------------- starting it
+
+test("an engine is only ever started again by a process that runs one", async () => {
+  // Nothing in this process has started an engine yet, so there is none to
+  // start again: a test, or an API told to leave the engine to someone else,
+  // must never launch one because a request found nothing listening.
+  assert.equal(await reviveEngine(), false);
+  assert.equal(engineOffReason(), null);
+});
 
 test("with no engine installed, nothing is started, and the reason says what to run", async () => {
   const root = path.join(scratch, "not-installed");
@@ -173,9 +208,15 @@ test("with no engine installed, nothing is started, and the reason says what to 
   const elsewhere = await checkAvailability({ baseUrl: "http://127.0.0.1:1", model: "qwen3", modelFromEnv: false, timeoutMs: 1000 });
   assert.deepEqual(elsewhere, { available: false, reason: "No local model: nothing is listening at http://127.0.0.1:1." });
 
-  // Stopping what was never started is not an error.
+  // An engine that would not start is not tried again by every request that
+  // finds it missing: the answer above came at once, not after another try.
+  assert.equal(await reviveEngine(), false, "not again within a few seconds of the last try");
+
+  // Stopping what was never started is not an error - and once the engine has
+  // been stopped on purpose, nothing starts it again.
   stopEngine();
   assert.equal(engineState().status, "off");
+  assert.equal(await reviveEngine(), false);
 });
 
 test("an engine named by its address is used as it is, and none is started", async () => {

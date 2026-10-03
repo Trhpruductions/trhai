@@ -699,7 +699,7 @@ export function withoutFabricatedLiveClaims(text: string): string {
   return kept.join(" ").trim();
 }
 
-/** Ollama's reply to a chat turn. */
+/** A reply to a chat turn, as the loop keeps it. */
 type ChatResponse = {
   message?: {
     content?: unknown;
@@ -1236,8 +1236,9 @@ function parseToolCalls(response: ChatResponse): ToolCall[] {
     const name = call.function?.name;
     if (typeof name !== "string" || !name) return [];
 
-    // Ollama sends an object; some builds send a JSON string. Both appear in
-    // the wild, and a thrown parse error here would lose the whole reply.
+    // The engine sends a JSON string; a model that writes its call as text
+    // gives an object. Both arrive here, and a thrown parse error would lose
+    // the whole reply.
     const raw = call.function?.arguments;
     let parsed: Record<string, unknown> = {};
     if (raw && typeof raw === "object") {
@@ -1259,7 +1260,7 @@ function parseToolCalls(response: ChatResponse): ToolCall[] {
  * last of its reply, and the caller's way to end it sooner.
  *
  * Held until the caller releases it, not until fetch() resolves. fetch()
- * resolves when the headers arrive, and Ollama sends those with a streamed
+ * resolves when the headers arrive, and the engine sends those with a streamed
  * reply's first words. When this wrapped fetch() alone, the timer and the Stop
  * relay were both let go of just as a streamed reply began, and from then on
  * nothing ended it: the model wrote on until it was done, holding the GPU,
