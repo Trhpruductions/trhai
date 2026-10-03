@@ -115,10 +115,22 @@ const actionVerbs: Array<{ kind: ActionKind; words: string[]; expects: string[] 
  */
 const conversationalRun = /\brun (?:me through|by me|into|through|out of|a bit|late)\b|\bin the long run\b/;
 
-/** A drive path, a POSIX path, or a bare filename with an extension. */
+/**
+ * A drive path: a letter standing on its own, a colon, a slash - "D:/app",
+ * "C:\Users". Not the end of a web address's scheme. Without the "on its
+ * own", "https://example.com" read as the drive "s:" and the path
+ * "//example.com", so every web address was also a file: a question about a
+ * page went to the coding model, and had the file writers in reach.
+ */
+export const drivePath = /(?<![a-z])[a-z]:[\\/][^\s]+/i;
+
+/** A web address, as it appears in a request. */
+const webAddress = /\bhttps?:\/\/[^\s]+/i;
+
+/** A web address, a drive path, a POSIX path, or a bare filename with an extension. */
 const targetPatterns = [
-  /\bhttps?:\/\/[^\s]+/i,
-  /[a-z]:[\\/][^\s]+/i,
+  webAddress,
+  drivePath,
   /(?:^|\s)\/[^\s]+\.[a-z0-9]{1,6}\b/i,
   /\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i
 ];
@@ -126,7 +138,7 @@ const targetPatterns = [
 /** A real file path or a bare filename with an extension (not a bare URL). */
 export function namesAFilePath(message: string): boolean {
   const text = message ?? "";
-  return /[a-z]:[\\/][^\s]+/i.test(text)
+  return drivePath.test(text)
     || /(?:^|\s)\/[^\s]+\.[a-z0-9]{1,6}\b/i.test(text)
     || /\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml|toml)\b/i.test(text);
 }
@@ -163,7 +175,7 @@ const commandPatterns = [
 
 /** A named project or folder, for checks that need to know where to run. */
 const projectPatterns = [
-  /[a-z]:[\\/][^\s]+/i,
+  drivePath,
   /\bthis (?:project|repo|repository|folder|directory)\b/i,
   /\bin ["'`]?[\w.-]+["'`]? (?:project|repo)\b/i
 ];
@@ -655,6 +667,11 @@ export function classifyIntent(message: string): IntentVerdict {
   }
 
   const hasTarget = targetPatterns.some((pattern) => pattern.test(message));
+  // A web address is a target to read, and never one to write to. So what the
+  // request names apart from its addresses is asked separately: a file named
+  // inside an address ("https://example.com/readme.md") is part of the address.
+  const namesAnAddress = webAddress.test(message);
+  const namesAFile = namesAFilePath(message.replace(new RegExp(webAddress.source, "gi"), " "));
 
   // Checked before the opener rule, not inside it.
   //
@@ -663,12 +680,16 @@ export function classifyIntent(message: string): IntentVerdict {
   // phrasing people use most. Asking what is inside a file that has been named
   // cannot be answered without opening it, whatever the sentence starts with.
   if (hasTarget && asksForContents.test(text)) {
+    // A page is read with the page reader. "What does the web page at
+    // https://example.com say?" was filed as asking for "the contents of a
+    // named file", with read_file as the tool it wanted.
+    const page = namesAnAddress && !namesAFile;
     return {
       action: true,
       kind: "read",
       hasTarget: true,
-      reason: "asks for the contents of a named file",
-      expects: ["read_file"]
+      reason: page ? "asks about the page at a named address" : "asks for the contents of a named file",
+      expects: page ? ["fetch_url"] : ["read_file"]
     };
   }
 
@@ -724,13 +745,18 @@ export function classifyIntent(message: string): IntentVerdict {
     // path; a command needs a command; a check needs somewhere to run. Using
     // the file patterns for all of them asked people running `npm test` which
     // file they meant, which reads as not having understood the request.
-    const targeted = targetFor(group.kind, message, text, hasTarget);
+    const targeted = targetFor(group.kind, message, text, group.kind === "write" ? namesAFile : hasTarget);
 
     // The file verbs additionally need *something* to act on before this is
     // confident enough to override a prose answer. "add a note about that" is
     // conversation; "add a guard to app.ts" is an order.
     const fileVerb = group.kind === "read" || group.kind === "write";
     if (fileVerb && !hasTarget && !mentionsAFileNoun(text)) continue;
+    // And a write needs a file, not just an address. "Write a two-sentence
+    // summary of https://example.com" asks for words about a page; with the
+    // address counted as its target it was an order to write a file, and an
+    // answer in words was a failure to carry it out.
+    if (group.kind === "write" && !namesAFile && !mentionsAFileNoun(text)) continue;
 
     return {
       action: true,
