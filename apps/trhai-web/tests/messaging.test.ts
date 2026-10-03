@@ -22,6 +22,18 @@ test("texting reads as ready only with a phone linked, and says what to do other
   assert.match(describeTexting("missing").text, /Microsoft Store/);
 });
 
+test("the steps follow the phone: an iPhone pastes into a new message, an Android gets the text written", () => {
+  const iphone = describeTexting("linked", "iphone");
+  assert.equal(iphone.ready, true);
+  assert.match(iphone.text, /can't start a text that's already written/);
+  assert.match(iphone.text, /paste it into a new message/);
+  assert.match(describeTexting("linked", "android").text, /written and ready/);
+  // Not said yet: what happens either way, and a prompt to say.
+  assert.match(describeTexting("linked", null).text, /Say which phone is linked/);
+  // No phone linked: the phone does not matter yet.
+  assert.match(describeTexting("not-linked", "iphone").text, /no phone is linked/);
+});
+
 test("the server is asked for only for a complete address no provider covers", () => {
   assert.equal(needsServer("ada@gmail.com", providers), false);
   assert.equal(needsServer("ada@mycompany.com", providers), true);

@@ -27,7 +27,20 @@ test("an update is readable straight back", () => {
 test("an update returns the whole state, not just the change", () => {
   // So a caller never has to guess what the resulting state is.
   resetPreferences();
-  assert.deepEqual(updatePreferences({ personality: "creative" }), { personality: "creative" });
+  assert.deepEqual(updatePreferences({ personality: "creative" }), { personality: "creative", phone: null });
+});
+
+test("the phone linked in Phone Link is set, kept through other changes, and can be cleared", () => {
+  resetPreferences();
+  assert.equal(readPreferences().phone, null, "not said until the user says");
+  assert.equal(updatePreferences({ phone: "iphone" }).phone, "iphone");
+  assert.equal(updatePreferences({ personality: "developer" }).phone, "iphone", "another change leaves it alone");
+  assert.equal(updatePreferences({}).phone, "iphone");
+  assert.equal(updatePreferences({ phone: "android" }).phone, "android");
+  assert.equal(updatePreferences({ phone: null }).phone, null);
+  // A stored file: only the two kinds survive.
+  assert.equal(parsePreferences({ personality: "x", phone: "iphone" }).phone, "iphone");
+  assert.equal(parsePreferences({ personality: "x", phone: "nokia" }).phone, null);
 });
 
 test("an empty or missing value leaves the setting alone", () => {

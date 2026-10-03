@@ -17,12 +17,23 @@ import { recordPersistFailure, recordPersistSuccess } from "./persistenceHealth.
 // the right owner. If accounts ever reach the UI, this becomes a per-account
 // record and the file below becomes the signed-out default.
 
+/** The phone linked in Phone Link - it decides how a text is handed over (messaging.ts). */
+export type PhoneKind = "iphone" | "android";
+
 export type Preferences = {
   /** Personality id; validated against the client's list by the caller. */
   personality: string;
+  /** The phone linked in Phone Link, once the user has said; null until then. */
+  phone: PhoneKind | null;
 };
 
-export const defaultPreferences: Preferences = { personality: "professional" };
+export const defaultPreferences: Preferences = { personality: "professional", phone: null };
+
+/** A phone kind, null for "not said", or undefined for anything else. */
+function phoneFrom(value: unknown): PhoneKind | null | undefined {
+  if (value === "iphone" || value === "android") return value;
+  return value === null ? null : undefined;
+}
 
 const preferencesFile = process.env.ASCEND_PREFERENCES_FILE
   ?? dataFile("preferences.json");
@@ -41,11 +52,12 @@ let current: Preferences = { ...defaultPreferences };
 export function parsePreferences(value: unknown): Preferences {
   if (!value || typeof value !== "object") return { ...defaultPreferences };
 
-  const raw = value as { personality?: unknown };
+  const raw = value as { personality?: unknown; phone?: unknown };
   return {
     personality: typeof raw.personality === "string" && raw.personality.trim()
       ? raw.personality.trim()
-      : defaultPreferences.personality
+      : defaultPreferences.personality,
+    phone: phoneFrom(raw.phone) ?? null
   };
 }
 
@@ -96,13 +108,15 @@ export function readPreferences(): Preferences {
 export function updatePreferences(patch: Partial<Preferences>): Preferences {
   load();
 
+  const phone = phoneFrom(patch.phone);
   const next: Preferences = {
     personality: typeof patch.personality === "string" && patch.personality.trim()
       ? patch.personality.trim()
-      : current.personality
+      : current.personality,
+    phone: phone === undefined ? current.phone : phone
   };
 
-  if (next.personality !== current.personality) {
+  if (next.personality !== current.personality || next.phone !== current.phone) {
     current = next;
     save();
   }
