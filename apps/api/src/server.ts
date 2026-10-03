@@ -377,7 +377,11 @@ function userTurnText(message: string, req: express.Request): string {
  */
 async function generateWithModel(prompt: string, cancel?: AbortSignal) {
   const base = readLocalModelConfig();
-  const result = await generate({ ...base, timeoutMs: Math.max(base.timeoutMs, 120000) },
+  // The configured model when it is there, and otherwise the model a chat
+  // turn would fall back to - not a name the engine has no model for.
+  const availability = await checkAvailability(base);
+  const model = availability.available ? availability.model : base.model;
+  const result = await generate({ ...base, model, timeoutMs: Math.max(base.timeoutMs, 120000) },
     { question: prompt, context: [], rawPrompt: prompt }, fetch, cancel);
   return result.ok ? { ok: true as const, text: result.text, model: result.model } : { ok: false as const, reason: result.reason };
 }

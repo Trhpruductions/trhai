@@ -561,6 +561,7 @@ export async function loadEngineModel(
   const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(allowed)]) : AbortSignal.timeout(allowed);
   const stopped = { ok: false as const, reason: "Stopped before the model was loaded." };
   const missing = { ok: false as const, reason: `${name} is not one of the models in TRH AI's models folder.` };
+  const outOfTime = { ok: false as const, reason: `${name} was not loaded within ${allowed >= 1000 ? `${Math.round(allowed / 1000)} s` : `${allowed} ms`}.` };
   const find = async () => findEngineModel(await listEngineModels(baseUrl, fetchImpl, signal), name);
   try {
     let model = await find();
@@ -571,7 +572,7 @@ export async function loadEngineModel(
     for (;;) {
       if (model.status === "loaded" && model.windowTokens) return { ok: true, id: model.id, windowTokens: model.windowTokens };
       if (options.signal?.aborted) return stopped;
-      if (Date.now() >= until) return { ok: false, reason: `${name} was not loaded within ${Math.round(allowed / 1000)} s.` };
+      if (Date.now() >= until) return outOfTime;
 
       if (model.status === "loading") {
         sawLoading = true;
@@ -600,8 +601,14 @@ export async function loadEngineModel(
       if (!model) return missing;
     }
   } catch (error) {
-    if (options.signal?.aborted) return { ok: false, reason: "Stopped before the model was loaded." };
-    return { ok: false, reason: `The model engine did not answer while loading ${name}: ${error instanceof Error ? error.message : String(error)}` };
+    if (options.signal?.aborted) return stopped;
+    // The time allowed ran out in the middle of a request, rather than between two.
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) return outOfTime;
+    // It answered, with an error, when asked which models it has.
+    if (error instanceof Error && /^The model engine answered \d+\.$/.test(error.message)) {
+      return { ok: false, reason: `${error.message.slice(0, -1)} while loading ${name}.` };
+    }
+    return { ok: false, reason: `The model engine is not answering, so ${name} could not be loaded.` };
   }
 }
 

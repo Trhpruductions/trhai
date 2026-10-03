@@ -21,7 +21,7 @@ import {
   unfinishedWithin,
   type LocalModelConfig, orderedCandidates } from "../src/services/localModel.js";
 import { defaultEnginePort } from "../src/services/modelEngine.js";
-import { completionBody, modelsBody } from "./helpers/fakeEngine.js";
+import { completionBody, fakeWindow, modelsBody } from "./helpers/fakeEngine.js";
 
 /**
  * A stand-in speaking the model engine's protocol, one answer per request.
@@ -219,10 +219,17 @@ test("an engine that answers with an error is said to have, with its status", as
   }
 });
 
+/** A stand-in engine with one model, llama3.2:latest, loaded; each chat request is answered as `chat` says. */
+const withModel = (chat: (body: unknown) => { status: number; payload: unknown } | "hang", window = fakeWindow) =>
+  standIn((url, body) => (url === "/models" ? { status: 200, payload: modelsBody(["llama3.2:latest"], { window }) } : chat(body)));
+
 test("a generated answer comes back with the model that produced it", async () => {
   const { server, baseUrl } = await standIn((url, body) => {
+    if (url === "/models") return { status: 200, payload: modelsBody(["llama3.2:latest"]) };
     assert.equal(url, "/v1/chat/completions");
     const request = body as { model: string; stream: boolean; messages: Array<{ role: string; content: string }>; max_tokens?: number };
+    // Asked for by the engine's own name for it, not the setting's.
+    assert.equal(request.model, "llama3.2:latest");
     assert.equal(request.stream, false);
     // The prompt as one user turn; the engine wraps it in the model's own template.
     assert.equal(request.messages.length, 1);
@@ -236,10 +243,40 @@ test("a generated answer comes back with the model that produced it", async () =
 
   try {
     const result = await generate(configFor(baseUrl), { question: "What is the capital of France?", context: [] });
-    assert.equal(result.ok, true);
-    if (!result.ok) return;
-    assert.equal(result.text, "Paris.");
-    assert.equal(result.model, "llama3.2:latest");
+    assert.deepEqual(result, { ok: true, text: "Paris.", model: "llama3.2:latest" });
+  } finally {
+    server.close();
+  }
+});
+
+test("a whole reply is asked of the engine's name for the model, however the setting spells it", async () => {
+  // Found before it shipped: a summary sent the name exactly as the .env had
+  // it - "qwen2.5-coder:7b", from when the models were Ollama's - and the
+  // engine, which knows the model as qwen2.5-coder-7b, answered that there is
+  // no such model. Chat turns were fine: they asked the engine first.
+  const asked: string[] = [];
+  const { server, baseUrl } = await standIn((url, body) => {
+    if (url === "/models") return { status: 200, payload: modelsBody(["qwen2.5-3b", "qwen2.5-coder-7b", "qwen3-8b"]) };
+    const model = (body as { model: string }).model;
+    asked.push(model);
+    // As the engine answers a name it does not know.
+    if (!["qwen2.5-3b", "qwen2.5-coder-7b", "qwen3-8b"].includes(model)) {
+      return { status: 400, payload: { error: { code: 400, message: `model '${model}' not found`, type: "invalid_request_error" } } };
+    }
+    return { status: 200, payload: completionBody(model, { message: { content: "A summary." } }) };
+  });
+
+  try {
+    for (const named of ["qwen2.5-coder:7b", "qwen2.5-coder", "QWEN2.5-CODER-7B"]) {
+      const result = await generate(configFor(baseUrl, { model: named }), { question: "anything", context: [], rawPrompt: "summarize this" });
+      assert.deepEqual(result, { ok: true, text: "A summary.", model: "qwen2.5-coder-7b" }, `asked for as ${named}`);
+    }
+    assert.deepEqual(asked, ["qwen2.5-coder-7b", "qwen2.5-coder-7b", "qwen2.5-coder-7b"]);
+
+    // A model that is not there is said to be missing, by the name asked for, and nothing is sent.
+    const missing = await generate(configFor(baseUrl, { model: "mistral:7b" }), { question: "anything", context: [] });
+    assert.deepEqual(missing, { ok: false, reason: "mistral:7b is not one of the models in TRH AI's models folder." });
+    assert.equal(asked.length, 3);
   } finally {
     server.close();
   }
@@ -247,11 +284,11 @@ test("a generated answer comes back with the model that produced it", async () =
 
 test("an empty reply is a failure, not an empty answer", async () => {
   // Returning "" would render as the assistant saying nothing at all.
-  const { server, baseUrl } = await standIn(() => ({ status: 200, payload: completionBody("llama3.2:latest", { message: { content: "   " } }) }));
+  const { server, baseUrl } = await withModel(() => ({ status: 200, payload: completionBody("llama3.2:latest", { message: { content: "   " } }) }));
 
   try {
     const result = await generate(configFor(baseUrl), { question: "anything", context: [] });
-    assert.equal(result.ok, false);
+    assert.deepEqual(result, { ok: false, reason: "The local model returned an empty reply." });
   } finally {
     server.close();
   }
@@ -263,16 +300,14 @@ test("a reply cut off at the length limit is a failure that says so, not a short
   // so what decides is the engine's finish reason.
   const words = "=== FILE: README.md\n# Snake\n\nUse the arrow keys to";
   let finish = "length";
-  const { server, baseUrl } = await standIn((url) => (url === "/models"
-    // The window the engine has the model loaded with: the limit it ran past.
-    ? { status: 200, payload: modelsBody(["llama3.2:latest"], { window: 9216 }) }
-    : { status: 200, payload: completionBody("llama3.2:latest", { message: { content: words }, done_reason: finish }) }));
+  // 9,216 tokens is the window the engine has the model loaded with: the limit it ran past.
+  const { server, baseUrl } = await withModel(
+    () => ({ status: 200, payload: completionBody("llama3.2:latest", { message: { content: words }, done_reason: finish }) }), 9216
+  );
 
   try {
     const cut = await generate(configFor(baseUrl), { question: "anything", context: [], rawPrompt: "write an app" });
-    assert.equal(cut.ok, false);
-    if (cut.ok) return;
-    assert.equal(cut.reason, "The reply from llama3.2 ran past the length limit (9,216 tokens) without finishing.");
+    assert.deepEqual(cut, { ok: false, reason: "The reply from llama3.2:latest ran past the length limit (9,216 tokens) without finishing." });
 
     finish = "stop";
     const finished = await generate(configFor(baseUrl), { question: "anything", context: [], rawPrompt: "write an app" });
@@ -283,17 +318,41 @@ test("a reply cut off at the length limit is a failure that says so, not a short
   }
 });
 
-test("a server that never replies gives up rather than hanging the request", async () => {
-  const { server, baseUrl } = await standIn(() => "hang");
+test("a model that never replies is given up on rather than hanging the request", async () => {
+  const { server, baseUrl } = await withModel(() => "hang");
 
   try {
     const result = await generate(configFor(baseUrl, { timeoutMs: 300 }), { question: "anything", context: [] });
-    assert.equal(result.ok, false);
-    if (result.ok) return;
     // Said as what happened: the model was there and did not answer in time.
-    assert.equal(result.reason, "llama3.2 did not reply within 300 ms.");
+    assert.deepEqual(result, { ok: false, reason: "llama3.2:latest did not reply within 300 ms." });
   } finally {
+    server.closeAllConnections();
     server.close();
+  }
+});
+
+test("an engine that does not answer is said as that, not as the model being slow", async () => {
+  // Takes the connection and says nothing, even about which models it has.
+  const silent = await standIn(() => "hang");
+  try {
+    const result = await generate(configFor(silent.baseUrl, { timeoutMs: 300 }), { question: "anything", context: [] });
+    assert.deepEqual(result, { ok: false, reason: "llama3.2 was not loaded within 300 ms." });
+  } finally {
+    silent.server.closeAllConnections();
+    silent.server.close();
+  }
+
+  // Nothing listening at all.
+  const gone = await generate(configFor("http://127.0.0.1:1"), { question: "anything", context: [] });
+  assert.deepEqual(gone, { ok: false, reason: "The model engine is not answering, so llama3.2 could not be loaded." });
+
+  // Answering, with an error, when asked which models it has.
+  const failing = await standIn(() => ({ status: 503, payload: { error: { code: 503, message: "Loading", type: "unavailable_error" } } }));
+  try {
+    const result = await generate(configFor(failing.baseUrl), { question: "anything", context: [] });
+    assert.deepEqual(result, { ok: false, reason: "The model engine answered 503 while loading llama3.2." });
+  } finally {
+    failing.server.close();
   }
 });
 
@@ -309,12 +368,17 @@ test("a request the turn stops is let go of at once, and said as stopped rather 
   const server = createServer((request, response) => {
     request.resume();
     request.on("end", () => {
+      // Which models there are is answered; the reply itself never is.
+      if (request.url === "/models") {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify(modelsBody(["llama3.2:latest"])));
+        return;
+      }
       asked += 1;
       response.on("close", () => {
         if (!response.writableEnded) markLetGo();
       });
       markArrived();
-      // ...and never answered.
     });
   });
   server.listen(0, "127.0.0.1");
@@ -345,15 +409,13 @@ test("a request the turn stops is let go of at once, and said as stopped rather 
 
 test("an error status is reported rather than treated as an answer", async () => {
   // In the engine's own words, taken out of its error body.
-  const { server, baseUrl } = await standIn(() => ({
+  const { server, baseUrl } = await withModel(() => ({
     status: 500, payload: { error: { code: 500, message: "model name=llama3.2 failed to load", type: "server_error" } }
   }));
 
   try {
     const result = await generate(configFor(baseUrl), { question: "anything", context: [] });
-    assert.equal(result.ok, false);
-    if (result.ok) return;
-    assert.equal(result.reason, "The model engine answered 500: model name=llama3.2 failed to load.");
+    assert.deepEqual(result, { ok: false, reason: "The model engine answered 500: model name=llama3.2 failed to load." });
   } finally {
     server.close();
   }

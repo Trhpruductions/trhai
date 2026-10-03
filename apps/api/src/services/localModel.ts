@@ -21,7 +21,7 @@
 // rather than the app looking broken.
 
 import {
-  engineOffReason, enginePaths, engineUrl, findEngineModel, isModelOrSize, listEngineModels, reviveEngine, type EngineModel
+  engineOffReason, enginePaths, engineUrl, isModelOrSize, listEngineModels, loadEngineModel, reviveEngine, type EngineModel
 } from "./modelEngine.js";
 import { engineError, readCompletion } from "./engineChat.js";
 
@@ -443,16 +443,6 @@ export function buildPrompt(request: GenerationRequest): string {
   return parts.join("\n");
 }
 
-/** The window the engine has `config.model` loaded with, for saying what limit a reply ran past. */
-async function loadedWindow(config: LocalModelConfig, fetchImpl: FetchLike): Promise<number | undefined> {
-  try {
-    const models = await listEngineModels(config.baseUrl, fetchImpl);
-    return findEngineModel(models, config.model)?.windowTokens ?? config.contextTokens;
-  } catch {
-    return config.contextTokens;
-  }
-}
-
 export async function generate(
   config: LocalModelConfig,
   request: GenerationRequest,
@@ -463,6 +453,15 @@ export async function generate(
    */
   cancel?: AbortSignal
 ): Promise<GenerationResult> {
+  // A turn already stopped asks nothing at all.
+  if (cancel?.aborted) return { ok: false, reason: stoppedBeforeFinishing };
+  // The engine's own name for the model, and the window it has it loaded
+  // with. A setting may spell the name the way Ollama did ("name:size"), or
+  // name a model without its size, and the engine answers only to its own
+  // names: asked for "qwen2.5-coder:7b" it says there is no such model.
+  const loaded = await loadEngineModel(config.baseUrl, config.model, { fetchImpl, signal: cancel, timeoutMs: config.timeoutMs });
+  if (!loaded.ok) return { ok: false, reason: cancel?.aborted ? stoppedBeforeFinishing : loaded.reason };
+  const model = loaded.id;
   try {
     const response = await fetchImpl(`${config.baseUrl}/v1/chat/completions`, {
       method: "POST",
@@ -470,7 +469,7 @@ export async function generate(
       // One reply per request, unstreamed: the callers - a summary's sections,
       // app authoring - have nothing to show until it is whole.
       body: JSON.stringify({
-        model: config.model,
+        model,
         // The prompt as one user turn; the engine wraps it in the model's own
         // chat template. No reply limit of its own: the engine stops a reply
         // when the model's window is full, which is the limit that matters
@@ -486,12 +485,12 @@ export async function generate(
       return { ok: false, reason: `The model engine answered ${response.status}${detail ? `: ${detail}` : ""}.` };
     }
 
-    const reply = readCompletion(await response.json(), config.model);
+    const reply = readCompletion(await response.json(), model);
     // Cut off because the window filled, rather than finished. An answer that
     // stops mid-sentence is not an answer, and for app authoring it is worse:
     // a file cut off mid-line can still pass for a whole one.
     if (reply.finishReason === "length") {
-      return { ok: false, reason: replyTooLong({ model: config.model, contextTokens: await loadedWindow(config, fetchImpl) }) };
+      return { ok: false, reason: replyTooLong({ model, contextTokens: loaded.windowTokens }) };
     }
     const text = reply.content.trim();
     if (!text) {
@@ -506,7 +505,7 @@ export async function generate(
     return {
       ok: false,
       reason: error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")
-        ? noReplyWithin(config)
+        ? noReplyWithin({ model, timeoutMs: config.timeoutMs })
         : "Local model unavailable: the request failed."
     };
   }

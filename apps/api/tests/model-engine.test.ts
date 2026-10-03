@@ -384,7 +384,12 @@ test("a model the engine does not have, and an engine that does not answer, are 
 
   const down = (async () => { throw new TypeError("fetch failed"); }) as unknown as Fetch;
   assert.deepEqual(await loadEngineModel("http://engine", "qwen3-8b", { fetchImpl: down }),
-    { ok: false, reason: "The model engine did not answer while loading qwen3-8b: fetch failed" });
+    { ok: false, reason: "The model engine is not answering, so qwen3-8b could not be loaded." });
+
+  // Answering, but with an error when asked which models it has.
+  const failing = (async () => new Response("{}", { status: 503 })) as unknown as Fetch;
+  assert.deepEqual(await loadEngineModel("http://engine", "qwen3-8b", { fetchImpl: failing }),
+    { ok: false, reason: "The model engine answered 503 while loading qwen3-8b." });
 });
 
 test("Stop ends the wait for a model that is loading, and so does the time allowed", async () => {
