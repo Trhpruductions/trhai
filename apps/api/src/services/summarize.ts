@@ -11,8 +11,12 @@ import { splitLongPassage } from "./knowledgeStore.js";
 // into something one reply can hold. Every section is read; nothing is
 // sampled or skipped below the cap.
 
-/** One call to the local model with a prompt sent as written. */
-export type GenerateText = (prompt: string) => Promise<{ ok: true; text: string; model?: string } | { ok: false; reason: string }>;
+/**
+ * One call to the local model with a prompt sent as written. `cancel` is the
+ * turn's Stop: a summary is many calls, minutes in all, and Stop ends the one
+ * under way.
+ */
+export type GenerateText = (prompt: string, cancel?: AbortSignal) => Promise<{ ok: true; text: string; model?: string } | { ok: false; reason: string }>;
 
 /** About what one section may hold, leaving the window room for the prompt and the notes. */
 export const sectionTokens = 2400;
@@ -82,7 +86,11 @@ export type Summary = { ok: true; notes: string; sections: number; read: number 
  */
 export async function summarizeLongText(
   text: string,
-  options: { title: string; focus?: string; generate: GenerateText; onSection?: (done: number, total: number) => void }
+  options: {
+    title: string; focus?: string; generate: GenerateText; onSection?: (done: number, total: number) => void;
+    /** The turn's Stop, passed to every call. A stopped call ends the summary, like any failed one. */
+    cancel?: AbortSignal;
+  }
 ): Promise<Summary> {
   const focus = (options.focus ?? "").trim();
   const sections = splitIntoSections(text);
@@ -91,7 +99,7 @@ export async function summarizeLongText(
 
   const notes: string[] = [];
   for (const [index, section] of used.entries()) {
-    const result = await options.generate(sectionPrompt(options.title, focus, index, used.length, section));
+    const result = await options.generate(sectionPrompt(options.title, focus, index, used.length, section), options.cancel);
     if (!result.ok) return { ok: false, reason: `The summary stopped at part ${index + 1} of ${used.length}: ${result.reason}` };
     notes.push(result.text.trim());
     options.onSection?.(index + 1, used.length);
@@ -103,7 +111,7 @@ export async function summarizeLongText(
     const groups = splitIntoSections(combined, sectionTokens);
     const merged: string[] = [];
     for (const group of groups) {
-      const result = await options.generate(combinePrompt(options.title, focus, group));
+      const result = await options.generate(combinePrompt(options.title, focus, group), options.cancel);
       if (!result.ok) return { ok: false, reason: `The summary stopped while combining the notes: ${result.reason}` };
       merged.push(result.text.trim());
     }
@@ -144,21 +152,21 @@ export type WrittenSummary = { ok: true; text: string; model?: string } | { ok: 
 export async function summarizeDocument(
   title: string,
   body: string,
-  options: { focus?: string; generate: GenerateText; onSection?: (done: number, total: number) => void }
+  options: { focus?: string; generate: GenerateText; onSection?: (done: number, total: number) => void; cancel?: AbortSignal }
 ): Promise<WrittenSummary> {
   const focus = (options.focus ?? "").trim();
   let source = body.trim();
   let note = "";
   if (!source) return { ok: false, reason: `"${title}" is empty, so there is nothing to summarize.` };
   if (!readableAtOnce(source)) {
-    const read = await summarizeLongText(source, { title, focus, generate: options.generate, onSection: options.onSection });
+    const read = await summarizeLongText(source, { title, focus, generate: options.generate, onSection: options.onSection, cancel: options.cancel });
     if (!read.ok) return read;
     source = read.notes;
     if (read.read < read.sections) {
       note = `\n\n_This covers the first ${read.read} of the document's ${read.sections} parts - it is longer than one summary reads._`;
     }
   }
-  const written = await options.generate(summaryPrompt(title, focus, source, source !== body.trim()));
+  const written = await options.generate(summaryPrompt(title, focus, source, source !== body.trim()), options.cancel);
   if (!written.ok) return { ok: false, reason: `The summary could not be written: ${written.reason}` };
   return { ok: true, text: `${written.text.trim()}${note}`, ...(written.model ? { model: written.model } : {}) };
 }

@@ -6,6 +6,7 @@ import path from "node:path";
 import { AddressInfo } from "node:net";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
 
 const dataDir = mkdtempSync(path.join(tmpdir(), "trhai-vision-"));
 const workspace = mkdtempSync(path.join(tmpdir(), "trhai-vision-ws-"));
@@ -231,6 +232,29 @@ test("a description cut off at the length limit is reported as that, not shown",
   const finished = await lookAtImages([{ name: "shot.png", data: png }], "What does it say?", config,
     { fetcher: fakeOllama([defaultVisionModel], { content: words, doneReason: "stop" }).fetcher });
   assert.deepEqual(finished, { ok: true, text: words, model: defaultVisionModel });
+});
+
+test("a look the turn stops ends then, and is said as stopped rather than as out of time", async () => {
+  // Looking can take minutes on a cold card. Stop ends the request, and it is
+  // not "did not answer in time": the time had not run out.
+  const stop = new AbortController();
+  let markAsked!: () => void;
+  const asked = new Promise<void>((resolve) => { markAsked = resolve; });
+  const fetcher = (async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: defaultVisionModel }] }), { status: 200 });
+    markAsked();
+    // Still looking: no answer until the request is let go of, when fetch rejects.
+    return new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+    });
+  }) as unknown as typeof fetch;
+
+  const looking = lookAtImages([{ name: "shot.png", data: png }], "What does it say?", config, { fetcher, cancel: stop.signal });
+  await asked;
+  stop.abort();
+  // Bounded: if Stop did not reach the request, it would wait out the five-minute limit.
+  const seen = await Promise.race([looking, delay(2000).then(() => "still looking" as const)]);
+  assert.deepEqual(seen, { ok: false, reason: "Stopped before it finished." });
 });
 
 test("the vision model can be loaded before the question arrives, answering nothing", async () => {

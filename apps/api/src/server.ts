@@ -336,8 +336,11 @@ function buildAssistInput(
  * (rawPrompt) because the assistant's own prompt tells the model to answer in
  * a few sentences and not to invent specifics, which is the opposite of what
  * writing an application needs.
+ *
+ * `cancel` is the turn's Stop: authoring is allowed five minutes, and Stop
+ * ends it rather than leaving the model writing an app nobody is waiting for.
  */
-async function authorAppWithModel(prompt: string) {
+async function authorAppWithModel(prompt: string, cancel?: AbortSignal) {
   const base = readLocalModelConfig();
 
   // Written by a coding model when one is installed, and given longer than a
@@ -351,7 +354,7 @@ async function authorAppWithModel(prompt: string) {
     : base.model;
 
   const config = { ...base, model, timeoutMs: Math.max(base.timeoutMs, 300000) };
-  const result = await generate(config, { question: prompt, context: [], rawPrompt: prompt });
+  const result = await generate(config, { question: prompt, context: [], rawPrompt: prompt }, fetch, cancel);
   return result.ok ? { ok: true as const, text: result.text } : { ok: false as const, reason: result.reason };
 }
 
@@ -370,11 +373,12 @@ function userTurnText(message: string, req: express.Request): string {
  * section notes of a long document's summary. The configured model, not the
  * coding one authorApp prefers: this is reading prose, not writing an app.
  * Given longer than a chat reply, since a section is a page or two of text.
+ * `cancel` is the turn's Stop.
  */
-async function generateWithModel(prompt: string) {
+async function generateWithModel(prompt: string, cancel?: AbortSignal) {
   const base = readLocalModelConfig();
   const result = await generate({ ...base, timeoutMs: Math.max(base.timeoutMs, 120000) },
-    { question: prompt, context: [], rawPrompt: prompt });
+    { question: prompt, context: [], rawPrompt: prompt }, fetch, cancel);
   return result.ok ? { ok: true as const, text: result.text, model: result.model } : { ok: false as const, reason: result.reason };
 }
 

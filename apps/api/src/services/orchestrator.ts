@@ -1,5 +1,5 @@
 import { ModelRouter, type ComposerKnowledge, type MemoryWriteOutcome } from "./modelRouter.js";
-import { checkAvailability, orderedCandidates, readLocalModelConfig } from "./localModel.js";
+import { checkAvailability, orderedCandidates, readLocalModelConfig, stoppedBeforeFinishing } from "./localModel.js";
 import { withChosenModel } from "./modelCatalog.js";
 import { isCodeWork } from "./machinePaths.js";
 import { pickAuthorModel } from "./appAuthor.js";
@@ -114,7 +114,7 @@ export type OrchestratorInput = {
   /** Images sent with this turn, decoded. See resolveImages. */
   images?: VisionImage[];
   /** Asks the vision model about images; the real local one when absent. Injected for tests. */
-  vision?: (images: VisionImage[], question: string) => Promise<VisionResult>;
+  vision?: (images: VisionImage[], question: string, cancel?: AbortSignal) => Promise<VisionResult>;
   /** Reads this machine's sensors; the real ones when absent. Injected for tests. */
   readTelemetry?: typeof readTelemetry;
   /**
@@ -126,8 +126,8 @@ export type OrchestratorInput = {
   launchApp?: (project: string) => Promise<StartResult>;
   stopApp?: (project: string) => boolean;
   runningApps?: () => RunningApp[];
-  /** Writes an application with the local model, for requests no template covers. */
-  authorApp?: (description: string) => Promise<{ ok: true; text: string } | { ok: false; reason: string }>;
+  /** Writes an application with the local model, for requests no template covers. `cancel` is the turn's Stop. */
+  authorApp?: (description: string, cancel?: AbortSignal) => Promise<{ ok: true; text: string } | { ok: false; reason: string }>;
   /**
    * Fired with each new piece of a generated reply, for callers that can show
    * it arriving. Optional throughout: without it every request is made and
@@ -154,6 +154,9 @@ export type OrchestratorInput = {
    * Real cancellation rather than a discarded result. A local model can hold
    * the GPU for a minute, so throwing the reply away while it kept generating
    * would leave the whole cost and remove only the benefit.
+   *
+   * Every model call a turn makes takes it: the agent loop's, the vision
+   * model's, and the ones the tools make - a summary, app authoring.
    */
   cancel?: AbortSignal;
 };
@@ -776,9 +779,13 @@ async function resolveImages(input: OrchestratorInput): Promise<OrchestratorResu
     return { ...deterministicResult(question, screenNotShared, "vision"), model: "memory" };
   }
   if (images.length === 0) return null;
-  const look = input.vision ?? ((shown: VisionImage[], asked: string) => lookAtImages(shown, asked, readLocalModelConfig()));
+  const look = input.vision ?? ((shown: VisionImage[], asked: string, cancel?: AbortSignal) =>
+    lookAtImages(shown, asked, readLocalModelConfig(), { cancel }));
   if (input.sessionId) setActivity(input.sessionId, "look_at_image");
-  const seen = await look(images, question);
+  const seen = await look(images, question, input.cancel);
+  // Stopped, and said as that - as a stopped answer is (see
+  // runAssistantOrchestrator) - rather than as the vision model failing.
+  if (!seen.ok && input.cancel?.aborted) return deterministicResult(question, stoppedBeforeFinishing, "stopped");
   if (!seen.ok) {
     return { ...deterministicResult(question, seen.reason, "failed"), model: "memory" };
   }
@@ -882,7 +889,9 @@ async function resolveDocumentSummary(input: OrchestratorInput, asked: string): 
   const document = documentNamedIn(asked, input.documents ?? []);
   if (!document) return null;
   if (input.sessionId) setActivity(input.sessionId, "summarize_document");
-  const written = await summarizeDocument(document.title, document.body, { focus: summaryFocus(asked), generate: input.generateText });
+  const written = await summarizeDocument(document.title, document.body,
+    { focus: summaryFocus(asked), generate: input.generateText, cancel: input.cancel });
+  if (!written.ok && input.cancel?.aborted) return deterministicResult(asked, stoppedBeforeFinishing, "stopped");
   if (!written.ok) return deterministicResult(asked, written.reason, "failed");
   return { ...deterministicResult(asked, written.text, "generated"), model: written.model ? `ollama/${written.model}` : "local" };
 }
@@ -2032,6 +2041,9 @@ async function answerWithLocalModel(
     generateText: input.generateText,
     confirmedActions,
     unattended: input.unattended,
+    // The turn's Stop, for the tools that ask a model themselves - the loop's
+    // own request takes it below.
+    cancel: input.cancel,
     sessionId: input.sessionId,
     impliedFile: input.impliedFile,
     agent: input.agent,
@@ -2071,7 +2083,7 @@ async function answerWithLocalModel(
 
     // Stopped on purpose. Nothing failed, and no other model is asked to
     // start it again.
-    if (result.stopped) return { ok: false, kind: "stopped", reason: "Stopped before it finished." };
+    if (result.stopped) return { ok: false, kind: "stopped", reason: stoppedBeforeFinishing };
 
     // Only a model that could not be loaded, or that produced nothing at all,
     // is worth replacing. One that loaded and answered badly will answer
