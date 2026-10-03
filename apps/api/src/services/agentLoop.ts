@@ -1,4 +1,4 @@
-import { contextWindow, modelOptions, noReplyWithin, replyTooLong, type LocalModelConfig } from "./localModel.js";
+import { contextWindow, modelOptions, noReplyWithin, replyTooLong, unfinishedWithin, type LocalModelConfig } from "./localModel.js";
 import { recordContextUse } from "./contextUse.js";
 import { estimateTokens, fitPromptToWindow, fitToolResult, promptBudgetTokens, requestTokens } from "./contextBudget.js";
 import { sendingTools } from "./messaging.js";
@@ -1244,9 +1244,19 @@ function parseToolCalls(response: ChatResponse): ToolCall[] {
   });
 }
 
-async function withTimeout<T>(
+/**
+ * The time one request to the model is allowed, from sending it to reading the
+ * last of its reply, and the caller's way to end it sooner.
+ *
+ * Held until the caller releases it, not until fetch() resolves. fetch()
+ * resolves when the headers arrive, and Ollama sends those with a streamed
+ * reply's first words. When this wrapped fetch() alone, the timer and the Stop
+ * relay were both let go of just as a streamed reply began, and from then on
+ * nothing ended it: the model wrote on until it was done, holding the GPU,
+ * while Stop closed only the browser's own connection.
+ */
+function requestDeadline(
   ms: number,
-  run: (signal: AbortSignal) => Promise<T>,
   /**
    * A caller's own reason to stop — the user pressing Stop, or their browser
    * going away mid-request.
@@ -1255,7 +1265,7 @@ async function withTimeout<T>(
    * give up on its own if the model stalls, whether or not anyone is watching.
    */
   external?: AbortSignal
-): Promise<T> {
+): { signal: AbortSignal; release: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
 
@@ -1265,11 +1275,20 @@ async function withTimeout<T>(
   const relay = () => controller.abort();
   external?.addEventListener("abort", relay);
 
-  try {
-    return await run(controller.signal);
-  } finally {
-    clearTimeout(timer);
-    external?.removeEventListener("abort", relay);
+  return {
+    signal: controller.signal,
+    release: () => {
+      clearTimeout(timer);
+      external?.removeEventListener("abort", relay);
+    }
+  };
+}
+
+/** `body` as it arrives, calling `arrived` as each piece of it does. */
+async function* noticing(body: AsyncIterable<Uint8Array>, arrived: () => void): AsyncGenerator<Uint8Array> {
+  for await (const bytes of body) {
+    arrived();
+    yield bytes;
   }
 }
 
@@ -1765,29 +1784,34 @@ export async function runAgent(
     }
 
     let response: ChatResponse;
+    // Held while the reply is read, not only while it is asked for - see
+    // requestDeadline.
+    const deadline = requestDeadline(config.timeoutMs, cancel);
+    // Whether any of a streamed reply had arrived, so that running out of
+    // time part way through it is not reported as no reply at all.
+    let begun = false;
     try {
-      const raw = await withTimeout(config.timeoutMs, (signal) =>
-        fetchImpl(`${config.baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: config.model,
-            messages,
-            // Streamed only when someone is listening. Tokens are useless to
-            // a caller that cannot show them, and the unstreamed path is the
-            // one every existing test exercises.
-            stream: Boolean(onToken),
-            // The window the whole prompt fits in. Without it Ollama ran the
-            // model at 4,096 tokens and cut every longer prompt from the front,
-            // rules first - see defaultContextTokens.
-            options: modelOptions(config),
-            // Withheld while disarmed rather than offered and refused: a
-            // model that can see run_command will reason about it and try to
-            // talk its way into it; one that never sees it cannot.
-            ...(offerTools ? { tools: offeredTools } : {})
-          }),
-          signal
-        }), cancel);
+      const raw = await fetchImpl(`${config.baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: config.model,
+          messages,
+          // Streamed only when someone is listening. Tokens are useless to
+          // a caller that cannot show them, and the unstreamed path is the
+          // one every existing test exercises.
+          stream: Boolean(onToken),
+          // The window the whole prompt fits in. Without it Ollama ran the
+          // model at 4,096 tokens and cut every longer prompt from the front,
+          // rules first - see defaultContextTokens.
+          options: modelOptions(config),
+          // Withheld while disarmed rather than offered and refused: a
+          // model that can see run_command will reason about it and try to
+          // talk its way into it; one that never sees it cannot.
+          ...(offerTools ? { tools: offeredTools } : {})
+        }),
+        signal: deadline.signal
+      });
 
       if (!raw.ok) {
         // The body carries why. "cudaMalloc failed: out of memory" and a
@@ -1817,7 +1841,7 @@ export async function runAgent(
         // Everything downstream — tool parsing, the text guard, the round
         // bound — then works identically whether or not this was streamed.
         const streamed = await readStream(
-          toLines(raw.body as unknown as AsyncIterable<Uint8Array>),
+          toLines(noticing(raw.body as unknown as AsyncIterable<Uint8Array>, () => { begun = true; })),
           onToken,
           // What counts as "do not show this": the same parser that decides
           // whether the finished message was a call. Sharing it means the
@@ -1852,10 +1876,12 @@ export async function runAgent(
       return {
         ok: false,
         reason: error instanceof Error && error.name === "AbortError"
-          ? noReplyWithin(config)
+          ? (begun ? unfinishedWithin(config) : noReplyWithin(config))
           : "Local model unavailable: the request failed.",
         toolsUsed
       };
+    } finally {
+      deadline.release();
     }
 
     // Cut off at the reply limit, not finished (see replyLimit). None of it is

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Markdown } from "../../components/Markdown";
+import { replyProvenance, unanswered } from "../../components/provenance";
 import type { ChatMessage } from "../../hooks/useAssistant";
 import { apiGet } from "../../lib/api";
 import { Icon } from "../ui/Icon";
@@ -14,22 +15,6 @@ import "./views.css";
 // The conversation, in full, beside every other one. The command bar below is
 // where you write; this is the record - every reply labelled with how it was
 // produced - and the list of conversations to move between.
-
-/** How a reply was produced, in words. Read from the API's own strategy field. */
-function provenance(message: ChatMessage): string | null {
-  const model = message.model?.replace(/^ollama\//, "").replace(/:latest$/, "");
-  switch (message.strategy) {
-    case "generated": return model ? `Written by ${model}` : "Written by the local model";
-    case "vision": return model ? `Looked at with ${model}` : "Looked at with the vision model";
-    case "answer": return "Quoted from your saved notes";
-    case "calendar": case "conversion": case "reading": return "Worked out on this PC";
-    case "message": return "Prepared on this PC - nothing is sent without your yes";
-    case "schedule": return "Saved on this PC";
-    case "stopped": return "Stopped";
-    case "error": return null;
-    default: return message.strategy ? "Answered on this PC" : null;
-  }
-}
 
 function Message({ message, last, onConfirm, onRegenerate }: {
   message: ChatMessage;
@@ -49,9 +34,9 @@ function Message({ message, last, onConfirm, onRegenerate }: {
       </div>
     );
   }
-  const credit = provenance(message);
+  const credit = replyProvenance(message.strategy, message.model);
   const sending = message.pendingConfirmation?.tool === "send_text" || message.pendingConfirmation?.tool === "send_email";
-  const failed = message.strategy === "error" || message.strategy === "stopped";
+  const failed = unanswered(message.strategy);
   return (
     <div className={`os-msg assistant${message.strategy === "error" ? " error" : ""}`}>
       <span className="os-msg-mark" aria-hidden="true">AI</span>
