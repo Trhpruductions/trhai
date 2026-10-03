@@ -2284,8 +2284,11 @@ export async function runAgent(
       // to happen - there is no later for the model to do it in. Both get the
       // same treatment: pushed once to actually call the tool, and if it still
       // will not, the user is told plainly rather than left holding a promise.
-      const claimedAChange = claimsUnperformedMutation(text, wroteSomething)
-        || promisesUnperformedMutation(text, wroteSomething);
+      // A question is offered nothing that writes (see onlyAsks), so only a
+      // claim that names a file can be a lie there; its answer describing
+      // the world in the passive is not one.
+      const claimedAChange = claimsUnperformedMutation(text, wroteSomething, !onlyAsks)
+        || promisesUnperformedMutation(text, wroteSomething, !onlyAsks);
 
       if (claimedAChange) {
         // A held confirmation looks identical from the mutation record - nothing

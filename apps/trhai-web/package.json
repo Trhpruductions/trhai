@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node scripts/serve.mjs",
     "test": "node --test --import tsx tests/**/*.test.ts",
     "lint": "eslint",
     "typecheck": "tsc -p tsconfig.json --noEmit"

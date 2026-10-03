@@ -168,6 +168,51 @@ test("the same ambiguous verb does count when it names code", () => {
   assert.equal(claimsUnperformedMutation("I added a null check to app.ts.", false), true);
 });
 
+// The answer to a question, which is offered nothing that writes.
+
+test("in a question's answer, the world described in the passive is not a claim", () => {
+  // qwen3 answers in the passive. Asked "Who wrote the novel Pride and
+  // Prejudice?", its answer said "was written", and the whole reply was
+  // replaced with "nothing was written. No file was created, edited, or deleted".
+  for (const fine of [
+    "Pride and Prejudice was written by Jane Austen.",
+    "The Berlin Wall was created in 1961 and has been removed since 1989.",
+    "The rule was changed in 2010.",
+    "The new iPhone is now available in stores.",
+    "I wrote you a haiku:\nCrimson leaves drifting",
+    "No file was created, because nothing asked for one."
+  ]) {
+    assert.equal(claimsUnperformedMutation(fine, false, false), false, `should allow: ${fine}`);
+  }
+});
+
+test("in a question's answer, a claim that names a file still counts", () => {
+  for (const claim of [
+    "I've saved notes.txt with your list.",
+    "I have updated the file for you.",
+    "The file has been created.",
+    "Your document was saved.",
+    "I've added a line to greet.js."
+  ]) {
+    assert.equal(claimsUnperformedMutation(claim, false, false), true, `should catch: ${claim}`);
+  }
+});
+
+test("a turn that could write keeps the whole check", () => {
+  // The two differ only where nothing could have been written.
+  assert.equal(claimsUnperformedMutation("The change was written.", false, true), true);
+  assert.equal(claimsUnperformedMutation("The change was written.", false, false), false);
+});
+
+test("in a question's answer, only a promise about a file is one", () => {
+  assert.equal(promisesUnperformedMutation("Let me write out the steps.", false, false), false);
+  assert.equal(promisesUnperformedMutation("I'll create a quick summary for you below.", false, false), false);
+  assert.equal(promisesUnperformedMutation("I'll update the file now.", false, false), true);
+  assert.equal(promisesUnperformedMutation("Let me save that to notes.txt.", false, false), true);
+  // Where a file could be written, an unnamed promise still counts.
+  assert.equal(promisesUnperformedMutation("Let me write out the steps.", false, true), true);
+});
+
 // The same failure in the future tense.
 
 test("a promise to write, at the end of a turn, counts as an unmade change", () => {

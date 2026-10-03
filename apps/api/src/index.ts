@@ -1,10 +1,13 @@
 import dotenv from "dotenv";
 import { existsSync } from "node:fs";
+import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./server.js";
 import { startScheduler, stopScheduler } from "./services/scheduler.js";
 import { noteListening } from "./services/runtimeStatus.js";
+import { listenOn, listenPlan, type Listener } from "./services/networkAccess.js";
+import { encryptPlainStores } from "./services/dataInventory.js";
 
 /**
  * Find .env by walking up from this file, not from the working directory.
@@ -47,26 +50,38 @@ function findEnvFile(name: string): string | undefined {
 const envFile = findEnvFile(process.env.NODE_ENV === "test" ? ".env.test" : ".env");
 if (envFile) dotenv.config({ path: envFile });
 
-const port = Number(process.env.PORT ?? 4000);
-const app = createApp();
+// Before any store loads, and after .env (which may hold TRHAI_DATA_KEY): a
+// store still kept as plain JSON from before encryption is rewritten encrypted.
+const atRest = encryptPlainStores();
+if (atRest.encrypted.length) console.log(`ascend-api encrypted ${atRest.encrypted.join(", ")}, which had been stored as plain text`);
+for (const { name, reason } of atRest.failed) console.warn(`ascend-api could not encrypt ${name}: ${reason}`);
 
-const server = app.listen(port, () => {
-  console.log(`ascend-api listening on port ${port}`);
+const port = Number(process.env.PORT ?? 4000);
+// This PC's own addresses only, unless ASCEND_NETWORK_ACCESS lets other devices
+// in - see networkAccess.ts for why it used to be every address and is not.
+const plan = listenPlan();
+const app = createApp({ otherDevices: plan.otherDevices });
+let listeners: Listener[] = [];
+
+listenOn(() => createServer(app), port, plan.hosts).then(({ listeners: bound, skipped }) => {
+  listeners = bound;
+  const where = bound.map(({ address }) => (address.family === "IPv6" ? `[${address.address}]` : address.address)).join(" and ");
+  console.log(`ascend-api listening on ${where}, port ${port}${plan.otherDevices ? " (other devices need the access key)" : " (this PC only)"}`);
+  for (const { host, reason } of skipped) console.log(`ascend-api is not listening on ${host}: ${reason}`);
   // What it actually bound to, for the Network workspace to report.
-  noteListening(server.address());
+  noteListening(bound.map(({ address }) => address), { keyRequired: plan.otherDevices });
   // Started here rather than in createApp(): the test suite builds an app on
   // almost every file, and a live scheduler there would fire real assistant
   // requests at the local model during a test run. SCHEDULER=off disables it
   // for anyone who wants the API without the timers.
   if (process.env.SCHEDULER !== "off") startScheduler();
-});
-
-server.on("error", (error: NodeJS.ErrnoException) => {
+}).catch((error: NodeJS.ErrnoException) => {
   if (error.code === "EADDRINUSE") {
     console.error(`Port ${port} is already in use.`);
     process.exit(1);
   }
-  throw error;
+  console.error(`ascend-api could not start: ${error.message}`);
+  process.exit(1);
 });
 
 // Shut down on purpose rather than by being killed.
@@ -92,10 +107,18 @@ function shutdown(signal: string): void {
   shuttingDown = true;
 
   stopScheduler();
-  server.close(() => {
+  let open = listeners.length;
+  const closed = () => {
     console.log(`ascend-api stopped (${signal})`);
     process.exit(0);
-  });
+  };
+  if (open === 0) closed();
+  for (const { server } of listeners) {
+    server.close(() => {
+      open -= 1;
+      if (open === 0) closed();
+    });
+  }
 
   // A request that never finishes must not hold the process open forever.
   const forced = setTimeout(() => {

@@ -99,6 +99,40 @@ test("a plain answer needs no tools", async () => {
   }
 });
 
+test("a question answered in the passive keeps its answer", async () => {
+  // qwen3 answers in the passive, and "Who wrote the novel Pride and
+  // Prejudice?" came back as "nothing was written. No file was created,
+  // edited, or deleted": the mutation guard read "was written" as a claim that
+  // a file had been, in a turn that was offered nothing that writes.
+  const reply = "Pride and Prejudice was written by Jane Austen and published in 1813.";
+  const { server, baseUrl, received } = await fakeModel([answer(reply)]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "Who wrote the novel Pride and Prejudice?", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.text, reply);
+    assert.equal(received.length, 1, "answered in one round, with no correction sent back");
+  } finally {
+    server.close();
+  }
+});
+
+test("a question's answer that claims a file was saved is still corrected", async () => {
+  // The control for the test above: nothing that writes was offered, so a
+  // claim that names a file is the lie the guard is for.
+  const { server, baseUrl } = await fakeModel([answer("I've saved notes.txt with the answer: Paris.")]);
+
+  try {
+    const result = await runAgent(configFor(baseUrl), "What is the capital of France?", context);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.match(result.text, /nothing was written/i);
+  } finally {
+    server.close();
+  }
+});
+
 test("the model can look something up and answer from it", async () => {
   const { server, baseUrl, received } = await fakeModel([
     toolCall("search_memory", { query: "billing database" }),

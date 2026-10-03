@@ -3,7 +3,7 @@ import { toolDefinitions } from "./agentTools.js";
 import { armedUntil, commandsArmed } from "./commandRunner.js";
 import { readEmailAccount } from "./emailAccount.js";
 import { checkAvailability, readLocalModelConfig } from "./localModel.js";
-import { phoneLinkStatus } from "./messaging.js";
+import { linkedPhone, phoneLinkStatus } from "./messaging.js";
 import { piperStatus } from "./piperSpeech.js";
 import { permissionLabels, permissionLevelOf, requiresConfirmation, type PermissionLevel } from "./toolPermissions.js";
 import { toolUsage, type ToolUsage } from "./toolUsage.js";
@@ -100,6 +100,8 @@ export type ToolProbe = {
   ffmpeg: boolean;
   piper: boolean;
   phoneLink: "linked" | "not-linked" | "missing";
+  /** The phone linked in Phone Link, once the user has said which; optional for older callers. */
+  phone?: "iphone" | "android" | null;
   /** The address an email account is set up with, if one is. */
   emailAccount: string | null;
 };
@@ -129,9 +131,12 @@ function readinessOf(name: string, probe: ToolProbe): ToolReadiness {
     return ready("Narrated with Piper and encoded with ffmpeg, on this PC.");
   }
   if (name === "send_text") {
-    return probe.phoneLink === "linked"
-      ? ready("Opens in Phone Link, to send from your phone.")
-      : { state: "needs-setup", note: probe.phoneLink === "not-linked" ? "Link your phone in Phone Link to send texts." : "Needs Phone Link, from the Microsoft Store." };
+    if (probe.phoneLink !== "linked") {
+      return { state: "needs-setup", note: probe.phoneLink === "not-linked" ? "Link your phone in Phone Link to send texts." : "Needs Phone Link, from the Microsoft Store." };
+    }
+    return ready(probe.phone === "iphone"
+      ? "Copies the text and opens Phone Link: with an iPhone you paste it into a new message and send it."
+      : "Opens in Phone Link, to send from your phone.");
   }
   if (name === "send_email") {
     return ready(probe.emailAccount
@@ -200,6 +205,7 @@ export async function probeTools(): Promise<ToolProbe> {
     ffmpeg,
     piper: piperStatus().available,
     phoneLink: phoneLinkStatus(),
+    phone: linkedPhone(),
     emailAccount: readEmailAccount()?.address ?? null
   };
 }

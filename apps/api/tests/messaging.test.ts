@@ -215,6 +215,39 @@ test("a text goes to Phone Link addressed and written, and onto the clipboard in
   assert.equal(failed.ok, false);
   assert.match(failed.content, /nothing was sent/i);
   assert.match(failed.content, /copied/);
+
+  // Said to be an Android: the same as not said.
+  const android = recorder();
+  await sendText({ to: "5550100123", message: "hi" }, { open: android.open, copy: android.copy, phoneLink: "linked" as const, phone: "android" as const });
+  assert.equal(android.opened[0], "sms:5550100123?body=hi");
+});
+
+test("with an iPhone, a text is copied and Phone Link opened, and the reply gives the steps - never 'press Send there'", async () => {
+  const { opened, copied, open, copy } = recorder();
+  let appOpened = 0;
+  const openPhoneLink = async () => { appOpened += 1; return true; };
+  const iphone = { open, copy, openPhoneLink, phoneLink: "linked" as const, phone: "iphone" as const };
+
+  const ready = await sendText({ to: "5550100123", message: "On my way" }, iphone);
+  assert.equal(ready.ok, true);
+  assert.equal(ready.via, "phone-link");
+  assert.deepEqual(opened, [], "no sms: link: with an iPhone it opens nothing");
+  assert.equal(appOpened, 1, "Phone Link itself is opened");
+  assert.deepEqual(copied, ["On my way"]);
+  assert.match(ready.content, /copied, and Phone Link is open/);
+  assert.match(ready.content, /\*\*New message\*\*, enter \(555\) 010-0123, paste it \(Ctrl\+V\) and press \*\*Send\*\*/);
+  assert.doesNotMatch(ready.content, /went to Phone Link|press \*\*Send\*\* there/, "nothing is waiting there to be sent");
+
+  // Phone Link would not open: the text is still copied, and the steps start one earlier.
+  const unopened = await sendText({ to: "5550100123", message: "hi" }, { ...iphone, openPhoneLink: async () => false });
+  assert.equal(unopened.ok, true);
+  assert.match(unopened.content, /open Phone Link, choose \*\*New message\*\*/);
+  assert.doesNotMatch(unopened.content, /Phone Link is open/);
+
+  // Not copied: nothing was handed over, and it says so.
+  const uncopied = await sendText({ to: "5550100123", message: "hi" }, { ...iphone, copy: async () => false });
+  assert.equal(uncopied.ok, false);
+  assert.match(uncopied.content, /Nothing was sent/);
 });
 
 // ------------------------------------------------------------- email
@@ -312,6 +345,11 @@ test("the message shown for approval is the message itself, word for word", () =
   assert.match(text, /\(555\) 010-0123/);
   assert.match(text, /> Running late\n> Save me a seat/);
   assert.match(text, /\*\*yes\*\*/);
+  // With an iPhone, what "yes" does is said before it is said.
+  const iphone = describeHeldMessage("send_text", { to: "5550100123", message: "Running late" }, { configured: false }, "iphone");
+  assert.match(iphone, /> Running late/);
+  assert.match(iphone, /\*\*yes\*\* copies it and opens Phone Link, for you to paste into a new message and send/);
+  assert.doesNotMatch(iphone, /Say \*\*yes\*\* to send it/);
 
   const viaAccount = describeHeldMessage("send_email", { to: "bob@example.com", subject: "Friday", body: "See you" },
     { configured: true, address: "me@example.com" });
@@ -410,6 +448,33 @@ test("yes sends exactly the message that was shown, without asking the model aga
     const again = await runAssistantOrchestrator({ mode: "general", sessionId: "send-1", userMessage: "yes", messaging });
     assert.equal(opened.length, 1, "one yes sends one message");
     assert.doesNotMatch(again.assistantMessage, /went to Phone Link/);
+  });
+});
+
+test("with an iPhone, the held text says what yes will do, and yes copies it and opens Phone Link", async () => {
+  resetPendingConfirmations();
+  resetEmailAccountForTests();
+  const { opened, copied, open, copy } = recorder();
+  let appOpened = 0;
+  const messaging = {
+    open, copy, openPhoneLink: async () => { appOpened += 1; return true; }, phoneLink: "linked" as const, phone: "iphone" as const
+  };
+  await withScriptedModel([{ message: { content: "unused" } }], async (chats) => {
+    // Its words are all in the request, so it is held without the model.
+    const asked = await runAssistantOrchestrator({
+      mode: "general", sessionId: "send-iphone", userMessage: "text 555-010-0123 that I'm running late", messaging
+    });
+    assert.match(asked.assistantMessage, /Here's the text for \(555\) 010-0123/);
+    assert.match(asked.assistantMessage, /With an iPhone, \*\*yes\*\* copies it and opens Phone Link/);
+    assert.equal(asked.pendingConfirmation?.tool, "send_text");
+
+    const sent = await runAssistantOrchestrator({ mode: "general", sessionId: "send-iphone", userMessage: "yes", messaging });
+    assert.deepEqual(opened, [], "no sms: link");
+    assert.equal(appOpened, 1);
+    assert.equal(copied.length, 1);
+    assert.match(copied[0], /running late/i);
+    assert.match(sent.assistantMessage, /choose \*\*New message\*\*, enter \(555\) 010-0123, paste it/);
+    assert.equal(chats.length, 0, "no model was asked, either time");
   });
 });
 
