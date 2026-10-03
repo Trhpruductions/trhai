@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Orbitron, Oxanium } from "next/font/google";
 import { themeBootScript } from "../lib/theme";
+// The fonts, from files in this repo (public/fonts): Geist and Geist Mono for
+// what is read at length, Orbitron and Oxanium - the system's display faces -
+// for names, states and headings. Not next/font/google: that downloads them
+// from Google whenever a build has no cached copy of them, so with no network,
+// or on a day that download failed, the app did not build.
+import "./fonts.css";
 import "./globals.css";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
-const orbitron = Orbitron({ variable: "--font-orbitron", subsets: ["latin"], weight: ["500", "700"] });
-// The system's display face: names, states and headings. Technical without
-// shouting; Geist carries everything that is read at length.
-const oxanium = Oxanium({ variable: "--font-oxanium", subsets: ["latin"], weight: ["400", "500", "600", "700"] });
+/** The files every page needs at once: the Latin part of each face. The rest load when a page uses them. */
+const preloadedFonts = ["geist-latin", "geist-mono-latin", "orbitron-latin", "oxanium-latin"];
 
 export const metadata: Metadata = {
   title: "TRH AI",
@@ -19,7 +20,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${orbitron.variable} ${oxanium.variable} h-full`}
+      className="h-full"
       // The theme-boot script in <head> sets data-accent and data-backdrop
       // from localStorage before React hydrates, which the server has no way
       // to know in advance. Those attributes are expected to differ on first
@@ -45,6 +46,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             the fixed accent list; see theme.ts, the only place its content is
             defined. */}
         <script id="theme-boot" dangerouslySetInnerHTML={{ __html: themeBootScript() }} />
+        {preloadedFonts.map((name) => (
+          <link key={name} rel="preload" href={`/fonts/${name}.woff2`} as="font" type="font/woff2" crossOrigin="anonymous" />
+        ))}
       </head>
       <body className="h-full">
         <div id="trhai-root">
