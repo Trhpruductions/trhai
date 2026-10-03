@@ -137,14 +137,49 @@ const claimsMutationDone = new RegExp(
 );
 
 /**
+ * What a claim has to name, in a turn that could not write, before it counts.
+ *
+ * Narrower than codeObject: in an answer to a question, "I wrote a few lines
+ * for you" is a poem and "the new version is out" is news.
+ */
+const fileObject =
+  "file|files|folder|document|documents|workspace|[\\w.-]+\\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|txt|css|html|py|ps1|bat|sh|yml|yaml)";
+
+const namesAFile = new RegExp(`\\b(?:${fileObject})\\b`, "i");
+
+/** A claim to have changed a file, said of the assistant or of the file. */
+const claimsFileChange = new RegExp(
+  [
+    // "I've saved notes.txt", "I have updated the file"
+    `\\b(?:i(?:'ve| have)?|we(?:'ve| have)?) (?:just )?(?:now )?(?:${plainlyMutating}|${conditionallyMutating})\\b[^.!?]{0,60}\\b(?:${fileObject})\\b`,
+    // "the file has been updated", "notes.txt was saved" - but not "no file
+    // was created", which is the honest denial.
+    `(?<!\\bno )\\b(?:${fileObject}) (?:(?:has|have) (?:now |just )?been|is|was|are|were) (?:now |just )?(?:successfully )?(?:${plainlyMutating})\\b`
+  ].join("|"),
+  "i"
+);
+
+/**
  * Whether the reply says a file was changed when nothing changed one.
  *
  * `didMutate` is decided by the caller from the tools that actually ran, so
  * this stays a pure question about the text.
  */
-export function claimsUnperformedMutation(text: string, didMutate: boolean): boolean {
+export function claimsUnperformedMutation(
+  text: string,
+  didMutate: boolean,
+  /**
+   * Whether the turn was offered anything that writes. A question is not, so
+   * what its answer says in the past tense is about the world, and only a
+   * claim that names a file still counts. Every passive sentence counted:
+   * qwen3, asked "Who wrote the novel Pride and Prejudice?", answers in the
+   * passive, and "was written" had the answer replaced with "nothing was
+   * written. No file was created, edited, or deleted".
+   */
+  couldWrite = true
+): boolean {
   if (didMutate) return false;
-  return claimsMutationDone.test(text);
+  return (couldWrite ? claimsMutationDone : claimsFileChange).test(text);
 }
 
 /**
@@ -191,7 +226,12 @@ const conditional = /\bif you(?:'d| would)?\b|\bwould you like\b|\bshall i\b|\bl
  * mid-turn the model saying "I'll edit it now" and then doing so is the normal,
  * correct sequence.
  */
-export function promisesUnperformedMutation(text: string, didMutate: boolean): boolean {
+export function promisesUnperformedMutation(
+  text: string,
+  didMutate: boolean,
+  /** As for claimsUnperformedMutation: in a question's answer, "let me write out the steps" is not about a file. */
+  couldWrite = true
+): boolean {
   if (didMutate) return false;
   if (!promisesMutation.test(text)) return false;
 
@@ -199,7 +239,8 @@ export function promisesUnperformedMutation(text: string, didMutate: boolean): b
   // answer that ends "I'll update it now" is a promise even if it asked a
   // question three paragraphs earlier.
   const sentences = text.split(/(?<=[.!?])\s+/);
-  const promising = sentences.filter((sentence) => promisesMutation.test(sentence));
+  const promising = sentences.filter((sentence) => promisesMutation.test(sentence)
+    && (couldWrite || namesAFile.test(sentence)));
   return promising.some((sentence) => !conditional.test(sentence));
 }
 
