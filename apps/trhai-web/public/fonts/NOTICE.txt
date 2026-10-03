@@ -1,0 +1,36 @@
+The fonts in this folder
+------------------------
+
+TRH AI serves its fonts from this folder, so building it and running it need
+no network. The files are the ones Google Fonts serves for each family, copied
+unchanged: one file for each group of characters.
+
+All four families are published under the SIL Open Font License, Version 1.1,
+which allows them to be used and to be passed on with software. The licence,
+with answers to common questions about it, is at https://openfontlicense.org
+
+Below, for each family, are the copyright notice its files carry in their own
+naming table and the address they give for their licence.
+
+Geist (Version 1.800)
+  geist-latin.woff2, geist-latin-ext.woff2, geist-cyrillic.woff2,
+  geist-cyrillic-ext.woff2, geist-vietnamese.woff2
+  Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font)
+  Licence: https://openfontlicense.org
+
+Geist Mono (Version 1.701)
+  geist-mono-latin.woff2, geist-mono-latin-ext.woff2, geist-mono-cyrillic.woff2,
+  geist-mono-cyrillic-ext.woff2, geist-mono-vietnamese.woff2,
+  geist-mono-symbols.woff2
+  Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git)
+  Licence: https://openfontlicense.org
+
+Orbitron (Version 2.001)
+  orbitron-latin.woff2
+  Copyright 2018 The Orbitron Project Authors (https://github.com/theleagueof/orbitron), with Reserved Font Name: "Orbitron".
+  Licence: http://scripts.sil.org/OFL
+
+Oxanium (Version 2.000)
+  oxanium-latin.woff2, oxanium-latin-ext.woff2
+  Copyright 2019 The Oxanium Project Authors (https://github.com/sevmeyer/oxanium)
+  Licence: https://scripts.sil.org/OFL
