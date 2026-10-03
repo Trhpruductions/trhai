@@ -6,7 +6,7 @@ import path from "node:path";
 import {
   defaultEnginePort, discoverModels, engineOffReason, enginePaths, enginePort, engineState, engineUrl, findEngineModel,
   isModelOrSize, leftoverEngine, listEngineModels, loadEngineModel, modelKey, presetsText, processName, reviveEngine,
-  runtimeDir, sameModel, startEngine, stopEngine, unloadEngineModel
+  runtimeDir, sameModel, samplingFor, startEngine, stopEngine, unloadEngineModel
 } from "../src/services/modelEngine.js";
 import { engineError, readCompletion, toWireMessages } from "../src/services/engineChat.js";
 import { checkAvailability } from "../src/services/localModel.js";
@@ -122,6 +122,16 @@ test("the preset file fits every model to the card, and gives each model its fil
   const second = lines.indexOf("[qwen2.5-vl-3b]");
   assert.deepEqual(lines.slice(second, second + 3), ["[qwen2.5-vl-3b]", "model = C:\\m\\v\\main.gguf", "mmproj = C:\\m\\v\\mmproj.gguf"]);
   assert.ok(!lines.slice(first, second).some((line) => line.startsWith("mmproj")), "a model with no vision part is given none");
+
+  // Qwen3 is sampled the way its makers publish for it - which is how it was
+  // evaluated, and what Ollama applied to it without saying so. A model with
+  // no published settings of its own runs on the engine's defaults.
+  assert.deepEqual(lines.slice(first + 2, first + 6), ["temp = 0.6", "top-k = 20", "top-p = 0.95", "min-p = 0"]);
+  assert.deepEqual(samplingFor("qwen3-8b"), { temp: "0.6", "top-k": "20", "top-p": "0.95", "min-p": "0" });
+  assert.deepEqual(samplingFor("Qwen3-14B-Q4"), samplingFor("qwen3-8b"));
+  assert.deepEqual(samplingFor("qwen2.5-coder-7b"), {});
+  assert.deepEqual(samplingFor("qwen30-8b"), {}, "another model whose name starts the same way");
+  assert.ok(!lines.slice(second).some((line) => line.startsWith("temp")), "the vision model's section has none");
 
   // TRHAI_CONTEXT_TOKENS forces one window on every model, never below what the prompt needs.
   assert.ok(presetsText([], { contextTokens: 16384 }).split("\n").includes("ctx-size = 16384"));

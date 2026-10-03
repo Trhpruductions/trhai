@@ -157,6 +157,27 @@ export function discoverModels(modelsDir: string): EngineModelFile[] {
  * margin let the 8B model take 12,800 tokens, Windows moved the overflow into
  * system memory, and it wrote a few tokens a minute.
  */
+/**
+ * How a family of models is sampled, where its makers publish settings that
+ * differ from the engine's own defaults.
+ *
+ * Ollama carried these with each model and applied them without a word, so a
+ * model moved to this engine as a bare file would otherwise answer with
+ * different settings from the ones it was measured with. Qwen3's are the ones
+ * published for its thinking mode, and what it ran with when it scored 93% of
+ * the 54 evaluation tasks. A model with no entry runs on the engine's
+ * defaults: qwen2.5-coder was evaluated again on those, and passed 47 of the
+ * 54 automatic checks against 45 under Ollama.
+ */
+const familySampling: Array<{ family: RegExp; settings: Record<string, string> }> = [
+  { family: /^qwen3(?![\d.])/i, settings: { temp: "0.6", "top-k": "20", "top-p": "0.95", "min-p": "0" } }
+];
+
+/** The sampling lines a model's section of the preset file carries, if any. */
+export function samplingFor(id: string): Record<string, string> {
+  return familySampling.find((entry) => entry.family.test(id))?.settings ?? {};
+}
+
 export function presetsText(models: EngineModelFile[], options: { contextTokens?: number } = {}): string {
   const lines = [
     "version = 1",
@@ -181,6 +202,7 @@ export function presetsText(models: EngineModelFile[], options: { contextTokens?
   for (const model of models) {
     lines.push("", `[${model.id}]`, `model = ${model.file}`);
     if (model.mmproj) lines.push(`mmproj = ${model.mmproj}`);
+    for (const [setting, value] of Object.entries(samplingFor(model.id))) lines.push(`${setting} = ${value}`);
   }
   return `${lines.join("\n")}\n`;
 }

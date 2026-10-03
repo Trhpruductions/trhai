@@ -186,11 +186,12 @@ test("the image and the question go to the vision model together", async () => {
   assert.deepEqual(seen, { ok: true, text: "A screenshot of a settings page.", model: defaultVisionModel });
   assert.deepEqual(engine.urls, ["http://engine/v1/chat/completions"]);
   const body = engine.chats[0] as {
-    model: string; stream: boolean; max_tokens: number;
+    model: string; stream: boolean; max_tokens: number; temperature: number;
     messages: Array<{ role: string; content: unknown }>
   };
   assert.equal(body.model, defaultVisionModel);
   assert.equal(body.stream, false);
+  assert.equal(body.temperature, 0, "reading an image is asked for without variety: the same image, the same answer");
   assert.equal(body.max_tokens, 8192, "the reply is no longer than the window the engine gave the model");
   assert.match(String(body.messages[0].content), /Read any text in an image exactly as written/);
   // The question, then the image as a data: URL - how the engine takes one.

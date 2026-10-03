@@ -273,6 +273,10 @@ export async function lookAtImages(
         model: loaded.id,
         stream: false,
         max_tokens: windowTokens,
+        // Reading what is in an image is not a place for variety: the same
+        // receipt should give the same total every time. Under Ollama the
+        // vision model ran at a temperature of 0.0001 for this reason.
+        temperature: 0,
         messages: [
           { role: "system", content: visionInstructions },
           {
