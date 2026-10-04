@@ -19,6 +19,12 @@ const { fakeEngine } = await import("./helpers/fakeEngine.js");
 // population of approximately 26 million people." from qwen2.5-coder and "The
 // population of Australia is approximately 26 million people." from Qwen3.
 // Each had both turns in front of it.
+//
+// Measured on 3 and 4 October with the real models. The app's own request,
+// put to qwen2.5-coder three times each way: as typed, three answers for
+// Australia; with the place said, three for Canberra. Then through the whole
+// app, three conversations on each model: all six answered for Canberra.
+// (The 3B answers for Canberra either way.)
 
 type Turn = { role: "user" | "assistant"; content: string };
 const exchange = (question: string, answer: string): Turn[] => [{ role: "user", content: question }, { role: "assistant", content: answer }];
