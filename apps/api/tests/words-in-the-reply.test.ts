@@ -119,9 +119,10 @@ test("a model that reaches for write_file anyway writes nothing, and its story i
     assert.equal(result.text, told, "the story is what the user reads");
     assert.equal(existsSync(path.join(testWorkspace, "story_lighthouse.txt")), false, "no file nobody asked for");
     assert.deepEqual(result.toolsUsed, [], "nothing ran");
-    const refusal = (engine.chats[1].messages ?? []).at(-1);
-    assert.equal(refusal?.role, "tool");
-    assert.match(String(refusal?.content), /^write_file was not available for this request and was not run\./);
+    // The story was in the call, and is read out of it rather than asked for a
+    // second time: asked again, the 7B has answered with something else
+    // entirely (see writing-for-someone.test.ts).
+    assert.equal(engine.chats.length, 1);
   } finally {
     await engine.close();
   }

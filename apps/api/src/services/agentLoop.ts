@@ -26,6 +26,7 @@ import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
 import { resolvePlaceReference } from "./placeReference.js";
+import { placeholderIn } from "./fileEdit.js";
 import { activeProject, projectForPath, resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
 import { verifyBuiltProject } from "./buildVerification.js";
 import { resolveInWorkspace } from "./workspace.js";
@@ -481,6 +482,33 @@ const toolTemplateEcho =
 
 export function echoesToolTemplate(text: string): boolean {
   return toolTemplateEcho.test(text);
+}
+
+/** Where each tool that takes a piece of writing carries it. */
+const wordsArguments: Record<string, string[]> = {
+  write_file: ["content"],
+  write_document: ["content", "body"],
+  update_document: ["body", "content"],
+  edit_file: ["append", "new_text"],
+  send_text: ["message", "text", "body"],
+  send_email: ["body", "message"]
+};
+
+/**
+ * The words a call would have kept or sent - a file's content, a document's,
+ * a message's - or null when the call carries none worth reading. Used when a
+ * request asked for the words themselves and the model handed them to a tool
+ * instead: see where a call that was not offered is refused.
+ */
+export function wordsCarriedBy(call: { name: string; arguments?: Record<string, unknown> }): string | null {
+  for (const key of wordsArguments[call.name] ?? []) {
+    const value = call.arguments?.[key];
+    if (typeof value !== "string") continue;
+    const words = value.trim();
+    // Something to read, and not a slot left unfilled ("<content>").
+    if (words.length >= 20 && !placeholderIn("words.txt", words)) return words;
+  }
+  return null;
 }
 
 /**
@@ -1774,8 +1802,12 @@ export async function runAgent(
         // for words in the reply: with write_document on offer, the model
         // saved them as a document called "Stainless Steel Water Bottle" and
         // the reply showed none of them.
+        // Nor is "a thank-you note to my neighbour" a note to keep: the word
+        // alone put write_document on offer, and the note was saved as a
+        // document with "You're welcome!" for a reply.
         documents: /\b(?:save|store|keep|record)\b/i.test(question)
-          || (intent.kind !== "read" && (/\b(?:documents?|docs?|notes?|knowledge)\b/i.test(question)
+          || (intent.kind !== "read" && (
+            (/\b(?:documents?|docs?|notes?|knowledge)\b/i.test(question) && !asksForWordsInTheReply(question))
             || namesASavedDocument(question, context.documents))),
         // The machine's own readings, when the question is about them.
         status: asksAboutMachineState(question),
@@ -2350,8 +2382,15 @@ export async function runAgent(
       // A question is offered nothing that writes (see onlyAsks), so only a
       // claim that names a file can be a lie there; its answer describing
       // the world in the passive is not one.
-      const claimedAChange = claimsUnperformedMutation(text, wroteSomething, !onlyAsks)
-        || promisesUnperformedMutation(text, wroteSomething, !onlyAsks);
+      // The same for a piece of writing asked for in the reply, which is not
+      // offered the file writers either: "I've written the note for you
+      // above" is true, and the note is above. Live, a letter to a landlord
+      // that ended that way was answered with "You did not change anything",
+      // and the reply the user got was "I'm sorry, but I can't assist with
+      // that."
+      const couldWrite = !onlyAsks && fileWritersHaveWork;
+      const claimedAChange = claimsUnperformedMutation(text, wroteSomething, couldWrite)
+        || promisesUnperformedMutation(text, wroteSomething, couldWrite);
 
       if (claimedAChange) {
         // A held confirmation looks identical from the mutation record - nothing
@@ -2605,6 +2644,23 @@ export async function runAgent(
       // is never coming.
       if (!offeredNames.has(call.name)) {
         toolActivity.markBlocked();
+        // The words asked for, handed over inside a tool that would have kept
+        // or sent them, are the answer. Live, "Draft a two-line thank-you
+        // note to a neighbour who watered my plants." came back as a
+        // write_file or a send_text carrying the note; told the tool was not
+        // available, the model's next reply was "You're welcome! If you need
+        // anything else, feel free to ask." - it had read its own note as
+        // thanks. The note was already written, so it is not asked for twice.
+        const words = fileWritersHaveWork ? null : wordsCarriedBy(call);
+        if (words) {
+          return {
+            ok: true,
+            text: words,
+            model: typeof response.model === "string" ? response.model : config.model,
+            toolsUsed,
+            actionAudit: auditFor("prose")
+          };
+        }
         // Names what is available, and for an order, which tool the order
         // wants. Told only "not available", the model apologised - "I'm
         // sorry, but I can't complete that request" - with edit_file sitting

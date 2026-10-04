@@ -567,7 +567,28 @@ const replyOnly =
  * note about it" is not an order for a note.
  */
 const composesWords =
-  /^(?:please\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:write|compose|draft|tell|give|make\s+up|come\s+up\s+with|create|generate)\b[^.?!\n]{0,80}?\b(?:stor(?:y|ies)|tales?|poems?|haikus?|limericks?|sonnets?|essays?|paragraphs?|sentences?|descriptions?|slogans?|taglines?|headlines?|captions?|jokes?|riddles?|speech(?:es)?|toasts?|letters?|emails?|messages?|repl(?:y|ies)|responses?|summar(?:y|ies)|outlines?|lists?|checklists?|bios?|blurbs?|reviews?|tweets?|posts?|articles?|introductions?|conclusions?|dialogues?|lyrics|songs?|pitch(?:es)?|explanations?|definitions?|translations?|names?|titles?|plans?|recipes?|functions?|snippets?|regex(?:es)?|regular\s+expressions?|one-liners?)\b/i;
+  /^(?:please\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:write|compose|draft|tell|give|make\s+up|come\s+up\s+with|create|generate)\b[^.?!\n]{0,80}?\b(?:stor(?:y|ies)|tales?|poems?|haikus?|limericks?|sonnets?|essays?|paragraphs?|sentences?|descriptions?|slogans?|taglines?|headlines?|captions?|jokes?|riddles?|speech(?:es)?|toasts?|letters?|emails?|messages?|texts?|repl(?:y|ies)|responses?|summar(?:y|ies)|outlines?|lists?|checklists?|bios?|blurbs?|reviews?|tweets?|posts?|articles?|introductions?|conclusions?|dialogues?|lyrics|songs?|pitch(?:es)?|explanations?|definitions?|translations?|names?|titles?|plans?|recipes?|functions?|snippets?|regex(?:es)?|regular\s+expressions?|one-liners?|announcements?|invitations?|greetings?|wishes|apolog(?:y|ies)|memos?|notices?|quotes?|mottos?|adverts?|advertisements?|eulog(?:y|ies)|vows|cards?)\b/i;
+
+/**
+ * A note written to someone is a piece of writing too: "a thank-you note",
+ * "a note to my landlord". Found live on 4 October: "Draft a two-line
+ * thank-you note to a neighbour who watered my plants." was saved - as a
+ * document twice, once as a file outside the workspace - and the reply was
+ * "You're welcome!" with none of the note in it.
+ *
+ * Not every note: "take a note", "a note to self" and "a note to call the
+ * plumber" are things to keep. So it has to be a kind of note people send, or
+ * a note to or for somebody.
+ */
+const composesANote = new RegExp(
+  String.raw`^(?:please\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:write|compose|draft)\b[^.?!\n]{0,60}?\b(?:`
+  + String.raw`(?:thank[- ]?you|apology|sick|love|farewell|welcome|condolence|sympathy|congratulations?|get[- ]well)\s+notes?\b`
+  + String.raw`|notes?\s+(?:to|for)\s+(?:(?:my|our|the|a|an|his|her|their|your)\s+(?!self\b|notes?\b|documents?\b|docs\b|files?\b|knowledge\b)|(?:everyone|all|whoever|someone|mum|mom|dad)\b)`
+  + String.raw`)`,
+  "i"
+);
+/** The same, to somebody named: "a note to Priya". The capital is what says it is a name, so this one reads the case. */
+const composesANoteToAName = /^(?:please\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:write|compose|draft)\b[^.?!\n]{0,60}?\bnotes?\s+(?:to|for)\s+[A-Z][a-z]+/;
 
 /**
  * "...and save it", "store that as a note", "write it down": the words are to
@@ -598,7 +619,10 @@ const namesAPlaceOnDisk = /\b(?:files?|folders?|director(?:y|ies)|workspace)\b/i
 export function asksForWordsInTheReply(message: string): boolean {
   const text = (message ?? "").trim();
   if (replyOnly.test(text)) return true;
-  return composesWords.test(text) && !keepsTheWords.test(text) && !namesAPlaceOnDisk.test(text);
+  const composes = composesWords.test(text) || composesANote.test(text)
+    // Its opening word may be capitalised or not; the name after "to" has to be.
+    || composesANoteToAName.test(text.charAt(0).toLowerCase() + text.slice(1));
+  return composes && !keepsTheWords.test(text) && !namesAPlaceOnDisk.test(text);
 }
 
 /**

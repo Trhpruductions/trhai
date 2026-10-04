@@ -15,7 +15,7 @@ import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
 import { isContinuationRequest, looksLikeScheduleRequest } from "./requestAnalysis.js";
 import { asksAboutTheScreen, planProject } from "@ascend/shared";
-import { asksForAReading, classifyIntent, wantsASummary, wantsToStopAnApp, wantsWebSearch } from "./actionIntent.js";
+import { asksForAReading, asksForWordsInTheReply, classifyIntent, wantsASummary, wantsToStopAnApp, wantsWebSearch } from "./actionIntent.js";
 import { detectTaskType } from "./taskPlanning.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
 import { archiveIfInterrupted, recordFinishedTask, runTrackedTask, stepsSince } from "./taskHistory.js";
@@ -515,8 +515,13 @@ export async function runAssistantOrchestrator(
     // composer's "create" plan fires on the word "build" anywhere, so "every
     // weekday at 8am ask me whether the build passed" - a schedule - reached
     // the model with "Call build_app with this" appended.
-    const planWantsAnApp = planIntent.kind === "generate"
-      || (planIntent.kind === undefined && !looksLikeScheduleRequest(modelReply.buildRequest ?? ""));
+    // Nor with a request for a piece of writing. Live, "Write a short welcome
+    // message for new members of a running club." reached the model with the
+    // instruction appended, and it built - or said it could not build - a
+    // "Welcome Message App" in three runs of four.
+    const planWantsAnApp = (planIntent.kind === "generate"
+      || (planIntent.kind === undefined && !looksLikeScheduleRequest(modelReply.buildRequest ?? "")))
+      && !asksForWordsInTheReply(modelReply.buildRequest ?? "");
 
     // A remembered fact with a trailing request: the trailing clause is what
     // the model is asked, with the fact marked as already stored. Handed the
