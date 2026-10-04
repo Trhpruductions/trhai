@@ -116,6 +116,35 @@ const actionVerbs: Array<{ kind: ActionKind; words: string[]; expects: string[] 
 const conversationalRun = /\brun (?:me through|by me|into|through|out of|a bit|late)\b|\bin the long run\b/;
 
 /**
+ * Where an order to run something puts the word: at the head of a clause, or
+ * after the words that lead into an order - "please run", "then run", "can
+ * you run", "I need to run", "quickly run".
+ *
+ * With anything else in front of it, "run" is what that thing does. Found
+ * live on 4 October: "A farmer has 17 sheep and all but 9 run away. How many
+ * are left?" was filed as an order to run a command. Qwen3 answered "The
+ * farmer has 9 sheep left.", no command had been run, and so its answer was
+ * thrown away and the reply was "Which command should I run? Give me the
+ * exact command." The same went for "the buses run every 10 minutes", "I run
+ * a small bakery" and "the tests run fine on my machine".
+ */
+const leadsIntoAnOrder =
+  /(?:^|[.!?;:,(]\s*|\b(?:please|kindly|to|and|then|but|or|so|now|also|just|first|next|again|you|let'?s|go|gonna|should|must|can|could|would|will|shall|might|may|do|did|does|don'?t|not|never|always|\w+ly)\s+)$/;
+
+/** What follows "run" when nothing is being run: "run away with me", "run around the block". */
+const runsNothing = /^run (?:away|off|after|around|about|amok|wild|free|errands|for (?:office|president|cover|it|your))\b/;
+
+function ordersARun(text: string): boolean {
+  for (let at = text.indexOf("run "); at >= 0; at = text.indexOf("run ", at + 1)) {
+    // Its own word: not the end of "rerun" or "overrun".
+    if (at > 0 && text[at - 1] !== " ") continue;
+    if (runsNothing.test(text.slice(at))) continue;
+    if (leadsIntoAnOrder.test(text.slice(0, at))) return true;
+  }
+  return false;
+}
+
+/**
  * A drive path: a letter standing on its own, a colon, a slash - "D:/app",
  * "C:\Users". Not the end of a web address's scheme. Without the "on its
  * own", "https://example.com" read as the drive "s:" and the path
@@ -758,8 +787,12 @@ export function classifyIntent(message: string): IntentVerdict {
     // notes.txt, don't change anything else" found "change" first (it comes
     // earlier in the list), saw it negated and skipped the whole group - so the
     // append the sentence opens with was never read as a write at all.
+    // "run" is an order only where an order puts it (see leadsIntoAnOrder).
+    // Asked of the word, not of the group: "the tests run fine, so install
+    // the package" still orders an install.
     const matched = group.words.find((word) =>
-      (text.startsWith(word) || text.includes(` ${word}`)) && !negatedBefore(text, word));
+      (text.startsWith(word) || text.includes(` ${word}`)) && !negatedBefore(text, word)
+      && (word !== "run " || ordersARun(text)));
     if (!matched) continue;
 
     if (group.kind === "execute" && conversationalRun.test(text)) continue;
