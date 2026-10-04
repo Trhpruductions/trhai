@@ -363,7 +363,11 @@ export async function fetchWebPage(
   fetchImpl: typeof fetch = fetch,
   lookup: typeof dnsLookup = dnsLookup
 ): Promise<FetchOutcome> {
-  const raw = await fetchRawPage(rawUrl, fetchImpl, lookup);
+  return readablePage(await fetchRawPage(rawUrl, fetchImpl, lookup));
+}
+
+/** A fetched page as fetch_url gives it to a model: its title, and its text up to the model's share. */
+export function readablePage(raw: RawFetchOutcome): FetchOutcome {
   if (!raw.ok) return raw;
 
   const { title, text } = extractReadableText(raw.body);
