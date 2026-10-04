@@ -49,6 +49,8 @@ import {
 } from "./memoryRequests.js";
 import { matchMemories } from "./factWording.js";
 import { resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
+import { contentToKeep, pageToKeep } from "./pageSave.js";
+import { fetchRawPage, readablePage, type RawFetchOutcome } from "./webFetch.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
@@ -117,6 +119,8 @@ export type OrchestratorInput = {
   vision?: (images: VisionImage[], question: string, cancel?: AbortSignal) => Promise<VisionResult>;
   /** Reads this machine's sensors; the real ones when absent. Injected for tests. */
   readTelemetry?: typeof readTelemetry;
+  /** Fetches a page as it is served; the real fetch when absent. Injected for tests. See resolveSavePage. */
+  fetchPageAsServed?: (url: string) => Promise<RawFetchOutcome>;
   /**
    * The model the user picked for this conversation. The usual choice if it
    * names none, or names one that is no longer installed (see modelCatalog).
@@ -320,6 +324,12 @@ export async function runAssistantOrchestrator(
   // Friday. See answerWeekdayQuestion.
   const weekday = approving ? null : answerWeekdayQuestion(effectiveMessage, new Date());
   if (weekday) return deterministicResult(effectiveMessage, weekday, "calendar");
+
+  // "fetch https://example.com and save it to example.html" - the page, kept
+  // exactly as it is served. Left to the model the file held "<html></html>"
+  // and the reply said it held the page; see resolveSavePage.
+  const savingPage = await resolveSavePage(input, approving, effectiveMessage);
+  if (savingPage) return savingPage;
 
   // "save a document called X with the text Y" is a list operation, not a
   // reasoning one: a title and a body, straight into the store. Left to the
@@ -896,6 +906,59 @@ async function resolveDocumentSummary(input: OrchestratorInput, asked: string): 
   if (!written.ok && input.cancel?.aborted) return deterministicResult(asked, stoppedBeforeFinishing, "stopped");
   if (!written.ok) return deterministicResult(asked, written.reason, "failed");
   return { ...deterministicResult(asked, written.text, "generated"), model: written.model ? `local/${written.model}` : "local" };
+}
+
+/**
+ * "fetch https://example.com and save it to example.html" - fetched and
+ * written here, with no model; see pageSave.ts for which requests are that.
+ *
+ * The write goes through write_file itself, so every rule about where a file
+ * may be written, and about not emptying one that is already there, applies as
+ * it does when a model writes.
+ */
+async function resolveSavePage(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): Promise<OrchestratorResult | null> {
+  if (approving) return null;
+  const asked = pageToKeep(effectiveMessage);
+  if (!asked) return null;
+
+  if (input.sessionId) setActivity(input.sessionId, "fetch_url");
+  const fetched = await (input.fetchPageAsServed ?? fetchRawPage)(asked.url);
+  if (!fetched.ok) return deterministicResult(effectiveMessage, `Nothing was saved. ${fetched.reason}`, "failed");
+  const keeping = contentToKeep(fetched, asked.as);
+  if (!keeping) return deterministicResult(effectiveMessage, "Nothing was saved. That page had no readable text.", "failed");
+
+  if (input.sessionId) setActivity(input.sessionId, "write_file");
+  const written = await runTool(
+    { name: "write_file", arguments: { path: asked.file, content: keeping.content } },
+    {
+      memories: [],
+      knowledge: [],
+      request: effectiveMessage,
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.unattended ? { unattended: true } : {})
+    }
+  );
+  if (!written.ok) {
+    // write_file's own words are for a model ("use edit_file ..."). A file that
+    // is already there and holds something else is said to the person plainly.
+    const alreadyThere = /\bwould keep \d+ of\b/.test(written.content);
+    return {
+      ...deterministicResult(effectiveMessage, alreadyThere
+        ? `${asked.file} is already there and holds something else, so it was left as it is. To replace it with the page, `
+          + "say the same again with \"overwrite\" in it, or name another file."
+        : written.content, "failed"),
+      toolsUsed: [{ name: "fetch_url", ok: true }, { name: "write_file", ok: false }]
+    };
+  }
+  return {
+    ...deterministicResult(effectiveMessage,
+      `${written.content} It holds ${keeping.holds}: ${keeping.content.length.toLocaleString("en-US")} characters.`, "saved"),
+    toolsUsed: [{ name: "fetch_url", ok: true }, { name: "write_file", ok: true }]
+  };
 }
 
 /** A reply written here, by neither a model nor the composer. */
@@ -2065,6 +2128,9 @@ async function answerWithLocalModel(
     ...(input.vision ? { vision: input.vision } : {}),
     // And the same sensors resolveMachineReading reads.
     ...(input.readTelemetry ? { readTelemetry: input.readTelemetry } : {}),
+    // And the same web resolveSavePage fetches from: fetch_url reads a page's
+    // text out of what that serves.
+    ...(input.fetchPageAsServed ? { fetchPage: async (url: string) => readablePage(await input.fetchPageAsServed!(url)) } : {}),
     // The transcript the request already carries, so "what did I just ask you"
     // is answerable without saving every turn to memory first.
     conversation: input.history,
