@@ -27,6 +27,7 @@ import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
 import { resolvePlaceReference } from "./placeReference.js";
 import { placeholderIn } from "./fileEdit.js";
+import { withoutHandlingRemarks } from "./handlingRemarks.js";
 import { activeProject, projectForPath, resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
 import { verifyBuiltProject } from "./buildVerification.js";
 import { resolveInWorkspace } from "./workspace.js";
@@ -2436,7 +2437,11 @@ export async function runAgent(
         };
       }
 
-      const withoutInvention = stripFabricatedToolOutput(text);
+      // And without its account of how the question was handled - "This is
+      // general knowledge and does not require checking the user's documents"
+      // - which Qwen3 adds to plain answers. See handlingRemarks.ts. Asked of
+      // the request as it was typed, not as spelled out for the model.
+      const withoutInvention = withoutHandlingRemarks(stripFabricatedToolOutput(text), context.request ?? question);
 
       // Nothing left once the invention is gone means there was no answer
       // under it, only the fiction. Treated as an unusable reply so the caller
