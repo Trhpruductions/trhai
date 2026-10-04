@@ -3400,7 +3400,10 @@ test("a follow-up reaches the model with the turn it follows", async () => {
     const sent = (received[0] as { messages: Array<{ role: string; content: string }> }).messages;
     assert.deepEqual(sent.map((message) => message.role), ["system", "user", "assistant", "user"]);
     assert.match(sent[2].content, /Canberra/);
-    assert.equal(sent[3].content, "And roughly how many people live there?", "the question comes last");
+    // The question comes last, as typed. Seeing the turn was not enough - both
+    // models then answered for Australia - so which place "there" is now
+    // follows it (see place-reference.test.ts).
+    assert.equal(sent[3].content, "And roughly how many people live there?\n\n(\"there\" is Canberra, the place the previous answer gave.)");
   } finally {
     server.close();
   }
