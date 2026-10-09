@@ -1259,3 +1259,15 @@ test("a persist error with nothing saved does not become a false success", () =>
 
   assert.doesNotMatch(reply.text, /^Saved\./);
 });
+
+test("a spoken instruction is a command, so it is not quoted back as something the user said", () => {
+  // Caught live: "Say hello in one short sentence." then "What is 12 times 12?"
+  // returned "You mentioned this earlier in our conversation: Say hello...".
+  assert.equal(analyzeRequest("Say hello in one short sentence.").shape, "command");
+  const history = [
+    { role: "user" as const, content: "Say hello in one short sentence." },
+    { role: "assistant" as const, content: "Hello, how can I assist you today?" }
+  ];
+  const reply = composeReply({ message: "What is 12 times 12?", history, memories: [], knowledge: [] } as never);
+  assert.doesNotMatch(reply.text, /You mentioned this earlier/);
+});
