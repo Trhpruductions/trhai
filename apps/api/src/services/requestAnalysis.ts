@@ -95,6 +95,11 @@ const commandVerbs = new Set([
   // these are the ordinary imperatives that were still missing.
   "convert", "translate", "compute", "estimate", "solve", "evaluate", "simplify", "sort", "rank",
   "recommend", "suggest", "send", "email", "text", "message", "post", "upload", "download",
+  // Caught live: "Say hello in one short sentence." was a statement, so the next
+  // turn, "What is 12 times 12?", was "answered" by quoting it back as something
+  // the user had said earlier. These are plain imperatives for talking to the
+  // assistant, not facts to file.
+  "say", "greet", "repeat",
   "launch", "start", "stop", "restart", "kill", "play", "print", "book", "order", "buy",
   "schedule", "remind", "notify", "alert", "ping", "clear", "reset", "rename", "move", "copy",
   "append", "insert", "replace", "edit", "change", "turn", "switch", "enable", "disable", "mark",
