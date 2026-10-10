@@ -1415,10 +1415,16 @@ export async function runAgent(
   }
 
   const now = (context.now ?? (() => new Date()))();
-  const today = now.toLocaleString(undefined, {
-    weekday: "long", year: "numeric", month: "long", day: "numeric",
-    hour: "2-digit", minute: "2-digit"
+  // The date goes in the system message and the clock time goes with the
+  // question. The system message is the front of every prompt, and the engine
+  // reuses whatever front two prompts share: with the minute in it, the front
+  // changed every 60 seconds and nothing after it was ever reused. On a PC with
+  // no graphics card that is the difference between a reply in seconds and one
+  // in minutes.
+  const today = now.toLocaleDateString(undefined, {
+    weekday: "long", year: "numeric", month: "long", day: "numeric"
   });
+  const clockNow = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
   // Read before the model answers, not left for it to fetch. With
   // system_status on offer, "what's my CPU usage right now?" called nothing
@@ -1441,8 +1447,9 @@ export async function runAgent(
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: `${systemPrompt}\n\nThe date and time on this machine right now is ${today}. `
-        + "That is current and correct — use it directly and never say the date is unknown or unrecorded."
+      content: `${systemPrompt}\n\nThe date on this machine today is ${today}. `
+        + "That is current and correct — use it directly and never say the date is unknown or unrecorded. "
+        + "The time of day is given with each question."
         // Where the work actually lives. Without this the model invents paths:
         // it called list_files on D:/projects/calculator, which has never
         // existed on this machine, then asked the user for a full path to a
@@ -1465,10 +1472,13 @@ export async function runAgent(
     ...recentTurns(context.conversation, [question, context.request ?? ""]),
     {
       role: "user",
-      content: machineReadings
+      content: (machineReadings
         ? `${asked}\n\nLive readings from this machine, taken just now. They are real: answer from them as `
           + `given, and do not give any other number for this machine.\n${machineReadings}`
-        : asked
+        : asked)
+        // Only when the request is about the time: a line that changes every minute,
+        // on every question, would give the engine a different prompt each time.
+        + (mentionsTime(question) ? `\n\n(The time on this machine now is ${clockNow}.)` : "")
     }
   ];
   // The rules and the question: the two messages that are never shortened to

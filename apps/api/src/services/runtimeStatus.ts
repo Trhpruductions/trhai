@@ -87,11 +87,11 @@ export async function engineRuntime(baseUrl: string, fetchImpl: typeof fetch = f
       loaded: models.filter((model) => model.status === "loaded")
         .map((model) => ({ name: model.id, sizeBytes: size(model), windowTokens: model.windowTokens })),
       installed: models.map((model) => ({ name: model.id, sizeBytes: size(model) })),
-      idleUnloadSeconds,
+      idleUnloadSeconds: idleUnloadSeconds(),
       reason: null
     };
   } catch {
-    return { reachable: false, version: null, loaded: [], installed: [], idleUnloadSeconds, reason: engineOffReason() };
+    return { reachable: false, version: null, loaded: [], installed: [], idleUnloadSeconds: idleUnloadSeconds(), reason: engineOffReason() };
   }
 }
 
