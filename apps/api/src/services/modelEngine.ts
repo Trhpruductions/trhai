@@ -35,7 +35,15 @@ import path from "node:path";
 /** The port the engine listens on, on this PC's own address only. */
 export const defaultEnginePort = 4040;
 /** A model nothing has used for this long is let go, to give the card back. */
-export const idleUnloadSeconds = 300;
+export const defaultIdleUnloadSeconds = 300;
+/**
+ * Read when asked, not when this file loads: the .env is read after the imports
+ * are, so a constant here would always see the default.
+ */
+export function idleUnloadSeconds(env: NodeJS.ProcessEnv = process.env): number {
+  const asked = Number(env.TRHAI_IDLE_UNLOAD_SECONDS);
+  return asked > 0 ? asked : defaultIdleUnloadSeconds;
+}
 /** Memory kept free on the card when a model is fitted to it, in MiB. */
 const fitMarginMiB = 1024;
 /** The smallest window a model is ever given: the assistant's prompt needs it. */
@@ -194,7 +202,7 @@ export function presetsText(models: EngineModelFile[], options: { contextTokens?
     "parallel = 1",
     "; A thinking model's thoughts go in reasoning_content, never into its answer.",
     "reasoning-format = deepseek",
-    `sleep-idle-seconds = ${idleUnloadSeconds}`
+    `sleep-idle-seconds = ${idleUnloadSeconds()}`
   ];
   if (options.contextTokens && Number.isFinite(options.contextTokens)) {
     lines.push(`ctx-size = ${Math.max(smallestWindow, Math.floor(options.contextTokens))}`);
