@@ -785,3 +785,12 @@ select.os-input { color-scheme: dark; }
 .os-voice-turn { display: grid; gap: var(--os-2); }
 .os-voice-turn p { margin: 0; overflow-wrap: anywhere; }
 .os-resource-meter { height: 10px; margin: 23px 0; }
+
+/* ------------------------------------------------------------ operations */
+
+.os-ops { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--os-2); }
+.os-ops li { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: var(--os-3); align-items: start; padding: 4px 0; }
+.os-ops li .os-dot { margin-top: 6px; }
+.os-ops p { margin: 1px 0 0; color: var(--os-text-2); }
+.os-ops-fix { color: var(--os-warn); }
+.os-ops li.fail .os-ops-fix { color: var(--os-danger); }
