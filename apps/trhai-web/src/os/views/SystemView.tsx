@@ -31,6 +31,11 @@ type Runtime = {
   stores: { failing: Array<{ store: string; error: string; at: string }>; locked: string[] };
 };
 
+type Operations = {
+  rows: Array<{ id: string; label: string; group: string; status: "ok" | "warn" | "fail"; detail: string; fix?: string }>;
+  summary: { ready: number; total: number; failing: number; warnings: number };
+};
+
 /** One resource: its reading now, and its last two minutes - or, for one with no history kept, how full it is. */
 function ResourceCard({ title, reading, values, tone, facts }: {
   title: string; reading: Reading | null | undefined; values: Array<number | null> | null; tone: TrendTone; facts: Array<string | null | undefined>;
@@ -65,11 +70,13 @@ export function SystemView() {
   const { rows, health } = useHealth();
   const { notify } = useNotify();
   const [runtime, setRuntime] = useState<Runtime | null>(null);
+  const [operations, setOperations] = useState<Operations | null>(null);
   const [unloading, setUnloading] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const result = await apiGet<Runtime>("/v1/system/runtime");
+    const [result, ops] = await Promise.all([apiGet<Runtime>("/v1/system/runtime"), apiGet<Operations>("/v1/system/operations")]);
     if (result.ok) setRuntime(result.data);
+    if (ops.ok) setOperations(ops.data);
   }, []);
 
   useEffect(() => {
@@ -117,6 +124,33 @@ export function SystemView() {
 
       <div className="os-tasks-layout">
         <div className="os-tasks-main">
+          <section className="os-panel" aria-label="Everything TRH AI needs">
+            <header className="os-panel-head">
+              <h3 className="os-panel-title">Everything TRH AI needs</h3>
+              {operations ? (
+                <span className={`os-chip ${operations.summary.failing > 0 ? "danger" : operations.summary.warnings > 0 ? "warn" : "ok"}`}>
+                  {operations.summary.ready} of {operations.summary.total} ready
+                </span>
+              ) : null}
+            </header>
+            <div className="os-panel-body">
+              {operations === null ? <p className="os-faint">Checking every part…</p> : (
+                <ul className="os-ops">
+                  {operations.rows.map((row) => (
+                    <li key={row.id} className={row.status}>
+                      <span className={`os-dot ${row.status === "ok" ? "ok" : row.status === "warn" ? "warn" : "danger"}`} aria-hidden="true" />
+                      <div>
+                        <strong>{row.label}</strong> <span className="os-faint os-small">{row.group}</span>
+                        <p className="os-small">{row.detail}</p>
+                        {row.fix ? <p className="os-small os-ops-fix">{row.fix}</p> : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+
           <section className="os-panel" aria-label="Models in memory">
             <header className="os-panel-head">
               <h3 className="os-panel-title">Models in memory</h3>

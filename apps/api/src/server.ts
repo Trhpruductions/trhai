@@ -96,6 +96,7 @@ import { readTelemetry, readIdentity } from "./services/systemTelemetry.js";
 import { getResumableTask, getTask, isTaskRunning } from "./services/taskStore.js";
 import { clearFinishedTasks, forgetFinishedTask, listFinishedTasks, maxFinishedPerSession } from "./services/taskHistory.js";
 import { clearEvents, listEvents } from "./services/executionLog.js";
+import { readOperations } from "./services/operations.js";
 import { finishStages, getStage, stageLabels } from "./services/reasoningStage.js";
 import { snapshot, toPrometheus } from "./services/metrics.js";
 import {
@@ -1349,6 +1350,16 @@ export function createApp(options: AppOptions = {}) {
   // TRH AI's own service and the model engine under it: the process, what it
   // listens on, the model the engine has in memory now and the window it gave
   // it, and any store that cannot be saved or read. For the System workspace.
+  // Everything TRH AI needs in order to run, each checked now, with what to do
+  // about any that is not right. See services/operations.ts.
+  app.get("/v1/system/operations", async (_req, res, next) => {
+    try {
+      res.json({ data: await readOperations(), traceId: "trace-local" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/v1/system/runtime", async (_req, res) => {
     const config = readLocalModelConfig();
     res.json({
