@@ -31,7 +31,13 @@ them is wrong even if it works.
 
 ---
 
-## Verified facts about this machine
+## Verified facts about the machines
+
+TRH AI has run on two PCs. The first table is the original one, where most of
+the measurements below were taken. The second is the PC it was moved to on
+2026-10-08, which has no graphics card and changes what to expect.
+
+### The original PC (graphics card)
 
 | Thing | Value |
 |---|---|
@@ -43,6 +49,25 @@ them is wrong even if it works.
 | Model engine | llama.cpp `b11366` (CUDA), started by the API on port 4040; the engine and the models are in `%LOCALAPPDATA%\TRHAI\runtime`, on the SSD |
 | Node | v24.4.0 local; `package.json` declares `>=20`; CI pins 22 |
 | Piper / whisper | both work; `ggml-base.en` |
+
+### This PC (no graphics card) — measured 2026-10-12
+
+| Thing | Value |
+|---|---|
+| CPU / RAM | Intel i5-3570, 4 cores, **7.9 GB RAM**, no GPU. Nine other services run here under pm2 (Discord bots, MariaDB, Free City RP), plus Discord, Steam and Chrome: **7.3 GB in use, 4.5 GB in the pagefile** while TRH AI runs |
+| Engine | llama.cpp `b11366` **CPU build** (`engine\b11366`); the CUDA build is kept as `engine\b11366-cuda` |
+| Model | `TRHAI_MODEL=qwen2.5-3b` in `.env`, because it is the one that fits. The 7B coder and the 8B **cannot load**: each attempt is a 300 s timeout |
+| Window | `TRHAI_CONTEXT_TOKENS=8192`. Without it the engine's `fit` mode gave the 3B its full 32k window (`n_ctx 32768`), a ~1.2 GB KV cache in system RAM |
+| Timeout | `TRHAI_MODEL_TIMEOUT_MS=600000`, and `TRHAI_IDLE_UNLOAD_SECONDS=1800` so the prompt cache survives between questions |
+| Speed | Raw engine, 8192 window, 961 MB free: **8.5–9.8 prompt tokens/s cold, 0.4–2.3 generated tokens/s** (the original PC: ~40/s). The app's prompt is ~3,000 tokens, so a cold reply is 1.5–4.5 minutes; a repeat question with a warm cache answers in seconds |
+| Live battery | 13 of 13 pass with these settings: greeting 264 s, calculate 133 s, date 113 s, file write 232 s (file verified on disk), file read 204 s, web fetch 95 s; memory remember/recall/forget instant |
+| Node | v24.19.0 |
+| Voice / video | Piper (4 voices), whisper `ggml-base.en`, ffmpeg on PATH: all pass their smoke checks; video renders with the CPU encoder in ~20 s |
+
+**The speed here is the hardware, not the app.** The engine is paging. What
+helps, in order: more RAM (16 GB of DDR3 ends the paging), a smaller model
+(`qwen2.5-1.5b`), closing memory-heavy programs while using it. Do not spend
+time tuning the prompt loop for this PC before one of those is done.
 
 ### Negative results — do not repeat this work
 
@@ -182,6 +207,28 @@ otes.txt`, or fell back to write_document.
   fails with `no decoder found for: svg`. Do not design around SVG input.
 - **`win.capturePage()` returns 1920x1032, not 1080**, because the window size
   includes chrome. Pass `useContentSize: true` to `BrowserWindow`.
+- **The front of the prompt must not change between questions.** The engine
+  reuses whatever prefix two prompts share, and that is the difference between
+  a reply in seconds and one in minutes on a CPU. The system message carried
+  the date *and the minute*, so the front changed every 60 s and nothing was
+  ever reused. The clock now goes with the question, and only when the
+  question is about the time (#99). Measured: the same 1,316-token prompt took
+  88 s cold and 2.8 s reused.
+- **`fit` mode assumes a graphics card.** With none, the engine hands a model
+  its full training window and the KV cache lands in system RAM. Set
+  `TRHAI_CONTEXT_TOKENS` on a CPU-only PC; the preset floors it at 8192.
+- **`TRHAI_MODEL` was not winning for code work.** Anything that looked like
+  code work (build/code modes, a path, "the file") put the coding model in
+  front of the pin, and `build_app` picked the coder outright. On a PC where
+  the coder cannot load that is a 300 s timeout before the pinned model is
+  asked at all. `pinnedModel`/`withCoderFirst` in `localModel.ts` keep the
+  env pin first with the coder right behind it (#104). A model a *conversation*
+  chose is deliberately not treated the same: file work still goes to the
+  coder ahead of it (`web-address.test.ts` says so).
+- **A timed-out request can leave the next one queued.** The engine has one
+  slot; the live battery saw a cold start time out and the warm request
+  behind it time out too. The 600 s limit on this PC is there so a slow reply
+  stays a slow reply.
 
 ### Proven working, end to end
 
@@ -286,31 +333,30 @@ local stack.
 
 ---
 
-## Task 2 — Run the CI that was just added
+## Task 2 — CI (done)
 
-`.github/workflows/ci.yml` exists on `trhai-microphone` and **has never run**. It
-triggers on PRs to `master` and pushes to `master`, so pushing the branch does
-not fire it. Open a PR and confirm it goes green before trusting it.
-
-If Node 22 fails where local Node 24 passes, that is a real version difference.
-Investigate it; do not just bump CI to 24.
+`.github/workflows/ci.yml` runs on every PR to `master` and has been green on
+every one since #97 (install, build, lint, typecheck, tests, PowerShell parse).
+The actions are on v7 (#106). Node 22 in CI has not differed from local Node 24
+so far. Pushing a workflow change needs the `workflow` OAuth scope on the
+`gh` sign-in; it has it on this PC now.
 
 ---
 
-## Task 3 — Decide on 1,048 lines of orphaned code
+## Task 3 — Decide on the orphaned code (mostly resolved)
 
-`packages/shared/src/` holds four modules with **zero consumers** in `apps/`:
+Two of the four modules this task listed are wired now: `automation.ts` is
+behind the Automation view (`flowStore`, `scheduler`), and `marketplace.ts` is
+the agent catalogue (chosen in Settings; also read by TRH World). Still with
+no consumer in `apps/`:
 
-| Module | Lines | Was behind |
-|---|---|---|
-| `automation.ts` | 448 | the deleted Automation page |
-| `marketplace.ts` | 301 | the deleted Agents page |
-| `localCalendar.ts` | 159 | the deleted Calendar page |
-| `knowledgeImport.ts` | 140 | the deleted Knowledge page |
+| Module | Lines |
+|---|---|
+| `localCalendar.ts` | 159 |
+| `knowledgeImport.ts` | 140 (three helpers are used; `prepareImport`/`summarizeImport` are not) |
 
-Plus ~70 tests. Working, tested code left behind when the app became one screen.
-**This is the user's decision, not an agent's** — either wire them into a rail
-(constraint 4) or delete them with their tests. Do not leave them drifting.
+**This is the user's decision, not an agent's** — wire them in or delete them
+with their tests. Do not leave them drifting.
 
 ---
 
@@ -330,12 +376,26 @@ Plus ~70 tests. Working, tested code left behind when the app became one screen.
 ```
 npm run lint          # eslint, trhai-web only - expect 0 problems
 npm run typecheck     # all workspaces - expect 0 errors
-npm test              # expect ~1561 tests, 0 failures
+npm test              # expect ~2,429 tests, 0 failures
 npm run build         # all workspaces
 ```
 
 Run all four. They catch different things: a CSS syntax error takes the build
 down while leaving lint, types and every test untouched. That has happened here.
+
+**Everything TRH AI needs, checked live:** `GET /v1/system/operations` (and the
+"Everything TRH AI needs" panel in the System view) reads API, web app,
+desktop shell, engine and model, Piper, Whisper, ffmpeg, workspace, saved
+data, schedules, free memory and disk, with a fix for anything not ok (#100).
+`npm run doctor` is the offline version. `npm run smoke:web-stack` and
+`npm run smoke:video` exercise the real stack.
+
+**TRH World** is a separate project (`D:\trhworld`, repo
+`Trhpruductions/trhworld`), not part of this repo (#102, #103). It reads only
+`GET /v1/world`, which this API computes from the execution log and the
+agent the last request named (`services/worldState.ts`, rules in
+`@ascend/shared` `agentWorld`). Keep that endpoint: it is the World's only
+data.
 
 **Test isolation:** run API tests with `npm test`, never a bare
 `npx tsx --test <file>`. The isolation keeping tests off the user's real
