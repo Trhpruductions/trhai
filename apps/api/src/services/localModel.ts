@@ -332,6 +332,39 @@ export function orderedCandidates(
   return ordered;
 }
 
+/**
+ * The model an explicit choice names, when it is installed: TRHAI_MODEL, or
+ * the conversation's own pick (see withChosenModel). Undefined when the choice
+ * is only the built-in default, or names nothing that is there.
+ */
+export function pinnedModel(config: Pick<LocalModelConfig, "model" | "modelFromEnv">, installed: string[]): string | undefined {
+  return config.modelFromEnv ? installed.find((name) => isModelOrSize(config.model, name)) : undefined;
+}
+
+/**
+ * The order for code work: the coding model first, in front of the ordinary
+ * candidates rather than replacing them, so that if it fails to load the
+ * fallback still works its way down the list.
+ *
+ * Unless TRHAI_MODEL names one. That stays first and the coder follows it:
+ * the rule above (an explicit TRHAI_MODEL always wins) was being overridden
+ * for anything that looked like code work, and on a PC with no
+ * graphics card and 8 GB that put a 7B coder the machine cannot load in front
+ * of the 3B the user had pinned precisely because it is the one that fits. Each
+ * such request waited out the coder's 300 s timeout before the pinned model
+ * was asked at all.
+ *
+ * A model a conversation chose is not the same kind of choice: it says which
+ * model should talk, not which one fits the machine, and code work still goes
+ * to the coder ahead of it. The caller decides which config's pin it passes.
+ */
+export function withCoderFirst(ordinary: string[], coder: string, pinned?: string): string[] {
+  if (!coder || ordinary[0] === coder) return ordinary;
+  const rest = ordinary.filter((name) => name !== coder);
+  if (pinned && rest[0] === pinned) return [pinned, coder, ...rest.slice(1)];
+  return [coder, ...rest];
+}
+
 export function pickModel(
   configured: string,
   installed: string[],

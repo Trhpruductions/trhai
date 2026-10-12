@@ -19,7 +19,7 @@ import {
   replyLimit,
   replyTooLong,
   unfinishedWithin,
-  type LocalModelConfig, orderedCandidates } from "../src/services/localModel.js";
+  type LocalModelConfig, orderedCandidates, pinnedModel, withCoderFirst } from "../src/services/localModel.js";
 import { defaultEnginePort } from "../src/services/modelEngine.js";
 import { completionBody, fakeWindow, modelsBody } from "./helpers/fakeEngine.js";
 
@@ -584,4 +584,39 @@ test("a model the user named still wins over the preference list", () => {
 test("a configured model that is not installed falls through to the list", () => {
   // The live situation: .env pinned qwen2.5-coder:7b after it had been removed.
   assert.equal(pickModel("qwen2.5-coder:7b", ["llama3.2:latest", "llama3.1:8b"], true), "llama3.1:8b");
+});
+
+test("a pinned model is the one named by an explicit choice, and only when it is installed", () => {
+  const installed = ["qwen2.5-coder-7b", "qwen2.5-3b", "qwen3-8b"];
+  assert.equal(pinnedModel({ model: "qwen2.5-3b", modelFromEnv: true }, installed), "qwen2.5-3b");
+  // A size of it, however the name is spelt.
+  assert.equal(pinnedModel({ model: "qwen2.5:3b", modelFromEnv: true }, installed), "qwen2.5-3b");
+  // The built-in default is not a choice.
+  assert.equal(pinnedModel({ model: "qwen2.5-coder", modelFromEnv: false }, installed), undefined);
+  // A choice that names nothing installed pins nothing.
+  assert.equal(pinnedModel({ model: "llama3.1", modelFromEnv: true }, installed), undefined);
+});
+
+test("for code work the coder goes first when nothing was chosen outright", () => {
+  assert.deepEqual(withCoderFirst(["qwen2.5-3b", "qwen3-8b", "qwen2.5-coder-7b"], "qwen2.5-coder-7b"),
+    ["qwen2.5-coder-7b", "qwen2.5-3b", "qwen3-8b"]);
+  // No coder installed: the list is untouched.
+  assert.deepEqual(withCoderFirst(["qwen2.5-3b", "qwen3-8b"], ""), ["qwen2.5-3b", "qwen3-8b"]);
+  // Already first: untouched.
+  assert.deepEqual(withCoderFirst(["qwen2.5-coder-7b", "qwen2.5-3b"], "qwen2.5-coder-7b"), ["qwen2.5-coder-7b", "qwen2.5-3b"]);
+});
+
+test("a model chosen outright stays first for code work, with the coder right behind it", () => {
+  // Seen live on a PC with no graphics card and 8 GB: TRHAI_MODEL=qwen2.5-3b,
+  // and "write a file called ..." still went to the 7B coder first, which could
+  // not load, so every such request waited out a 300 s timeout before the
+  // pinned model was asked.
+  const installed = ["qwen2.5-coder-7b", "qwen2.5-3b", "qwen3-8b"];
+  const ordinary = orderedCandidates("qwen2.5-3b", installed, true);
+  assert.equal(ordinary[0], "qwen2.5-3b");
+  assert.deepEqual(withCoderFirst(ordinary, "qwen2.5-coder-7b", pinnedModel({ model: "qwen2.5-3b", modelFromEnv: true }, installed)),
+    ["qwen2.5-3b", "qwen2.5-coder-7b", "qwen3-8b"]);
+  // When the pin IS the coder, nothing changes.
+  const pinnedCoder = orderedCandidates("qwen2.5-coder-7b", installed, true);
+  assert.deepEqual(withCoderFirst(pinnedCoder, "qwen2.5-coder-7b", "qwen2.5-coder-7b"), pinnedCoder);
 });
