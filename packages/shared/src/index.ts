@@ -5,6 +5,7 @@ export * from "./projectChange.js";
 export * from "./specRefinement.js";
 export * from "./personalities.js";
 export * from "./marketplace.js";
+export * from "./agentWorld.js";
 export * from "./memoryView.js";
 export * from "./knowledgeImport.js";
 export * from "./localCalendar.js";

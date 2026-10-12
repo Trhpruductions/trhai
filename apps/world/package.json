@@ -1,0 +1,15 @@
+{
+  "name": "@ascend/world",
+  "version": "0.1.0",
+  "description": "TRH World - the agents' town. A separate app that shows what TRH AI is really doing.",
+  "private": true,
+  "type": "module",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "build": "echo \"Nothing to build: plain files, no bundler\"",
+    "lint": "echo \"No linter configured yet\"",
+    "typecheck": "node --check server.mjs && node --check public/world.js && node --check main.cjs",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

@@ -10,7 +10,8 @@
     "apps/api",
     "apps/desktop",
     "apps/web",
-    "apps/trhai-web"
+    "apps/trhai-web",
+    "apps/world"
   ],
   "scripts": {
     "dev": "npm run dev --workspace @ascend/api",
@@ -27,6 +28,7 @@
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "health:api": "curl -fsS http://localhost:4000/health",
+    "world": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/launch-world.ps1",
     "smoke:web-stack": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/smoke-web-stack.ps1",
     "smoke:video": "tsx scripts/smoke-video.ts",
     "doctor": "tsx scripts/doctor.ts",

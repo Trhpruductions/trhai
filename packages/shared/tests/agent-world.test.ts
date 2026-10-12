@@ -1,10 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { allAgents, agentById } from "@ascend/shared";
+import { allAgents, agentById } from "../src/marketplace.js";
 import {
-  byRoom, homeRoomFor, recentSteps, residents, roomForKind, rooms, runningSteps
-} from "../src/lib/agentWorld.js";
-import type { ExecutionEvent } from "../src/hooks/useExecutionEvents.js";
+  byRoom, homeRoomFor, recentSteps, residents, roomForKind, rooms, runningSteps, type ExecutionEvent
+} from "../src/agentWorld.js";
 
 function step(id: string, kind: ExecutionEvent["kind"], status: ExecutionEvent["status"], label = `${kind} ${id}`): ExecutionEvent {
   return { id, kind, label, status, startedAt: "2026-10-10T10:00:00.000Z" };
