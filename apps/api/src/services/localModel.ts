@@ -346,13 +346,17 @@ export function pinnedModel(config: Pick<LocalModelConfig, "model" | "modelFromE
  * candidates rather than replacing them, so that if it fails to load the
  * fallback still works its way down the list.
  *
- * Unless a model was chosen outright. A choice stays first and the coder
- * follows it: the rule above (an explicit TRHAI_MODEL always wins) was being
- * overridden for anything that looked like code work, and on a PC with no
+ * Unless TRHAI_MODEL names one. That stays first and the coder follows it:
+ * the rule above (an explicit TRHAI_MODEL always wins) was being overridden
+ * for anything that looked like code work, and on a PC with no
  * graphics card and 8 GB that put a 7B coder the machine cannot load in front
  * of the 3B the user had pinned precisely because it is the one that fits. Each
  * such request waited out the coder's 300 s timeout before the pinned model
  * was asked at all.
+ *
+ * A model a conversation chose is not the same kind of choice: it says which
+ * model should talk, not which one fits the machine, and code work still goes
+ * to the coder ahead of it. The caller decides which config's pin it passes.
  */
 export function withCoderFirst(ordinary: string[], coder: string, pinned?: string): string[] {
   if (!coder || ordinary[0] === coder) return ordinary;

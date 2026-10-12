@@ -2032,7 +2032,8 @@ async function answerWithLocalModel(
   confirmedActions?: ReadonlySet<string>
 ): Promise<LocalModelAttempt> {
   // The conversation's own model when it has one; the usual choice otherwise.
-  const config = withChosenModel(readLocalModelConfig(), input.model);
+  const base = readLocalModelConfig();
+  const config = withChosenModel(base, input.model);
   const availability = await checkAvailability(config);
   if (!availability.available) return { ok: false, kind: "unavailable", reason: availability.reason };
 
@@ -2078,9 +2079,11 @@ async function answerWithLocalModel(
   // it fails to load the existing fallback still works its way down the list.
   const codeWork = isCodeWork(input.mode, input.userMessage ?? "");
   const ordinary = orderedCandidates(config.model, availability.installedModels, config.modelFromEnv ?? true);
-  // And a model chosen outright stays first even then: see withCoderFirst.
+  // TRHAI_MODEL stays first even then: it says which model fits this PC. A
+  // model the conversation chose does not - the coder still goes ahead of it
+  // for code work, as it always has. See withCoderFirst.
   const coder = codeWork ? pickAuthorModel(availability.installedModels, "") : "";
-  const candidates = withCoderFirst(ordinary, coder, pinnedModel(config, availability.installedModels));
+  const candidates = withCoderFirst(ordinary, coder, pinnedModel(base, availability.installedModels));
   const attempted: string[] = [];
   // Why the last model that could not be used was not, for when none could.
   let lastUnusable = "";

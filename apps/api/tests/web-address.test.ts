@@ -122,6 +122,35 @@ test("words about a page are offered the page reader and no file writer, and are
   }
 });
 
+test("TRHAI_MODEL stays first for code work, with the coding model right behind it", async () => {
+  // Seen live on a PC with no graphics card and 8 GB: TRHAI_MODEL=qwen2.5-3b
+  // because it is the model that fits, and a file question still went to the
+  // 7B coder first, which could not load there - a 300 s timeout before the
+  // pinned model was asked at all.
+  const engine = await fakeEngine({ models: ["qwen2.5-coder-7b", "qwen2.5-3b"], reply: { message: { content: "It is a server." } } });
+  const previousUrl = process.env.TRHAI_ENGINE_URL;
+  const previousModel = process.env.TRHAI_MODEL;
+  process.env.TRHAI_ENGINE_URL = engine.baseUrl;
+  process.env.TRHAI_MODEL = "qwen2.5-3b";
+  const app = createApp().listen(0, "127.0.0.1");
+  await once(app, "listening");
+  const base = `http://127.0.0.1:${(app.address() as AddressInfo).port}`;
+  try {
+    const response = await fetch(`${base}/v1/assist`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "general", sessionId: "web-address-pinned", message: "what's in D:/projects/app/server.js?" })
+    });
+    assert.equal(response.status, 200);
+    await response.json();
+    assert.equal(engine.chats[0]?.model, "qwen2.5-3b", "the pinned model is asked first");
+  } finally {
+    if (previousUrl === undefined) delete process.env.TRHAI_ENGINE_URL; else process.env.TRHAI_ENGINE_URL = previousUrl;
+    if (previousModel === undefined) delete process.env.TRHAI_MODEL; else process.env.TRHAI_MODEL = previousModel;
+    await new Promise<void>((resolve) => app.close(() => resolve()));
+    await engine.close();
+  }
+});
+
 test("a question about a page is answered by the conversation's own model, and a file by the coding model", async () => {
   // Both models installed, and the conversation has chosen the thinking one.
   const engine = await fakeEngine({ models: ["qwen2.5-coder-7b", "qwen3-8b"], reply: { message: { content: "It says Example Domain." } } });
