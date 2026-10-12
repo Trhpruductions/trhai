@@ -56,7 +56,7 @@ import {
   retrieveKnowledgePassages
 } from "./services/knowledgeStore.js";
 import { isAllowedOrigin } from "./services/originPolicy.js";
-import { checkAvailability, generate, readLocalModelConfig } from "./services/localModel.js";
+import { checkAvailability, generate, pinnedModel, readLocalModelConfig } from "./services/localModel.js";
 import { pickAuthorModel } from "./services/appAuthor.js";
 import { readPreferences, updatePreferences } from "./services/preferences.js";
 import { getBuildInfo } from "./services/buildInfo.js";
@@ -352,9 +352,12 @@ async function authorAppWithModel(prompt: string, cancel?: AbortSignal) {
   // finish a snake game in five minutes and the coder model wrote one in
   // thirty seconds, and the default timeout is tuned for answering a question
   // rather than producing five files.
+  // A model chosen outright (TRHAI_MODEL) writes the app itself: on a PC where
+  // the coding model cannot load, the pin is how the user has said so, and a
+  // slow build beats one that times out before it starts. See withCoderFirst.
   const availability = await checkAvailability(base);
   const model = availability.available
-    ? pickAuthorModel(availability.installedModels, availability.model)
+    ? pinnedModel(base, availability.installedModels) ?? pickAuthorModel(availability.installedModels, availability.model)
     : base.model;
 
   const config = { ...base, model, timeoutMs: Math.max(base.timeoutMs, 300000) };
