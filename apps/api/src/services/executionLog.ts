@@ -124,6 +124,17 @@ export function recordEvent(
   endEvent(sessionId, id, status, detail, artifact);
 }
 
+/**
+ * The latest steps from every session, oldest first. For the agents' world,
+ * which belongs to no one browser and so reads all of them.
+ */
+export function listAllEvents(limit = 60): ExecutionEvent[] {
+  const all: ExecutionEvent[] = [];
+  for (const events of logs.values()) for (const event of events) all.push({ ...event });
+  all.sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id, undefined, { numeric: true }));
+  return all.slice(-limit);
+}
+
 export function listEvents(sessionId: string | undefined): ExecutionEvent[] {
   if (!sessionId) return [];
   // Copies, so a caller cannot rewrite the record of what happened.

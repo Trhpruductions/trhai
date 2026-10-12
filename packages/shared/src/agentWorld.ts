@@ -12,8 +12,16 @@
 // workers running beside it - so showing them busy would be inventing activity.
 // They stand in their rooms and say what they are for.
 
-import type { Agent } from "@ascend/shared";
-import type { ExecutionEvent } from "../hooks/useExecutionEvents";
+import type { Agent } from "./marketplace.js";
+
+/** The part of an execution step the world reads. The API's own steps carry more. */
+export type ExecutionEvent = {
+  id: string;
+  kind: "plan" | "create" | "write" | "install" | "test" | "verify" | "launch" | "command" | "read";
+  label: string;
+  status: "running" | "ok" | "failed" | "skipped";
+  startedAt: string;
+};
 
 export type RoomId = "study" | "library" | "workshop" | "depot" | "lab" | "terminal" | "launchpad";
 

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TRH World</title>
+  <link rel="stylesheet" href="/world.css">
+</head>
+<body>
+  <header class="bar">
+    <h1>TRH World</h1>
+    <p>The agents' town. They only move when TRH AI really takes a step.</p>
+    <span id="link" class="chip">Connecting to TRH AI…</span>
+    <span id="mode" class="chip"></span>
+  </header>
+  <main class="layout">
+    <section class="stage" aria-label="The town">
+      <canvas id="town" width="480" height="340" role="img" aria-label="A pixel-art town. Each building is a kind of work; the agents stand in front of theirs and walk to the one where TRH AI is working."></canvas>
+      <p id="offline" class="offline" hidden>TRH AI is not running, so there is nothing to show. Open TRH AI and the town comes alive.</p>
+    </section>
+    <aside class="side">
+      <section class="card" aria-label="Who they are">
+        <h2>Who they are <span id="count" class="chip"></span></h2>
+        <ul id="roster" class="roster"></ul>
+      </section>
+      <section class="card" aria-label="What just happened">
+        <h2>What just happened</h2>
+        <ul id="steps" class="steps"></ul>
+        <p id="nosteps" class="faint">Nothing yet. Ask TRH AI to do something and each step shows up here, in the building where it happened.</p>
+      </section>
+    </aside>
+  </main>
+  <script src="/world.js"></script>
+</body>
+</html>

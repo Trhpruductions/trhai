@@ -97,6 +97,7 @@ import { getResumableTask, getTask, isTaskRunning } from "./services/taskStore.j
 import { clearFinishedTasks, forgetFinishedTask, listFinishedTasks, maxFinishedPerSession } from "./services/taskHistory.js";
 import { clearEvents, listEvents } from "./services/executionLog.js";
 import { readOperations } from "./services/operations.js";
+import { noteAgentUse, readWorld } from "./services/worldState.js";
 import { finishStages, getStage, stageLabels } from "./services/reasoningStage.js";
 import { snapshot, toPrometheus } from "./services/metrics.js";
 import {
@@ -197,6 +198,8 @@ function normalizeCadence(value: unknown): Cadence | undefined {
 function agentFromRequest(req: express.Request): AgentLens | undefined {
   const id = typeof req.body?.agentId === "string" ? req.body.agentId.trim() : "";
   const agent = id ? agentById(id) : undefined;
+  // Remembered for the agents' world, which shows who was last asked for.
+  noteAgentUse(agent ? agent.id : null);
   return agent
     ? { name: agent.name, role: agent.role, description: agent.description, focus: agent.focus }
     : undefined;
@@ -1358,6 +1361,12 @@ export function createApp(options: AppOptions = {}) {
     } catch (error) {
       next(error);
     }
+  });
+
+  // The agents' world: who is where, from what TRH AI is really doing, across
+  // every session. Read by the separate World app. See services/worldState.ts.
+  app.get("/v1/world", (_req, res) => {
+    res.json({ data: readWorld(), traceId: "trace-local" });
   });
 
   app.get("/v1/system/runtime", async (_req, res) => {
