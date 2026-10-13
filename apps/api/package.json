@@ -9,7 +9,8 @@
     "start": "tsx src/index.ts",
     "test": "node --test --import tsx --import ./tests/setup/isolate-state.ts tests/**/*.test.ts",
     "lint": "echo \"No linter configured yet\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "bundle": "node scripts/bundle.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -28,6 +29,7 @@
     "@types/node": "^24.3.0",
     "@types/nodemailer": "^8.0.2",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "esbuild": "^0.28.1"
   }
 }

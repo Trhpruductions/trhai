@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
-import { constants as fsConstants, existsSync, statSync, statfsSync } from "node:fs";
+import { constants as fsConstants, existsSync, mkdirSync, openSync, statSync, statfsSync } from "node:fs";
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell } from "electron";
 import os from "node:os";
 import path from "node:path";
@@ -825,8 +825,78 @@ async function waitForApiHealth(timeoutMs: number): Promise<boolean> {
   return false;
 }
 
+/**
+ * The services from the install's own resources.
+ *
+ * An installed copy has no source tree, no npm and no Node of its own, so
+ * the API is one bundled file and the web app is its standalone build, and
+ * both are run by this Electron acting as Node (ELECTRON_RUN_AS_NODE).
+ * Everything the app keeps - its data, its .env - lives under userData,
+ * never beside the program files. The children inherit the environment, so
+ * an app TRH AI builds and runs is started by the same Electron-as-Node.
+ */
+async function ensurePackagedServices() {
+  const resources = process.resourcesPath;
+  const userData = app.getPath("userData");
+  const apiEntry = path.join(resources, "api", "server.mjs");
+  const webEntry = path.join(resources, "web", "apps", "trhai-web", "scripts", "serve.mjs");
+  const env: NodeJS.ProcessEnv = {
+    ELECTRON_RUN_AS_NODE: "1",
+    NODE_ENV: "production",
+    PORT: "4000",
+    TRHAI_DATA_DIR: path.join(userData, "data"),
+    TRHAI_ENV_FILE: path.join(userData, ".env"),
+    TRHAI_ELECTRON_PATH: process.execPath,
+    TRHAI_VERSION: app.getVersion()
+  };
+  await mkdir(env.TRHAI_DATA_DIR as string, { recursive: true });
+
+  const apiPortReady = await waitForPort(4000, 1200);
+  const apiReady = apiPortReady ? await waitForApiHealth(2500) : false;
+  if (!apiReady) spawnNodeService("TRH AI API", apiEntry, [], env, path.dirname(apiEntry));
+
+  if (!(await waitForPort(webPort, 1200))) {
+    spawnNodeService("TRH AI web", webEntry, ["-H", desktopHost, "-p", String(webPort)], env, path.dirname(webEntry));
+  }
+
+  if (!(await waitForApiHealth(45000))) console.error("[desktop] API health endpoint did not become ready within timeout");
+  if (!(await waitForPort(webPort, 45000))) console.error("[desktop] Web client port did not become ready within timeout");
+}
+
+/**
+ * One service, run by this Electron as Node. No cmd.exe shim, so its pid is
+ * the process itself. What it prints goes to `logs\<label>.log` under
+ * userData, appended, so a service that fails to start on someone's PC leaves
+ * a reason behind.
+ */
+function spawnNodeService(label: string, script: string, args: string[], env: NodeJS.ProcessEnv, cwd: string) {
+  const child = spawn(process.execPath, [script, ...args], {
+    cwd,
+    stdio: ["ignore", serviceLog(label), serviceLog(label)],
+    windowsHide: true,
+    env: { ...process.env, ...env }
+  });
+  if (child.pid !== undefined) startedServices.push({ label, pid: child.pid });
+}
+
+/** A file descriptor for the service's log, or "ignore" when the log cannot be opened. */
+function serviceLog(label: string): number | "ignore" {
+  try {
+    const dir = path.join(app.getPath("userData"), "logs");
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.log`);
+    return openSync(file, "a");
+  } catch {
+    return "ignore";
+  }
+}
+
 async function ensureSelfHostedServices() {
   if (autoStartDisabled) return;
+  if (app.isPackaged) {
+    await ensurePackagedServices();
+    return;
+  }
   if (!(await pathExists(path.resolve(workspaceRoot, "package.json")))) return;
 
   const apiPortReady = await waitForPort(4000, 1200);
@@ -884,7 +954,10 @@ async function ensureSelfHostedServices() {
 async function renderInlineShell(reason: string, details?: string) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
 
-  const fallbackPath = path.resolve(workspaceRoot, ".ascend-temp", "desktop-shell.html");
+  // An installed copy cannot write beside its program files; its userData can.
+  const fallbackPath = app.isPackaged
+    ? path.join(app.getPath("userData"), "temp", "desktop-shell.html")
+    : path.resolve(workspaceRoot, ".ascend-temp", "desktop-shell.html");
   // The TRH AI loading screen - see loadingShell.ts. This was a grey box
   // headed "Vexora AI", the first thing anyone saw on opening the app.
   const html = loadingShellHtml(reason, details);

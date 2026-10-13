@@ -38,10 +38,15 @@ function readVersion(relativePackageJsonPath: string): string {
   try {
     const raw = readFileSync(path.join(repoRoot, relativePackageJsonPath), "utf8");
     const parsed = JSON.parse(raw) as { version?: unknown };
-    return typeof parsed.version === "string" ? parsed.version : "unknown";
+    return typeof parsed.version === "string" ? parsed.version : fallbackVersion();
   } catch {
-    return "unknown";
+    return fallbackVersion();
   }
+}
+
+/** An installed copy has no package.json to read; the shell passes its own version. */
+function fallbackVersion(): string {
+  return process.env.TRHAI_VERSION?.trim() || "unknown";
 }
 
 /** Null on any failure — no git binary, not a checkout, a shallow clone missing the ref. Never thrown. */
