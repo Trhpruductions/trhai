@@ -1,6 +1,6 @@
 {
-  "appId": "com.trh.ascend.desktop",
-  "productName": "Vexora AI",
+  "appId": "com.trh.trhai",
+  "productName": "TRH AI",
   "asar": true,
   "directories": {
     "output": "release"
@@ -12,6 +12,22 @@
     "assets/**/*",
     "package.json"
   ],
+  "extraResources": [
+    {
+      "from": "../api/dist",
+      "to": "api",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../trhai-web/.next/standalone",
+      "to": "web",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
   "win": {
     "target": [
       "nsis",
@@ -21,6 +37,9 @@
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
-    "artifactName": "ascend-ai-desktop-setup-${version}.${ext}"
+    "artifactName": "TRH-AI-Setup-${version}.${ext}"
+  },
+  "portable": {
+    "artifactName": "TRH-AI-Portable-${version}.${ext}"
   }
 }

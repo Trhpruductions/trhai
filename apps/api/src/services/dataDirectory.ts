@@ -67,5 +67,9 @@ export function dataRoot(): string {
     return testDataRoot;
   }
 
+  // An installed copy keeps its data where the desktop shell says (its
+  // userData folder), never beside the program files.
+  const configured = process.env.TRHAI_DATA_DIR?.trim();
+  if (configured) return configured;
   return path.join(packageRoot(), "data");
 }
