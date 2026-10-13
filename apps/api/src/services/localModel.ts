@@ -24,6 +24,7 @@ import {
   engineOffReason, enginePaths, engineUrl, isModelOrSize, listEngineModels, loadEngineModel, reviveEngine, type EngineModel
 } from "./modelEngine.js";
 import { engineError, readCompletion } from "./engineChat.js";
+import { engineFetch } from "./engineFetch.js";
 
 export type LocalModelConfig = {
   /** Where the model engine is listening. */
@@ -390,7 +391,7 @@ export function pickModel(
 
 export async function checkAvailability(
   config: LocalModelConfig,
-  fetchImpl: FetchLike = fetch
+  fetchImpl: FetchLike = engineFetch
 ): Promise<ModelAvailability> {
   const list = () => listEngineModels(config.baseUrl, fetchImpl, AbortSignal.timeout(Math.min(config.timeoutMs, 4000)));
   const answeredWithError = (error: unknown) => error instanceof Error && /^The model engine answered \d+/.test(error.message);
@@ -432,7 +433,7 @@ export async function checkAvailability(
     return {
       available: false,
       reason: `The model engine is running at ${config.baseUrl} but has no model to answer with. `
-        + `Put a .gguf model file in ${enginePaths().modelsDir} and start TRH AI again.`
+        + `Install one in Settings, under Engine and models, or put a .gguf model file in ${enginePaths().modelsDir} and start TRH AI again.`
     };
   }
 
@@ -490,7 +491,7 @@ export function buildPrompt(request: GenerationRequest): string {
 export async function generate(
   config: LocalModelConfig,
   request: GenerationRequest,
-  fetchImpl: FetchLike = fetch,
+  fetchImpl: FetchLike = engineFetch,
   /**
    * The turn's Stop. App authoring and a long summary run during a turn and
    * can take minutes, so Stop ends this request too - see deadlineOrStop.

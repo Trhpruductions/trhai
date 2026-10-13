@@ -1,6 +1,7 @@
 import { deadlineOrStop, stoppedBeforeFinishing, type LocalModelConfig } from "./localModel.js";
 import { enginePaths, engineUrl, listEngineModels, loadEngineModel, reviveEngine, sameModel } from "./modelEngine.js";
 import { engineError, readCompletion } from "./engineChat.js";
+import { engineFetch } from "./engineFetch.js";
 
 // Looking at an image, with a local vision model.
 //
@@ -138,7 +139,7 @@ export function tokensNeededFor(images: VisionImage[]): number {
 export async function findVisionModel(
   baseUrl: string,
   wanted: string,
-  fetcher: Fetcher = fetch
+  fetcher: Fetcher = engineFetch
 ): Promise<{ reachable: boolean; model: string | null }> {
   try {
     const models = await listEngineModels(baseUrl, fetcher as typeof fetch, AbortSignal.timeout(5000));
@@ -200,7 +201,7 @@ export async function warmVisionModel(
   config: Pick<LocalModelConfig, "baseUrl">,
   options: { fetcher?: Fetcher; model?: string } = {}
 ): Promise<boolean> {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? engineFetch;
   const found = await findVisionModel(config.baseUrl, options.model ?? visionModelName(), fetcher);
   if (!found.model) return false;
   const loaded = await loadEngineModel(config.baseUrl, found.model, { fetchImpl: fetcher as typeof fetch, timeoutMs: 300_000 });
@@ -229,7 +230,7 @@ export async function lookAtImages(
     if (problem) return { ok: false, reason: problem };
   }
 
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? engineFetch;
   const wanted = options.model ?? visionModelName();
   let found = await findVisionModel(config.baseUrl, wanted, fetcher);
   // This process's own engine, stopped: started again before giving up, as

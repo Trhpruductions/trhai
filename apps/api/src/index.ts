@@ -7,6 +7,7 @@ import { createApp } from "./server.js";
 import { startScheduler, stopScheduler } from "./services/scheduler.js";
 import { noteListening } from "./services/runtimeStatus.js";
 import { startEngine, stopEngine } from "./services/modelEngine.js";
+import { hardwareDefaults, readHardware } from "./services/modelSetup.js";
 import { listenOn, listenPlan, type Listener } from "./services/networkAccess.js";
 import { encryptPlainStores } from "./services/dataInventory.js";
 
@@ -54,6 +55,13 @@ function findEnvFile(name: string): string | undefined {
 
 const envFile = findEnvFile(process.env.NODE_ENV === "test" ? ".env.test" : ".env");
 if (envFile) dotenv.config({ path: envFile });
+
+// Settings that suit this PC, for whatever .env leaves unset: an installed copy
+// has no .env at all, and a PC without a graphics card needs a capped context
+// window, a longer wait for a reply and a smaller model (modelSetup.ts says why).
+const suited = hardwareDefaults(readHardware(), process.env);
+for (const [key, value] of Object.entries(suited)) process.env[key] = value;
+if (Object.keys(suited).length) console.log(`ascend-api suited to this PC: ${Object.entries(suited).map(([key, value]) => `${key}=${value}`).join(", ")}`);
 
 // Before any store loads, and after .env (which may hold TRHAI_DATA_KEY): a
 // store still kept as plain JSON from before encryption is rewritten encrypted.

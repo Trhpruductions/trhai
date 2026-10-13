@@ -71,6 +71,26 @@ time tuning the prompt loop for this PC before one of those is done.
 
 ### Negative results — do not repeat this work
 
+- **Node's fetch gives up at 300 s, whatever the model timeout says.**
+  Found 2026-10-13: undici, inside Node's built-in fetch, drops a request
+  whose response has not begun within 300 s, and nothing passed to `fetch()`
+  changes that. The engine answers nothing until it has read the whole
+  prompt, so on this PC every cold reply over five minutes failed as "the
+  request failed" while `TRHAI_MODEL_TIMEOUT_MS=600000` was set - and the
+  engine log shows the model finishing anyway, for nobody. Engine requests
+  now go through `engineFetch.ts` (Node's `http`, no limit of its own; the
+  caller's deadline decides). The 4B model's 409 s first reply works since.
+  The note above that the 7B coder and the 8B "cannot load" here because
+  "each attempt is a 300 s timeout" was this limit: try them again before
+  believing it.
+- **One connection per engine request.** The first version of
+  `engineFetch.ts` used Node's default agent, which keeps connections open
+  for reuse. The engine closes its side after each answer, so the model's
+  second turn after a tool call went out on a dead connection and failed in
+  0 ms with "socket hang up". It now uses a non-keep-alive agent and sends
+  `Connection: close`; `engine-fetch.test.ts` has a server that closes like
+  llama.cpp does.
+
 - **Gating a tool out of the offer is not enough; enforce it at dispatch.**
   With `calculate` withheld for "what comes next: 2, 6, 12, 20, 30, ?", the
   model returned a `calculate` tool_call anyway - from habit, not from the

@@ -2,6 +2,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { engineFetch } from "./engineFetch.js";
 
 // The model engine: llama.cpp's own server, started and stopped by TRH AI.
 //
@@ -178,6 +179,9 @@ export function discoverModels(modelsDir: string): EngineModelFile[] {
  * 54 automatic checks against 45 under Ollama.
  */
 const familySampling: Array<{ family: RegExp; settings: Record<string, string> }> = [
+  // Qwen3's 2507 instruct models do not think first, and their makers publish
+  // other settings for them. Before the family line below, which would match.
+  { family: /^qwen3-[\d.]+b-instruct-2507/i, settings: { temp: "0.7", "top-k": "20", "top-p": "0.8", "min-p": "0" } },
   { family: /^qwen3(?![\d.])/i, settings: { temp: "0.6", "top-k": "20", "top-p": "0.95", "min-p": "0" } }
 ];
 
@@ -409,7 +413,7 @@ async function launch(env: NodeJS.ProcessEnv): Promise<EngineState> {
   if (!paths.exe) {
     state = {
       status: "off", url,
-      reason: `The model engine (llama.cpp) is not installed in ${path.join(paths.runtimeDir, "engine")}. Run: npm run setup:engine`
+      reason: `The model engine (llama.cpp) is not installed in ${path.join(paths.runtimeDir, "engine")}. Set it up in Settings, under Engine and models.`
     };
     return state;
   }
@@ -490,6 +494,26 @@ function endEngine(): void {
   state = { status: "off", url: state.url, reason: "The model engine was stopped." };
 }
 
+/**
+ * Stops the engine and starts it again, for a change to the models folder: it
+ * reads the list of models only when it starts. `between` runs while it is
+ * stopped - deleting a model's file, which a running engine may hold open.
+ *
+ * Leaves alone an engine that is someone else's, and one this process was
+ * told not to run (TRHAI_ENGINE=off); `between` still runs.
+ */
+export async function restartEngine(between?: () => void): Promise<EngineState> {
+  if (starting) await starting.catch(() => undefined);
+  if (state.status === "external" || process.env.TRHAI_ENGINE === "off") {
+    between?.();
+    return state;
+  }
+  endEngine();
+  between?.();
+  closing = false;
+  return startEngine(startedWith);
+}
+
 /** Stops the engine for good: the API is closing. It is not started again by a request that finds it gone. */
 export function stopEngine(): void {
   closing = true;
@@ -514,7 +538,7 @@ export type EngineModel = {
 type FetchLike = typeof fetch;
 
 /** The engine's models. Throws when the engine does not answer, or answers with an error. */
-export async function listEngineModels(baseUrl: string, fetchImpl: FetchLike = fetch, signal?: AbortSignal): Promise<EngineModel[]> {
+export async function listEngineModels(baseUrl: string, fetchImpl: FetchLike = engineFetch, signal?: AbortSignal): Promise<EngineModel[]> {
   const response = await fetchImpl(`${baseUrl}/models`, { signal: signal ?? AbortSignal.timeout(4000) });
   if (!response.ok) throw new Error(`The model engine answered ${response.status}.`);
   const payload = await response.json() as { data?: unknown };
@@ -561,7 +585,7 @@ export async function loadEngineModel(
   name: string,
   options: { fetchImpl?: FetchLike; signal?: AbortSignal; timeoutMs?: number } = {}
 ): Promise<LoadedModel> {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = options.fetchImpl ?? engineFetch;
   const allowed = options.timeoutMs ?? 120_000;
   const until = Date.now() + allowed;
   // The caller's Stop and the time allowed, on every request made here: an
@@ -621,7 +645,7 @@ export async function loadEngineModel(
 }
 
 /** Lets a model go now, rather than when it has sat idle. The next request that needs it loads it again. */
-export async function unloadEngineModel(baseUrl: string, name: string, fetchImpl: FetchLike = fetch): Promise<{ ok: true } | { ok: false; reason: string }> {
+export async function unloadEngineModel(baseUrl: string, name: string, fetchImpl: FetchLike = engineFetch): Promise<{ ok: true } | { ok: false; reason: string }> {
   try {
     const models = await listEngineModels(baseUrl, fetchImpl);
     const id = models.find((model) => sameModel(model.id, name))?.id ?? name;

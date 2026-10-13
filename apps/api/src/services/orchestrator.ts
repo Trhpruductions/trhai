@@ -53,6 +53,7 @@ import { matchMemories } from "./factWording.js";
 import { resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
 import { contentToKeep, pageToKeep } from "./pageSave.js";
 import { fetchRawPage, readablePage, type RawFetchOutcome } from "./webFetch.js";
+import { engineFetch } from "./engineFetch.js";
 
 export type OrchestratorInput = {
   mode: "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
@@ -2152,7 +2153,7 @@ async function answerWithLocalModel(
     // calculator-call-build-app and snake-game-call-build-app - right at the
     // front, wrong from there on.
     request: input.userMessage
-  }, fetch, onToolStart, input.onToken, input.unattended, input.cancel);
+  }, engineFetch, onToolStart, input.onToken, input.unattended, input.cancel);
 
     if (result.ok) {
       return {

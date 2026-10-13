@@ -62,6 +62,8 @@ import { readPreferences, updatePreferences } from "./services/preferences.js";
 import { getBuildInfo } from "./services/buildInfo.js";
 import { activateLicense, licenseStatus, paywallGate, removeLicense } from "./services/licensing.js";
 import { checkForUpdates } from "./services/updates.js";
+import { engineFetch } from "./services/engineFetch.js";
+import { cancelSetup, removeModel, setupStatus, startSetup } from "./services/modelSetup.js";
 import { getSystemCapabilities, toolsByLevel } from "./services/systemCapabilities.js";
 import { describeTools, probeTools } from "./services/toolCenter.js";
 import { addTask, listTasks, removeTask, setTaskDone } from "./services/taskListStore.js";
@@ -363,7 +365,7 @@ async function authorAppWithModel(prompt: string, cancel?: AbortSignal) {
     : base.model;
 
   const config = { ...base, model, timeoutMs: Math.max(base.timeoutMs, 300000) };
-  const result = await generate(config, { question: prompt, context: [], rawPrompt: prompt }, fetch, cancel);
+  const result = await generate(config, { question: prompt, context: [], rawPrompt: prompt }, engineFetch, cancel);
   return result.ok ? { ok: true as const, text: result.text } : { ok: false as const, reason: result.reason };
 }
 
@@ -391,7 +393,7 @@ async function generateWithModel(prompt: string, cancel?: AbortSignal) {
   const availability = await checkAvailability(base);
   const model = availability.available ? availability.model : base.model;
   const result = await generate({ ...base, model, timeoutMs: Math.max(base.timeoutMs, 120000) },
-    { question: prompt, context: [], rawPrompt: prompt }, fetch, cancel);
+    { question: prompt, context: [], rawPrompt: prompt }, engineFetch, cancel);
   return result.ok ? { ok: true as const, text: result.text, model: result.model } : { ok: false as const, reason: result.reason };
 }
 
@@ -564,6 +566,42 @@ export function createApp(options: AppOptions = {}) {
 
   app.delete("/v1/license", (_req, res) => {
     res.json({ data: removeLicense(), traceId: "trace-local" });
+  });
+
+  // First-run setup: the model engine and the models, downloaded and verified
+  // by the app (services/modelSetup.ts). Not behind the paywall: a PC has to
+  // be able to get to the point of answering before anyone pays for it.
+  app.get("/v1/setup", (_req, res) => {
+    res.json({ data: setupStatus(), traceId: "trace-local" });
+  });
+
+  app.post("/v1/setup/install", (req, res) => {
+    const engine = req.body?.engine;
+    const models = Array.isArray(req.body?.models) ? req.body.models.filter((id: unknown): id is string => typeof id === "string") : [];
+    const started = startSetup({ engine: engine === true || typeof engine === "string" ? engine : false, models });
+    if (!started.ok) {
+      res.status(409).json({ code: "SETUP_REFUSED", message: started.error, traceId: "trace-local" });
+      return;
+    }
+    res.status(202).json({ data: setupStatus(), traceId: "trace-local" });
+  });
+
+  app.delete("/v1/setup/job", (_req, res) => {
+    cancelSetup();
+    res.json({ data: setupStatus(), traceId: "trace-local" });
+  });
+
+  app.delete("/v1/setup/models/:id", async (req, res, next) => {
+    try {
+      const removed = await removeModel(req.params.id);
+      if (!removed.ok) {
+        res.status(409).json({ code: "REMOVE_REFUSED", message: removed.error, traceId: "trace-local" });
+        return;
+      }
+      res.json({ data: setupStatus(), traceId: "trace-local" });
+    } catch (error) {
+      next(error);
+    }
   });
 
   // What is new in this version, and whether a newer one is out.

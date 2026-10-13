@@ -80,7 +80,7 @@ export function operationsFrom(facts: OperationFacts): OperationRow[] {
     rows.push({
       id: "engine", label: "Model engine", group: "Model", status: "fail",
       detail: facts.engine.reason ?? "The model engine is not answering",
-      fix: "Start TRH AI again. If it still does not answer, run: npm run setup:engine"
+      fix: "Open Settings, then Engine and models, to install it. If it is installed, start TRH AI again."
     });
   } else {
     rows.push({
@@ -94,11 +94,11 @@ export function operationsFrom(facts: OperationFacts): OperationRow[] {
         detail: present
           ? `${facts.engine.wanted} is installed${facts.engine.loaded.length ? ` and loaded` : ", loads on the first question"}`
           : `${facts.engine.wanted} is not installed; ${facts.engine.installed[0]} will answer instead`,
-        fix: present ? undefined : `Put ${facts.engine.wanted}.gguf in the models folder, or set TRHAI_MODEL to an installed model.`
+        fix: present ? undefined : `Install ${facts.engine.wanted} in Settings, under Engine and models, or pick an installed model there.`
       }
       : {
         id: "model", label: "Chat model", group: "Model", status: "fail", detail: "No model is installed",
-        fix: "Put a .gguf model in the models folder, then restart TRH AI."
+        fix: "Open Settings, then Engine and models, and install the model it recommends for this PC."
       });
   }
 

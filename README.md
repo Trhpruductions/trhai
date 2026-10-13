@@ -14,10 +14,26 @@ provider SDK, or a non-loopback URL to the model client.
 Answers come from a local model when one is installed. The app runs it in its own
 model engine — [llama.cpp](https://github.com/ggml-org/llama.cpp)'s server, which
 it starts and stops itself — so opening Vexora is the only thing you have to do,
-and there is no second application to install or keep running. `npm run
-setup:engine` puts the engine in place once, and a model is a `.gguf` file in the
-app's models folder. With no model installed it still runs, answering from your
-saved memory and your documents and saying plainly when it has neither.
+and there is no second application to install or keep running. The first time
+it runs on a PC without them, it offers to download the engine and a model suited
+to that PC, each checked against the fingerprint its makers published (Settings,
+Engine and models, does the same at any time). From a checkout, `npm run
+setup:engine` still puts the engine in place, and any `.gguf` file in the app's
+models folder is a model. With no model installed it still runs, answering from
+your saved memory and your documents and saying plainly when it has neither.
+
+## What it needs
+
+| | Smallest that works | Comfortable |
+|---|---|---|
+| Windows | 10 or 11, 64-bit | |
+| Memory | 8 GB, with the Qwen3 4B model. Replies take a minute or more. | 16 GB, or an NVIDIA card with 8 GB, for the 7B models |
+| Disk | About 3 GB free for the engine and one small model | 10 GB or more for several models |
+| Internet | Only for the first download of the engine and models, and for update checks | |
+
+Measured on an i5-3570 with 8 GB and no graphics card: a cold reply takes
+between one and five minutes, and a follow-up in the same conversation takes
+seconds. With an 8 GB NVIDIA card, replies arrive at about 40 tokens a second.
 
 The assistant has tools it can call and chain, so it can look something up, do
 arithmetic exactly, work out a date, write a file, and build a working app. Two rules
@@ -141,12 +157,13 @@ it documents every setting.
 ## Desktop packaging
 
 ```bash
-npm run dist:desktop:win
+npm run package:win
 ```
 
-Artifacts land in `apps/desktop/release`. `npm run dist:desktop` builds for the
-current platform. On Windows, `Launch-Vexora.vbs` starts the packaged app with no
-visible console window.
+That builds `TRH-AI-Setup-<version>.exe` and a portable build in
+`apps/desktop/release`; they need no Node, npm or source tree on the PC. See
+`docs/23-install-story.md` for what goes in and how first-run setup works, and
+`docs/24-paywall-and-updates.md` for licences, releases and update notices.
 
 ## Notes
 

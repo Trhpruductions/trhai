@@ -1,7 +1,7 @@
 // The Settings app's sections, and what a search of them keeps. Pure, so it
 // is testable without a screen.
 
-export type SectionId = "account" | "billing" | "updates" | "assistant" | "voice" | "appearance" | "messaging" | "notifications" | "data" | "about";
+export type SectionId = "account" | "billing" | "updates" | "models" | "assistant" | "voice" | "appearance" | "messaging" | "notifications" | "data" | "about";
 
 export type Section = { id: SectionId; label: string; summary: string; keywords: string };
 
@@ -9,6 +9,7 @@ export const sections: Section[] = [
   { id: "account", label: "Account", summary: "Sign in, out, password, recovery codes.", keywords: "sign in out password recovery codes email login" },
   { id: "billing", label: "Plan and billing", summary: "Your trial or license, buying one, and the key.", keywords: "plan billing payment pay buy purchase license licence key trial subscription upgrade price paywall" },
   { id: "updates", label: "Updates", summary: "What is new, and newer versions to download.", keywords: "updates update new version release notes changelog download upgrade whats new" },
+  { id: "models", label: "Engine and models", summary: "The engine that runs the AI, and the models it runs.", keywords: "engine model models download install llama gguf ai setup first run qwen remove disk" },
   { id: "assistant", label: "Assistant", summary: "Personality, accent colour, agent and model.", keywords: "personality tone agent model accent colour color" },
   { id: "voice", label: "Voice", summary: "The voice TRH AI speaks with.", keywords: "voice speech speak piper sound" },
   { id: "appearance", label: "Appearance", summary: "What stands behind everything.", keywords: "background scene theme look plain still living" },
