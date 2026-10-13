@@ -9,6 +9,8 @@ import { CommandBar } from "./CommandBar";
 import { CommandPalette } from "./CommandPalette";
 import { NotificationCenter, Toasts } from "./Notifications";
 import { ViewBoundary } from "../ui/SystemAlert";
+import { PaywallScreen } from "../../components/PaywallScreen";
+import { UpdateNotices } from "../../components/UpdateNotices";
 import { useNav } from "../state/nav";
 import { useAssistantState, useVoice } from "../state/assistant";
 import { views, viewById, type ViewId } from "../views";
@@ -96,7 +98,10 @@ export function AppShell() {
   ), [view, View]);
   const chrome = useMemo(() => ({
     sidebar: <Sidebar />, topbar: <TopBar />, commandbar: <CommandBar />,
-    notices: <NotificationCenter />, toasts: <Toasts />, palette: <CommandPalette />
+    notices: <NotificationCenter />, toasts: <Toasts />, palette: <CommandPalette />,
+    // Over every screen, for everyone using the app: the update notices, and
+    // the paywall once a trial or license has run out (it sits above them).
+    updates: <UpdateNotices />, paywall: <PaywallScreen />
   }), []);
 
   return (
@@ -130,6 +135,8 @@ export function AppShell() {
         {chrome.notices}
         {chrome.toasts}
         {chrome.palette}
+        {chrome.updates}
+        {chrome.paywall}
       </div>
     </BackdropAnchorProvider>
   );

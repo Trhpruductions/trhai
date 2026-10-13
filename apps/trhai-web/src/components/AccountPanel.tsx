@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { apiBaseUrl } from "../lib/api";
+import { apiBaseUrl, apiFetch } from "../lib/api";
 import { browserStores, minPasswordLength, readStoredAuth, writeStoredAuth, type SignedInAccount } from "../lib/auth";
 import "./personality.css";
 
@@ -51,7 +51,7 @@ export function AccountPanel({ account, onSignOut, onSignIn }: {
     setBusy(true);
     setNote(null);
     try {
-      const response = await fetch(`${apiBaseUrl}/v1/auth/password`, {
+      const response = await apiFetch(`${apiBaseUrl}/v1/auth/password`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${stored.token}` },
         body: JSON.stringify({ currentPassword: current, newPassword: next })

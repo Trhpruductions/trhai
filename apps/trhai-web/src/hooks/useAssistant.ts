@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiBaseUrl, requestHeaders, sessionId as resolveSessionId } from "../lib/api";
+import { apiBaseUrl, apiFetch, requestHeaders, sessionId as resolveSessionId } from "../lib/api";
 import { applyAgentDisclaimer, applyResponseStyle } from "@ascend/shared";
 import { readStoredPersonality } from "../lib/personality";
 import { readActiveAgent } from "../lib/agents";
@@ -192,7 +192,7 @@ export function useAssistant() {
     if (listFilter.current.query?.trim()) params.set("q", listFilter.current.query.trim());
     if (listFilter.current.archived) params.set("archived", "1");
     try {
-      const response = await fetch(`${apiBaseUrl}/v1/conversations?${params}`, { headers: requestHeaders() });
+      const response = await apiFetch(`${apiBaseUrl}/v1/conversations?${params}`, { headers: requestHeaders() });
       const payload = response.ok ? await response.json() : null;
       // Only the newest request may answer: typing a search fires several.
       if (mine === listGeneration.current && Array.isArray(payload?.data?.conversations)) {
@@ -216,7 +216,7 @@ export function useAssistant() {
     const open = async () => {
       const remembered = readOpenConversation();
       if (remembered) {
-        const response = await fetch(`${apiBaseUrl}/v1/conversations/${remembered}?sessionId=${sessionParam}`, { headers: requestHeaders() });
+        const response = await apiFetch(`${apiBaseUrl}/v1/conversations/${remembered}?sessionId=${sessionParam}`, { headers: requestHeaders() });
         const conversation = response.ok ? (await response.json())?.data?.conversation : null;
         if (conversation) {
           if (!superseded()) {
@@ -227,7 +227,7 @@ export function useAssistant() {
           return;
         }
       }
-      const response = await fetch(`${apiBaseUrl}/v1/assist/conversation?sessionId=${sessionParam}`, { headers: requestHeaders() });
+      const response = await apiFetch(`${apiBaseUrl}/v1/assist/conversation?sessionId=${sessionParam}`, { headers: requestHeaders() });
       const payload = response.ok ? await response.json() : null;
       if (superseded()) return;
       const turns: StoredTurnPayload[] = payload?.data?.turns ?? [];
@@ -329,7 +329,7 @@ export function useAssistant() {
     let flush = 0;
 
     try {
-      const response = await fetch(`${apiBaseUrl}/v1/assist/stream`, {
+      const response = await apiFetch(`${apiBaseUrl}/v1/assist/stream`, {
         method: "POST",
         headers: requestHeaders({ "Content-Type": "application/json" }),
         // The active agent goes by id only; the API looks it up in the shared
@@ -351,6 +351,12 @@ export function useAssistant() {
         signal: controller.signal
       });
 
+      if (response.status === 402) {
+        // The trial or license has run out; apiFetch has already put the
+        // paywall up. The reply says so in the API's own words.
+        const refused = await response.json().catch(() => null) as { message?: unknown } | null;
+        throw new Error(typeof refused?.message === "string" ? refused.message : "TRH AI needs a license key to keep going.");
+      }
       if (!response.ok) throw new Error(`The assistant service answered ${response.status}.`);
       if (!response.body) throw new Error("The assistant service sent no reply.");
 
@@ -571,7 +577,7 @@ export function useAssistant() {
 
   const changeConversation = useCallback(async (id: string, change: { title?: string; pinned?: boolean; archived?: boolean; model?: string | null }) => {
     try {
-      const response = await fetch(`${apiBaseUrl}/v1/conversations/${encodeURIComponent(id)}`, {
+      const response = await apiFetch(`${apiBaseUrl}/v1/conversations/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: requestHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ sessionId: session.current, ...change })
@@ -590,7 +596,7 @@ export function useAssistant() {
 
   const deleteConversation = useCallback(async (id: string) => {
     try {
-      await fetch(`${apiBaseUrl}/v1/conversations/${encodeURIComponent(id)}?sessionId=${encodeURIComponent(session.current)}`, {
+      await apiFetch(`${apiBaseUrl}/v1/conversations/${encodeURIComponent(id)}?sessionId=${encodeURIComponent(session.current)}`, {
         method: "DELETE",
         headers: requestHeaders()
       });
