@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiBaseUrl } from "../lib/api";
+import { apiBaseUrl, apiFetch } from "../lib/api";
 import { concatSamples, encodeWav, resampleMono } from "../lib/wav";
 
 // The microphone, read and transcribed locally and nowhere else.
@@ -161,7 +161,7 @@ export function useMicrophone(): MicrophoneState {
       // stays one binary instead of whisper plus ffmpeg.
       const wav = encodeWav(resampleMono(samples, rate));
 
-      const response = await fetch(`${apiBaseUrl}/v1/transcribe`, {
+      const response = await apiFetch(`${apiBaseUrl}/v1/transcribe`, {
         method: "POST",
         headers: { "Content-Type": "audio/wav" },
         body: wav
@@ -217,7 +217,7 @@ export function useMicrophone(): MicrophoneState {
     setTranscribing(true);
     try {
       const wav = encodeWav(resampleMono(slice, rate));
-      const response = await fetch(`${apiBaseUrl}/v1/transcribe`, {
+      const response = await apiFetch(`${apiBaseUrl}/v1/transcribe`, {
         method: "POST",
         headers: { "Content-Type": "audio/wav" },
         body: wav

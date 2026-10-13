@@ -13,6 +13,22 @@ export const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localh
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; reason: string };
 
+/** Fired on window when a trial or license runs out (a 402), and when a key is activated or removed. */
+export const licenseEventName = "trhai:license";
+
+/**
+ * A request to the API that tells the paywall screen when it was refused for
+ * want of a license (402). The screen then appears over whatever was open,
+ * rather than the refusal surfacing only as one more error line.
+ */
+export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, init);
+  if (response.status === 402 && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(licenseEventName, { detail: "locked" }));
+  }
+  return response;
+}
+
 /**
  * Headers for a request, with the signed-in account's token when there is one.
  *
@@ -50,7 +66,7 @@ async function refusal(response: Response): Promise<string> {
  */
 export async function apiGet<T>(path: string): Promise<ApiResult<T>> {
   try {
-    const response = await fetch(`${apiBaseUrl}${path}`, { headers: requestHeaders() });
+    const response = await apiFetch(`${apiBaseUrl}${path}`, { headers: requestHeaders() });
     if (!response.ok) return { ok: false, reason: await refusal(response) };
     const payload = await response.json();
     return { ok: true, data: (payload?.data ?? payload) as T };
@@ -61,7 +77,7 @@ export async function apiGet<T>(path: string): Promise<ApiResult<T>> {
 
 export async function apiPost<T>(path: string, body: unknown): Promise<ApiResult<T>> {
   try {
-    const response = await fetch(`${apiBaseUrl}${path}`, {
+    const response = await apiFetch(`${apiBaseUrl}${path}`, {
       method: "POST",
       headers: requestHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body)
@@ -78,7 +94,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<ApiResult
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<ApiResult<T>> {
   try {
-    const response = await fetch(`${apiBaseUrl}${path}`, {
+    const response = await apiFetch(`${apiBaseUrl}${path}`, {
       method: "PATCH",
       headers: requestHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body)
@@ -93,7 +109,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiResul
 
 export async function apiPut<T>(path: string, body: unknown): Promise<ApiResult<T>> {
   try {
-    const response = await fetch(`${apiBaseUrl}${path}`, {
+    const response = await apiFetch(`${apiBaseUrl}${path}`, {
       method: "PUT",
       headers: requestHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body)
@@ -110,7 +126,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<ApiResult<
 
 export async function apiDelete(path: string): Promise<ApiResult<void>> {
   try {
-    const response = await fetch(`${apiBaseUrl}${path}`, { method: "DELETE", headers: requestHeaders() });
+    const response = await apiFetch(`${apiBaseUrl}${path}`, { method: "DELETE", headers: requestHeaders() });
     if (!response.ok) return { ok: false, reason: await refusal(response) };
     return { ok: true, data: undefined };
   } catch {

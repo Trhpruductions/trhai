@@ -1,0 +1,142 @@
+/* The paywall, the What's new notice, the update card, and the Plan and
+   billing / Updates settings sections. Built on the OS tokens in os.css. */
+
+.paywall-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--os-scrim);
+  backdrop-filter: blur(6px);
+}
+
+.paywall {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  display: grid;
+  gap: 12px;
+  padding: 28px;
+  border-radius: var(--os-r-xl);
+  border: 1px solid var(--os-line-3);
+  background: var(--os-surface-solid);
+  box-shadow: var(--os-shadow-3), 0 0 60px rgba(59, 212, 255, 0.08);
+  color: var(--os-text);
+}
+.paywall h2 {
+  margin: 0;
+  font-family: var(--os-font-display);
+  font-size: var(--os-fs-xl);
+  line-height: 1.25;
+}
+.paywall p { margin: 0; color: var(--os-text-2); line-height: 1.55; }
+.paywall .paywall-lead { color: var(--os-text); font-weight: 600; }
+
+.paywall-points,
+.whatsnew-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.paywall-points li,
+.whatsnew-list li {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  align-items: start;
+  color: var(--os-text-2);
+  line-height: 1.5;
+}
+.paywall-points li svg { color: var(--os-ok); margin-top: 3px; }
+.whatsnew-list li svg { color: var(--os-accent); margin-top: 3px; }
+
+.paywall-key { display: grid; gap: 6px; margin-top: 4px; }
+.paywall-key-label { font-size: var(--os-fs-sm); color: var(--os-text-2); }
+.paywall-key-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.paywall-key-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: var(--os-r-md);
+  border: 1px solid var(--os-line-2);
+  background: var(--os-bg-2);
+  color: var(--os-text);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-fs-sm);
+}
+.paywall-key-input:focus { outline: 2px solid var(--os-accent-line); outline-offset: 1px; }
+
+.paywall-note { margin: 0; font-size: var(--os-fs-sm); }
+.paywall-note.ok { color: var(--os-ok); }
+.paywall-note.bad { color: var(--os-danger); }
+
+/* Settings sections */
+.billing-panel .os-panel-body,
+.updates-panel .os-panel-body { display: grid; gap: 14px; }
+
+.billing-status {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--os-r-lg);
+  border: 1px solid var(--os-line-2);
+  background: var(--os-surface-2);
+}
+.billing-status.locked { border-color: var(--os-danger); background: var(--os-danger-soft); }
+.billing-status.fresh { border-color: var(--os-accent-line); background: var(--os-accent-soft); }
+.billing-status p { margin: 0; color: var(--os-text-2); }
+.billing-plan { font-family: var(--os-font-display); font-size: var(--os-fs-lg); }
+
+.updates-heading { margin: 6px 0 0; font-size: var(--os-fs-md); }
+.updates-note {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0;
+  border-top: 1px solid var(--os-line);
+}
+.updates-note header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.updates-note-title { flex-basis: 100%; color: var(--os-text); }
+.updates-note ul { margin: 0; padding-left: 18px; color: var(--os-text-2); line-height: 1.5; }
+.updates-remote summary { cursor: pointer; color: var(--os-text-2); }
+.updates-remote pre {
+  white-space: pre-wrap;
+  font-family: var(--os-font-body);
+  color: var(--os-text-2);
+  margin: 8px 0 0;
+}
+
+/* The update card, bottom right, over every screen - above the command bar,
+   so it never covers the message box or Send. */
+.update-card {
+  position: fixed;
+  right: 16px;
+  bottom: 120px;
+  z-index: 85;
+  width: min(380px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  padding: 14px 14px 14px 16px;
+  border-radius: var(--os-r-lg);
+  border: 1px solid var(--os-accent-line);
+  background: var(--os-surface-solid);
+  box-shadow: var(--os-shadow-2);
+  color: var(--os-text);
+}
+.update-card-icon { color: var(--os-accent); margin-top: 2px; }
+.update-card-text { display: grid; gap: 4px; }
+.update-card-text span { color: var(--os-text-2); font-size: var(--os-fs-sm); line-height: 1.45; }
+.update-card-text .os-view-actions { margin-top: 6px; }
+.update-card-close { align-self: start; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .paywall, .update-card { animation: paywall-in var(--os-med, 220ms) var(--os-ease, ease-out); }
+}
+@keyframes paywall-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}

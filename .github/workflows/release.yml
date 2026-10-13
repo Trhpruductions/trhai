@@ -1,0 +1,53 @@
+# Builds the Windows installer for a version tag and publishes it as a GitHub
+# release, which is what every installed copy's update check reads
+# (apps/api/src/services/updates.ts asks this repo's latest release).
+#
+# To release: bump "version" in apps/desktop/package.json, add a note for it
+# in packages/shared/src/releaseNotes.ts, merge, then push a tag that matches:
+#
+#   git tag v0.1.5 && git push origin v0.1.5
+#
+# Nothing here signs the installer; that needs a certificate (docs/23).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # The tag and the version the installer is named after must agree, or
+      # the update check would offer a release whose download says otherwise.
+      - name: Tag matches the product version
+        shell: pwsh
+        run: |
+          $version = (Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json).version
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match apps/desktop/package.json version $version" }
+
+      - name: Build the installer
+        shell: pwsh
+        run: npm run package:win
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = Get-ChildItem apps/desktop/release -Filter "*.exe" | ForEach-Object { $_.FullName }
+          if ($files.Count -lt 2) { throw "Expected the Setup and Portable installers, found $($files.Count)" }
+          gh release create "${{ github.ref_name }}" $files --title "TRH AI ${{ github.ref_name }}" --generate-notes

@@ -13,6 +13,7 @@ export * from "./automation.js";
 export * from "./markdown.js";
 export * from "./videoScript.js";
 export * from "./screenRequest.js";
+export * from "./releaseNotes.js";
 
 export type AssistantMode = "general" | "coding" | "business" | "creator";
 

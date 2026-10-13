@@ -60,6 +60,8 @@ import { checkAvailability, generate, pinnedModel, readLocalModelConfig } from "
 import { pickAuthorModel } from "./services/appAuthor.js";
 import { readPreferences, updatePreferences } from "./services/preferences.js";
 import { getBuildInfo } from "./services/buildInfo.js";
+import { activateLicense, licenseStatus, paywallGate, removeLicense } from "./services/licensing.js";
+import { checkForUpdates } from "./services/updates.js";
 import { getSystemCapabilities, toolsByLevel } from "./services/systemCapabilities.js";
 import { describeTools, probeTools } from "./services/toolCenter.js";
 import { addTask, listTasks, removeTask, setTaskDone } from "./services/taskListStore.js";
@@ -537,6 +539,41 @@ export function createApp(options: AppOptions = {}) {
   // running window alone. This is the answer to "which one is this".
   app.get("/v1/build-info", (_req, res) => {
     res.json({ data: getBuildInfo(), traceId: "trace-local" });
+  });
+
+  // The paywall. Reads stay open everywhere; what a lapsed trial or license
+  // refuses is the work: talking to the assistant, building and running apps,
+  // commands, schedules and tasks. See services/licensing.ts for the shape of
+  // a key and why the app itself never touches a payment provider.
+  for (const gated of ["/v1/assist", "/v1/apps", "/v1/commands", "/v1/schedules", "/v1/tasks", "/v1/agent-tasks", "/v1/flow", "/v1/vision"]) {
+    app.use(gated, paywallGate);
+  }
+
+  app.get("/v1/license", (_req, res) => {
+    res.json({ data: licenseStatus(), traceId: "trace-local" });
+  });
+
+  app.post("/v1/license/activate", (req, res) => {
+    const result = activateLicense(req.body?.key);
+    if (!result.ok) {
+      res.status(400).json({ code: "INVALID_LICENSE", message: result.error, traceId: "trace-local" });
+      return;
+    }
+    res.json({ data: result.status, traceId: "trace-local" });
+  });
+
+  app.delete("/v1/license", (_req, res) => {
+    res.json({ data: removeLicense(), traceId: "trace-local" });
+  });
+
+  // What is new in this version, and whether a newer one is out.
+  // ?refresh=1 asks the release feed again instead of answering from the cache.
+  app.get("/v1/updates", async (req, res, next) => {
+    try {
+      res.json({ data: await checkForUpdates({ refresh: req.query.refresh === "1" }), traceId: "trace-local" });
+    } catch (error) {
+      next(error);
+    }
   });
 
   // Texting and email: what is set up, and the user's own email account. The

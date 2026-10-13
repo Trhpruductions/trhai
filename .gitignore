@@ -25,3 +25,7 @@ apps/api/workspace/
 # Generated desktop release files
 apps/desktop/release/
 ascend-ai-export.zip
+
+# License signing keys and the record of issued keys never belong in the repo.
+*.pem
+issued-licenses.jsonl
