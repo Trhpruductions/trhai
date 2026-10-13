@@ -50,9 +50,35 @@ under userData too.
 - Code changes behind it: `TRHAI_DATA_DIR`, `TRHAI_ENV_FILE` and a
   `TRHAI_VERSION` fallback in the API; `output: "standalone"` in Next;
   `apps/api/scripts/bundle.mjs`; `ensurePackagedServices` in the shell;
-  `electron-builder.json` renamed to TRH AI with `extraResources`.
-- Verification: see the end of this file; it is filled in from a real run of
-  the built installer, not written ahead of it.
+  `electron-builder.json` renamed to TRH AI with `extraResources`;
+  `productName` in the shell's package.json, because Electron names the
+  userData folder after it (without it an installed copy kept its data
+  under `%APPDATA%\@ascend\desktop`).
+- One thing learned the hard way: electron-builder drops every
+  `node_modules` folder from `extraResources`, with or without a filter
+  naming it, and the web app's standalone build is nothing without its
+  `node_modules` (that is where `next` lives). `apps/desktop/afterPack.cjs`
+  copies it into place after packaging and before the installers are built.
+  Do not try to fix this with a filter again.
+- The second thing learned: a standalone build has no `next.config` and no
+  webpack, and Next only skips loading both when
+  `__NEXT_PRIVATE_STANDALONE_CONFIG` holds the resolved config, which its
+  generated `server.js` sets from a JSON line of its own. `serve.mjs`, which
+  starts Next itself so it can listen on both loopback addresses, now reads
+  that line from the `server.js` beside it. Without it the packaged web app
+  died at start with "Cannot find module next/dist/compiled/webpack/webpack-lib".
+- Verified 2026-10-13 on this PC (i5-3570, 8 GB, no GPU) with the portable
+  build, the checkout's services stopped first: the API answered `/health`
+  39 s after launch and the web app 70 s after, both run by `TRH AI.exe` from
+  its resources; the operations check reported 13 of 13 ready; data was
+  written under `%APPDATA%\TRH AI\data`; the window titled "TRH AI" opened;
+  quitting freed both ports. A chat through the packaged API reached the
+  model but timed out at 180 s - the installed copy has none of this PC's
+  `.env` tuning (`TRHAI_MODEL=qwen2.5-3b`, the 600 s timeout), which is the
+  M2 work below, not a packaging fault.
+- Each packaged service writes what it prints to
+  `%APPDATA%\TRH AI\logs	rh-ai-api.log` and `trh-ai-web.log`, appended.
+  That is where to look when an installed copy does not come up.
 
 ### M2 — first run on a PC with nothing (next)
 

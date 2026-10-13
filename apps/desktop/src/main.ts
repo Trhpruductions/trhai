@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
-import { constants as fsConstants, existsSync, statSync, statfsSync } from "node:fs";
+import { constants as fsConstants, existsSync, mkdirSync, openSync, statSync, statfsSync } from "node:fs";
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell } from "electron";
 import os from "node:os";
 import path from "node:path";
@@ -863,15 +863,32 @@ async function ensurePackagedServices() {
   if (!(await waitForPort(webPort, 45000))) console.error("[desktop] Web client port did not become ready within timeout");
 }
 
-/** One service, run by this Electron as Node. No cmd.exe shim, so its pid is the process itself. */
+/**
+ * One service, run by this Electron as Node. No cmd.exe shim, so its pid is
+ * the process itself. What it prints goes to `logs\<label>.log` under
+ * userData, appended, so a service that fails to start on someone's PC leaves
+ * a reason behind.
+ */
 function spawnNodeService(label: string, script: string, args: string[], env: NodeJS.ProcessEnv, cwd: string) {
   const child = spawn(process.execPath, [script, ...args], {
     cwd,
-    stdio: "ignore",
+    stdio: ["ignore", serviceLog(label), serviceLog(label)],
     windowsHide: true,
     env: { ...process.env, ...env }
   });
   if (child.pid !== undefined) startedServices.push({ label, pid: child.pid });
+}
+
+/** A file descriptor for the service's log, or "ignore" when the log cannot be opened. */
+function serviceLog(label: string): number | "ignore" {
+  try {
+    const dir = path.join(app.getPath("userData"), "logs");
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.log`);
+    return openSync(file, "a");
+  } catch {
+    return "ignore";
+  }
 }
 
 async function ensureSelfHostedServices() {

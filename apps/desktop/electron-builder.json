@@ -41,5 +41,6 @@
   },
   "portable": {
     "artifactName": "TRH-AI-Portable-${version}.${ext}"
-  }
+  },
+  "afterPack": "./afterPack.cjs"
 }
