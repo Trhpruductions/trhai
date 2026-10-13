@@ -69,8 +69,13 @@ test("one changed character in the payload or the signature is refused", () => {
   const [prefixAndPayload, signature] = key.split(".");
   const tamperedPayload = `${prefixAndPayload.slice(0, -2)}${prefixAndPayload.endsWith("A") ? "BB" : "AA"}.${signature}`;
   assert.equal(parseLicenseKey(tamperedPayload).ok, false);
-  const tamperedSignature = `${prefixAndPayload}.${signature.slice(0, -1)}${signature.endsWith("A") ? "B" : "A"}`;
-  assert.equal(parseLicenseKey(tamperedSignature).ok, false);
+  // Every position, including the last character, whose spare bits once let
+  // a different character decode to the same signature.
+  for (const at of [0, Math.floor(signature.length / 2), signature.length - 1]) {
+    const swapped = signature[at] === "A" ? "B" : "A";
+    const tamperedSignature = `${prefixAndPayload}.${signature.slice(0, at)}${swapped}${signature.slice(at + 1)}`;
+    assert.equal(parseLicenseKey(tamperedSignature).ok, false, `changed at ${at}`);
+  }
   assert.equal(parseLicenseKey("TRHAI-nope").ok, false);
   assert.equal(parseLicenseKey("not a key").ok, false);
   assert.equal(parseLicenseKey(42).ok, false);

@@ -105,17 +105,27 @@ export function parseLicenseKey(raw: unknown): ParsedKey {
   const body = key.slice(keyPrefix.length);
   const dot = body.indexOf(".");
   if (dot <= 0 || dot === body.length - 1) return { ok: false, error: "That is not a complete license key." };
+  const payloadText = body.slice(0, dot);
+  const signatureText = body.slice(dot + 1);
   let payload: unknown;
   try {
-    payload = JSON.parse(Buffer.from(body.slice(0, dot), "base64url").toString("utf8"));
+    payload = JSON.parse(Buffer.from(payloadText, "base64url").toString("utf8"));
   } catch {
     return { ok: false, error: "That is not a complete license key." };
   }
   if (!isPayload(payload)) return { ok: false, error: "This key is not one TRH AI issued." };
   const signed = Buffer.from(JSON.stringify(payload), "utf8");
+  const signature = Buffer.from(signatureText, "base64url");
+  // Only the exact text that was issued. Base64's last character carries a
+  // few unused bits, so a different last character can decode to the same
+  // bytes; and JSON can be spaced differently and parse the same. Neither
+  // would forge anything, but a key is one exact string, and this keeps it so.
+  if (signed.toString("base64url") !== payloadText || signature.toString("base64url") !== signatureText) {
+    return { ok: false, error: "This key's signature does not check out. Copy it again, exactly as it was sent." };
+  }
   let valid = false;
   try {
-    valid = verifySignature(null, signed, publicKey(), Buffer.from(body.slice(dot + 1), "base64url"));
+    valid = verifySignature(null, signed, publicKey(), signature);
   } catch {
     valid = false;
   }
