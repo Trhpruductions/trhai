@@ -203,7 +203,11 @@ async function webReachable(url: string): Promise<boolean> {
 }
 
 function desktopInstalled(): boolean {
-  // The API runs from apps/api, so the desktop shell sits beside it.
+  // An installed copy: the shell that started this API names its own
+  // Electron, which is the desktop window.
+  const shell = process.env.TRHAI_ELECTRON_PATH?.trim();
+  if (shell && existsSync(shell)) return true;
+  // A checkout: the API runs from apps/api, so the desktop shell sits beside it.
   const here = process.cwd();
   const candidates = [
     path.resolve(here, "../desktop/node_modules/electron/dist/electron.exe"),

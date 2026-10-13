@@ -32,6 +32,10 @@ import { encryptPlainStores } from "./services/dataInventory.js";
  * working directory does.
  */
 function findEnvFile(name: string): string | undefined {
+  // An installed copy has no repo to walk; the desktop shell names the file.
+  const named = process.env.TRHAI_ENV_FILE?.trim();
+  if (named) return existsSync(named) ? named : undefined;
+
   let directory = path.dirname(fileURLToPath(import.meta.url));
 
   // apps/api/src -> apps/api -> apps -> repo root is three; a few more in hand

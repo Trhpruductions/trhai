@@ -12,6 +12,7 @@
 // shell start it unchanged. A hostname naming this PC still means both of its
 // addresses; any other is used as given.
 
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,9 +21,37 @@ import { listenHosts, serveOptions } from "./serve-options.mjs";
 // Before Next is loaded: it picks its production code paths, and React's, by
 // this. `next start` sets it the same way.
 process.env.NODE_ENV = "production";
-const { default: next } = await import("next");
 
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+// Inside a standalone build (the installer's copy) there is no next.config and
+// no webpack: Next's generated server.js hands the resolved config over in
+// this variable, and Next skips loading both when it is set. Running beside
+// that server.js, this does the same with the config it carries.
+if (!process.env.__NEXT_PRIVATE_STANDALONE_CONFIG) {
+  const standaloneConfig = readStandaloneConfig(path.join(dir, "server.js"));
+  if (standaloneConfig) process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = standaloneConfig;
+}
+
+const { default: next } = await import("next");
+
+/** The JSON Next wrote as `const nextConfig = {...}` in a standalone server.js, or undefined. */
+function readStandaloneConfig(serverFile) {
+  let source;
+  try {
+    source = readFileSync(serverFile, "utf8");
+  } catch {
+    return undefined;
+  }
+  const match = /^const nextConfig = (\{.*\})\s*$/m.exec(source);
+  if (!match) return undefined;
+  try {
+    JSON.parse(match[1]);
+  } catch {
+    return undefined;
+  }
+  return match[1];
+}
 const options = serveOptions(process.argv.slice(2), process.env);
 const app = next({ dev: false, dir, hostname: "localhost", port: options.port });
 const handle = app.getRequestHandler();

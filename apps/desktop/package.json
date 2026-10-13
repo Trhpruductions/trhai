@@ -1,5 +1,6 @@
 {
   "name": "@ascend/desktop",
+  "productName": "TRH AI",
   "version": "0.1.4",
   "description": "Vexora AI desktop shell",
   "author": "TRH",

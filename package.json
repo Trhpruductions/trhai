@@ -30,6 +30,7 @@
     "smoke:web-stack": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/smoke-web-stack.ps1",
     "smoke:video": "tsx scripts/smoke-video.ts",
     "doctor": "tsx scripts/doctor.ts",
-    "setup:engine": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-engine.ps1"
+    "setup:engine": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-engine.ps1",
+    "package:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-win.ps1"
   }
 }
