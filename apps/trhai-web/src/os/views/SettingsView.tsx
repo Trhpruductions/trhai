@@ -5,6 +5,7 @@ import { defaultPersonality, type PersonalityId } from "@ascend/shared";
 import { AccountPanel } from "../../components/AccountPanel";
 import { BillingPanel } from "../../components/BillingPanel";
 import { UpdatesPanel } from "../../components/UpdatesPanel";
+import { SetupPanel } from "../../components/SetupPanel";
 import { MessagingPanel } from "../../components/MessagingPanel";
 import { VoicePicker } from "../../components/VoicePicker";
 import { PersonalityPicker } from "../../components/PersonalityPicker";
@@ -262,6 +263,12 @@ export function SettingsView() {
           {section === "account" ? <AccountPanel account={account.account} onSignOut={() => void account.signOut()} onSignIn={account.openSignIn} /> : null}
           {section === "billing" ? <BillingPanel /> : null}
           {section === "updates" ? <UpdatesPanel /> : null}
+          {section === "models" ? (
+            <section className="os-panel">
+              <header className="os-panel-head"><h3 className="os-panel-title">Engine and models</h3></header>
+              <div className="os-panel-body"><SetupPanel mode="settings" /></div>
+            </section>
+          ) : null}
           {section === "assistant" ? (
             <>
               <PersonalityPicker

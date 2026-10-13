@@ -80,10 +80,44 @@ under userData too.
   `%APPDATA%\TRH AI\logs	rh-ai-api.log` and `trh-ai-web.log`, appended.
   That is where to look when an installed copy does not come up.
 
-### M2 — first run on a PC with nothing (next)
+### M2 — first run on a PC with nothing (built)
 
-Today a PC without an engine is told to run `npm run setup:engine`, which an
-installed copy cannot do. M2 moves that into the app:
+Built 2026-10-13 in `apps/api/src/services/modelSetup.ts`, with the screens in
+`SetupScreen.tsx` and `SetupPanel.tsx`:
+
+- The first time the app opens without an engine or a chat model, a setup
+  screen offers to download them. *Settings → Engine and models* does the same
+  later, and removes models.
+- The engine is chosen from the PC: the CUDA 13.4 build for an NVIDIA card on a
+  580 or newer driver, CUDA 12.4 on an older driver, otherwise the CPU build.
+- The recommended model is Qwen3 4B Instruct 2507 for a PC with less than
+  16 GB and no 8 GB card, otherwise Qwen2.5 Coder 7B. Both are Apache 2.0.
+- Every file is pinned: a llama.cpp release tag or a Hugging Face commit, its
+  size and its SHA-256. A file that does not match is deleted, not installed.
+  A stopped download keeps its `.part` file and continues with a Range request.
+  Nothing reaches `engine\` or `models\` until it is whole and verified, and
+  the engine is restarted afterwards because it reads the model list only at
+  start.
+- On a PC without a graphics card, settings the `.env` does not set are filled
+  in at start: an 8,192-token window, a 600 s reply limit, a 30-minute idle
+  unload, and the small model first. These are the values this PC needed
+  (`21-handoff.md`).
+- Licences: Qwen2.5 3B and Qwen2.5 VL 3B are under Qwen's research licence,
+  which does not allow commercial use. The VL 3B download page says Apache
+  2.0; the model it was made from does not. They stay in the list, labelled,
+  and are never recommended.
+- Verified on this PC: the real CPU engine archive downloaded, verified and
+  unpacked with Windows' `tar` in under 3 s, and `llama-server --version`
+  ran. Through the first-run screen, the 4B model downloaded at about 7 MB/s;
+  stopping it at 278 MB kept the `.part` file, and starting again continued
+  from there. The engine restarted with it and answered "Hello! How can I
+  assist you today?" after 409 s cold (3,784 prompt tokens at 10.4 a second).
+- That first answer exposed a limit in Node's own fetch: it abandons a
+  response that has not begun within 300 s, so every cold reply longer than
+  that had been failing on slow PCs. `engineFetch.ts` fixes it for every
+  engine request (see `21-handoff.md`, negative results).
+
+What was planned for M2, kept for reference:
 
 - Port `scripts/setup-engine.ps1` to the API: pick the variant (CUDA when
   `nvidia-smi` answers, else CPU), download the llama.cpp release asset,

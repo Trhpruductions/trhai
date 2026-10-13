@@ -186,7 +186,7 @@ test("an engine with no model in it says where to put one", async () => {
     assert.equal(result.available, false);
     if (result.available) return;
     assert.match(result.reason, /has no model to answer with/);
-    assert.match(result.reason, /Put a \.gguf model file in .*models/);
+    assert.match(result.reason, /Install one in Settings, under Engine and models, or put a \.gguf model file in .*models/);
     assert.doesNotMatch(result.reason, /ollama/i);
   } finally {
     server.close();

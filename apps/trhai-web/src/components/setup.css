@@ -1,0 +1,80 @@
+/* First-run setup and Settings > Engine and models. Built on the OS tokens
+   in os.css; the dialog frame is the paywall's (paywall.css). */
+
+.setup-dialog { width: min(720px, 100%); }
+.setup { display: grid; gap: 14px; }
+
+.setup-pc {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  color: var(--os-text-2);
+  font-size: var(--os-fs-sm);
+}
+
+.setup-block {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: var(--os-r-lg);
+  border: 1px solid var(--os-line-2);
+  background: var(--os-surface-2);
+}
+.setup-block > header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; justify-content: space-between; }
+.setup-block p { margin: 0; }
+
+.setup-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--os-r-pill);
+  font-size: var(--os-fs-xs);
+  border: 1px solid var(--os-line-2);
+  color: var(--os-text-2);
+}
+.setup-tag.ok { color: var(--os-ok); border-color: var(--os-ok); background: var(--os-ok-soft); }
+.setup-tag.todo { color: var(--os-warn); border-color: var(--os-warn); background: var(--os-warn-soft); }
+.setup-tag.rec { color: var(--os-accent); border-color: var(--os-accent-line); background: var(--os-accent-soft); }
+
+.setup-models { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.setup-models li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: var(--os-r-md);
+  border: 1px solid var(--os-line);
+}
+.setup-models li.recommended { border-color: var(--os-accent-line); }
+.setup-models label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; flex: 1; min-width: 0; }
+.setup-models input { margin-top: 4px; accent-color: var(--os-accent); }
+.setup-model-text { display: grid; gap: 3px; color: var(--os-text-2); line-height: 1.45; min-width: 0; }
+.setup-model-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--os-text); }
+.setup-model-text a { color: var(--os-accent); }
+
+.setup-others ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.setup-others li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.setup-bar {
+  height: 8px;
+  border-radius: var(--os-r-pill);
+  background: var(--os-bg-2);
+  overflow: hidden;
+}
+.setup-bar span {
+  display: block;
+  height: 100%;
+  background: var(--os-accent);
+  transition: width var(--os-med, 220ms) var(--os-ease, ease-out);
+}
+.setup-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.setup-steps li { display: grid; grid-template-columns: 16px 1fr; gap: 2px 8px; align-items: center; }
+.setup-steps li > .os-small { grid-column: 2; }
+.setup-steps li.done svg { color: var(--os-ok); }
+.setup-steps li.failed svg { color: var(--os-danger); }
+.setup-steps li.downloading svg { color: var(--os-accent); }
+
+.setup-note { margin: 0; font-size: var(--os-fs-sm); }
+.setup-note.ok { color: var(--os-ok); }
+.setup-note.bad { color: var(--os-danger); }

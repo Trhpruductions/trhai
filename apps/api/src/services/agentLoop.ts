@@ -37,6 +37,7 @@ import path from "node:path";
 // Re-exported so nothing that already imports it from here has to move.
 export type { ToolActivity };
 import { increment, observe } from "./metrics.js";
+import { engineFetch } from "./engineFetch.js";
 
 // The agent loop.
 //
@@ -1344,7 +1345,7 @@ export async function runAgent(
   config: LocalModelConfig,
   question: string,
   context: ToolContext,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = engineFetch,
   /** Fired right before each tool call, so a caller can report live progress. */
   onToolStart?: (toolName: string) => void,
   /**

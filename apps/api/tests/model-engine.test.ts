@@ -206,7 +206,7 @@ test("with no engine installed, nothing is started, and the reason says what to 
   assert.equal(state.status, "off");
   assert.equal(state.url, "http://127.0.0.1:4999");
   if (state.status !== "off") return;
-  assert.equal(state.reason, `The model engine (llama.cpp) is not installed in ${path.join(root, "engine")}. Run: npm run setup:engine`);
+  assert.equal(state.reason, `The model engine (llama.cpp) is not installed in ${path.join(root, "engine")}. Set it up in Settings, under Engine and models.`);
   assert.deepEqual(engineState(), state);
   assert.equal(engineOffReason(), state.reason);
 
