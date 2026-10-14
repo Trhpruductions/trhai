@@ -23,7 +23,7 @@ export const releaseNotes: ReleaseNote[] = [
     notes: [
       "TRH AI now starts a 14-day free trial on a new PC. After that it asks for a license key; everything it holds stays readable, and a key unlocks it again.",
       "Settings has a Plan and billing section: where to buy, your plan, your key.",
-      "A What's new notice like this one appears the first time a new version runs, and TRH AI tells you when a newer version is out, with the download.",
+      "A What's new notice like this one appears the first time a new version runs, and TRH AI tells you when a newer version is out. The installed app downloads it, installs it when you say so and opens again by itself.",
       "The Windows installer: TRH AI installs like any program, with no Node, npm or source tree needed.",
       "On a new PC, TRH AI offers to download its engine and a model suited to the PC, checks each against what its makers published, and carries on if the download is interrupted. Settings, Engine and models, adds and removes models later."
     ]

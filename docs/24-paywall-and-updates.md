@@ -118,5 +118,27 @@ git push origin v0.1.5
 ```
 
 The **Release** workflow builds both installers on Windows, checks that the
-tag matches the version, and publishes a GitHub release with them attached.
-From then on, every installed copy offers it.
+tag matches the version, and publishes a GitHub release with them attached,
+together with `latest.yml` and the installer's `.blockmap`. From then on,
+every installed copy offers it.
+
+### How an installed copy updates itself
+
+- The update card and *Settings → Updates* show **Download and install**.
+  The download runs in the app, with its progress shown. Then the button
+  becomes **Restart to update**. Nothing is downloaded or installed until the
+  person asks.
+- The app quits and runs the installer silently. A small hidden helper waits
+  for the installer to finish, then opens the new version. The installer's own
+  "open the app afterwards" switch did not do that, so the helper does it, and
+  writes each step to `%APPDATA%\TRH AI\logs\update-restart.log`.
+- A downloaded update that is not installed then is installed the next time
+  the app quits.
+- The portable build, a browser, and a copy run from source keep the
+  download link: they have nothing to install over.
+- `latest.yml` is what the updater reads. A release without it can still be
+  downloaded by hand, but installed copies cannot update themselves from it,
+  so the workflow refuses to publish one without it.
+- To try an update without publishing one, serve a folder holding
+  `latest.yml` and the new Setup file over http, and start the installed app
+  with `TRHAI_DESKTOP_UPDATE_URL` set to that address.
