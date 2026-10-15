@@ -12,6 +12,7 @@ import type { readTelemetry } from "./systemTelemetry.js";
 import { workspaceRoot } from "./workspace.js";
 import { changesSomething } from "./toolPermissions.js";
 import { convertUnits } from "./unitConversion.js";
+import { answerArithmeticQuestion } from "./arithmeticQuestion.js";
 import type { RunningApp, StartResult } from "./appRunner.js";
 import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
@@ -321,6 +322,13 @@ export async function runAssistantOrchestrator(
   // formula; worked out here it is exact every time. See unitConversion.ts.
   const conversion = approving ? null : convertUnits(effectiveMessage);
   if (conversion) return deterministicResult(effectiveMessage, conversion.text, "conversion");
+
+  // "what is 487 times 263?" - a sum. Handed to the model it had to call the
+  // calculator and say what came back: 377 seconds, then 531, on a PC with no
+  // graphics card. The calculator is exact and instant; the model was only
+  // ever the way to reach it. See arithmeticQuestion.ts.
+  const sum = approving ? null : answerArithmeticQuestion(effectiveMessage);
+  if (sum) return deterministicResult(effectiveMessage, sum, "arithmetic");
 
   // "what day of the week is December 25, 2026?" - a calendar lookup. The
   // model answered Sunday, Wednesday and Thursday in three runs; it is a

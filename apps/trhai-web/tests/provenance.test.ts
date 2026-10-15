@@ -151,3 +151,14 @@ test("a reply saying why there is no answer is not labelled as an answer", () =>
   for (const strategy of ["failed", "stopped", "error"]) assert.equal(unanswered(strategy), true, strategy);
   for (const strategy of ["generated", "plan", "answer", undefined]) assert.equal(unanswered(strategy), false, String(strategy));
 });
+
+test("a sum worked out by the app is labelled as worked out, and credited to no model", () => {
+  // The same label as a unit conversion or a calendar lookup: the API computed it,
+  // so it must not read "Answered on this PC" like a reply that is only a guess,
+  // nor be credited to a model that never ran.
+  for (const strategy of ["arithmetic", "conversion", "calendar", "reading"]) {
+    assert.equal(replyProvenance(strategy, "memory"), "Worked out on this PC", strategy);
+    assert.equal(answerCredit(strategy, "memory"), "Answered directly, without a model", strategy);
+    assert.equal(unanswered(strategy), false, strategy);
+  }
+});
