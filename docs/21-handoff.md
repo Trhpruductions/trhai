@@ -134,6 +134,16 @@ time tuning the prompt loop for this PC before one of those is done.
   with 3:30 PM, and the date tools were the wrong shape (whole days). `shift_time`
   in `clockMath.ts` does it; it and the date tools are offered only when the
   request names a clock time / a date (`looksLikeClockMath`, `looksLikeDateMath`).
+- **A sum is read out of the message, not handed to the model.** "What is 487
+  times 263?" went to the model, which had to call `calculate` and say what came
+  back: 377 s, then 531 s, on the PC with no graphics card. `answerArithmeticQuestion`
+  (`arithmeticQuestion.ts`, tried in the orchestrator after unit conversions) answers a
+  message that is a sum and nothing else, through the same evaluator the tool uses, in
+  about 100 ms with no model running. It reads symbols and words ("times", "15% of
+  80", "square root of 144", "subtract 5 from 12"), and leaves to the model anything
+  with a unit, a date, a variable or a list ("2, 6, 12, 20"). A bare `3-5`, `4/5` or
+  `3x4` is a range, a score or a size until the message asks for a calculation. The
+  answer is strategy `arithmetic`, labelled "Worked out on this PC".
 - **A tool that replaces a whole document is a tool that loses it.** Asked to
   add one line to a note, the model did not read the note and sent a body it
   made up; the user's text was gone. `update_document` now takes `append`, or
