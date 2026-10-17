@@ -88,7 +88,7 @@ export function replyProvenance(strategy: string | undefined, model: string | un
     case "generated": return name ? `Written by ${name}` : "Written by the local model";
     case "vision": return name ? `Looked at with ${name}` : "Looked at with the vision model";
     case "answer": return "Quoted from your saved notes";
-    case "calendar": case "conversion": case "reading": return "Worked out on this PC";
+    case "calendar": case "conversion": case "arithmetic": case "reading": return "Worked out on this PC";
     case "message": return "Prepared on this PC - nothing is sent without your yes";
     case "schedule": return "Saved on this PC";
     case "stopped": return "Stopped";

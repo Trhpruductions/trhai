@@ -68,6 +68,34 @@ test("a unit conversion is answered exactly, without asking the model", async ()
   });
 });
 
+test("a sum is worked out exactly, without asking the model", async () => {
+  // Asked of the model on a PC with no graphics card this took 377 seconds, then 531.
+  await withFakeModel("It comes to about 128,000.", async (received) => {
+    const result = await runAssistantOrchestrator({ mode: "general", userMessage: "What is 487 times 263?" });
+    assert.equal(result.strategy, "arithmetic");
+    assert.equal(result.assistantMessage, "487 × 263 = 128,081");
+    assert.equal(received.length, 0, "the model was not asked");
+    assert.deepEqual(result.toolsUsed, []);
+  });
+});
+
+test("a sum with anything else in the message still goes to the model, whole", async () => {
+  await withFakeModel("Four. And a joke.", async (received) => {
+    const result = await runAssistantOrchestrator({ mode: "general", userMessage: "what is 2 + 2, and tell me a joke" });
+    assert.notEqual(result.strategy, "arithmetic");
+    assert.ok(received.length > 0, "the model was asked");
+  });
+});
+
+test("a bare sum, with no asking words, is a sum too", async () => {
+  await withFakeModel("Understood.", async (received) => {
+    const result = await runAssistantOrchestrator({ mode: "general", userMessage: "2 + 2" });
+    assert.equal(result.strategy, "arithmetic");
+    assert.equal(result.assistantMessage, "2 + 2 = 4");
+    assert.equal(received.length, 0, "the model was not asked");
+  });
+});
+
 test("saving a document goes straight to the store, off the model", async () => {
   const saved: Array<{ title: string; body: string }> = [];
   const result = await runAssistantOrchestrator({
