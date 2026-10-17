@@ -63,3 +63,27 @@ export function notesUpTo(version: string, limit = 5, notes: ReleaseNote[] = rel
     .sort((a, b) => compareVersions(b.version, a.version))
     .slice(0, limit);
 }
+
+/**
+ * The text of the GitHub release page for `version`, made from its note.
+ *
+ * An installed copy shows this text as it stands when it offers the update
+ * (apps/api/src/services/updates.ts keeps the first 4,000 characters), so it
+ * is plain sentences for the people using the app: no list of pull requests,
+ * and no markdown that would show as symbols. Null when the version has no
+ * note, which the Release workflow refuses to publish without.
+ */
+export function releasePageText(version: string, options: { candidate?: boolean } = {}, notes: ReleaseNote[] = releaseNotes): string | null {
+  const note = notes.find((entry) => entry.version === version);
+  if (!note) return null;
+  return [
+    note.title,
+    "",
+    ...note.notes.map((line) => `- ${line}`),
+    "",
+    ...(options.candidate ? ["This is a release candidate, published for testing. Installed copies of TRH AI are not offered it.", ""] : []),
+    `Windows only. TRH-AI-Setup-${version}.exe installs it; TRH-AI-Portable-${version}.exe runs without installing. SHA256SUMS.txt lists each file's SHA-256 checksum.`,
+    // Until the installer is signed (docs/23-install-story.md).
+    "The installer is not code-signed yet, so Windows SmartScreen may warn the first time it runs."
+  ].join("\n");
+}
