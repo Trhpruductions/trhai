@@ -64,7 +64,9 @@ page can read nothing from it.
   nothing proves an update came from you except the release page it was
   downloaded from. A code-signing certificate is a purchase; see
   `24-paywall-and-updates.md`.
-- **License keys are not tied to a PC.** Deleting the license file restarts the
-  trial. Both need a server to change, which the no-cloud rule rules out.
+- **License keys are not tied to a PC.** Deleting the license file alone no
+  longer restarts the trial, but deleting it together with the trial marker
+  (`%LOCALAPPDATA%\TRHAI\trial-started`) does. Both need a server to change,
+  which the no-cloud rule rules out.
 - **Commands.** `run_command` runs what the PC has, behind the machine-access
   switch; that switch is the control.
