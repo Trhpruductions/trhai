@@ -50,6 +50,41 @@ export const priceText: string | null = "$29, one-time";
 Only `https://` links are accepted. Until this is set, the Buy button is
 replaced by "Ask whoever gave you TRH AI for a license key."
 
+### Backing up the signing key, and restoring it
+
+The private key is the only thing that can issue keys that existing installs
+accept. If it is lost, every copy already sold keeps working, but no new key
+can be issued for them, so new buyers would need a new release with a new
+public key. If it leaks, anyone can issue keys.
+
+**Back it up now**, to at least two places that are not this PC and are not
+online in plain text:
+
+1. Copy the whole folder `%USERPROFILE%\.trhai-license`. It holds
+   `trhai-license-private.pem`, `trhai-license-public.txt` and
+   `issued-licenses.jsonl`, the record of every key issued.
+2. Put one copy on an encrypted USB drive (BitLocker To Go, or VeraCrypt) and
+   keep it somewhere safe.
+3. Put a second copy in a password manager that holds files (1Password and
+   Bitwarden do), or print the `.pem` and store the paper securely. It is a
+   short block of text.
+4. Do not email it, commit it, or put it in an ordinary cloud folder.
+   `*.pem` and `issued-licenses.jsonl` are already ignored by git in this repo.
+
+**Check a backup** before you rely on it:
+
+```bash
+node scripts/licensing/verify.mjs --key E:\trhai-license\trhai-license-private.pem
+```
+
+It says whether that key matches the public key built into the app. It
+issues nothing and writes nothing.
+
+**Restore** on a new PC: copy the folder back to
+`%USERPROFILE%\.trhai-license`, run the check above without `--key`, and carry
+on issuing keys. `--license TRHAI-…` checks a key you sent someone: whether it
+is genuine and what it says.
+
 ### For each sale
 
 When the provider tells you someone paid, issue their key and send it to them
@@ -78,7 +113,16 @@ Set `TRHAI_PAYWALL=off` in that PC's `.env`, or issue yourself a key.
   activation server, which this app has chosen not to have.
 - Someone who edits the app's code can remove the check. That is true of any
   app that runs entirely on the buyer's own PC.
-- Deleting `license.json` restarts the trial on that PC.
+- The trial start is kept twice: in `license.json` in the data folder, and
+  in `%LOCALAPPDATA%\TRHAI\trial-started`, which uninstalling leaves. The
+  earlier one wins, so deleting the license file, the data folder or the app
+  and reinstalling does not restart the trial. Deleting both still does.
+- A license file changed by hand ends the trial instead of extending it. That
+  covers a plain-text file, one that cannot be decrypted, or one whose trial
+  starts in the future. The app only writes it encrypted. A genuine key in such
+  a file still unlocks, because its signature is checked on its own. Losing
+  the data key (`trhai-data.key`) has the same effect: re-enter the license
+  key.
 
 ## Update notices
 

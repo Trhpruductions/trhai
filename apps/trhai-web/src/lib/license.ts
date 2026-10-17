@@ -21,6 +21,8 @@ export type LicenseStatus = {
   checkoutUrl: string | null;
   priceText: string | null;
   paywallDisabled: boolean;
+  /** The trial record on this PC had been changed by hand, which ends the trial. */
+  trialTampered?: boolean;
 };
 
 /** Fired on window when the API answers 402, and after a key is activated or removed. */
@@ -83,7 +85,9 @@ export function describeLicense(status: LicenseStatus): string {
     case "license_expired":
       return `Your ${planLabel(status.plan)} license expired on ${status.license?.expiresAt ? new Date(status.license.expiresAt).toLocaleDateString() : "an earlier date"}.`;
     case "trial_expired":
-      return `Your free trial ended on ${new Date(status.trialEndsAt).toLocaleDateString()}.`;
+      return status.trialTampered
+        ? "The trial record on this PC had been changed by hand, so the free trial has ended. A license key unlocks TRH AI."
+        : `Your free trial ended on ${new Date(status.trialEndsAt).toLocaleDateString()}.`;
     default:
       return status.trialDaysLeft === 1
         ? "Free trial: this is the last day."
