@@ -1,5 +1,6 @@
 import { pickModel, type LocalModelConfig } from "./localModel.js";
 import { discoverModels, enginePaths, listEngineModels, type EngineModel } from "./modelEngine.js";
+import { engineFetch } from "./engineFetch.js";
 
 // The models a conversation can be answered by: what is in TRH AI's models
 // folder, less the ones that cannot hold a conversation - the vision model (it
@@ -62,7 +63,10 @@ export function withChosenModel(config: LocalModelConfig, chosen?: string | null
 /** The chat models installed now, and which one answers when a conversation names none. */
 export async function listChatModels(
   config: LocalModelConfig,
-  fetchImpl: typeof fetch = fetch
+  // The engine client, which carries the engine's key. Node's own fetch was
+  // left here when the key came in, and every list was refused: the model
+  // picker came back empty, and the engine logged a refusal every poll.
+  fetchImpl: typeof fetch = engineFetch
 ): Promise<{ models: ChatModel[]; defaultModel: string | null; reason?: string }> {
   try {
     const entries = await listEngineModels(config.baseUrl, fetchImpl);
