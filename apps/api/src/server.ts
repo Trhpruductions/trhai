@@ -1986,7 +1986,14 @@ export function createApp(options: AppOptions = {}) {
     res.setHeader("Cross-Origin-Resource-Policy", "same-site");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.type(media.contentType);
-    res.sendFile(media.absolutePath, (error) => {
+    // workspaceMedia has already kept the path inside the workspace, so the
+    // dotfile rule here only decides what a dot in the path means. Express 5's
+    // default refuses a dot anywhere in the absolute path - a picture in a
+    // ".previews" folder, or a whole workspace under a dot-folder, became a
+    // 404. Express 4 refused only a file whose own name starts with a dot, and
+    // that is what is kept.
+    const dotfiles = path.basename(media.absolutePath).startsWith(".") ? "ignore" : "allow";
+    res.sendFile(media.absolutePath, { dotfiles }, (error) => {
       if (error && !res.headersSent) res.status(404).json({ code: "NOT_FOUND", message: "There is no file there.", traceId: "trace-local" });
     });
   });
@@ -2327,8 +2334,19 @@ export function createApp(options: AppOptions = {}) {
     res.json({ data: { forgotten: true }, traceId: "trace-local" });
   });
 
-  app.use((error: Error & { statusCode?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    const statusCode = error.statusCode ?? 500;
+  // Express 5 sends a handler's rejected promise here too, not only an error
+  // passed to next() - including one from a streamed reply whose status went
+  // long ago, which only Express's own handler can end (it closes the socket).
+  app.use((error: Error & { status?: number; statusCode?: number }, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) {
+      next(error);
+      return;
+    }
+    // body-parser's errors carry both; Express 5's router marks a malformed
+    // URL parameter with `status` alone, which read as a 500 here. A code that
+    // is not a client or server error is no status to answer with.
+    const given = error.statusCode ?? error.status;
+    const statusCode = typeof given === "number" && Number.isInteger(given) && given >= 400 && given < 600 ? given : 500;
     res.status(statusCode).json({
       code: statusCode >= 500 ? "INTERNAL_ERROR" : "REQUEST_ERROR",
       message: error.message,
