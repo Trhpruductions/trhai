@@ -26,6 +26,32 @@ test("failures are sentences, never stack traces", () => {
   assert.equal(plainUpdateError(undefined), "The update did not work.");
 });
 
+// What electron-updater 6.8 threw on 2026-10-17, when the repo's only release
+// was the pre-release v0.1.5-rc.1: the lookup of the latest release failed,
+// and the error quoted the whole feed, whose notes said "with checksums".
+function feedError(feedNotes: string) {
+  const inner = "Error: Unable to find latest version on GitHub (https://github.com/Trhpruductions/trhai/releases/latest), please ensure a production release exists: HttpError: 406 \n    at createHttpError (httpExecutor.js:1:1)";
+  return Object.assign(new Error(`Cannot parse releases feed: ${inner},\nXML:\n<feed><entry><content>${feedNotes}</content></entry></feed>`), { code: "ERR_UPDATER_INVALID_RELEASE_FEED" });
+}
+
+test("no release yet is said as such, whatever the feed's notes say", () => {
+  for (const notes of ["Release candidates publish as pre-releases, with checksums", "a 404 page", "no space left", "ECONNRESET"]) {
+    assert.match(plainUpdateError(feedError(notes)), /No release has been published yet/, notes);
+  }
+  const notFound = Object.assign(new Error("Unable to find latest version on GitHub (https://github.com/o/r/releases/latest), please ensure a production release exists: HttpError: 404"), { code: "ERR_UPDATER_LATEST_VERSION_NOT_FOUND" });
+  assert.match(plainUpdateError(notFound), /No release has been published yet/);
+  assert.match(plainUpdateError(Object.assign(new Error("No published versions on GitHub"), { code: "ERR_UPDATER_NO_PUBLISHED_VERSIONS" })), /No release has been published yet/);
+});
+
+test("the error's code and first line decide; what follows them does not", () => {
+  const mismatch = Object.assign(new Error("sha512 checksum mismatch, expected abc, got def"), { code: "ERR_CHECKSUM_MISMATCH" });
+  assert.match(plainUpdateError(mismatch), /checksum/);
+  // An offline lookup is wrapped in the not-found error, and is still offline.
+  const offline = Object.assign(new Error("Unable to find latest version on GitHub (https://github.com/o/r/releases/latest), please ensure a production release exists: Error: net::ERR_INTERNET_DISCONNECTED"), { code: "ERR_UPDATER_LATEST_VERSION_NOT_FOUND" });
+  assert.match(plainUpdateError(offline), /could not be reached/);
+  assert.equal(plainUpdateError(new Error("something odd\nsha512 checksum mismatch in a quoted note")), "The update did not work: something odd");
+});
+
 test("after an update the helper waits for the app and the installer, then starts the app once", () => {
   const script = relaunchScript("C:\\Users\\O'Neil\\AppData\\Local\\Programs\\trh-ai\\TRH AI.exe", 4242);
   assert.ok(script.includes("$exe = 'C:\\Users\\O''Neil\\AppData\\Local\\Programs\\trh-ai\\TRH AI.exe'"), "a quote in the path is doubled");

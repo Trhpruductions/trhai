@@ -150,8 +150,15 @@ newest release and the notes of recent versions.
 
 1. Bump `version` in `apps/desktop/package.json`, which is the product
    version the installer is named after.
-2. Add a note for that version at the top of `releaseNotes.ts`.
-3. Merge the change, then tag the release:
+2. Add a note for that version at the top of `releaseNotes.ts`. Its title and
+   lines also become the release page's text, which installed copies show
+   when they offer the update, so write them for the people using the app.
+   The workflow refuses to publish a version that has no note.
+3. Merge the change. Tag a release candidate first, such as `v0.1.5-rc.1`.
+   It is published as a pre-release, which no installed copy is offered, so
+   it can be installed and updated to by hand (`TRHAI_DESKTOP_UPDATE_URL` set
+   to its download folder) before anyone else sees it.
+4. Then tag the release:
 
 ```bash
 git tag v0.1.5
@@ -163,8 +170,9 @@ git push origin v0.1.5
 
 The **Release** workflow builds both installers on Windows, checks that the
 tag matches the version, and publishes a GitHub release with them attached,
-together with `latest.yml` and the installer's `.blockmap`. From then on,
-every installed copy offers it.
+together with `latest.yml`, the installer's `.blockmap` and `SHA256SUMS.txt`.
+From then on, every installed copy offers it. A release candidate is
+published the same way, marked as a pre-release.
 
 ### How an installed copy updates itself
 

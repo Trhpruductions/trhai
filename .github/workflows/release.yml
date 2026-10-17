@@ -3,7 +3,8 @@
 # (apps/api/src/services/updates.ts asks this repo's latest release).
 #
 # To release: bump "version" in apps/desktop/package.json, add a note for it
-# in packages/shared/src/releaseNotes.ts, merge, then push a tag that matches:
+# in packages/shared/src/releaseNotes.ts (it becomes the release page's text,
+# and the run stops if there is none), merge, then push a tag that matches:
 #
 #   git tag v0.1.5 && git push origin v0.1.5
 #
@@ -51,6 +52,20 @@ jobs:
           else { throw "Tag $tag is neither vX.Y.Z nor vX.Y.Z-rc.N" }
           if ($base -ne $version) { throw "Tag $tag does not match apps/desktop/package.json version $version" }
           "candidate=$candidate" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      # The release page is the version's own note, not a list of pull
+      # requests: an installed copy shows this text when it offers the update.
+      # A version with no note stops here, before the long build.
+      - name: Release notes
+        shell: pwsh
+        run: |
+          npm run build --workspace @ascend/shared
+          if ($LASTEXITCODE -ne 0) { throw "building @ascend/shared failed" }
+          $flags = @()
+          if ("${{ steps.tag.outputs.candidate }}" -eq "true") { $flags += "--candidate" }
+          node scripts/release-notes.mjs "${{ steps.tag.outputs.version }}" (Join-Path $env:RUNNER_TEMP "release-notes.txt") @flags
+          if ($LASTEXITCODE -ne 0) { throw "no release note for ${{ steps.tag.outputs.version }}" }
 
       - name: Build the installer
         shell: pwsh
@@ -71,8 +86,9 @@ jobs:
           $sums = Join-Path apps/desktop/release "SHA256SUMS.txt"
           $files | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower(), (Split-Path $_ -Leaf) } | Set-Content -Path $sums -Encoding ascii
           $files += (Resolve-Path $sums).Path
+          $notes = Join-Path $env:RUNNER_TEMP "release-notes.txt"
           if ("${{ steps.tag.outputs.candidate }}" -eq "true") {
-            gh release create "${{ github.ref_name }}" $files --title "TRH AI ${{ github.ref_name }} (release candidate)" --generate-notes --prerelease
+            gh release create "${{ github.ref_name }}" $files --title "TRH AI ${{ github.ref_name }} (release candidate)" --notes-file $notes --prerelease
           } else {
-            gh release create "${{ github.ref_name }}" $files --title "TRH AI ${{ github.ref_name }}" --generate-notes
+            gh release create "${{ github.ref_name }}" $files --title "TRH AI ${{ github.ref_name }}" --notes-file $notes
           }
