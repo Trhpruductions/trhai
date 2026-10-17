@@ -44,7 +44,10 @@ Step "desktop" { npm run build --workspace @ascend/desktop }
 
 Step "installer" {
     Set-Location (Join-Path $root "apps\desktop")
-    npx electron-builder --win --config electron-builder.json
+    # Never publishes from here: the Release workflow attaches the files to a
+    # GitHub release itself. The "publish" entry in electron-builder.json is
+    # still what writes latest.yml, which the installed app's updater reads.
+    npx electron-builder --win --config electron-builder.json --publish never
     Set-Location $root
 }
 

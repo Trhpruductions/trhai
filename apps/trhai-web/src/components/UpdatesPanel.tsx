@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../os/ui/Icon";
-import { openReleaseLink, readUpdates, showWhatsNewEvent, type UpdateCheck } from "../lib/updates";
+import { readUpdates, showWhatsNewEvent, type UpdateCheck } from "../lib/updates";
+import { DesktopUpdateButton } from "./DesktopUpdateButton";
 import "./paywall.css";
 
 // Updates, in settings: the version running, whether a newer one is out, a
@@ -54,9 +55,7 @@ export function UpdatesPanel() {
               </p>
               {check.updateAvailable && check.latest ? (
                 <div className="os-view-actions">
-                  <button type="button" className="os-btn os-btn-primary" onClick={() => openReleaseLink(check.latest?.downloadUrl ?? check.latest?.url ?? "")}>
-                    <Icon name="external" size={15} />{check.latest.downloadUrl ? `Download v${check.latest.version}` : "See the release"}
-                  </button>
+                  <DesktopUpdateButton version={check.latest.version} downloadUrl={check.latest.downloadUrl} releaseUrl={check.latest.url} />
                 </div>
               ) : null}
             </div>

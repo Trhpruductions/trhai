@@ -48,6 +48,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $files = Get-ChildItem apps/desktop/release -Filter "*.exe" | ForEach-Object { $_.FullName }
+          $files = @(Get-ChildItem apps/desktop/release -Filter "*.exe" | ForEach-Object { $_.FullName })
           if ($files.Count -lt 2) { throw "Expected the Setup and Portable installers, found $($files.Count)" }
+          # What the installed app's updater reads: latest.yml names the Setup
+          # build and its SHA-512, and the blockmap lets it download only what changed.
+          $files += @(Get-ChildItem apps/desktop/release -File | Where-Object { $_.Name -eq "latest.yml" -or $_.Name -like "*.blockmap" } | ForEach-Object { $_.FullName })
+          if (-not ($files | Where-Object { $_ -like "*latest.yml" })) { throw "latest.yml was not built; the installed app could not update itself from this release" }
           gh release create "${{ github.ref_name }}" $files --title "TRH AI ${{ github.ref_name }}" --generate-notes

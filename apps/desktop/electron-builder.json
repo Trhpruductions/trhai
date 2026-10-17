@@ -35,12 +35,36 @@
     ]
   },
   "nsis": {
-    "oneClick": false,
-    "allowToChangeInstallationDirectory": true,
+    "oneClick": true,
+    "perMachine": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "TRH AI",
+    "runAfterFinish": true,
+    "deleteAppDataOnUninstall": false,
     "artifactName": "TRH-AI-Setup-${version}.${ext}"
   },
   "portable": {
     "artifactName": "TRH-AI-Portable-${version}.${ext}"
   },
-  "afterPack": "./afterPack.cjs"
+  "afterPack": "./afterPack.cjs",
+  "extraMetadata": {
+    "name": "trh-ai"
+  },
+  "electronFuses": {
+    "runAsNode": true,
+    "enableCookieEncryption": true,
+    "enableNodeOptionsEnvironmentVariable": false,
+    "enableNodeCliInspectArguments": false,
+    "onlyLoadAppFromAsar": true,
+    "grantFileProtocolExtraPrivileges": false
+  },
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "Trhpruductions",
+      "repo": "trhai",
+      "releaseType": "release"
+    }
+  ]
 }

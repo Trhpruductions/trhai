@@ -11,6 +11,7 @@ import { getDetachedSpawnConfig, getServiceSpawnOptions } from "./launcher.js";
 import { containPath, isSafeExternalUrl, isTrustedAppUrl, type TrustedApp } from "./pathGuard.js";
 import { getDesktopBuildInfo } from "./buildInfo.js";
 import { loadingShellHtml } from "./loadingShell.js";
+import { startUpdater } from "./updater.js";
 import {
   checkEnvironment,
   isWorkspaceCheck,
@@ -1212,6 +1213,9 @@ app.whenReady().then(() => {
   guardPermissions();
   createWindow();
   void ensureSelfHostedServices();
+  // The installed app's own updates, behind the same trusted-window check as
+  // every other bridge call (see updater.ts).
+  startUpdater((channel, listener) => handleFromAppWindow(channel, listener));
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
