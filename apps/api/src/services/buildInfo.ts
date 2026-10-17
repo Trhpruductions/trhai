@@ -65,7 +65,9 @@ export function getBuildInfo(): BuildInfo {
 
   return {
     apiVersion: readVersion("apps/api/package.json"),
-    webVersion: readVersion("apps/web/package.json"),
+    // The interface people use: trhai-web. This read apps/web, the Vite client
+    // it replaced, so Settings > About showed that one's version instead.
+    webVersion: readVersion("apps/trhai-web/package.json"),
     desktopVersion: readVersion("apps/desktop/package.json"),
     environment: process.env.NODE_ENV?.trim() || "development",
     gitCommit: git(["rev-parse", "HEAD"]),
