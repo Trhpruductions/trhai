@@ -18,9 +18,12 @@ export type ReleaseNote = {
 export const releaseNotes: ReleaseNote[] = [
   {
     version: "0.1.5",
-    date: "2026-10-13",
-    title: "Trial, license keys and update notices",
+    date: "2026-10-16",
+    title: "Trial, license keys, self-updating and a safer app",
     notes: [
+      "Sums, today's date and the time are answered at once, without waiting for the AI model.",
+      "Security: TRH AI now runs on Electron 44 with its window sandboxed. Its local services answer only this PC, and its AI engine only TRH AI.",
+      "A trial record changed by hand ends the trial, and reinstalling no longer starts a new one.",
       "TRH AI now starts a 14-day free trial on a new PC. After that it asks for a license key; everything it holds stays readable, and a key unlocks it again.",
       "Settings has a Plan and billing section: where to buy, your plan, your key.",
       "A What's new notice like this one appears the first time a new version runs, and TRH AI tells you when a newer version is out. The installed app downloads it, installs it when you say so and opens again by itself.",
