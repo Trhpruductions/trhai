@@ -1,8 +1,10 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { engineFetch } from "./engineFetch.js";
+import { setEngineKey } from "./engineKey.js";
 
 // The model engine: llama.cpp's own server, started and stopped by TRH AI.
 //
@@ -336,12 +338,15 @@ export function processName(pid: number): string | null {
  * Null when the file names no engine. Process ids are reused, so one that now
  * belongs to some other program is not an engine and is never touched.
  */
-export function leftoverEngine(pidFile: string): { pid: number; ownerRunning: boolean } | null {
+export function leftoverEngine(pidFile: string): { pid: number; ownerRunning: boolean; key: string | null } | null {
   let recorded: string;
   try { recorded = readFileSync(pidFile, "utf8"); } catch { return null; }
-  const [pid, owner] = recorded.trim().split(/\s+/).map(Number);
+  const [pidText, ownerText, key] = recorded.trim().split(/\s+/);
+  const pid = Number(pidText), owner = Number(ownerText);
   if (!/llama-server/i.test(processName(pid) ?? "")) return null;
-  return { pid, ownerRunning: owner !== process.pid && /^node/i.test(processName(owner) ?? "") };
+  // An installed copy's API runs as "TRH AI.exe" (its own Electron, as Node); a checkout's as node.
+  const ownerName = processName(owner) ?? "";
+  return { pid, ownerRunning: owner !== process.pid && /^(node|trh ai)/i.test(ownerName), key: key ?? null };
 }
 
 /** Whether the engine answers within `withinMs`. Gives up early once `waitingFor` says there is nothing left to wait for. */
@@ -424,7 +429,8 @@ async function launch(env: NodeJS.ProcessEnv): Promise<EngineState> {
     const leftover = leftoverEngine(paths.pidFile);
     if (leftover?.ownerRunning) {
       // Another copy of the API started the engine on this port and is still
-      // running. Its engine is used as it is, and is its to stop.
+      // running. Its engine is used as it is, with its key, and is its to stop.
+      setEngineKey(leftover.key);
       state = await answersHealth(url, 20_000)
         ? { status: "external", url }
         : {
@@ -434,6 +440,8 @@ async function launch(env: NodeJS.ProcessEnv): Promise<EngineState> {
       return state;
     }
     if (leftover) killTree(leftover.pid);
+    // Fresh for every start; see engineKey.ts.
+    const key = randomBytes(24).toString("hex");
     writeFileSync(paths.presetsFile, presetsText(models, { contextTokens: Number.isFinite(forced) && forced > 0 ? forced : undefined }));
 
     // The log of the engine that ran before is kept beside the new one: when
@@ -448,12 +456,16 @@ async function launch(env: NodeJS.ProcessEnv): Promise<EngineState> {
       "--models-max", "1",
       // This PC only, like the API itself.
       "--host", "127.0.0.1",
-      "--port", String(enginePort(env))
+      "--port", String(enginePort(env)),
+      // Only requests carrying this key are answered, so no web page can use it.
+      "--api-key", key
     ], { cwd: path.dirname(paths.exe), windowsHide: true, stdio: ["ignore", log, log] });
     child = started;
-    // The engine's process id, and this one's: who to ask whether it is still in use.
+    setEngineKey(key);
+    // The engine's process id, this one's (who to ask whether it is still in
+    // use), and its key, for another copy of the app on this PC to use it too.
     if (started.pid) {
-      writeFileSync(paths.pidFile, `${started.pid} ${process.pid}`);
+      writeFileSync(paths.pidFile, `${started.pid} ${process.pid} ${key}`);
       pidFileWritten = paths.pidFile;
     }
     started.once("exit", (code) => {

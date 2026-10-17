@@ -22,6 +22,7 @@ import { engineRuntime } from "./runtimeStatus.js";
 import { listSchedules } from "./scheduleStore.js";
 import { whisperStatus } from "./whisperTranscribe.js";
 import { workspaceRoot } from "./workspace.js";
+import { resolveElectronBinary } from "./frameRenderer.js";
 
 export type OperationStatus = "ok" | "warn" | "fail";
 
@@ -72,7 +73,7 @@ export function operationsFrom(facts: OperationFacts): OperationRow[] {
       ? { id: "desktop", label: "Desktop window", group: "Core", status: "ok", detail: "Installed" }
       : {
         id: "desktop", label: "Desktop window", group: "Core", status: "warn", detail: "The desktop shell is not installed",
-        fix: "TRH AI still works in a browser. To get the window, run: npm install, then node install.js inside apps/desktop/node_modules/electron."
+        fix: "TRH AI still works in a browser. To get the window, run npm install, then node install.js inside node_modules/electron."
       });
   }
 
@@ -207,13 +208,9 @@ function desktopInstalled(): boolean {
   // Electron, which is the desktop window.
   const shell = process.env.TRHAI_ELECTRON_PATH?.trim();
   if (shell && existsSync(shell)) return true;
-  // A checkout: the API runs from apps/api, so the desktop shell sits beside it.
-  const here = process.cwd();
-  const candidates = [
-    path.resolve(here, "../desktop/node_modules/electron/dist/electron.exe"),
-    path.resolve(here, "apps/desktop/node_modules/electron/dist/electron.exe")
-  ];
-  return candidates.some((candidate) => existsSync(candidate));
+  // A checkout: the desktop workspace's own Electron, wherever npm put it -
+  // the same lookup video rendering uses.
+  return resolveElectronBinary().ok;
 }
 
 function probeWorkspace(root: string): { writable: boolean; error?: string } {

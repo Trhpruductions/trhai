@@ -1,5 +1,6 @@
 import os from "node:os";
 import type { AddressInfo } from "node:net";
+import { engineFetch } from "./engineFetch.js";
 import {
   discoverModels, engineOffReason, enginePaths, idleUnloadSeconds, listEngineModels, unloadEngineModel
 } from "./modelEngine.js";
@@ -68,7 +69,7 @@ export type EngineRuntime = {
 };
 
 /** What the model engine has loaded and installed, read from the engine itself. */
-export async function engineRuntime(baseUrl: string, fetchImpl: typeof fetch = fetch): Promise<EngineRuntime> {
+export async function engineRuntime(baseUrl: string, fetchImpl: typeof fetch = engineFetch): Promise<EngineRuntime> {
   // The engine gives a model's size only once it has loaded it; the files in
   // the models folder give the rest.
   const onDisk = new Map(discoverModels(enginePaths().modelsDir).map((model) => [model.id, model.sizeBytes]));
@@ -99,7 +100,7 @@ export async function engineRuntime(baseUrl: string, fetchImpl: typeof fetch = f
  * Take a model out of memory now, rather than after it has sat idle.
  * Nothing is lost - the next request that needs it loads it again.
  */
-export async function unloadModel(baseUrl: string, name: string, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; reason: string }> {
+export async function unloadModel(baseUrl: string, name: string, fetchImpl: typeof fetch = engineFetch): Promise<{ ok: true } | { ok: false; reason: string }> {
   return unloadEngineModel(baseUrl, name, fetchImpl);
 }
 

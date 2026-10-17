@@ -2,13 +2,13 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
 import { constants as fsConstants, existsSync, mkdirSync, openSync, statSync, statfsSync } from "node:fs";
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, session, shell } from "electron";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { access, mkdir, readdir, writeFile } from "node:fs/promises";
 import { getDetachedSpawnConfig, getServiceSpawnOptions } from "./launcher.js";
-import { containPath, isSafeExternalUrl, isTrustedAppUrl } from "./pathGuard.js";
+import { containPath, isSafeExternalUrl, isTrustedAppUrl, type TrustedApp } from "./pathGuard.js";
 import { getDesktopBuildInfo } from "./buildInfo.js";
 import { loadingShellHtml } from "./loadingShell.js";
 import { startUpdater } from "./updater.js";
@@ -311,7 +311,7 @@ function handleFromAppWindow<T>(
   ipcMain.handle(channel, async (event, payload: unknown) => {
     const senderUrl = event.senderFrame?.url ?? "";
 
-    if (!isTrustedAppUrl(senderUrl)) {
+    if (!isTrustedAppUrl(senderUrl, trustedApp())) {
       // Logged because a refusal here means something is calling this bridge
       // that should not exist, and that is worth seeing rather than only
       // returning quietly to whatever asked.
@@ -952,13 +952,59 @@ async function ensureSelfHostedServices() {
   }
 }
 
+/** Where the loading screen is written. An installed copy cannot write beside its program files; its userData can. */
+function inlineShellPath(): string {
+  return app.isPackaged
+    ? path.join(app.getPath("userData"), "temp", "desktop-shell.html")
+    : path.resolve(workspaceRoot, ".ascend-temp", "desktop-shell.html");
+}
+
+/**
+ * The app, as the window and the bridge recognise it: the web app's own port
+ * on this PC, and the loading screen this shell writes. Read when asked, since
+ * DESKTOP_START_URL can move the port.
+ */
+function trustedApp(): TrustedApp {
+  let port = String(webPort);
+  try {
+    const start = new URL(desktopStartUrl || `http://${desktopHost}:${webPort}`);
+    port = start.port || "80";
+  } catch { /* keep the web port */ }
+  return { port, files: [inlineShellPath()] };
+}
+
+/** What the app's own pages may use: the microphone (voice), notifications (reminders), copying, full screen. */
+const grantedPermissions = new Set(["media", "notifications", "clipboard-sanitized-write", "fullscreen"]);
+
+/**
+ * Electron grants a page every permission it asks for unless told otherwise:
+ * camera, location, USB, HID, serial, MIDI. Only the app's own pages get
+ * anything, only what they use, and "media" only for sound - voice input.
+ */
+function guardPermissions(): void {
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const asker = details.requestingUrl || contents.getURL();
+    const mediaTypes = (details as { mediaTypes?: string[] }).mediaTypes ?? [];
+    const audioOnly = permission !== "media" || (mediaTypes.length > 0 && mediaTypes.every((type) => type === "audio"));
+    const granted = grantedPermissions.has(permission) && audioOnly && isTrustedAppUrl(asker, trustedApp());
+    if (!granted) console.warn(`[desktop] refused permission ${permission} for ${asker || "unknown"}`);
+    callback(granted);
+  });
+  session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) =>
+    grantedPermissions.has(permission) && isTrustedAppUrl(requestingOrigin, trustedApp()));
+  // No page gets an embedded <webview>: it can carry its own preload and settings.
+  app.on("web-contents-created", (_event, contents) => {
+    contents.on("will-attach-webview", (event) => {
+      event.preventDefault();
+      console.warn("[desktop] refused to attach a webview");
+    });
+  });
+}
+
 async function renderInlineShell(reason: string, details?: string) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
 
-  // An installed copy cannot write beside its program files; its userData can.
-  const fallbackPath = app.isPackaged
-    ? path.join(app.getPath("userData"), "temp", "desktop-shell.html")
-    : path.resolve(workspaceRoot, ".ascend-temp", "desktop-shell.html");
+  const fallbackPath = inlineShellPath();
   // The TRH AI loading screen - see loadingShell.ts. This was a grey box
   // headed "Vexora AI", the first thing anyone saw on opening the app.
   const html = loadingShellHtml(reason, details);
@@ -1104,10 +1150,12 @@ function createWindow() {
     backgroundColor: "#07111f",
     icon: logoPath,
     webPreferences: {
-      preload: path.resolve(__dirname, "preload.js"),
+      // CommonJS, so it runs in a sandboxed renderer: an ES-module preload
+      // needs sandbox off, which is why it was off.
+      preload: path.resolve(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   });
 
@@ -1133,13 +1181,13 @@ function createWindow() {
   // never end up somewhere untrusted. Nothing navigated it away before, but
   // nothing stopped a redirect or an injected location change either.
   mainWindow.webContents.on("will-navigate", (navigationEvent, url) => {
-    if (isTrustedAppUrl(url)) return;
+    if (isTrustedAppUrl(url, trustedApp())) return;
     navigationEvent.preventDefault();
     console.warn(`[desktop] Blocked navigation to ${url}`);
   });
 
   mainWindow.webContents.on("will-redirect", (navigationEvent, url) => {
-    if (isTrustedAppUrl(url)) return;
+    if (isTrustedAppUrl(url, trustedApp())) return;
     navigationEvent.preventDefault();
     console.warn(`[desktop] Blocked redirect to ${url}`);
   });
@@ -1162,6 +1210,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  guardPermissions();
   createWindow();
   void ensureSelfHostedServices();
   // The installed app's own updates, behind the same trusted-window check as

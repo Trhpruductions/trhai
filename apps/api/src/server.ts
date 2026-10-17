@@ -55,7 +55,7 @@ import {
   removeDocument,
   retrieveKnowledgePassages
 } from "./services/knowledgeStore.js";
-import { isAllowedOrigin } from "./services/originPolicy.js";
+import { isAllowedHost, isAllowedOrigin } from "./services/originPolicy.js";
 import { checkAvailability, generate, pinnedModel, readLocalModelConfig } from "./services/localModel.js";
 import { pickAuthorModel } from "./services/appAuthor.js";
 import { readPreferences, updatePreferences } from "./services/preferences.js";
@@ -503,6 +503,16 @@ export function createApp(options: AppOptions = {}) {
   const otherDevices = options.otherDevices === true;
   const key = otherDevices ? readAccessKey() : null;
 
+  // Before anything else, the preflight included: a request whose Host does
+  // not name this PC is a page that pointed its own domain here (see
+  // isAllowedHost), and gets nothing - not even a CORS answer.
+  app.use((req, res, next) => {
+    if (isAllowedHost(req.headers.host, { otherDevices })) {
+      next();
+      return;
+    }
+    res.status(421).json({ code: "WRONG_HOST", message: "This service only answers requests addressed to this PC.", traceId: "trace-local" });
+  });
   app.use(helmet());
   // Defaults to this machine's own origins rather than "*". The API listens on
   // localhost, but that does not stop a page on any site the user visits from

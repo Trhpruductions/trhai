@@ -1,14 +1,38 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isAllowedOrigin, isLocalOrigin } from "../src/services/originPolicy.js";
+import { isAllowedHost, isAllowedOrigin, isLocalOrigin, webAppPort } from "../src/services/originPolicy.js";
 
-test("the app's own origins are allowed on any port", () => {
-  // The web shell moves with ASCEND_WEB_PORT and the desktop shell follows it,
-  // so the port cannot be pinned.
-  assert.equal(isLocalOrigin("http://localhost:5173"), true);
-  assert.equal(isLocalOrigin("http://127.0.0.1:5173"), true);
-  assert.equal(isLocalOrigin("http://127.0.0.1:4173"), true);
-  assert.equal(isLocalOrigin("http://localhost:3000"), true);
+test("the app's own origin is allowed, on the web app's port", () => {
+  assert.equal(isLocalOrigin("http://localhost:3210"), true);
+  assert.equal(isLocalOrigin("http://127.0.0.1:3210"), true);
+  assert.equal(isLocalOrigin("http://[::1]:3210"), true);
+});
+
+test("another port on this PC is not the app: the apps TRH AI builds run on ports of their own", () => {
+  assert.equal(isLocalOrigin("http://127.0.0.1:5173"), false);
+  assert.equal(isLocalOrigin("http://localhost:4173"), false);
+  assert.equal(isLocalOrigin("http://localhost"), false);
+});
+
+test("the port follows ASCEND_WEB_PORT, as the web app and the desktop shell do", () => {
+  assert.equal(webAppPort({}), "3210");
+  assert.equal(webAppPort({ ASCEND_WEB_PORT: "5180" }), "5180");
+  assert.equal(isLocalOrigin("http://localhost:5180", "5180"), true);
+  assert.equal(isLocalOrigin("http://localhost:3210", "5180"), false);
+});
+
+test("only requests addressed to this PC are answered: a rebound domain is not", () => {
+  for (const host of ["127.0.0.1:4000", "localhost:4000", "[::1]:4000", "LOCALHOST:4000", "localhost"]) {
+    assert.equal(isAllowedHost(host), true, host);
+  }
+  // A page that pointed its own name at 127.0.0.1 still sends its own name.
+  for (const host of ["evil.example:4000", "127.0.0.1.evil.example:4000", "localhost.evil.example:4000", "192.168.1.20:4000", "", undefined]) {
+    assert.equal(isAllowedHost(host), false, String(host));
+  }
+  // With other devices let in, an address typed as numbers reaches it too; a name still does not.
+  assert.equal(isAllowedHost("192.168.1.20:4000", { otherDevices: true }), true);
+  assert.equal(isAllowedHost("[fe80::1]:4000", { otherDevices: true }), true);
+  assert.equal(isAllowedHost("evil.example:4000", { otherDevices: true }), false);
 });
 
 test("a remote site is refused", () => {
@@ -57,5 +81,6 @@ test("an empty CORS_ORIGIN falls back to the local default rather than allowing 
   // An unset or blank variable must not read as "no restrictions".
   assert.equal(isAllowedOrigin("https://example.com", ""), false);
   assert.equal(isAllowedOrigin("https://example.com", "   "), false);
-  assert.equal(isAllowedOrigin("http://localhost:5173", ""), true);
+  assert.equal(isAllowedOrigin("http://localhost:3210", ""), true);
+  assert.equal(isAllowedOrigin("http://localhost:5173", ""), false);
 });

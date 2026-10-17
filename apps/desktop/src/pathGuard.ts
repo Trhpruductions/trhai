@@ -1,5 +1,6 @@
 import path from "node:path";
 import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // Containment for paths the renderer supplies.
 //
@@ -111,12 +112,36 @@ export function isSafeExternalUrl(value: string): boolean {
  * navigates inherits that. Without a guard, a redirect or an injected
  * `location.href` would hand arbitrary command execution to remote content.
  */
-export function isTrustedAppUrl(value: string): boolean {
+/** What the window may show and who may call the bridge: the app itself, and nothing else on this PC. */
+export type TrustedApp = {
+  /** The app's own web port; only this PC's addresses on it count. */
+  port: string;
+  /** Local files the shell itself writes and shows (its loading screen). */
+  files: string[];
+};
+
+const thisPc = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/**
+ * Whether a URL is the app itself.
+ *
+ * This was any http page on 127.0.0.1 or localhost, on any port, and any
+ * file: URL at all. The bridge behind it reads project files, captures the
+ * screens and runs workspace checks, and this PC also serves the apps TRH AI
+ * builds, on ports of their own - so a generated app, or any other local
+ * server, that the window was ever navigated to would have had all of it.
+ * Now: this PC's addresses on the app's own port, and the shell's own files.
+ */
+export function isTrustedAppUrl(value: string, app: TrustedApp): boolean {
   try {
     const url = new URL(value);
-    if (url.protocol === "file:") return true;
+    if (url.protocol === "file:") {
+      const shown = path.resolve(fileURLToPath(url)).toLowerCase();
+      return app.files.some((file) => path.resolve(file).toLowerCase() === shown);
+    }
     if (url.protocol !== "http:") return false;
-    return url.hostname === "127.0.0.1" || url.hostname === "localhost";
+    if (!thisPc.has(url.hostname)) return false;
+    return (url.port || "80") === app.port;
   } catch {
     return false;
   }
