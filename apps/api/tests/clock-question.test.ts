@@ -90,3 +90,19 @@ test("an empty message, and no message at all", () => {
 test("a question broken over two lines is still the question", () => {
   assert.equal(says("what time\nis it"), "It is 1:35 PM.");
 });
+
+test("a very long message is turned down at once, not read", () => {
+  // Every message reaches this reader before the model. Taking the trailing
+  // punctuation off a long run of it costs time in the square of its length:
+  // 50,000 question marks and a letter held the API for 3 to 5 seconds.
+  const flood = `${"?".repeat(50_000)}x`;
+  const started = performance.now();
+  assert.equal(says(flood), null);
+  assert.ok(performance.now() - started < 250, `took ${Math.round(performance.now() - started)} ms`);
+  assert.equal(says(`what time is it${"?".repeat(300)}`), null);
+  // The longest way of asking that is answered is far inside the limit.
+  assert.equal(
+    says("Hey, could you please tell me the current date and time right now?"),
+    "It is 1:35 PM on Thursday, October 15, 2026."
+  );
+});

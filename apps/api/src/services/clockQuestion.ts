@@ -60,6 +60,10 @@ function timeText(now: Date, locale?: string): string {
  */
 export function answerClockQuestion(message: string, now: Date, locale?: string): string | null {
   const raw = (message ?? "").replace(/\u2019/g, "'").trim();
+  // No date or time question is this long, and every message passes through
+  // here: taking the trailing punctuation off a long run of it costs time in
+  // the square of its length (50,000 characters held the API for seconds).
+  if (raw.length > 200) return null;
   const text = raw.toLowerCase().replace(/\s+/g, " ").replace(/[?!.\s]+$/, "").trim();
   const head = lead.exec(text);
   let body = text.slice(head ? head[0].length : 0).trim();
