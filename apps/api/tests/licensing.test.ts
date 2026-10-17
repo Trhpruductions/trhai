@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,7 +10,9 @@ import path from "node:path";
 // module load, so they are set before the import.
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 process.env.TRHAI_LICENSE_PUBLIC_KEY = publicKey.export({ type: "spki", format: "der" }).toString("base64");
-process.env.TRHAI_LICENSE_FILE = path.join(mkdtempSync(path.join(tmpdir(), "trhai-license-")), "license.json");
+const licenseDir = mkdtempSync(path.join(tmpdir(), "trhai-license-"));
+process.env.TRHAI_LICENSE_FILE = path.join(licenseDir, "license.json");
+process.env.TRHAI_TRIAL_MARKER = path.join(licenseDir, "elsewhere", "trial-started");
 delete process.env.TRHAI_PAYWALL;
 
 const {
@@ -170,4 +172,81 @@ test("the Buy button only ever points at an https page", () => {
   }
   delete process.env.TRHAI_CHECKOUT_URL;
   delete process.env.TRHAI_PRICE_TEXT;
+});
+
+
+// --------------------------------------------- a trial record changed by hand
+
+const licenseFile = process.env.TRHAI_LICENSE_FILE as string;
+const markerFile = process.env.TRHAI_TRIAL_MARKER as string;
+const fresh = () => {
+  rmSync(licenseFile, { force: true });
+  rmSync(markerFile, { force: true });
+  resetLicensingForTests();
+};
+
+test("a plain, hand-written license file ends the trial, however far ahead it says the trial began", () => {
+  fresh();
+  writeFileSync(licenseFile, JSON.stringify({ trialStartedAt: "2099-01-01T00:00:00.000Z" }));
+  const status = licenseStatus();
+  assert.equal(status.state, "trial_expired");
+  assert.equal(status.locked, true);
+  assert.equal(status.trialTampered, true);
+  assert.match(readFileSync(licenseFile, "utf8"), /"protected": true/, "written back encrypted");
+  resetLicensingForTests();
+  assert.equal(licenseStatus().locked, true, "and it stays ended after a restart");
+});
+
+test("an encrypted file whose trial begins in the future, or that cannot be read, ends the trial too", () => {
+  fresh();
+  writeProtectedJsonFile(licenseFile, { trialStartedAt: new Date(Date.now() + 30 * day).toISOString() });
+  assert.equal(licenseStatus().state, "trial_expired");
+  fresh();
+  writeFileSync(licenseFile, '{"version":1,"protected":true,"algorithm":"aes-256-gcm","kdf":"scrypt-sha256","salt":"AA==","iv":"AA==","tag":"AA==","ciphertext":"AA=="}');
+  const unreadable = licenseStatus();
+  assert.equal(unreadable.locked, true);
+  assert.equal(unreadable.trialTampered, true);
+});
+
+test("a real key in a hand-edited file still unlocks: its signature is checked on its own", () => {
+  fresh();
+  writeFileSync(licenseFile, JSON.stringify({ trialStartedAt: "2099-01-01T00:00:00.000Z", key: issue() }));
+  const status = licenseStatus();
+  assert.equal(status.state, "licensed");
+  assert.equal(status.locked, false);
+});
+
+test("deleting the license file does not start a new trial: the other record keeps the first start", () => {
+  fresh();
+  const first = licenseStatus().trialStartedAt;
+  assert.ok(existsSync(markerFile), "the second record is written");
+  rmSync(licenseFile, { force: true });
+  resetLicensingForTests();
+  assert.equal(licenseStatus().trialStartedAt, first);
+
+  // A trial that began long ago stays over after the file goes.
+  fresh();
+  writeProtectedJsonFile(licenseFile, { trialStartedAt: new Date(Date.now() - 20 * day).toISOString() });
+  assert.equal(licenseStatus().locked, true);
+  rmSync(licenseFile, { force: true });
+  resetLicensingForTests();
+  const after = licenseStatus();
+  assert.equal(after.locked, true);
+  assert.equal(after.trialTampered, false, "nothing was edited; the file was only deleted");
+});
+
+test("the earlier of the two records wins, and a second record dated in the future is ignored", () => {
+  fresh();
+  writeProtectedJsonFile(licenseFile, { trialStartedAt: new Date(Date.now() - 1 * day).toISOString() });
+  mkdirSync(path.dirname(markerFile), { recursive: true });
+  writeFileSync(markerFile, new Date(Date.now() - 20 * day).toISOString());
+  resetLicensingForTests();
+  assert.equal(licenseStatus().locked, true, "the older record ends the trial");
+
+  fresh();
+  mkdirSync(path.dirname(markerFile), { recursive: true });
+  writeFileSync(markerFile, "2099-01-01T00:00:00.000Z");
+  const status = licenseStatus();
+  assert.equal(status.state, "trial");
+  assert.ok(Date.parse(status.trialStartedAt) <= Date.now());
 });

@@ -16,10 +16,12 @@
 // trial began on this PC and the key that was activated, if any.
 
 import { createPublicKey, randomUUID, verify as verifySignature, type KeyObject } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
 import { checkoutUrl as configuredCheckoutUrl, licensePublicKeyBase64, priceText as configuredPriceText } from "./licenseConfig.js";
-import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
+import { assertProtectedJsonWritable, protectedJsonLooksEncrypted, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
+import { runtimeDir } from "./modelEngine.js";
 
 export type Plan = "personal" | "pro" | "team";
 export const plans: Plan[] = ["personal", "pro", "team"];
@@ -57,6 +59,8 @@ export type LicenseStatus = {
   priceText: string | null;
   /** When set, nothing is ever locked: for the owner's own PCs and for tests. */
   paywallDisabled: boolean;
+  /** True when the trial record on this PC had been changed by hand, which ends the trial. */
+  trialTampered: boolean;
 };
 
 export const trialDays = 14;
@@ -66,6 +70,47 @@ const dayMs = 24 * 60 * 60 * 1000;
 type Stored = { trialStartedAt?: string; key?: string | null };
 
 const licenseFilePath = process.env.TRHAI_LICENSE_FILE ?? dataFile("license.json");
+
+/**
+ * A second record of when the trial began, outside the data folder: beside
+ * the model engine's runtime (%LOCALAPPDATA%\TRHAI), which uninstalling the app
+ * leaves alone. The earlier of the two wins, so deleting the license file - or
+ * the whole data folder, or reinstalling - no longer starts a new trial on its
+ * own. Both can still be deleted; stopping that needs a server, which this app
+ * does not have (docs/24-paywall-and-updates.md).
+ */
+function trialMarkerPath(): string {
+  return process.env.TRHAI_TRIAL_MARKER ?? path.join(path.dirname(runtimeDir()), "trial-started");
+}
+
+/** A clock a few minutes fast on one start and right on the next is not tampering. */
+const clockSlackMs = 10 * 60 * 1000;
+let tampered = false;
+
+function readTrialMarker(nowMs: number): number | null {
+  try {
+    const when = Date.parse(readFileSync(trialMarkerPath(), "utf8").trim());
+    // A date in the future helps nobody honest: it is ignored, not trusted.
+    return Number.isFinite(when) && when <= nowMs + clockSlackMs ? when : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Written once; an earlier record is never replaced by a later one. */
+function writeTrialMarker(iso: string): void {
+  const file = trialMarkerPath();
+  try {
+    const existing = Date.parse(readFileSync(file, "utf8").trim());
+    if (Number.isFinite(existing) && existing <= Date.parse(iso)) return;
+  } catch { /* none yet */ }
+  try {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, `${iso}\n`, "utf8");
+  } catch (error) {
+    console.warn(`[license] could not record the trial start at ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 let loaded: Stored | null = null;
 
@@ -133,25 +178,53 @@ export function parseLicenseKey(raw: unknown): ParsedKey {
   return { ok: true, payload };
 }
 
+/**
+ * The trial and the key, as this PC has them.
+ *
+ * The app only ever writes the license file encrypted. One that is not - or
+ * that cannot be read, or whose trial begins in the future - was changed by
+ * hand, and the store under it used to accept a plain JSON file as readily as
+ * an encrypted one: a trial start typed in for 2099 meant a trial that never
+ * ended. Now such a file ends the trial. A license key in it still counts,
+ * because its signature is checked on its own.
+ */
 function load(): Stored {
   if (loaded) return loaded;
   loaded = {};
+  tampered = false;
+  const nowMs = now().getTime();
   if (existsSync(licenseFilePath)) {
+    let text = "";
+    try { text = readFileSync(licenseFilePath, "utf8"); } catch { /* unreadable: handled below */ }
+    let parsed: Stored | null = null;
     try {
-      const parsed = readProtectedJsonFile(licenseFilePath) as Stored;
-      if (parsed && typeof parsed === "object") {
-        if (typeof parsed.trialStartedAt === "string") loaded.trialStartedAt = parsed.trialStartedAt;
-        if (typeof parsed.key === "string") loaded.key = parsed.key;
-      }
+      parsed = (protectedJsonLooksEncrypted(text) ? readProtectedJsonFile(licenseFilePath) : JSON.parse(text)) as Stored;
     } catch (error) {
       console.warn(`[license] could not read ${licenseFilePath}: ${error instanceof Error ? error.message : String(error)}`);
     }
+    if (!protectedJsonLooksEncrypted(text) || !parsed || typeof parsed !== "object") tampered = true;
+    if (parsed && typeof parsed === "object") {
+      if (typeof parsed.key === "string") loaded.key = parsed.key;
+      const started = typeof parsed.trialStartedAt === "string" ? Date.parse(parsed.trialStartedAt) : NaN;
+      if (Number.isFinite(started) && started <= nowMs + clockSlackMs) loaded.trialStartedAt = new Date(started).toISOString();
+      else tampered = true;
+    }
   }
-  if (!loaded.trialStartedAt) {
-    // First run on this PC: the trial starts now and is remembered.
-    loaded.trialStartedAt = now().toISOString();
+  const marker = readTrialMarker(nowMs);
+  if (tampered) {
+    // The trial has ended: as of the earliest start this PC knows of, or now.
+    console.warn(`[license] the trial record in ${licenseFilePath} was changed by hand; the trial has ended`);
+    loaded.trialStartedAt = new Date(Math.min(marker ?? Infinity, nowMs - trialDays * dayMs)).toISOString();
+    save();
+  } else if (!loaded.trialStartedAt) {
+    // First run on this PC - unless the other record says otherwise.
+    loaded.trialStartedAt = new Date(marker ?? nowMs).toISOString();
+    save();
+  } else if (marker !== null && marker < Date.parse(loaded.trialStartedAt)) {
+    loaded.trialStartedAt = new Date(marker).toISOString();
     save();
   }
+  writeTrialMarker(loaded.trialStartedAt as string);
   return loaded;
 }
 
@@ -192,7 +265,8 @@ export function licenseStatus(when?: Date): LicenseStatus {
     trialDaysLeft,
     checkoutUrl: safeCheckoutUrl(process.env.TRHAI_CHECKOUT_URL?.trim() || configuredCheckoutUrl),
     priceText: process.env.TRHAI_PRICE_TEXT?.trim() || configuredPriceText,
-    paywallDisabled: disabled
+    paywallDisabled: disabled,
+    trialTampered: tampered
   };
 
   const parsed = stored.key ? parseLicenseKey(stored.key) : null;

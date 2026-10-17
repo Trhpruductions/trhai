@@ -29,4 +29,5 @@ test("each state is described in a sentence", () => {
   assert.match(describeLicense(status({ state: "licensed", plan: "pro", license: { ...license, expiresAt: new Date(Date.now() + 30 * day).toISOString() } })), /until/);
   assert.match(describeLicense(status({ state: "license_expired", locked: true, plan: "pro", license: { ...license, expiresAt: new Date(Date.now() - day).toISOString() } })), /expired/);
   assert.match(describeLicense(status({ paywallDisabled: true })), /not limited/);
+  assert.match(describeLicense(status({ state: "trial_expired", locked: true, trialDaysLeft: 0, trialTampered: true })), /changed by hand/);
 });
