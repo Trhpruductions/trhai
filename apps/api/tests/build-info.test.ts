@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { getBuildInfo } from "../src/services/buildInfo.js";
 
 // This repo is always a real git checkout in dev and in CI, so the git
@@ -13,6 +14,11 @@ test("build info reports the versions of all three workspaces", () => {
   assert.match(info.apiVersion, /^\d+\.\d+\.\d+$/);
   assert.match(info.webVersion, /^\d+\.\d+\.\d+$/);
   assert.match(info.desktopVersion, /^\d+\.\d+\.\d+$/);
+});
+
+test("the interface version is the web app people use, not the client it replaced", () => {
+  const trhaiWeb = JSON.parse(readFileSync(new URL("../../trhai-web/package.json", import.meta.url), "utf8")) as { version: string };
+  assert.equal(getBuildInfo().webVersion, trhaiWeb.version);
 });
 
 test("build info reports the real commit this process is running from", () => {
