@@ -126,3 +126,24 @@ test("nothing listening is a TypeError, as it is from fetch", async () => {
   await engine.close();
   await assert.rejects(engineFetch(`${url}/health`), TypeError);
 });
+
+test("every engine request carries the engine's key, and an explicit one is left alone", async () => {
+  const { setEngineKey } = await import("../src/services/engineKey.js");
+  const seen: Array<string | undefined> = [];
+  const engine = await serve((request, response) => {
+    seen.push(request.headers.authorization);
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end("{}");
+  });
+  try {
+    setEngineKey("k-123");
+    await (await engineFetch(`${engine.url}/v1/models`)).json();
+    await (await engineFetch(`${engine.url}/v1/models`, { headers: { Authorization: "Bearer other" } })).json();
+    setEngineKey(null);
+    await (await engineFetch(`${engine.url}/v1/models`)).json();
+    assert.deepEqual(seen, ["Bearer k-123", "Bearer other", undefined]);
+  } finally {
+    setEngineKey(null);
+    await engine.close();
+  }
+});

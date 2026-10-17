@@ -13,25 +13,58 @@
 /** Hostnames that are this machine. */
 const localHostnames = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
+/** The web app's port: ASCEND_WEB_PORT, which the web app and the desktop shell also read, or 3210. */
+export function webAppPort(env: NodeJS.ProcessEnv = process.env): string {
+  return env.ASCEND_WEB_PORT?.trim() || "3210";
+}
+
 /**
  * Whether an Origin header belongs to the app running on this machine.
  *
- * Any port is accepted: the web shell moves with ASCEND_WEB_PORT and the
- * desktop shell follows it, so pinning a port would break a supported setup for
- * no security gain — a hostile page cannot pick its own origin's hostname.
+ * This PC's addresses, on the web app's own port. It used to be any port, on
+ * the reasoning that a hostile page cannot pick its own hostname - but this PC
+ * also serves the apps TRH AI builds, each on a port of its own, and their code
+ * is written by the model. Any of them could have read your memory and
+ * documents from here. The port follows ASCEND_WEB_PORT, as the web app and the
+ * desktop shell do, so moving it still works.
  *
  * The hostname is compared after parsing rather than by prefix. "http://
  * 127.0.0.1.evil.com" starts with the loopback address as text but is not
  * local, and a substring test would have admitted it.
  */
-export function isLocalOrigin(origin: string): boolean {
+export function isLocalOrigin(origin: string, port: string = webAppPort()): boolean {
   try {
     const url = new URL(origin);
     if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-    return localHostnames.has(url.hostname);
+    if (!localHostnames.has(url.hostname)) return false;
+    return (url.port || (url.protocol === "https:" ? "443" : "80")) === port;
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether a request's Host header names this PC.
+ *
+ * CORS stops a hostile page reading replies from another origin, and DNS
+ * rebinding walks around it: a site points its own name at 127.0.0.1 once the
+ * page has loaded, and the page's requests to that name on port 4000 then
+ * reach this API as the page's own origin, which CORS never checks. What gives
+ * them away is the Host header, which still carries the site's name. So only
+ * this PC's names are answered; with other devices let in (where the access
+ * key guards everything from elsewhere), an address typed as numbers is too,
+ * since no site can make a browser send its own origin under a bare address.
+ */
+export function isAllowedHost(hostHeader: string | undefined, options: { otherDevices?: boolean } = {}): boolean {
+  if (!hostHeader) return false;
+  const value = hostHeader.trim().toLowerCase();
+  const hostname = value.startsWith("[") ? value.slice(0, value.indexOf("]") + 1) : value.split(":")[0];
+  if (localHostnames.has(hostname)) return true;
+  if (options.otherDevices) {
+    const bare = hostname.replace(/^\[|\]$/g, "");
+    return /^\d{1,3}(\.\d{1,3}){3}$/.test(bare) || /^[0-9a-f:]+$/.test(bare);
+  }
+  return false;
 }
 
 /**

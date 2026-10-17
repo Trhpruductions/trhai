@@ -56,16 +56,29 @@ test("only web schemes are handed to the operating system", () => {
   assert.equal(isSafeExternalUrl("not a url"), false);
 });
 
-test("the window may only sit on the local app", () => {
-  // Wherever this window navigates inherits a bridge that runs shell commands.
-  assert.equal(isTrustedAppUrl("http://127.0.0.1:5173/"), true);
-  assert.equal(isTrustedAppUrl("http://localhost:5173/dashboard"), true);
-  assert.equal(isTrustedAppUrl("file:///C:/app/index.html"), true);
+const app = { port: "3210", files: ["C:\\Users\\me\\AppData\\Roaming\\TRH AI\\temp\\desktop-shell.html"] };
 
-  assert.equal(isTrustedAppUrl("https://example.com"), false);
-  assert.equal(isTrustedAppUrl("http://127.0.0.1.evil.com/"), false);
-  assert.equal(isTrustedAppUrl("http://evil.com/?x=127.0.0.1"), false);
-  assert.equal(isTrustedAppUrl("garbage"), false);
+test("the window may only sit on the app itself", () => {
+  // Wherever this window navigates inherits a bridge that reads project files,
+  // captures the screens and runs workspace checks.
+  assert.equal(isTrustedAppUrl("http://127.0.0.1:3210/", app), true);
+  assert.equal(isTrustedAppUrl("http://localhost:3210/#settings/billing", app), true);
+  assert.equal(isTrustedAppUrl("http://[::1]:3210/", app), true);
+  assert.equal(isTrustedAppUrl("file:///C:/Users/me/AppData/Roaming/TRH%20AI/temp/desktop-shell.html", app), true, "its own loading screen");
+
+  // Another port on this PC: an app TRH AI built and is running, or any other local server.
+  assert.equal(isTrustedAppUrl("http://127.0.0.1:5173/", app), false);
+  assert.equal(isTrustedAppUrl("http://localhost:4000/v1/assist", app), false);
+  assert.equal(isTrustedAppUrl("http://127.0.0.1/", app), false);
+  // Any other local file.
+  assert.equal(isTrustedAppUrl("file:///C:/app/index.html", app), false);
+  assert.equal(isTrustedAppUrl("file:///C:/Users/me/Downloads/desktop-shell.html", app), false);
+
+  assert.equal(isTrustedAppUrl("https://127.0.0.1:3210/", app), false);
+  assert.equal(isTrustedAppUrl("https://example.com", app), false);
+  assert.equal(isTrustedAppUrl("http://127.0.0.1.evil.com:3210/", app), false);
+  assert.equal(isTrustedAppUrl("http://evil.com:3210/?x=127.0.0.1", app), false);
+  assert.equal(isTrustedAppUrl("garbage", app), false);
 });
 
 test("the same rule decides who may call in over IPC", () => {
@@ -75,10 +88,10 @@ test("the same rule decides who may call in over IPC", () => {
   // the window may navigate has to be the rule governing who may call in —
   // otherwise the two can disagree and the weaker one wins.
   const senderUrls = [
-    ["http://127.0.0.1:5173/", true],
-    ["http://localhost:5173/", true],
-    ["file:///C:/app/index.html", true],
-    // An embedded frame pointed somewhere else is the case this closes.
+    ["http://127.0.0.1:3210/", true],
+    ["http://localhost:3210/", true],
+    // A generated app shown in a frame is on a port of its own.
+    ["http://127.0.0.1:5173/", false],
     ["https://ads.example.com/frame.html", false],
     ["http://127.0.0.1.evil.com/", false],
     // A frame with no URL at all must fail closed, not pass by default.
@@ -86,7 +99,7 @@ test("the same rule decides who may call in over IPC", () => {
   ] as const;
 
   for (const [url, expected] of senderUrls) {
-    assert.equal(isTrustedAppUrl(url), expected, `sender ${url || "(none)"}`);
+    assert.equal(isTrustedAppUrl(url, app), expected, `sender ${url || "(none)"}`);
   }
 });
 

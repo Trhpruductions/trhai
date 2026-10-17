@@ -23,6 +23,7 @@
 
 import http, { type IncomingMessage } from "node:http";
 import { Readable } from "node:stream";
+import { engineKey } from "./engineKey.js";
 
 const oneConnectionEach = new http.Agent({ keepAlive: false });
 
@@ -44,6 +45,9 @@ export function engineFetch(input: string | URL | Request, init: RequestInit = {
   if (body === null) return fetch(input, init);
   if (body !== undefined) headers["content-length"] = String(Buffer.byteLength(body));
   headers.connection = "close";
+  // The engine refuses requests without its key (engineKey.ts).
+  const key = engineKey();
+  if (key && !headers.authorization) headers.authorization = `Bearer ${key}`;
 
   return new Promise<Response>((resolve, reject) => {
     let settled = false;

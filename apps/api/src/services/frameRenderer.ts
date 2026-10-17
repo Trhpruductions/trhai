@@ -70,16 +70,15 @@ export function resolveElectronBinary(): { ok: true; path: string } | { ok: fals
   }
 
   const desktopDir = process.env.TRHAI_DESKTOP_DIR ?? path.join(here, "..", "..", "..", "desktop");
-  const electronDir = path.join(desktopDir, "node_modules", "electron");
-  const pathFile = path.join(electronDir, "path.txt");
-
-  if (!existsSync(pathFile)) {
+  const electronDir = findElectronPackage(desktopDir);
+  if (!electronDir) {
     return {
       ok: false,
-      reason: "Electron is not installed under the desktop workspace (apps/desktop/node_modules/electron). "
-        + "Run npm install there first."
+      reason: "Electron is not installed for the desktop workspace (no node_modules/electron in apps/desktop or above it). "
+        + "Run npm install, then node install.js inside that electron folder."
     };
   }
+  const pathFile = path.join(electronDir, "path.txt");
 
   const executableName = readFileSync(pathFile, "utf8").trim();
   const executablePath = path.join(electronDir, "dist", executableName);
@@ -88,6 +87,24 @@ export function resolveElectronBinary(): { ok: true; path: string } | { ok: fals
   }
 
   return { ok: true, path: executablePath };
+}
+
+/**
+ * The `electron` package the desktop workspace would load: its own
+ * node_modules first, then each folder above it, as Node resolves a package.
+ * npm hoists it to the repository root or leaves it in the workspace
+ * depending on what else is installed (Electron 37 sat in the workspace,
+ * 44 at the root), so a fixed path found it only some of the time.
+ */
+export function findElectronPackage(fromDir: string): string | null {
+  let dir = path.resolve(fromDir);
+  for (;;) {
+    const candidate = path.join(dir, "node_modules", "electron");
+    if (existsSync(path.join(candidate, "path.txt"))) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
 }
 
 /** The Electron main-process script this module spawns. Kept alongside it. */
