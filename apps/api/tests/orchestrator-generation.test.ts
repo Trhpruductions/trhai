@@ -87,6 +87,29 @@ test("a sum with anything else in the message still goes to the model, whole", a
   });
 });
 
+test("today's date and the time are read off the clock, without asking the model", async () => {
+  // Asked of the model on a PC with no graphics card the date took 113 seconds.
+  await withFakeModel("I believe it is a Tuesday.", async (received) => {
+    const date = await runAssistantOrchestrator({ mode: "general", userMessage: "What's today's date?" });
+    assert.equal(date.strategy, "calendar");
+    assert.match(date.assistantMessage, /^Today is .+\d{4}\.$/);
+    const time = await runAssistantOrchestrator({ mode: "general", userMessage: "what time is it" });
+    assert.equal(time.strategy, "calendar");
+    assert.match(time.assistantMessage, /^It is .*\d:\d{2}/);
+    assert.equal(received.length, 0, "the model was not asked");
+    assert.deepEqual(date.toolsUsed, []);
+  });
+});
+
+test("a date question with anything else in the message still goes to the model, whole", async () => {
+  await withFakeModel("Thursday, and four.", async (received) => {
+    const result = await runAssistantOrchestrator({ mode: "general", userMessage: "what day is it, and what is 2 + 2" });
+    assert.notEqual(result.strategy, "calendar");
+    assert.notEqual(result.strategy, "arithmetic");
+    assert.ok(received.length > 0, "the model was asked");
+  });
+});
+
 test("a bare sum, with no asking words, is a sum too", async () => {
   await withFakeModel("Understood.", async (received) => {
     const result = await runAssistantOrchestrator({ mode: "general", userMessage: "2 + 2" });

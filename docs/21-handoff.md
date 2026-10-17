@@ -144,6 +144,15 @@ time tuning the prompt loop for this PC before one of those is done.
   with a unit, a date, a variable or a list ("2, 6, 12, 20"). A bare `3-5`, `4/5` or
   `3x4` is a range, a score or a size until the message asks for a calculation. The
   answer is strategy `arithmetic`, labelled "Worked out on this PC".
+- **Today's date and the time are read off the clock, not asked of the model.**
+  "What's today's date?" took 113 s on the PC with no graphics card, because the model
+  had to call `current_datetime` first, and it has called it twice and then answered
+  "Today's date is not recorded". `answerClockQuestion` (`clockQuestion.ts`, tried in the
+  orchestrator after the weekday lookup) answers a message that is a date or time question
+  and nothing else: "what time is it", "what day is it", "tell me the date and time". It
+  says "It is 1:35 PM." and "Today is Thursday, October 15, 2026." in the PC's own way of
+  writing a date, with strategy `calendar`. "What time is it in Tokyo" and "what day is
+  it, and what is 2+2" still go to the model whole.
 - **A tool that replaces a whole document is a tool that loses it.** Asked to
   add one line to a note, the model did not read the note and sent a body it
   made up; the user's text was gone. `update_document` now takes `append`, or

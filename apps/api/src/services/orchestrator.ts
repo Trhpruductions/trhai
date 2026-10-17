@@ -13,6 +13,7 @@ import { workspaceRoot } from "./workspace.js";
 import { changesSomething } from "./toolPermissions.js";
 import { convertUnits } from "./unitConversion.js";
 import { answerArithmeticQuestion } from "./arithmeticQuestion.js";
+import { answerClockQuestion } from "./clockQuestion.js";
 import type { RunningApp, StartResult } from "./appRunner.js";
 import { setActivity } from "./agentActivity.js";
 import { enterStage } from "./reasoningStage.js";
@@ -335,6 +336,13 @@ export async function runAssistantOrchestrator(
   // Friday. See answerWeekdayQuestion.
   const weekday = approving ? null : answerWeekdayQuestion(effectiveMessage, new Date());
   if (weekday) return deterministicResult(effectiveMessage, weekday, "calendar");
+
+  // "what's today's date?" and "what time is it?" - a reading off the clock.
+  // Handed to the model it had to call current_datetime and say what came
+  // back: 113 seconds on a PC with no graphics card, and a tool it has called
+  // twice and then denied ("Today's date is not recorded"). See clockQuestion.ts.
+  const clock = approving ? null : answerClockQuestion(effectiveMessage, new Date());
+  if (clock) return deterministicResult(effectiveMessage, clock, "calendar");
 
   // "fetch https://example.com and save it to example.html" - the page, kept
   // exactly as it is served. Left to the model the file held "<html></html>"

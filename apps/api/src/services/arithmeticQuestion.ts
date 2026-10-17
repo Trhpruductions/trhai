@@ -192,11 +192,11 @@ function readInfix(body: string, asked: boolean): Sum | "zero" | null {
  * "√144 = 12"; a division by zero is said so.
  */
 export function answerArithmeticQuestion(message: string): string | null {
-  const raw = (message ?? "").replace(/’/g, "'").trim();
+  const raw = (message ?? "").replace(/\u2019/g, "'").trim();
   if (!raw || raw.length > 200 || /[\r\n]/.test(raw)) return null;
 
   const text = raw.toLowerCase()
-    .replace(/[−–]/g, "-")
+    .replace(/[\u2212\u2013]/g, "-")
     .replace(/\*\*/g, "^")
     .replace(/\s+/g, " ")
     .replace(/[?!.\s]+$/, "")
