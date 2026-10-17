@@ -29,20 +29,32 @@ export function updateSupport(input: { isPackaged: boolean; platform: string; en
   return { supported: true };
 }
 
-/** An updater failure in a sentence a person can act on; never a stack trace. */
+/**
+ * An updater failure in a sentence a person can act on; never a stack trace.
+ *
+ * Read from electron-updater's error code and the message's first line only.
+ * Some of its errors go on to quote the whole GitHub release feed, every
+ * release's notes included, and a word in those notes must not decide what
+ * this says: with only a pre-release published, "with checksums" in its notes
+ * once turned "no release yet" into a checksum failure.
+ */
 export function plainUpdateError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error ?? "");
-  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|net::ERR_|getaddrinfo/i.test(text)) {
+  const code = typeof (error as { code?: unknown } | null)?.code === "string" ? (error as { code: string }).code : "";
+  const first = text.split("\n")[0].trim();
+  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|net::ERR_|getaddrinfo/i.test(first)) {
     return "The release page could not be reached. Check the internet connection and try again.";
   }
-  if (/sha512 checksum mismatch|checksum/i.test(text)) {
+  if (code === "ERR_UPDATER_LATEST_VERSION_NOT_FOUND" || code === "ERR_UPDATER_NO_PUBLISHED_VERSIONS" || /please ensure a production release exists|No published versions/i.test(first)) {
+    return "No release has been published yet, so there is nothing to update to.";
+  }
+  if (code === "ERR_CHECKSUM_MISMATCH" || /checksum mismatch/i.test(first)) {
     return "The download did not match its checksum, so it was not installed. Try again.";
   }
-  if (/\b404\b|Cannot find .*latest\.yml|No published versions/i.test(text)) {
+  if (/\b404\b|Cannot find .*latest\.yml/i.test(first)) {
     return "This release has no installer for this PC yet. Download it from the release page instead.";
   }
-  if (/ENOSPC|no space/i.test(text)) return "There is not enough free disk space for the update.";
-  const first = text.split("\n")[0].trim();
+  if (/ENOSPC|no space/i.test(first)) return "There is not enough free disk space for the update.";
   return first ? `The update did not work: ${first.slice(0, 200)}` : "The update did not work.";
 }
 
