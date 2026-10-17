@@ -31,6 +31,21 @@ contextBridge.exposeInMainWorld("ascendDesktop", {
   readProjectFile: (payload: { path: string }) => ipcRenderer.invoke("ascend:read-project-file", payload),
   listWorkspaceChecks: () => ipcRenderer.invoke("ascend:list-workspace-checks"),
   runWorkspaceCheck: (payload: { check: string; cwd?: string }) => ipcRenderer.invoke("ascend:run-check", payload),
+  // The installed app's own updates (updater.ts): where it stands, and the
+  // three things the window may ask - look, download, restart into it.
+  updates: {
+    status: () => ipcRenderer.invoke("ascend:update-get"),
+    check: () => ipcRenderer.invoke("ascend:update-check"),
+    download: () => ipcRenderer.invoke("ascend:update-download"),
+    install: () => ipcRenderer.invoke("ascend:update-install"),
+    onStatus: (listener: (status: unknown) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: unknown) => listener(status);
+      ipcRenderer.on("ascend:update-status", handler);
+      return () => {
+        ipcRenderer.removeListener("ascend:update-status", handler);
+      };
+    }
+  },
   onRuntimeEvent: (listener: (event: {
     runId: string;
     kind: "start" | "stdout" | "stderr" | "exit";

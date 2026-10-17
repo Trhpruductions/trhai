@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../os/ui/Icon";
 import {
-  dismissUpdate, markVersionSeen, noticeToShow, openReleaseLink, readDismissedUpdate, readSeenVersion, readUpdates,
+  dismissUpdate, markVersionSeen, noticeToShow, readDismissedUpdate, readSeenVersion, readUpdates,
   showWhatsNewEvent, type Notice, type ReleaseNote, type UpdateCheck
 } from "../lib/updates";
+import { DesktopUpdateButton } from "./DesktopUpdateButton";
 import "./paywall.css";
 
 // The notices everyone using the app sees: "What's new" once per version, and
@@ -97,9 +98,7 @@ export function UpdateNotices() {
         <strong>TRH AI v{notice.latest.version} is out</strong>
         <span>You have v{check?.currentVersion}. Install it over this one; your data stays where it is.</span>
         <div className="os-view-actions">
-          <button type="button" className="os-btn os-btn-primary os-btn-sm" onClick={() => openReleaseLink(notice.latest.downloadUrl ?? notice.latest.url)}>
-            <Icon name="external" size={14} />{notice.latest.downloadUrl ? "Download" : "See the release"}
-          </button>
+          <DesktopUpdateButton version={notice.latest.version} downloadUrl={notice.latest.downloadUrl} releaseUrl={notice.latest.url} small />
           <button type="button" className="os-btn os-btn-ghost os-btn-sm" onClick={later}>Later</button>
         </div>
       </div>

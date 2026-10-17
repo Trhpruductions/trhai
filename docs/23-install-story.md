@@ -45,8 +45,9 @@ under userData too.
 
 - `npm run package:win` (`scripts/package-win.ps1`) builds shared → web
   standalone → API bundle → shell → `electron-builder`, and leaves
-  `apps/desktop/release/TRH-AI-Setup-<version>.exe` (NSIS, choose the folder)
-  and `TRH-AI-Portable-<version>.exe`.
+  `apps/desktop/release/TRH-AI-Setup-<version>.exe` (one-click NSIS, per
+  user: it installs to `%LOCALAPPDATA%\Programs\trh-ai` without asking for
+  admin rights) and `TRH-AI-Portable-<version>.exe`.
 - Code changes behind it: `TRHAI_DATA_DIR`, `TRHAI_ENV_FILE` and a
   `TRHAI_VERSION` fallback in the API; `output: "standalone"` in Next;
   `apps/api/scripts/bundle.mjs`; `ensurePackagedServices` in the shell;
@@ -137,11 +138,26 @@ What was planned for M2, kept for reference:
 
 - Code signing: unsigned today, so SmartScreen warns on first run. Needs a
   certificate, which is a purchase, not code.
-- Auto-update: `electron-updater` against GitHub Releases of
-  `Trhpruductions/trhai`; the installer is NSIS already, which is what it
-  expects.
+- Auto-update (built 2026-10-13): `electron-updater` against GitHub Releases
+  of `Trhpruductions/trhai`, in `apps/desktop/src/updater.ts`. The owner's
+  side is in `24-paywall-and-updates.md`.
+  - The installer became **one-click** for it. The assisted installer, which
+    let people pick a folder, showed its "install for whom" page during a
+    silent update and gave up.
+  - Neither installer reopens the app after a silent update, whatever
+    `--force-run` says. So the app starts a hidden helper before it quits,
+    and the helper waits for the installer, then starts the app. The helper
+    must be detached, because Node ends non-detached children with their
+    parent. Detached PowerShell has no console and exits at once, so it runs
+    under `conhost --headless`, with `cmd /c start /min` as the fallback.
+  - Verified on this PC: 0.1.5 was installed one-click. Its own buttons found
+    a local 0.1.6, downloaded it, quit and installed it. The helper reopened
+    it about 80 s later, reporting 0.1.6. Uninstalling then removed the
+    program, its shortcut and its Windows entry, and left the user's own
+    `TRHAI.lnk` alone.
 - A CI job that builds the installer on a version tag and attaches it to the
-  release, and a CHANGELOG.
+  release (`release.yml`, built with the paywall work), and a CHANGELOG
+  (`releaseNotes.ts` is the in-app one).
 - `Build-TRHAI.bat` and `Launch-TRHAI.bat` stay for working from a checkout;
   they are not the product's install path any more.
 
@@ -150,7 +166,10 @@ What was planned for M2, kept for reference:
 - `run_command` runs what the PC has. An installed copy has no `npm`
   unless the PC does; `node` is there (the app's own Electron) only for the
   apps TRH AI builds and runs itself, which inherit `ELECTRON_RUN_AS_NODE`.
-- Document import (`unpdf` and the Office readers) is bundled but has not
-  been exercised from an installed copy.
+- Document import was exercised from an installed copy on 2026-10-13. A
+  PDF (2 pages), a Word file and a PowerPoint deck were read, and a question
+  about the Word file was answered from it in 1 s. That run also did
+  first-run setup from an empty runtime folder with no `.env`, and answered
+  "487 times 263" with the calculator after 531 s.
 - The installer is Windows only. The shell's packaged path is platform
   neutral, but nothing else has been tried elsewhere.

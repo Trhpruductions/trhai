@@ -1,0 +1,100 @@
+// What the installed app's own updater is doing, in a shape the window can
+// show, and the decisions that do not need Electron to make: whether this copy
+// can update itself at all, and how a failure is said. Kept apart from
+// updater.ts so the tests can load it without Electron.
+
+export type DesktopUpdateStatus =
+  | { state: "unsupported"; reason: string }
+  | { state: "idle" }
+  | { state: "checking" }
+  | { state: "available"; version: string }
+  | { state: "not-available"; version: string | null }
+  | { state: "downloading"; version: string; percent: number; bytesPerSecond: number }
+  | { state: "downloaded"; version: string }
+  | { state: "error"; message: string };
+
+export type UpdateSupport = { supported: true } | { supported: false; reason: string };
+
+/**
+ * Only the installed app updates itself. A copy run from the source tree is
+ * updated with git; the portable build is one file the person keeps wherever
+ * they like, and has nowhere to install over, so it is pointed at the
+ * download instead.
+ */
+export function updateSupport(input: { isPackaged: boolean; platform: string; env: Record<string, string | undefined> }): UpdateSupport {
+  if (input.env.TRHAI_UPDATE_CHECK === "off") return { supported: false, reason: "Checking for updates is switched off (TRHAI_UPDATE_CHECK=off)." };
+  if (!input.isPackaged) return { supported: false, reason: "This copy runs from its source code, so it is updated from there, not by installing." };
+  if (input.env.PORTABLE_EXECUTABLE_DIR) return { supported: false, reason: "The portable build does not install updates; download the new one from the release page." };
+  if (input.platform !== "win32") return { supported: false, reason: "Updates install themselves on Windows only." };
+  return { supported: true };
+}
+
+/** An updater failure in a sentence a person can act on; never a stack trace. */
+export function plainUpdateError(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error ?? "");
+  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|net::ERR_|getaddrinfo/i.test(text)) {
+    return "The release page could not be reached. Check the internet connection and try again.";
+  }
+  if (/sha512 checksum mismatch|checksum/i.test(text)) {
+    return "The download did not match its checksum, so it was not installed. Try again.";
+  }
+  if (/\b404\b|Cannot find .*latest\.yml|No published versions/i.test(text)) {
+    return "This release has no installer for this PC yet. Download it from the release page instead.";
+  }
+  if (/ENOSPC|no space/i.test(text)) return "There is not enough free disk space for the update.";
+  const first = text.split("\n")[0].trim();
+  return first ? `The update did not work: ${first.slice(0, 200)}` : "The update did not work.";
+}
+
+/**
+ * The script that brings the app back after an update installs.
+ *
+ * electron-updater asks the installer to start the app when it finishes
+ * (--force-run), and on this app's installer that does not happen: tried with
+ * both the assisted and the one-click installer, the update installed and
+ * nothing started. So the app starts this, hidden and detached, just before it
+ * quits into the installer. It waits for the app to exit, then for the
+ * installer to finish, then starts the app - unless something already has.
+ * Quotes in the path are doubled for PowerShell's single-quoted strings.
+ */
+export function relaunchScript(exePath: string, appPid: number, options: { logPath?: string; installerPattern?: string } = {}): string {
+  const quoted = (value: string) => `'${value.replace(/'/g, "''")}'`;
+  const pattern = options.installerPattern ?? "TRH-AI-Setup*";
+  // Each step is written down, so a restart that did not happen on someone's
+  // PC says where it stopped.
+  const log = options.logPath
+    ? `function Note($text) { try { Add-Content -LiteralPath ${quoted(options.logPath)} -Value ((Get-Date).ToString('s') + ' ' + $text) } catch {} }`
+    : "function Note($text) {}";
+  return [
+    log,
+    `$exe = ${quoted(exePath)}`,
+    `$deadline = (Get-Date).AddMinutes(15)`,
+    `Note 'waiting for the app (pid ${Math.trunc(appPid)}) to close'`,
+    `try { Wait-Process -Id ${Math.trunc(appPid)} -Timeout 120 -ErrorAction Stop } catch {}`,
+    `Start-Sleep -Seconds 2`,
+    `Note 'waiting for the installer to finish'`,
+    `while ((Get-Date) -lt $deadline) {`,
+    `  if (-not (Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like ${quoted(pattern)} })) { break }`,
+    `  Start-Sleep -Seconds 2`,
+    `}`,
+    `Start-Sleep -Seconds 2`,
+    `if (Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }) { Note 'the app is already running'; exit }`,
+    `if (-not (Test-Path -LiteralPath $exe)) { Note 'the app is no longer installed'; exit }`,
+    `Note 'starting the app'`,
+    `Start-Process -FilePath $exe`
+  ].join("\n");
+}
+
+/**
+ * A script as PowerShell's -EncodedCommand wants it: UTF-16LE, base64.
+ * Passed through -Command instead, a script with line breaks ran only its
+ * first line, and the restart helper silently did nothing.
+ */
+export function encodedCommand(script: string): string {
+  return Buffer.from(script, "utf16le").toString("base64");
+}
+
+/** PowerShell's command line for the helper: no profile, no prompts, hidden, the script encoded. */
+export function helperPowerShell(encoded: string): string[] {
+  return ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-EncodedCommand", encoded];
+}
