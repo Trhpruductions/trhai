@@ -1341,6 +1341,43 @@ async function* noticing(body: AsyncIterable<Uint8Array>, arrived: () => void): 
  * Returns `ok: false` when there is no usable answer — a caller must not treat
  * that as an empty string and show the user a blank reply.
  */
+/** Today, as the system message states it: "Saturday, October 18, 2026". */
+export function dateLine(now: Date): string {
+  return now.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+}
+
+/**
+ * The system message every turn starts with.
+ *
+ * Built here and nowhere else, because the warm-up (warmUp.ts) has the engine
+ * read this same message before anyone asks: a single character's difference
+ * and the engine reads the whole prompt again. Everything in it changes at
+ * most daily, or when the workspace or the access switch does - the clock
+ * time goes with the question instead (see clockNow in runAgent).
+ */
+export function systemMessageFor(options: { today: string; sessionId?: string; agent?: AgentLens; unattended?: boolean }): string {
+  return `${systemPrompt}\n\nThe date on this machine today is ${options.today}. `
+    + "That is current and correct — use it directly and never say the date is unknown or unrecorded. "
+    + "The time of day is given with each question."
+    // Where the work actually lives. Without this the model invents paths:
+    // it called list_files on D:/projects/calculator, which has never
+    // existed on this machine, then asked the user for a full path to a
+    // project it could have found by name. See projectContext.ts.
+    + `\n\n${describeWorkspace(summariseWorkspace(), activeProject(options.sessionId))}`
+    // Said outright when it is true. With access on, the model still opened
+    // every read of a path outside the workspace with "I can't read files
+    // outside the workspace - switch command access on", and only the
+    // forced retry got the file read. It was reasoning from the prompt's
+    // description of the switch, not from its state.
+    + (commandsArmed() && !options.unattended
+      ? "\n\nMachine access is ON right now. read_file, write_file, edit_file and run_command "
+        + "work on any path on this machine, not only the workspace. A full path like C:/Users/... "
+        + "or D:/... is fine to pass as given - do not refuse it and do not ask for access."
+      : "")
+    // Last, so it reads as a lens on everything above rather than ahead of it.
+    + (options.agent ? `\n\n${describeAgentLens(options.agent)}` : "");
+}
+
 export async function runAgent(
   config: LocalModelConfig,
   question: string,
@@ -1422,9 +1459,7 @@ export async function runAgent(
   // changed every 60 seconds and nothing after it was ever reused. On a PC with
   // no graphics card that is the difference between a reply in seconds and one
   // in minutes.
-  const today = now.toLocaleDateString(undefined, {
-    weekday: "long", year: "numeric", month: "long", day: "numeric"
-  });
+  const today = dateLine(now);
   const clockNow = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
   // Read before the model answers, not left for it to fetch. With
@@ -1446,29 +1481,7 @@ export async function runAgent(
   // The request as the model reads it.
   const asked = place ? `${question}\n\n${place.note}` : question;
   const messages: ChatMessage[] = [
-    {
-      role: "system",
-      content: `${systemPrompt}\n\nThe date on this machine today is ${today}. `
-        + "That is current and correct — use it directly and never say the date is unknown or unrecorded. "
-        + "The time of day is given with each question."
-        // Where the work actually lives. Without this the model invents paths:
-        // it called list_files on D:/projects/calculator, which has never
-        // existed on this machine, then asked the user for a full path to a
-        // project it could have found by name. See projectContext.ts.
-        + `\n\n${describeWorkspace(summariseWorkspace(), activeProject(context.sessionId))}`
-        // Said outright when it is true. With access on, the model still opened
-        // every read of a path outside the workspace with "I can't read files
-        // outside the workspace - switch command access on", and only the
-        // forced retry got the file read. It was reasoning from the prompt's
-        // description of the switch, not from its state.
-        + (commandsArmed() && !unattended
-          ? "\n\nMachine access is ON right now. read_file, write_file, edit_file and run_command "
-            + "work on any path on this machine, not only the workspace. A full path like C:/Users/... "
-            + "or D:/... is fine to pass as given - do not refuse it and do not ask for access."
-          : "")
-        // Last, so it reads as a lens on everything above rather than ahead of it.
-        + (context.agent ? `\n\n${describeAgentLens(context.agent)}` : "")
-    },
+    { role: "system", content: systemMessageFor({ today, sessionId: context.sessionId, agent: context.agent, unattended }) },
     // What was said just before, so a follow-up has something to follow.
     ...recentTurns(context.conversation, [question, context.request ?? ""]),
     {

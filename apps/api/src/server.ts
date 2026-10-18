@@ -77,6 +77,7 @@ import { describeEmailAccount, knownProviders, readEmailAccount, removeEmailAcco
 import { phoneLinkStatus, sendWithAccount } from "./services/messaging.js";
 import { extractDocumentText, maxDocumentBytes } from "./services/documentText.js";
 import { maxImagesPerTurn, parseImages, warmVisionModel } from "./services/vision.js";
+import { warmUpEngine, warmUpStatus } from "./services/warmUp.js";
 import path from "node:path";
 import { maxAudioBytes, requiredChannels, requiredSampleRate, transcribe, whisperStatus } from "./services/whisperTranscribe.js";
 import {
@@ -1245,6 +1246,32 @@ export function createApp(options: AppOptions = {}) {
     }
     visionWarming ??= warmVisionModel(readLocalModelConfig()).finally(() => { visionWarming = null; });
     res.json({ data: { loaded: await visionWarming }, traceId: "trace-local" });
+  });
+
+  // Has the chat model read the front of the prompt while a question is still
+  // being typed (see warmUp.ts). Answers at once: the reading can take minutes
+  // on a PC with no graphics card, and whoever is typing should not wait on it.
+  // Any question sent meanwhile stops it, keeping what it read. JSON only, for
+  // the reason /v1/vision/warm is.
+  //
+  // Outside /v1/assist on purpose: everything there is refused once the trial
+  // has ended, and a refusal reopens the paywall - which clicking into the
+  // chat box must not do. Nothing is warmed then, since nothing can be asked.
+  app.post("/v1/warm-up", (req, res) => {
+    if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) {
+      res.status(415).json({ message: "Send this as JSON." });
+      return;
+    }
+    if (licenseStatus().locked) {
+      res.status(202).json({ data: { state: "skipped", reason: "The trial has ended.", at: new Date().toISOString() }, traceId: "trace-local" });
+      return;
+    }
+    void warmUpEngine({ reason: "composer" });
+    res.status(202).json({ data: warmUpStatus(), traceId: "trace-local" });
+  });
+
+  app.get("/v1/warm-up", (_req, res) => {
+    res.json({ data: warmUpStatus(), traceId: "trace-local" });
   });
 
   // What the assistant can actually do, read from the same registry runTool

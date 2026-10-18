@@ -1159,6 +1159,30 @@ const statusTools = new Set(["system_status"]);
 /** Offered only when the request asks for something to be started; see asksToStartSomething. */
 const launchTools = new Set(["run_app"]);
 
+/**
+ * The tools offered with every turn the model takes, whatever was asked, in
+ * the order they are offered. Nothing above withholds them, except the readers
+ * for a summary (see allowReaders).
+ *
+ * They go first. The engine reuses whatever front two prompts share, and the
+ * tools are written into the front, straight after the rules: with the
+ * conditional ones interleaved, a plain question and a coding request parted
+ * ways at the third tool, and everything after it was read again. With these
+ * first, every turn shares the rules and these, and the warm-up (warmUp.ts)
+ * can read that much before anyone asks.
+ */
+export const alwaysOfferedTools = [
+  "search_memory", "search_documents", "list_memories", "list_documents", "read_document",
+  "search_conversation", "list_files", "search_files", "read_file", "list_schedules", "stop_app"
+] as const;
+
+const offerOrder = new Map<string, number>([
+  ...alwaysOfferedTools.map((name, index) => [name, index] as const),
+  ...toolDefinitions
+    .filter((definition) => !(alwaysOfferedTools as readonly string[]).includes(definition.function.name))
+    .map((definition, index) => [definition.function.name, alwaysOfferedTools.length + index] as const)
+]);
+
 export function availableTools(
   armed: boolean,
   options: {
@@ -1223,7 +1247,7 @@ export function availableTools(
     // Only when the request is about an image; see mentionsAnImage.
     if (!allowImages && name === "look_at_image") return false;
     return true;
-  });
+  }).sort((a, b) => (offerOrder.get(a.function.name) ?? 0) - (offerOrder.get(b.function.name) ?? 0));
 }
 
 /**
