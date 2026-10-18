@@ -335,6 +335,19 @@ test("bad requests are refused rather than half-applied", async () => {
   }
 });
 
+// Express 5's router marks this error with `status` only, which the error
+// handler once read as a 500.
+test("an id that is not valid URL encoding is the caller's mistake, not the server's", async () => {
+  const server = await startTestServer();
+  try {
+    const refused = await call(server.baseUrl, "GET", "/v1/conversations/%E0%A4%A?sessionId=web");
+    assert.equal(refused.status, 400);
+    assert.equal(refused.body.code, "REQUEST_ERROR");
+  } finally {
+    await server.close();
+  }
+});
+
 test("a regenerated answer replaces the one before it", async () => {
   resetConversations();
   const server = await startTestServer();

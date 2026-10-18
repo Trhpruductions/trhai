@@ -142,6 +142,20 @@ test("GET /v1/files/raw serves pictures and video, sandboxed and same-site, and 
   });
 });
 
+// Express 5's sendFile refuses a dot anywhere in the path by default, where
+// Express 4 refused only a file named with one.
+test("GET /v1/files/raw serves a picture inside a dot-folder, and still not one whose own name starts with a dot", async () => {
+  write(".previews/shot.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  write(".shot.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  await withServer(async (baseUrl) => {
+    const inFolder = await fetch(`${baseUrl}/v1/files/raw?path=.previews/shot.png`);
+    assert.equal(inFolder.status, 200);
+    assert.equal(inFolder.headers.get("content-type"), "image/png");
+    assert.equal((await inFolder.arrayBuffer()).byteLength, 8);
+    assert.equal((await fetch(`${baseUrl}/v1/files/raw?path=.shot.png`)).status, 404);
+  });
+});
+
 test("when a folder last changed is its newest file, not the folder, and dependencies do not count", () => {
   const changed = newestChange("app2");
   assert.ok(changed !== null);
