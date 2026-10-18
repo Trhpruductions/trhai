@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBaseUrl, apiFetch } from "../lib/api";
 import { concatSamples, encodeWav, resampleMono } from "../lib/wav";
+import { whyNotListen } from "../lib/speechInput";
 
 // The microphone, read and transcribed locally and nowhere else.
 //
@@ -152,7 +153,10 @@ export function useMicrophone(): MicrophoneState {
 
     const { samples, rate } = teardown();
     if (samples.length === 0 || rate === 0) return null;
-    if (transcriptionAvailable !== true) return null;
+    if (transcriptionAvailable !== true) {
+      setError(transcriptionReason ?? "Speech-to-text was not ready, so what you said could not be turned into words.");
+      return null;
+    }
 
     setTranscribing(true);
     setError(null);
@@ -182,7 +186,7 @@ export function useMicrophone(): MicrophoneState {
     } finally {
       setTranscribing(false);
     }
-  }, [listening, teardown, transcriptionAvailable]);
+  }, [listening, teardown, transcriptionAvailable, transcriptionReason]);
 
   /** Mark the start of an utterance at the current position in the capture. */
   const markUtteranceStart = useCallback(() => {
@@ -236,6 +240,14 @@ export function useMicrophone(): MicrophoneState {
   const start = useCallback(async () => {
     if (listening) return;
     setError(null);
+
+    // Nothing on this PC can turn speech into words. Recording anyway, and
+    // discarding it at Stop, looked like being heard and then ignored.
+    const refused = whyNotListen({ available: transcriptionAvailable, reason: transcriptionReason });
+    if (refused) {
+      setError(refused);
+      return;
+    }
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setError("This browser cannot open a microphone.");
@@ -326,7 +338,7 @@ export function useMicrophone(): MicrophoneState {
       );
       teardown();
     }
-  }, [listening, teardown]);
+  }, [listening, teardown, transcriptionAvailable, transcriptionReason]);
 
   // Closing the tab or navigating away must release the device. Tears the
   // graph down directly rather than going through stop(), which would try to
