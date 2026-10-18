@@ -20,7 +20,7 @@ import {
   correctionFor, inventsAReading, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { asksAboutMachineState, asksForAReading, asksForWordsInTheReply, asksToStartSomething, drivePath, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
+import { asksAboutMachineState, asksForAReading, asksForCodeInTheReply, asksForWordsInTheReply, asksToStartSomething, drivePath, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -1763,6 +1763,8 @@ export async function runAgent(
       // a POSIX calculator this Windows machine does not have - and answered
       // with advice to install it. An order to run something keeps the shell.
       ? availableTools(commandsArmed() && !unattended && !(looksArithmetic(question) && !intent.action) && !readingOnly
+        // Not for code asked for in the reply: see asksForCodeInTheReply.
+        && !asksForCodeInTheReply(question)
         // And only for a request about the machine, or an order to run
         // something: see mentionsTheMachine.
         && (mentionsTheMachine(question) || intent.kind === "execute" || intent.kind === "check"), {

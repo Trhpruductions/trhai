@@ -626,6 +626,29 @@ export function asksForWordsInTheReply(message: string): boolean {
 }
 
 /**
+ * Whether a request asks for code to be written for the reply - a function,
+ * a one-liner, a script, a query, a command - rather than for anything to be
+ * run, so run_command is not offered.
+ *
+ * Naming a language is enough for mentionsTheMachine ("python" is in its
+ * list, for "what version of python is installed?"), so the shell was on
+ * offer. Live on 2026-10-18, "Write a one-line Python function that reverses
+ * a string." on the 3B: it ran the definition as a shell command and answered
+ * that "the function is not recognized as a valid command"; a second run
+ * looped through tools until it gave up. The code was the answer.
+ *
+ * Not when a file is named (writing it is file work) or when the request also
+ * asks for the thing to be run.
+ */
+export function asksForCodeInTheReply(message: string): boolean {
+  const text = (message ?? "").trim();
+  if (!text || namesAFilePath(text)) return false;
+  if (/\b(?:and|then)\s+(?:then\s+)?(?:run|execute|launch|test|try)\b|\b(?:run|execute|launch|test|try)\s+(?:it|that|them|this)\b/i.test(text)) return false;
+  return /\b(?:write|show|give|make|create|draft|generate|code|need|want)\b(?:\s+(?:me|us))?\s+(?:(?:a|an|the|some|another|short|simple|quick|small|one-line|one line|single-line)\s+)*(?:[\w+#.-]+\s+){0,3}?(?:function|method|one-?liner|snippet|regex|regular expression|query|class|script|command|example|lambda|loop)s?\b/i
+    .test(text);
+}
+
+/**
  * A request to reshape something already said - "make that answer one
  * sentence", "say it more simply", "translate that to French" - so nothing
  * that writes is offered.
