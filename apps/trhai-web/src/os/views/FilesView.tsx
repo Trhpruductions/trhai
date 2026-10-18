@@ -5,7 +5,7 @@ import { Markdown } from "../../components/Markdown";
 import { apiBaseUrl, apiGet } from "../../lib/api";
 import { whenUsed } from "../../lib/conversationGroups";
 import {
-  absolutePath, crumbs, fileKind, formatBytes, languageOf, parentOf, sortEntries,
+  absolutePath, crumbs, fileKind, formatBytes, languageOf, parentOf, readableDocument, sortEntries,
   type FileEntry, type FileKind, type FileSort
 } from "../../lib/files";
 import { Icon } from "../ui/Icon";
@@ -119,12 +119,14 @@ function Preview({ entry, root, onAsk }: { entry: PreviewTarget; root: string; o
             <button type="button" className={`os-btn os-btn-sm${wrap ? " on" : ""}`} aria-pressed={wrap} onClick={() => setWrap(!wrap)}>Wrap lines</button>
           ) : null}
           <button type="button" className="os-btn os-btn-sm" onClick={() => void copy()}><Icon name="copy" size={14} />Copy path</button>
-          <button type="button" className="os-btn os-btn-sm os-btn-primary"
-            onClick={() => onAsk(kind === "document"
-              ? `Summarise the document ${entry.path} in my workspace.`
-              : `Look at ${entry.path} in the workspace and tell me what it is for.`)}>
-            <Icon name="message" size={14} />{kind === "document" ? "Ask TRH AI to summarise it" : "Ask TRH AI about it"}
-          </button>
+          {kind !== "document" || readableDocument(entry.name) ? (
+            <button type="button" className="os-btn os-btn-sm os-btn-primary"
+              onClick={() => onAsk(kind === "document"
+                ? `Summarise the document ${entry.path} in my workspace.`
+                : `Look at ${entry.path} in the workspace and tell me what it is for.`)}>
+              <Icon name="message" size={14} />{kind === "document" ? "Ask TRH AI to summarise it" : "Ask TRH AI about it"}
+            </button>
+          ) : null}
         </div>
       </header>
       <div className="os-file-preview-body">
@@ -136,7 +138,9 @@ function Preview({ entry, root, onAsk }: { entry: PreviewTarget; root: string; o
               : kind === "document" ? (
                 <div className="os-empty">
                   <strong>No preview for this kind of file</strong>
-                  <p>TRH AI can read PDF, Word and PowerPoint files - ask it to summarise this one.</p>
+                  <p>{readableDocument(entry.name)
+                    ? "TRH AI can read PDF, Word and PowerPoint files - ask it to summarise this one."
+                    : "TRH AI reads PDF, Word (.docx) and PowerPoint (.pptx) files. Open this one in the program it belongs to."}</p>
                 </div>
               ) : failed ? <p className="os-task-alert"><Icon name="alert" size={14} />{failed}</p>
                 : !opened ? <p className="os-faint">Reading…</p>

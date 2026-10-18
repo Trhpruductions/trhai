@@ -659,7 +659,7 @@ export async function readTelemetry(): Promise<SystemTelemetry> {
     gpu,
     cloud: {
       services: [],
-      detail: "Nothing leaves this machine. No cloud services are in use."
+      detail: "No cloud AI is in use: every reply is written on this PC. What does go online, and when, is listed under Network."
     },
     disk,
     network,

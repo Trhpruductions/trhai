@@ -441,7 +441,7 @@ export function buildCapabilityReply(localModel?: string): string {
   // promising one that was never installed, and a user who reads either and
   // then sees the opposite stops believing the rest of this reply.
   const opening = localModel
-    ? `I'm TRHAI, an assistant that runs entirely on this machine. General questions go to ${localModel} here — nothing leaves it, and there is no API key involved.`
+    ? `I'm TRHAI, an assistant that runs entirely on this machine. General questions go to ${localModel}, which runs here — they are not sent to any AI service, and there is no API key involved.`
     : "I'm TRHAI, an assistant that runs entirely on this machine, with no language model behind me — so I can't answer general questions from world knowledge, and I won't pretend to.";
 
   const closing = localModel

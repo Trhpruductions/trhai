@@ -182,7 +182,7 @@ export type RawFetchOutcome =
 export type RawFetchOptions = { method?: string; body?: string; contentType?: string; userAgent?: string };
 
 /** How the request identifies itself. One string, so every route uses the same. */
-const userAgent = "Vexora/1.0 (local assistant, fetching a page on the user's behalf)";
+const userAgent = "TRH-AI/1.0 (local assistant, fetching a page on the user's behalf)";
 
 /**
  * Fetch `rawUrl` and return its raw body text, with every network-facing

@@ -16,11 +16,11 @@ import path from "node:path";
 import { readLocalModelConfig } from "./localModel.js";
 import { discoverModels, enginePaths } from "./modelEngine.js";
 import { persistenceFailures } from "./persistenceHealth.js";
-import { piperStatus } from "./piperSpeech.js";
+import { piperRoot, piperStatus } from "./piperSpeech.js";
 import { lockedProtectedFiles } from "./protectedJson.js";
 import { engineRuntime } from "./runtimeStatus.js";
 import { listSchedules } from "./scheduleStore.js";
-import { whisperStatus } from "./whisperTranscribe.js";
+import { whisperRoot, whisperStatus } from "./whisperTranscribe.js";
 import { workspaceRoot } from "./workspace.js";
 import { resolveElectronBinary } from "./frameRenderer.js";
 
@@ -107,13 +107,13 @@ export function operationsFrom(facts: OperationFacts): OperationRow[] {
     ? { id: "piper", label: "Voice (Piper)", group: "Voice", status: "ok", detail: facts.piper.detail }
     : {
       id: "piper", label: "Voice (Piper)", group: "Voice", status: "warn", detail: facts.piper.detail,
-      fix: "TRH AI cannot speak aloud until Piper and a voice are installed in the Vexora folder."
+      fix: `TRH AI cannot speak aloud until Piper and a voice are installed. It looks for them in ${piperRoot()}.`
     });
   rows.push(facts.whisper.available
     ? { id: "whisper", label: "Listening (Whisper)", group: "Voice", status: "ok", detail: facts.whisper.detail }
     : {
       id: "whisper", label: "Listening (Whisper)", group: "Voice", status: "warn", detail: facts.whisper.detail,
-      fix: "TRH AI cannot transcribe speech until whisper.cpp and a model are installed in the Vexora folder."
+      fix: `TRH AI cannot transcribe speech until whisper.cpp and a model are installed. It looks for them in ${whisperRoot()}.`
     });
 
   rows.push(facts.ffmpeg.found
