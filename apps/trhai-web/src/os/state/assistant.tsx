@@ -18,6 +18,7 @@ import {
 } from "../../lib/imageAttach";
 import { canShareScreen, shareScreen } from "../../lib/screenShare";
 import { apiPost } from "../../lib/api";
+import { whyNotListen } from "../../lib/speechInput";
 import { readActiveAgent } from "../../lib/agents";
 import type { Agent } from "@ascend/shared";
 import { useNotify } from "./notify";
@@ -287,6 +288,13 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const toggleMic = useCallback(async () => {
     const current = live.current;
     if (!current.mic.listening) {
+      // Said where the button was pressed: the microphone's own message shows
+      // only on the Voice screen, and nothing else would answer the press.
+      const refused = whyNotListen({ available: current.mic.transcriptionAvailable, reason: current.mic.transcriptionReason });
+      if (refused) {
+        notify({ level: "warning", title: "TRH AI cannot hear you yet", body: refused, source: "VOICE" });
+        return;
+      }
       // Stop any reply being read, or the microphone transcribes TRH AI's own voice.
       current.speech.stop();
       current.cues.play("listen");
@@ -302,7 +310,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       return;
     }
     live.current.ask(said);
-  }, []);
+  }, [notify]);
 
   // The hands-free loop: decides where each utterance ends from the
   // microphone's own level, and never listens while TRH AI talks or works.

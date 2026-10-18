@@ -207,6 +207,7 @@ function MicButton() {
   const ring = mic.listening ? Math.min(1, micAmplitude * 2.2) : 0;
   const title = !mic.supported
     ? "This browser exposes no microphone"
+    : mic.transcriptionAvailable === false ? "Speech-to-text is not installed, so TRH AI cannot hear you yet"
     : mic.transcribing ? "Transcribing on this PC…"
       : mic.listening ? (handsFree ? "Hands-free: listening for your next request" : "Stop and send what you said")
         : "Speak your request - transcribed on this PC, never uploaded";
