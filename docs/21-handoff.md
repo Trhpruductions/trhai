@@ -69,6 +69,43 @@ helps, in order: more RAM (16 GB of DDR3 ends the paging), a smaller model
 (`qwen2.5-1.5b`), closing memory-heavy programs while using it. Do not spend
 time tuning the prompt loop for this PC before one of those is done.
 
+### First replies: the warm-up (measured 2026-10-18)
+
+Almost all of a cold reply's wait here is the model reading its prompt, not
+writing the answer. The engine keeps what it has read and reuses whatever
+front the next prompt shares, so the API has it read the front every turn
+shares before anyone asks (`apps/api/src/services/warmUp.ts`):
+
+- What it reads: the system message (`systemMessageFor`) and the eleven
+  tools offered with every turn (`alwaysOfferedTools`, which now come first
+  in every tool list so that they are shared).
+- When: once the API's own engine is up, and when the chat box is clicked
+  into (`POST /v1/warm-up`, at most once a minute from the app) if the
+  engine has since let the model go. Never while the trial has ended, and
+  never by pushing out another loaded model.
+- It gives way to real work: any reply the engine is asked for stops it
+  (`loadEngineModel` calls `stopWarmUp`), and the engine keeps what it had
+  read. `GET /v1/warm-up` says where it is; `TRHAI_WARM_UP=off` turns it off.
+
+On this PC, 3B model, "Write a one-line Python function that reverses a
+string." sent as the chat box sends it:
+
+| | Prompt read before the first word | Whole turn |
+|---|---|---|
+| master, cold | 3,564 tokens, 261 s | 413 s |
+| warm-up branch, warmed at start | 663 tokens, 51 s | 293 s (more tool rounds) |
+
+The warm-up itself read 2,957 tokens in 201 s, starting 13 s after launch.
+After a turn that used up its tool rounds, the last round has no tools, so
+the next question shares only the system message (about 57%) - uncommon,
+and noted here so it is not mistaken for the warm-up failing.
+
+The live battery on the branch passed 12 of 13 (greeting 7 s, calculate
+94 s, file write 177 s, file read 159 s, web fetch 67 s). The one failure is
+not the warm-up's: after "forget my favourite colour", the model read the
+colour back out of the conversation history, where the earlier "remember"
+turn still is.
+
 ### Negative results — do not repeat this work
 
 - **Node's fetch gives up at 300 s, whatever the model timeout says.**

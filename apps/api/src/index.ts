@@ -10,6 +10,8 @@ import { startEngine, stopEngine } from "./services/modelEngine.js";
 import { hardwareDefaults, readHardware } from "./services/modelSetup.js";
 import { listenOn, listenPlan, type Listener } from "./services/networkAccess.js";
 import { encryptPlainStores } from "./services/dataInventory.js";
+import { licenseStatus } from "./services/licensing.js";
+import { describeWarmUp, warmUpEngine } from "./services/warmUp.js";
 
 /**
  * Find .env by walking up from this file, not from the working directory.
@@ -99,6 +101,12 @@ listenOn(() => createServer(app), port, plan.hosts).then(({ listeners: bound, sk
         : engine.status === "external"
           ? `model engine: using the one at ${engine.url}`
           : `model engine not running: ${engine.reason}`);
+      // So the first question does not pay for reading the whole prompt (see
+      // warmUp.ts). Only this process's own engine, and not while the trial
+      // has ended and nothing new can be asked anyway.
+      if (engine.status === "running" && !licenseStatus().locked) {
+        void warmUpEngine({ reason: "start" }).then((result) => console.log(describeWarmUp(result)));
+      }
     });
   }
 }).catch((error: NodeJS.ErrnoException) => {

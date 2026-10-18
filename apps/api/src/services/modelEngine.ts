@@ -595,8 +595,12 @@ export type LoadedModel = { ok: true; id: string; windowTokens: number } | { ok:
 export async function loadEngineModel(
   baseUrl: string,
   name: string,
-  options: { fetchImpl?: FetchLike; signal?: AbortSignal; timeoutMs?: number } = {}
+  options: { fetchImpl?: FetchLike; signal?: AbortSignal; timeoutMs?: number; forWarmUp?: boolean } = {}
 ): Promise<LoadedModel> {
+  // Every reply the engine gives starts here, so this is where a warm-up gives
+  // way to one (see warmUp.ts). The engine stops the warm-up's reading at the
+  // end of the batch it is on, and the request that follows keeps what it read.
+  if (!options.forWarmUp) stopWarmUp();
   const fetchImpl = options.fetchImpl ?? engineFetch;
   const allowed = options.timeoutMs ?? 120_000;
   const until = Date.now() + allowed;
@@ -654,6 +658,27 @@ export async function loadEngineModel(
     }
     return { ok: false, reason: `The model engine is not answering, so ${name} could not be loaded.` };
   }
+}
+
+// The warm-up in progress, if any. Held here rather than in warmUp.ts so that
+// loadEngineModel can stop it without the two modules importing each other.
+let warmUpInProgress: AbortController | null = null;
+
+/** Registers the warm-up now running. */
+export function claimWarmUp(controller: AbortController): void {
+  warmUpInProgress = controller;
+}
+
+/** Clears a warm-up that has ended, if it is still the registered one. */
+export function releaseWarmUp(controller: AbortController): void {
+  if (warmUpInProgress === controller) warmUpInProgress = null;
+}
+
+/** Stops a warm-up in progress: real work needs the engine. */
+export function stopWarmUp(): void {
+  const running = warmUpInProgress;
+  warmUpInProgress = null;
+  running?.abort(new Error("A request needs the model engine."));
 }
 
 /** Lets a model go now, rather than when it has sat idle. The next request that needs it loads it again. */

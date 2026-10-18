@@ -184,6 +184,17 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [attentive, setAttentive] = useState(false);
   const [agent, setAgent] = useState<Agent | null>(null);
   const imagePicker = useRef<HTMLInputElement>(null);
+  const warmedAt = useRef(0);
+
+  // Someone is about to type a question: the model reads the start of its
+  // prompt meanwhile, so the question does not wait for that (see the API's
+  // warmUp.ts). The API answers at once and does nothing when the model
+  // already holds it; at most once a minute from here.
+  useEffect(() => {
+    if (!attentive || Date.now() - warmedAt.current < 60_000) return;
+    warmedAt.current = Date.now();
+    void apiPost("/v1/warm-up", {});
+  }, [attentive]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- browser capabilities and stored choices, unknowable on the server

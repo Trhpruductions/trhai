@@ -194,23 +194,11 @@ if (-not (Test-Port 4000)) {
     }
 }
 
-# Warm the model in the background so the first real question is not the one
-# that pays for loading it. On a PC with no graphics card that first question
-# takes minutes: the model is read off disk and the whole prompt is processed.
-# A greeting takes the same front of the prompt as an ordinary question, and
-# the engine keeps what it processed, so the questions after it are quick.
-# Skipped under -NoOpen, which is the smoke check and wants a quiet machine.
-if (-not $NoOpen -and (Test-Port 4000)) {
-    try {
-        $warm = '{"message":"Hello.","sessionId":"warm-up"}'
-        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList @(
-            "-NoProfile", "-Command",
-            "try { Invoke-RestMethod -Uri http://127.0.0.1:4000/v1/assist -Method Post -ContentType 'application/json' -Body '$warm' -TimeoutSec 900 | Out-Null } catch {}")
-        Write-Log "warming the model"
-    } catch {
-        Write-Log "could not start the warm-up: $($_.Exception.Message)"
-    }
-}
+# The model is warmed by the API itself once its engine is up (see
+# apps/api/src/services/warmUp.ts): it reads the start of the prompt every
+# question shares, so the first question does not. This used to post
+# "Hello." to /v1/assist, which is answered without the model and so never
+# warmed anything.
 
 Write-Log "opening"
 if ($NoOpen) { exit 0 }
