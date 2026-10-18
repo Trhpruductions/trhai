@@ -73,6 +73,36 @@ export function statesFact(text: string, fact: string): boolean {
   return copulas.some((copula) => have.includes(`${subject}${copula}`));
 }
 
+/**
+ * A conversation with every turn that states a forgotten fact taken out, for
+ * anything that hands the transcript to the model.
+ *
+ * Deleting the memory was not enough: the turn it was made from was still in
+ * the history the model reads. Live, "forget that my favourite colour is
+ * teal" deleted it, and "what is my favourite colour?" was answered "Based on
+ * what you've shared, your favourite colour is teal". A reply to a turn taken
+ * out goes with it - "Saved." answers nothing on its own - and so does any
+ * reply that repeated the fact.
+ */
+export function withoutForgotten<T extends { role: string; content: string }>(turns: T[], forgotten: string[]): T[] {
+  if (forgotten.length === 0) return turns;
+  const kept: T[] = [];
+  let answeringRemoved = false;
+  for (const turn of turns) {
+    if (forgotten.some((fact) => statesFact(turn.content, fact))) {
+      answeringRemoved = turn.role === "user";
+      continue;
+    }
+    if (answeringRemoved && turn.role === "assistant") {
+      answeringRemoved = false;
+      continue;
+    }
+    answeringRemoved = false;
+    kept.push(turn);
+  }
+  return kept;
+}
+
 export type FactMatch<T> =
   | { kind: "one"; memory: T }
   | { kind: "several"; candidates: T[] }

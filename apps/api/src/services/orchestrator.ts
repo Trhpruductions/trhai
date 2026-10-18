@@ -51,7 +51,7 @@ import {
   parseNthThingRequest, parsePinRequest,
   parseRemoveScheduleRequest, parseToggleScheduleRequest
 } from "./memoryRequests.js";
-import { matchMemories } from "./factWording.js";
+import { matchMemories, withoutForgotten } from "./factWording.js";
 import { resolveFilePronoun, resolveProjectReference } from "./activeProject.js";
 import { contentToKeep, pageToKeep } from "./pageSave.js";
 import { fetchRawPage, readablePage, type RawFetchOutcome } from "./webFetch.js";
@@ -2158,8 +2158,10 @@ async function answerWithLocalModel(
     // text out of what that serves.
     ...(input.fetchPageAsServed ? { fetchPage: async (url: string) => readablePage(await input.fetchPageAsServed!(url)) } : {}),
     // The transcript the request already carries, so "what did I just ask you"
-    // is answerable without saving every turn to memory first.
-    conversation: input.history,
+    // is answerable without saving every turn to memory first - less what the
+    // user has asked to forget (see withoutForgotten). Both the model's
+    // history and search_conversation read this.
+    conversation: withoutForgotten(input.history ?? [], input.forgottenFacts ?? []),
     // The user's own words, so a built app is named after what they asked for
     // rather than after the model's paraphrase of it.
     //
