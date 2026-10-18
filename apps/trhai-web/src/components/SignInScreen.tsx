@@ -256,7 +256,7 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
 
   const heading = {
     signin: { eyebrow: "SECURE SIGN IN", title: "Welcome back", sub: "Sign in and your memory, documents and conversations come with you." },
-    register: { eyebrow: "NEW ACCOUNT", title: "Create your account", sub: "Kept on this machine and encrypted. No email is ever sent, and nothing leaves it." },
+    register: { eyebrow: "NEW ACCOUNT", title: "Create your account", sub: "Kept on this machine and encrypted. No email is ever sent, and the account never leaves this PC." },
     recover: { eyebrow: "ACCOUNT RECOVERY", title: "Use a recovery code", sub: "Each code works once. Using one sets a new password and signs out everywhere else." },
     codes: { eyebrow: "SAVE THESE NOW", title: "Your recovery codes", sub: "If you forget your password, one of these gets you back in. They will not be shown again." }
   }[mode];
@@ -280,9 +280,9 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
               matters, and answers from what you have told it.
             </p>
             <ul className="gate-points">
-              <li><Icon name="screen" />Runs entirely on this PC - nothing leaves it</li>
+              <li><Icon name="screen" />The AI runs on this PC - your conversations stay here</li>
               <li><Icon name="brain" />Your memory follows your account between browsers</li>
-              <li><Icon name="shield" />No API keys, no subscription, no cloud account</li>
+              <li><Icon name="shield" />No API keys and no cloud account</li>
             </ul>
           </div>
         </section>
@@ -427,7 +427,7 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
             </form>
           )}
 
-          <div className="gate-fine"><Icon name="lock" />Stored encrypted on this machine · Nothing leaves it</div>
+          <div className="gate-fine"><Icon name="lock" />Stored encrypted on this machine · Your account never leaves it</div>
         </section>
         </div>
         </div>

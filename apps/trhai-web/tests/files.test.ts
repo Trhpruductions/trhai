@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { absolutePath, crumbs, fileKind, formatBytes, languageOf, parentOf, sortEntries, type FileEntry } from "../src/lib/files.js";
+import { absolutePath, crumbs, fileKind, formatBytes, languageOf, parentOf, readableDocument, sortEntries, type FileEntry } from "../src/lib/files.js";
 import { detailFromHash, hashFor, viewFromHash } from "../src/os/views.js";
 
 // The Files and Code workspaces' wording and ordering, and the address that
@@ -55,4 +55,10 @@ test("an address carries a folder within its view, and survives the round trip",
   assert.equal(detailFromHash("#files"), null);
   assert.equal(hashFor("code"), "code");
   assert.equal(detailFromHash("#files/%E0%A4%A"), null, "a broken address is no place, not a crash");
+});
+
+test("summarising is offered only for the documents TRH AI can read", () => {
+  for (const name of ["report.pdf", "notes.DOCX", "deck.pptx"]) assert.equal(readableDocument(name), true, name);
+  // Documents to the file list, but the API has nothing that reads them.
+  for (const name of ["old.doc", "old.ppt", "sheet.xlsx", "sheet.xls", "readme.md"]) assert.equal(readableDocument(name), false, name);
 });

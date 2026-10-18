@@ -59,7 +59,7 @@ export function PaywallScreen() {
           built, this PC needs a license key.
         </p>
         <ul className="paywall-points">
-          <li><Icon name="ok" size={15} />Runs entirely on this PC. No account, no cloud, nothing of yours leaves it.</li>
+          <li><Icon name="ok" size={15} />Runs on this PC, with no account and no cloud AI. Your conversations, memory and documents stay here.</li>
           <li><Icon name="ok" size={15} />One key unlocks this PC for good on a plan without an end date.</li>
           <li><Icon name="ok" size={15} />Paying happens in your browser; TRH AI never handles the card.</li>
         </ul>

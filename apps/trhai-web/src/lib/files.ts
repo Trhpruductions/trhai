@@ -46,6 +46,15 @@ function extensionOf(name: string): string {
 }
 
 /** What kind of file a name is, for how to show it. A name with no extension (README, Dockerfile) is text. */
+/**
+ * Whether TRH AI can read this document (the API's documentText.ts reads PDF,
+ * Word .docx and PowerPoint .pptx). Older Office files and spreadsheets are
+ * documents to the file list, but there is nothing in them TRH AI can read.
+ */
+export function readableDocument(name: string): boolean {
+  return ["pdf", "docx", "pptx"].includes(extensionOf(name));
+}
+
 export function fileKind(name: string): FileKind {
   const extension = extensionOf(name);
   if (!extension) return "text";

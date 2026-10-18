@@ -288,7 +288,7 @@ test("with no account, the email opens in the mail app ready to send", async () 
   assert.equal(result.ok, true);
   assert.equal(result.via, "mail-app");
   assert.equal(opened[0], "mailto:bob@example.com?subject=Friday&body=See%20you");
-  assert.match(result.content, /Settings > Email/);
+  assert.match(result.content, /Settings > Texts and email/);
 
   const tooLong = await sendEmail({ to: "bob@example.com", subject: "x", body: "word ".repeat(600) }, { account: null, open });
   assert.equal(tooLong.ok, false, "a link that long would be cut off on the way to the mail app");

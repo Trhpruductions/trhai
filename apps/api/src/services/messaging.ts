@@ -342,10 +342,10 @@ export function explainSendFailure(error: unknown, account: Pick<EmailAccount, "
   const code = failure?.code ?? "";
   if (code === "EAUTH" || failure?.responseCode === 535 || failure?.responseCode === 534) {
     const help = providerFor(account.address)?.passwordHelp;
-    return `${account.host} refused the sign-in for ${account.address}.${help ? ` ${help}` : " Check the app password in Settings > Email."}`;
+    return `${account.host} refused the sign-in for ${account.address}.${help ? ` ${help}` : " Check the app password in Settings > Texts and email."}`;
   }
   if (["ETIMEDOUT", "ECONNECTION", "ESOCKET", "ECONNREFUSED", "EDNS", "ENOTFOUND"].includes(code)) {
-    return `${account.host}:${account.port} could not be reached. Check the internet connection, and the server and port in Settings > Email.`;
+    return `${account.host}:${account.port} could not be reached. Check the internet connection, and the server and port in Settings > Texts and email.`;
   }
   if (failure?.responseCode && failure.responseCode >= 500) {
     return `${account.host} refused the message: ${firstLine(failure.message ?? "")}`;
@@ -411,7 +411,7 @@ export async function sendEmail(args: Record<string, unknown>, deps: MessagingDe
     return {
       ok: false,
       content: "Nothing was sent - that email is too long to hand to a mail app in one go. Add your email account in "
-        + "**Settings > Email** and TRH AI can send it directly."
+        + "**Settings > Texts and email** and TRH AI can send it directly."
     };
   }
   const opened = await (deps.open ?? openWithSystem)(link);
@@ -420,11 +420,11 @@ export async function sendEmail(args: Record<string, unknown>, deps: MessagingDe
       ok: true,
       via: "mail-app",
       content: `Your mail app is open with the email to ${to.join(", ")} written and ready - press **Send** there. `
-        + "To have TRH AI send emails itself, add your email account in **Settings > Email**."
+        + "To have TRH AI send emails itself, add your email account in **Settings > Texts and email**."
     }
     : {
       ok: false,
-      content: "Nothing was sent - no mail app opened. Add your email account in **Settings > Email** and TRH AI can send it directly."
+      content: "Nothing was sent - no mail app opened. Add your email account in **Settings > Texts and email** and TRH AI can send it directly."
     };
 }
 
