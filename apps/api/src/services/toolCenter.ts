@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { toolDefinitions } from "./agentTools.js";
 import { armedUntil, commandsArmed } from "./commandRunner.js";
 import { readEmailAccount } from "./emailAccount.js";
+import { ffmpegProgram } from "./ffmpegPath.js";
 import { checkAvailability, readLocalModelConfig } from "./localModel.js";
 import { linkedPhone, phoneLinkStatus } from "./messaging.js";
 import { piperStatus } from "./piperSpeech.js";
@@ -172,15 +173,20 @@ export function describeTools(probe: ToolProbe): ToolEntry[] {
     .sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
 }
 
-let ffmpegCache: { present: boolean; checkedAt: number } | null = null;
+let ffmpegCache: { present: boolean; checkedAt: number; program: string } | null = null;
 const ffmpegCacheMs = 5 * 60_000;
 
-/** Whether ffmpeg runs, checked the way the video renderer starts it; cached for five minutes. */
+/**
+ * Whether ffmpeg runs, checked the way the video renderer starts it; cached for
+ * five minutes. The cache is for one program: once TRH AI has installed its own
+ * ffmpeg the program changes, and the answer is asked for again at once.
+ */
 function ffmpegPresent(): Promise<boolean> {
-  if (ffmpegCache && Date.now() - ffmpegCache.checkedAt < ffmpegCacheMs) return Promise.resolve(ffmpegCache.present);
+  const program = ffmpegProgram();
+  if (ffmpegCache && ffmpegCache.program === program && Date.now() - ffmpegCache.checkedAt < ffmpegCacheMs) return Promise.resolve(ffmpegCache.present);
   return new Promise((resolve) => {
-    execFile("ffmpeg", ["-version"], { windowsHide: true, timeout: 5000 }, (error) => {
-      ffmpegCache = { present: !error, checkedAt: Date.now() };
+    execFile(program, ["-version"], { windowsHide: true, timeout: 5000 }, (error) => {
+      ffmpegCache = { present: !error, checkedAt: Date.now(), program };
       resolve(!error);
     });
   });

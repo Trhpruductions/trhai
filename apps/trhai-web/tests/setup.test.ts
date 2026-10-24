@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { describeHardware, formatBytes, initialSelection, jobPercent, plannedBytes, stepText, type SetupStatus } from "../src/lib/setup.js";
+import {
+  describeHardware, formatBytes, initialSelection, initialToolSelection, jobPercent, plannedBytes, setupReason, stepText, type SetupStatus, type ToolEntry
+} from "../src/lib/setup.js";
 
 // What the setup screens work out from the API's answer.
 
@@ -13,7 +15,15 @@ function status(overrides: Partial<SetupStatus> = {}): SetupStatus {
       { id: "small", label: "Small", summary: "", needs: "", license: { name: "Apache 2.0", url: "", commercialUse: true }, vision: false, sizeBytes: 2.5 * gib, installed: false, recommended: true },
       { id: "big", label: "Big", summary: "", needs: "", license: { name: "Apache 2.0", url: "", commercialUse: true }, vision: false, sizeBytes: 4.7 * gib, installed: false, recommended: false }
     ],
-    installed: [], needsSetup: true, recommendedModel: "small", runtimeDir: "C:\runtime", freeBytes: 40 * gib, job: null, ...overrides
+    installed: [], tools: [], needsSetup: true, recommendedModel: "small", runtimeDir: "C:\runtime", freeBytes: 40 * gib, job: null, ...overrides
+  };
+}
+
+const mib = 1024 ** 2;
+function tool(id: string, overrides: Partial<ToolEntry> = {}): ToolEntry {
+  return {
+    id, label: id, summary: "", needs: "", license: { name: "MIT", url: "https://example.test", commercialUse: true },
+    installed: false, sizeBytes: 100 * mib, supported: true, ...overrides
   };
 }
 
@@ -48,4 +58,57 @@ test("the PC and sizes are described in words", () => {
   assert.equal(describeHardware({ totalMemoryBytes: 32 * gib, cpuCores: 16, gpu: { vendor: "nvidia", name: "RTX 4060", memoryMiB: 8188, driver: "581" } }), "32 GB of memory, 16 processor cores, RTX 4060 with 8 GB");
   assert.equal(formatBytes(19_328_326), "18 MB");
   assert.equal(formatBytes(0), "0 MB");
+});
+
+test("every tool that is not installed starts ticked and counts in the download; one that is installed never does", () => {
+  const fresh = status({ tools: [tool("speech", { sizeBytes: 130 * mib }), tool("listening", { sizeBytes: 150 * mib }), tool("video", { installed: true, sizeBytes: 0 })] });
+  assert.deepEqual(initialToolSelection(fresh), ["speech", "listening"]);
+  assert.equal(plannedBytes(fresh, ["small"], ["speech", "listening"]), 2.5 * gib + 19_328_326 + 280 * mib);
+  assert.equal(plannedBytes(fresh, [], ["video"]), 19_328_326, "an installed tool adds nothing, even if it is ticked");
+  assert.equal(plannedBytes(fresh, ["small"]), 2.5 * gib + 19_328_326, "with no tools ticked, the tools are not counted");
+});
+
+test("a tool this PC cannot use is not offered ticked", () => {
+  const other = status({ tools: [tool("speech", { supported: false }), tool("video")] });
+  assert.deepEqual(initialToolSelection(other), ["video"]);
+});
+
+test("a service that sends no tools gives no tool choices and no extra download", () => {
+  const older = status({ tools: undefined as unknown as ToolEntry[] });
+  assert.deepEqual(initialToolSelection(older), []);
+  assert.equal(plannedBytes(older, ["small"], ["speech"]), 2.5 * gib + 19_328_326);
+});
+
+test("a PC with nothing to answer with gets the first-run screen, whether or not it was offered the tools", () => {
+  const fresh = status({ tools: [tool("speech")] });
+  assert.equal(setupReason(fresh, false), "first-run");
+  assert.equal(setupReason(fresh, true), "first-run");
+});
+
+test("a PC that can answer is offered the tools it lacks once, and then left alone", () => {
+  const ready = status({ needsSetup: false, tools: [tool("speech"), tool("listening", { installed: true, sizeBytes: 0 })] });
+  assert.equal(setupReason(ready, false), "tools");
+  assert.equal(setupReason(ready, true), null, "once it has been offered, it is not offered again");
+});
+
+test("nothing is offered to a PC that can answer and has every tool, or cannot use them", () => {
+  const complete = status({ needsSetup: false, tools: [tool("speech", { installed: true, sizeBytes: 0 }), tool("video", { installed: true, sizeBytes: 0 })] });
+  assert.equal(setupReason(complete, false), null);
+  const elsewhere = status({ needsSetup: false, tools: [tool("speech", { supported: false }), tool("video", { supported: false })] });
+  assert.equal(setupReason(elsewhere, false), null);
+  const older = status({ needsSetup: false, tools: undefined as unknown as ToolEntry[] });
+  assert.equal(setupReason(older, false), null, "a service that sends no tools has none to offer");
+});
+
+test("a tool's step reads like any other step, and counts in the progress", () => {
+  const job = {
+    id: "j", state: "running" as const, startedAt: "", finishedAt: null, error: null,
+    steps: [
+      { kind: "model" as const, id: "small", label: "Small", totalBytes: 100, doneBytes: 100, state: "done" as const, error: null },
+      { kind: "tool" as const, id: "speech", label: "Voice (Piper)", totalBytes: 100, doneBytes: 0, state: "downloading" as const, error: null }
+    ]
+  };
+  assert.equal(jobPercent(job), 50);
+  assert.match(stepText(job.steps[1]), /Downloading/);
+  assert.equal(stepText({ ...job.steps[1], state: "unpacking" }), "Unpacking");
 });

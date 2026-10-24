@@ -23,13 +23,18 @@ would have found neither — while quietly breaking the single promise the rest
 of the build keeps: that nothing leaves this machine.
 
 whisper.cpp is the same shape as Piper next door: an open-source binary, run
-locally, nothing uploaded. The install is manual for the same reason Piper's
-is — the models are large and the app does not download things on your behalf.
+locally, nothing uploaded. Its install is the same too: the first-run screen
+offers it, and *Settings → Engine and models* installs it later.
 
 ## Installing it
 
-Neither the binary nor the models are in this repository, and nothing in the
-app fetches them for you.
+Neither the binary nor the models are in this repository.
+
+**On Windows, TRH AI installs them for you.** whisper.cpp b4938 and
+`ggml-base.en` come to 149 MiB, each file checked against a pinned size and
+SHA-256 before it is used. whisper.cpp and the model are MIT. It needs no
+restart; `GET /v1/transcribe` reports the model straight away. See
+`23-install-story.md`, M2b. By hand, which is also how to use a bigger model:
 
 1. Get a `whisper.cpp` build. On Windows, download **`whisper-bin-x64.zip`**
    (~8 MB) from the
@@ -59,7 +64,8 @@ app fetches them for you.
 
    **`ggml-base.en.bin` (~150 MB) is the recommended starting point.**
 
-Restart the API after installing. `GET /v1/transcribe` reports what it found.
+`GET /v1/transcribe` reports what it found. The disk is read on each call, so
+nothing needs restarting.
 
 ### Verified on this machine
 
