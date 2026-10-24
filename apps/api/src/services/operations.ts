@@ -9,10 +9,10 @@
 // never as ready; a thing the app can run without (voice, video) is a warning
 // that says what stops working, not a failure.
 
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ffmpegAvailable, ffmpegSource, type FfmpegSource } from "./ffmpegPath.js";
 import { readLocalModelConfig } from "./localModel.js";
 import { discoverModels, enginePaths } from "./modelEngine.js";
 import { persistenceFailures } from "./persistenceHealth.js";
@@ -44,7 +44,7 @@ export type OperationFacts = {
   engine: { reachable: boolean; version: string | null; reason: string | null; loaded: string[]; installed: string[]; wanted: string };
   piper: { available: boolean; detail: string };
   whisper: { available: boolean; detail: string };
-  ffmpeg: { found: boolean };
+  ffmpeg: { found: boolean; source?: FfmpegSource };
   workspace: { path: string; writable: boolean; error?: string; freeBytes: number | null };
   stores: { failing: string[]; locked: string[] };
   schedules: { count: number };
@@ -107,20 +107,23 @@ export function operationsFrom(facts: OperationFacts): OperationRow[] {
     ? { id: "piper", label: "Voice (Piper)", group: "Voice", status: "ok", detail: facts.piper.detail }
     : {
       id: "piper", label: "Voice (Piper)", group: "Voice", status: "warn", detail: facts.piper.detail,
-      fix: `TRH AI cannot speak aloud until Piper and a voice are installed. It looks for them in ${piperRoot()}.`
+      fix: `TRH AI cannot speak aloud until Piper and a voice are installed. Open Settings, then Engine and models, and install the voice. Or put them in ${piperRoot()} yourself.`
     });
   rows.push(facts.whisper.available
     ? { id: "whisper", label: "Listening (Whisper)", group: "Voice", status: "ok", detail: facts.whisper.detail }
     : {
       id: "whisper", label: "Listening (Whisper)", group: "Voice", status: "warn", detail: facts.whisper.detail,
-      fix: `TRH AI cannot transcribe speech until whisper.cpp and a model are installed. It looks for them in ${whisperRoot()}.`
+      fix: `TRH AI cannot transcribe speech until whisper.cpp and a model are installed. Open Settings, then Engine and models, and install listening. Or put them in ${whisperRoot()} yourself.`
     });
 
   rows.push(facts.ffmpeg.found
-    ? { id: "ffmpeg", label: "ffmpeg", group: "Media", status: "ok", detail: "Found on PATH" }
+    ? {
+      id: "ffmpeg", label: "ffmpeg", group: "Media", status: "ok",
+      detail: facts.ffmpeg.source === "installed" ? "Installed by TRH AI" : facts.ffmpeg.source === "named" ? "The file TRHAI_FFMPEG_PATH names" : "Found on PATH"
+    }
     : {
-      id: "ffmpeg", label: "ffmpeg", group: "Media", status: "warn", detail: "Not found on PATH",
-      fix: "Video making is off until ffmpeg is installed: winget install Gyan.FFmpeg"
+      id: "ffmpeg", label: "ffmpeg", group: "Media", status: "warn", detail: "Not installed",
+      fix: "Video making is off until ffmpeg is installed. Open Settings, then Engine and models, and install video. Or run winget install Gyan.FFmpeg yourself."
     });
 
   rows.push(facts.workspace.writable
@@ -183,16 +186,6 @@ export function summarise(rows: OperationRow[]): { ready: number; total: number;
 }
 
 // --- the reading half -------------------------------------------------------
-
-let ffmpegCache: { at: number; found: boolean } | null = null;
-
-function ffmpegFound(now = Date.now()): boolean {
-  if (ffmpegCache && now - ffmpegCache.at < 30_000) return ffmpegCache.found;
-  const probe = spawnSync("ffmpeg -version", { stdio: "ignore", shell: true, timeout: 5000 });
-  const found = !probe.error && probe.status === 0;
-  ffmpegCache = { at: now, found };
-  return found;
-}
 
 async function webReachable(url: string): Promise<boolean> {
   try {
@@ -261,7 +254,7 @@ export async function gatherFacts(webUrl = process.env.TRHAI_WEB_URL ?? "http://
     whisper: whisper.available
       ? { available: true, detail: `Model ${whisper.model.id}` }
       : { available: false, detail: whisper.reason },
-    ffmpeg: { found: ffmpegFound() },
+    ffmpeg: { found: ffmpegAvailable(), source: ffmpegSource() },
     workspace: { path: root, writable: workspace.writable, error: workspace.error, freeBytes: freeBytesAt(root) },
     stores: { failing: persistenceFailures().map((entry) => entry.store), locked: lockedProtectedFiles() },
     schedules: { count: listSchedules().length },

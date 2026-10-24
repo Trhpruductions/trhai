@@ -29,6 +29,7 @@ import { once } from "node:events";
 import os from "node:os";
 import path from "node:path";
 import { discoverModels, enginePaths, engineState, restartEngine, sameModel } from "./modelEngine.js";
+import { catalogueTool, toolCatalogue, toolStatuses, type ToolDef, type ToolStatus } from "./toolCatalog.js";
 
 // ------------------------------------------------------------------ this PC
 
@@ -256,7 +257,7 @@ export function hardwareDefaults(hardware: Hardware, env: NodeJS.ProcessEnv): Re
 export type StepState = "waiting" | "downloading" | "verifying" | "unpacking" | "done" | "failed" | "cancelled";
 
 export type SetupStep = {
-  kind: "engine" | "model";
+  kind: "engine" | "model" | "tool";
   id: string;
   label: string;
   totalBytes: number;
@@ -288,6 +289,8 @@ export type SetupStatus = {
   };
   catalog: Array<Omit<CatalogModel, "files"> & { sizeBytes: number; installed: boolean; recommended: boolean }>;
   installed: InstalledModel[];
+  /** The voice, listening and video tools: optional for answering, needed for those screens. */
+  tools: ToolStatus[];
   /** True when the app cannot answer yet: no engine, or no model that can hold a conversation. */
   needsSetup: boolean;
   recommendedModel: string;
@@ -338,6 +341,7 @@ export function setupStatus(env: NodeJS.ProcessEnv = process.env): SetupStatus {
       recommended: model.id === recommended
     })),
     installed,
+    tools: toolStatuses(env),
     needsSetup: paths.exe === null || !installed.some((model) => !model.vision),
     recommendedModel: recommended,
     runtimeDir: paths.runtimeDir,
@@ -454,7 +458,7 @@ export function unzip(archive: string, into: string, run: Run = spawnSync): void
     `Expand-Archive -LiteralPath '${archive.replace(/'/g, "''")}' -DestinationPath '${into.replace(/'/g, "''")}' -Force`
   ], { windowsHide: true, encoding: "utf8", timeout: 10 * 60_000 });
   if (viaPowerShell.status !== 0) {
-    throw new Error(`The engine's archive could not be unpacked: ${String(viaPowerShell.stderr || viaTar.stderr || "unknown error").trim().slice(0, 300)}`);
+    throw new Error(`An archive could not be unpacked: ${String(viaPowerShell.stderr || viaTar.stderr || "unknown error").trim().slice(0, 300)}`);
   }
 }
 
@@ -468,6 +472,8 @@ export type SetupRequest = {
   engine?: boolean | EngineVariant;
   /** Catalog ids of models to install. */
   models?: string[];
+  /** Ids of the tools to install: "speech", "listening", "video" (toolCatalog.ts). */
+  tools?: string[];
 };
 
 export type SetupDeps = {
@@ -480,6 +486,8 @@ export type SetupDeps = {
   /** What can be installed, when not the real lists: the tests use small files of their own. */
   catalog?: CatalogModel[];
   engineFiles?: Record<EngineVariant, PinnedFile[]>;
+  /** The tools that can be installed, when not the real ones. */
+  tools?: ToolDef[];
 };
 
 export type StartResult = { ok: true; job: SetupJob } | { ok: false; error: string };
@@ -498,6 +506,12 @@ export function startSetup(request: SetupRequest, deps: SetupDeps = {}): StartRe
 
   const unknown = (request.models ?? []).filter((id) => !lookup(id));
   if (unknown.length) return { ok: false, error: `Not a model TRH AI can install: ${unknown.join(", ")}.` };
+  const tools = deps.tools ?? toolCatalogue;
+  const unknownTools = (request.tools ?? []).filter((id) => !catalogueTool(id, tools));
+  if (unknownTools.length) return { ok: false, error: `Not a tool TRH AI can install: ${unknownTools.join(", ")}.` };
+  if ((request.tools ?? []).length > 0 && !deps.tools && process.platform !== "win32") {
+    return { ok: false, error: "The voice, listening and video tools are built for Windows." };
+  }
 
   const installed = discoverModels(paths.modelsDir).map((model) => model.id);
   const steps: SetupStep[] = [];
@@ -516,6 +530,13 @@ export function startSetup(request: SetupRequest, deps: SetupDeps = {}): StartRe
     const model = lookup(id) as CatalogModel;
     steps.push({ kind: "model", id, label: model.label, totalBytes: modelSize(model), doneBytes: 0, state: "waiting", error: null });
   }
+  for (const id of [...new Set(request.tools ?? [])]) {
+    const tool = catalogueTool(id, tools) as ToolDef;
+    // Only what is missing: Piper without a voice gets the voice, and a tool that is all there gets nothing.
+    const files = tool.missing(env);
+    if (files.length === 0) continue;
+    steps.push({ kind: "tool", id, label: tool.label, totalBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0), doneBytes: 0, state: "waiting", error: null });
+  }
 
   const needed = steps.reduce((sum, step) => sum + step.totalBytes, 0);
   const free = freeSpace(paths.runtimeDir);
@@ -529,7 +550,7 @@ export function startSetup(request: SetupRequest, deps: SetupDeps = {}): StartRe
   job = { id: `setup-${Date.now()}`, state: steps.length ? "running" : "done", startedAt: now, finishedAt: steps.length ? null : now, steps, error: null };
   if (!steps.length) return { ok: true, job };
   controller = new AbortController();
-  void runJob(job, controller.signal, variant, { ...deps, catalog, engineFiles: archives }, env);
+  void runJob(job, controller.signal, variant, { ...deps, catalog, engineFiles: archives, tools }, env);
   return { ok: true, job };
 }
 
@@ -562,6 +583,20 @@ async function runJob(current: SetupJob, signal: AbortSignal, variant: EngineVar
         rmSync(target, { recursive: true, force: true });
         renameSync(staging, target);
         for (const file of files) rmSync(path.join(downloads, file.name), { force: true });
+      } else if (step.kind === "tool") {
+        const tool = catalogueTool(step.id, deps.tools ?? toolCatalogue) as ToolDef;
+        const staging = path.join(downloads, `tool-${tool.id}`);
+        let before = 0;
+        for (const file of tool.missing(env)) {
+          const start = before;
+          await downloadVerified(file, path.join(staging, file.name), { fetcher: deps.fetcher, signal, onProgress: (done) => { step.doneBytes = start + done; } });
+          before += file.sizeBytes;
+        }
+        step.state = "unpacking";
+        tool.place(staging, env, unpack);
+        // The check that matters is the app's own: can it find and use what was just put there.
+        if (!tool.installed(env)) throw new Error(`${tool.label} was unpacked, but TRH AI still cannot use it.`);
+        rmSync(staging, { recursive: true, force: true });
       } else {
         const model = (deps.catalog ?? modelCatalog).find((entry) => entry.id === step.id) as CatalogModel;
         const staging = path.join(downloads, model.id);
@@ -586,7 +621,8 @@ async function runJob(current: SetupJob, signal: AbortSignal, variant: EngineVar
       }
       step.doneBytes = step.totalBytes;
       step.state = "done";
-      changed = true;
+      // The engine reads its models when it starts; a voice or ffmpeg is no reason to restart it.
+      if (step.kind !== "tool") changed = true;
     }
     current.state = "done";
   } catch (error) {

@@ -32,8 +32,10 @@ Verified on 2026-09-27: full build + all 1835 tests pass, lint/typecheck clean.
   - Without a model the app still runs — memory, files, schedules, app
     management and the machine readings all work; only generated replies need it.
 - **Optional, feature-specific** (auto-discovered; the app degrades gracefully if
-  absent, it does not fail): `ffmpeg` on PATH for `make_video`; Piper + whisper
-  for hands-free voice.
+  absent, it does not fail): `ffmpeg` for `make_video`; Piper + whisper for
+  hands-free voice. On Windows the first-run screen (or *Settings → Engine and
+  models*) installs all three, about 390 MiB, so none of it has to be set up by
+  hand; an `ffmpeg` already on PATH is used and not downloaded again.
 
 Nothing else is machine-specific — no drive letters or usernames are baked in.
 

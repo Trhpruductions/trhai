@@ -19,7 +19,18 @@ settings. Piper replaces the engine.
 ## Installing it
 
 Neither the binary nor the voice models are in this repository — the models are
-60–120 MB each — and nothing in the app downloads them for you. Install by hand:
+60–120 MB each.
+
+**On Windows, TRH AI installs them for you.** The first-run screen offers the
+voice ticked, and *Settings → Engine and models* installs it at any time: Piper
+2023.11.14-2 and the Cori voice (British English, high quality), 130 MiB
+together, each file checked against a pinned size and SHA-256 before it is used.
+It needs no restart; `GET /v1/speech` reports the voice straight away. Cori is
+public domain and Piper is MIT, so both may be used commercially. The most used
+Piper voice, Ryan, is CC BY-NC-SA, so it is not offered. See
+`23-install-story.md`, M2b.
+
+By hand, which is also how to add another voice:
 
 1. Download `piper_windows_amd64.zip` from the
    [Piper releases page](https://github.com/rhasspy/piper/releases) and extract

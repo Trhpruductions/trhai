@@ -13,9 +13,10 @@ import path from "node:path";
 //
 // whisper.cpp is the honest answer, and it is the same shape as Piper next
 // door: an open-source binary, run locally, no account, no key, no network at
-// runtime. Optional by design — nothing here downloads or installs anything.
-// If the binary or a model is missing this says so plainly and the interface
-// keeps the microphone as a level meter rather than pretending to hear words.
+// runtime. Optional by design — nothing here downloads or installs anything
+// (first-run setup does, see toolCatalog.ts). If the binary or a model is
+// missing this says so plainly and the interface keeps the microphone as a
+// level meter rather than pretending to hear words.
 //
 // The command is fixed. The audio goes in as a file this module wrote to a
 // temp directory it created, and the model is a path resolved from a
@@ -151,12 +152,12 @@ export function installedModels(): WhisperModel[] {
 export function whisperStatus(): WhisperStatus {
   const binary = binaryPath();
   if (!binary) {
-    return { available: false, reason: "whisper.cpp is not installed on this machine." };
+    return { available: false, reason: "whisper.cpp is not installed on this machine. Settings, Engine and models, installs it." };
   }
 
   const models = installedModels();
   if (models.length === 0) {
-    return { available: false, reason: "whisper.cpp is installed but no model was found." };
+    return { available: false, reason: "whisper.cpp is installed but no model was found. Settings, Engine and models, adds one." };
   }
 
   // An explicit preference wins, but only if it is actually there — falling

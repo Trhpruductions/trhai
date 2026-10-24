@@ -13,7 +13,7 @@ export type Hardware = {
 export type StepState = "waiting" | "downloading" | "verifying" | "unpacking" | "done" | "failed" | "cancelled";
 
 export type SetupStep = {
-  kind: "engine" | "model";
+  kind: "engine" | "model" | "tool";
   id: string;
   label: string;
   totalBytes: number;
@@ -43,11 +43,25 @@ export type CatalogEntry = {
   recommended: boolean;
 };
 
+/** The voice, listening and video tools: optional for answering, needed for those screens. */
+export type ToolEntry = {
+  id: string;
+  label: string;
+  summary: string;
+  needs: string;
+  license: { name: string; url: string; commercialUse: boolean };
+  installed: boolean;
+  /** Bytes still to download: none once it is installed. */
+  sizeBytes: number;
+  supported: boolean;
+};
+
 export type SetupStatus = {
   hardware: Hardware;
   engine: { installed: boolean; build: string | null; running: boolean; reason: string | null; recommendedVariant: string; downloadBytes: number };
   catalog: CatalogEntry[];
   installed: Array<{ id: string; sizeBytes: number; vision: boolean; inCatalog: boolean }>;
+  tools: ToolEntry[];
   needsSetup: boolean;
   recommendedModel: string;
   runtimeDir: string;
@@ -77,7 +91,7 @@ async function send(method: "POST" | "DELETE", path: string, body?: unknown): Pr
   }
 }
 
-export function startInstall(request: { engine: boolean; models: string[] }): Promise<SetupOutcome> {
+export function startInstall(request: { engine: boolean; models: string[]; tools?: string[] }): Promise<SetupOutcome> {
   return send("POST", "/v1/setup/install", request);
 }
 
@@ -112,10 +126,30 @@ export function initialSelection(status: SetupStatus): string[] {
   return recommended ? [recommended.id] : [];
 }
 
+/** The tools to offer ticked: every one this PC can use that is not installed yet, so that one click installs everything. */
+export function initialToolSelection(status: SetupStatus): string[] {
+  return (status.tools ?? []).filter((tool) => tool.supported && !tool.installed).map((tool) => tool.id);
+}
+
+/**
+ * Why the setup screen should open by itself, if it should.
+ *
+ * "first-run": there is nothing to answer with yet. "tools": TRH AI can answer,
+ * but this PC has not been offered the voice, listening and video tools, which a
+ * copy installed before they existed never was; the screen offers them once and
+ * they stay in Settings after that.
+ */
+export function setupReason(status: SetupStatus, toolsAlreadyOffered: boolean): "first-run" | "tools" | null {
+  if (status.needsSetup) return "first-run";
+  if (!toolsAlreadyOffered && (status.tools ?? []).some((tool) => tool.supported && !tool.installed)) return "tools";
+  return null;
+}
+
 /** What an install of the selection would download, engine included when it is missing. */
-export function plannedBytes(status: SetupStatus, selected: string[]): number {
+export function plannedBytes(status: SetupStatus, selected: string[], selectedTools: string[] = []): number {
   const models = status.catalog.filter((model) => selected.includes(model.id) && !model.installed).reduce((sum, model) => sum + model.sizeBytes, 0);
-  return models + (status.engine.installed ? 0 : status.engine.downloadBytes);
+  const tools = (status.tools ?? []).filter((tool) => selectedTools.includes(tool.id) && !tool.installed).reduce((sum, tool) => sum + tool.sizeBytes, 0);
+  return models + tools + (status.engine.installed ? 0 : status.engine.downloadBytes);
 }
 
 /** 0 to 100 across every step of a job, by bytes. */

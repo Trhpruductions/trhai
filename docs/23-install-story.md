@@ -22,9 +22,11 @@ in `main.ts`) and stops them when it quits, as it already did for the
 checkout's `npm run` services.
 
 What is **not** in the installer, on purpose: the model engine (llama.cpp,
-~50 MB per build) and the models (2–5 GB each; 14 GB on a working install).
-They live where they always have, `%LOCALAPPDATA%\TRHAI\runtime`, and an
-install finds them there. A PC that has none needs the first-run setup below.
+~50 MB per build), the models (2–5 GB each; 14 GB on a working install) and
+the three optional tools beside them, the voice, listening and video (about
+390 MiB together). The engine and models live where they always have,
+`%LOCALAPPDATA%\TRHAI\runtime`, and an install finds them there. A PC that has
+none needs the first-run setup below, which fetches the tools too (M2b).
 
 Where an installed copy keeps things:
 
@@ -33,6 +35,9 @@ Where an installed copy keeps things:
 | Data (memories, conversations, accounts, schedules…) | `%APPDATA%\TRH AI\data` | `TRHAI_DATA_DIR` |
 | Settings | `%APPDATA%\TRH AI\.env` (optional; the same keys as the repo's `.env`) | `TRHAI_ENV_FILE` |
 | Engine and models | `%LOCALAPPDATA%\TRHAI\runtime` | unchanged |
+| Voice: Piper and its voice | `~\Vexora\piper\piper` | `VEXORA_PIPER_DIR` |
+| Listening: whisper.cpp and its model | `~\Vexora\whisper` | `VEXORA_WHISPER_DIR` |
+| Video: ffmpeg | `%LOCALAPPDATA%\TRHAI\runtime\tools\ffmpeg` | `TRHAI_FFMPEG_PATH` names a different one; used before an `ffmpeg` on PATH |
 | Workspace (apps it builds, files it writes) | `~\Vexora\workspace` | unchanged (`ASCEND_WORKSPACE`) |
 | Electron, for video frames | the app's own `electron.exe` | `TRHAI_ELECTRON_PATH` |
 
@@ -78,7 +83,7 @@ under userData too.
   `.env` tuning (`TRHAI_MODEL=qwen2.5-3b`, the 600 s timeout), which is the
   M2 work below, not a packaging fault.
 - Each packaged service writes what it prints to
-  `%APPDATA%\TRH AI\logs	rh-ai-api.log` and `trh-ai-web.log`, appended.
+  `%APPDATA%\TRH AI\logs\trh-ai-api.log` and `trh-ai-web.log`, appended.
   That is where to look when an installed copy does not come up.
 
 ### M2 — first run on a PC with nothing (built)
@@ -133,6 +138,79 @@ What was planned for M2, kept for reference:
 - A minimum spec stated in the installer and the README: 16 GB RAM or an
   8 GB graphics card for the 7B; 8 GB RAM runs the 3B slowly (see
   `21-handoff.md`, this PC's section).
+
+### M2b — the voice, listening and video tools (built 2026-10-24)
+
+After M2 an installed copy could chat and do nothing else: the voice, listening
+and video screens said "not installed", and the fix was a hand install of
+Piper, a voice, whisper.cpp, a model and ffmpeg. Those three now install from
+the same screens as the engine and the models. `toolCatalog.ts` lists them and
+`modelSetup.ts` runs them as a third kind of step beside the engine and the
+models.
+
+| Tool | Installs | Left to download | Licence |
+|---|---|---|---|
+| Voice | Piper 2023.11.14-2 and the Cori voice (British English, high quality) | 130.4 MiB | Piper is MIT; the voice is public domain |
+| Listening | whisper.cpp b4938 and `ggml-base.en` | 149.1 MiB | MIT |
+| Video | ffmpeg 9.0.2, the gyan.dev "essentials" build | 109.5 MiB | GPL 3; run as its own program, not linked |
+
+- The first-run screen offers all three, ticked; *Settings → Engine and models*
+  does the same later. Any can be unticked. One that is already there, whether
+  hand-installed or an `ffmpeg` on PATH, shows as installed and is left alone,
+  and a tool missing only a part (Piper with no voice) fetches only that part.
+  A tool install does not restart the engine; the engine and a model do.
+- A copy installed before these tools existed would never see that screen, as it
+  already has an engine and a model. So the first time one opens with all of
+  that in place and the tools missing, the screen opens once more with only the
+  tools ticked (`setupReason`, `lib/setup.ts`; remembered in the browser's
+  storage under `trhai.setup.tools-offered.v1`). After it is closed, however it
+  is closed, the tools are in Settings only.
+- Pinned like the engine and the models: a release tag or a Hugging Face
+  commit, the exact size and the SHA-256, and a file that does not match is
+  deleted, not installed. Where each lands is in the table under "What an
+  install is, and is not". ffmpeg keeps only `bin\ffmpeg.exe` and its licence under the
+  runtime folder, and is used before an `ffmpeg` on PATH, so TRH AI neither
+  depends on the PC's own copy nor changes it.
+- The voice is Cori because her licence allows what the rest of the app allows.
+  The most used Piper voice, Ryan, is CC BY-NC-SA (non-commercial) and is not
+  offered.
+- Verified 2026-10-24 on this PC, through the API's own install route, into empty
+  scratch folders with no `ffmpeg` on PATH. All six files downloaded in 20 s and
+  matched their pinned size and SHA-256. The operations check then reported the
+  voice ("1 voice, speaking as Cori"), listening (`ggml-base.en`) and ffmpeg
+  ("Installed by TRH AI") as ready. The installed voice spoke a sentence and the
+  installed whisper.cpp heard it back word for word. Asking for the same install
+  again did nothing, and an unknown tool name was refused ("Not a tool TRH AI
+  can install"). Then the app's own `renderVideo` made an 8 s video with the
+  installed Piper and ffmpeg: H.264 and AAC, all 64 frames, the first frame red
+  and the last blue as drawn, and whisper.cpp heard the narration in the video's
+  own audio track. Plain colour frames stood in for Electron, and the hardware
+  encoder was refused on purpose, so the graphics card was not used and the
+  software encoder did the work, as it would on a PC without an NVIDIA card.
+- That check found a fault in `videoRender.ts` that predates it. Each scene's
+  audio was only its narration, the scenes' audio was joined end to end, and a
+  scene lasts longer than its narration whenever the script gives it more time
+  than the sentence needs. The second sentence then played over the first
+  scene's pictures, and ffmpeg's `-shortest` cut the video where the audio ended:
+  two 5 s scenes with a 2 s sentence each came out 3.98 s long, 31 of 80 frames.
+  Each narrated scene's audio is now padded with silence to the scene's length,
+  so the second sentence starts at 5.0 s, when its scene does, and the video is
+  10.00 s with all 80 frames.
+- Verified in a browser, against a copy of the service with scratch folders and
+  the model engine switched off: the first-run screen with the three tools
+  ticked; an install from it of the engine and the tools (939 MB, about a
+  minute, each step shown and then marked Installed); the one-time offer on a PC
+  that already had an engine and a model, with only the tools shown; its
+  install, 389 MB; and that closing it once keeps it from coming back.
+- Tests: `tool-setup.test.ts` (24, with fake downloads, including a same-length
+  file with one letter changed and an install that placed something the app
+  cannot use) and the screen logic in `setup.test.ts`. Breaking the installer in
+  29 specific ways (which ffmpeg wins, what is remembered, what counts as
+  missing, what is put where, the engine restart, the refusal off Windows) each
+  fails a test, and so does each of 6 ways of breaking the offer.
+- Not verified: the same screens inside the packaged Electron window, the real
+  Electron frame renderer with the installed ffmpeg (it uses the graphics
+  card), and a PC with no graphics card at all.
 
 ### M3 — releases
 

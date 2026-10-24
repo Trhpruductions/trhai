@@ -589,7 +589,8 @@ export function createApp(options: AppOptions = {}) {
   app.post("/v1/setup/install", (req, res) => {
     const engine = req.body?.engine;
     const models = Array.isArray(req.body?.models) ? req.body.models.filter((id: unknown): id is string => typeof id === "string") : [];
-    const started = startSetup({ engine: engine === true || typeof engine === "string" ? engine : false, models });
+    const tools = Array.isArray(req.body?.tools) ? req.body.tools.filter((id: unknown): id is string => typeof id === "string") : [];
+    const started = startSetup({ engine: engine === true || typeof engine === "string" ? engine : false, models, tools });
     if (!started.ok) {
       res.status(409).json({ code: "SETUP_REFUSED", message: started.error, traceId: "trace-local" });
       return;

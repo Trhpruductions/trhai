@@ -17,7 +17,9 @@ it starts and stops itself — so opening Vexora is the only thing you have to d
 and there is no second application to install or keep running. The first time
 it runs on a PC without them, it offers to download the engine and a model suited
 to that PC, each checked against the fingerprint its makers published (Settings,
-Engine and models, does the same at any time). From a checkout, `npm run
+Engine and models, does the same at any time). The same screen offers the
+voice, listening and video tools, ticked, so that everything works from the first
+minute. From a checkout, `npm run
 setup:engine` still puts the engine in place, and any `.gguf` file in the app's
 models folder is a model. With no model installed it still runs, answering from
 your saved memory and your documents and saying plainly when it has neither.
@@ -28,8 +30,8 @@ your saved memory and your documents and saying plainly when it has neither.
 |---|---|---|
 | Windows | 10 or 11, 64-bit | |
 | Memory | 8 GB, with the Qwen3 4B model. Replies take a minute or more. | 16 GB, or an NVIDIA card with 8 GB, for the 7B models |
-| Disk | About 3 GB free for the engine and one small model | 10 GB or more for several models |
-| Internet | Only for the first download of the engine and models, and for update checks | |
+| Disk | About 3 GB free for the engine and one small model, and 0.4 GB more for the voice, listening and video tools | 10 GB or more for several models |
+| Internet | Only for the first download of the engine, the models and those tools, and for update checks | |
 
 Measured on an i5-3570 with 8 GB and no graphics card: a cold reply takes
 between one and five minutes, and a follow-up in the same conversation takes

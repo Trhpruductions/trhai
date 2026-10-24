@@ -11,11 +11,12 @@ import path from "node:path";
 // an open-source neural engine: no account, no key, no network at runtime,
 // and it sounds like a person.
 //
-// It is optional by design. Nothing here downloads or installs anything — if
-// the binary and a voice model are not present, this reports that plainly and
-// the interface falls back to the browser's own voices. An app that silently
-// did nothing, or claimed to speak while producing no sound, would be the
-// failure this codebase is built to avoid.
+// It is optional by design. Nothing here downloads or installs anything
+// (first-run setup does, see toolCatalog.ts). If the binary and a voice model
+// are not present, this reports that plainly and the interface falls back to
+// the browser's own voices. An app that silently did nothing, or claimed to
+// speak while producing no sound, would be the failure this codebase is built
+// to avoid.
 //
 // The command is fixed and the text goes in over stdin, never on the command
 // line. That is the same rule the desktop workspace checks follow: the caller
@@ -181,12 +182,12 @@ export function installedVoices(): NeuralVoice[] {
 export function piperStatus(): PiperStatus {
   const binary = binaryPath();
   if (!existsSync(binary)) {
-    return { available: false, reason: "Piper is not installed on this machine." };
+    return { available: false, reason: "Piper is not installed on this machine. Settings, Engine and models, installs it." };
   }
 
   const voices = installedVoices();
   if (voices.length === 0) {
-    return { available: false, reason: "Piper is installed but no voice model was found." };
+    return { available: false, reason: "Piper is installed but no voice model was found. Settings, Engine and models, adds one." };
   }
 
   // An explicit preference wins, but only if it is actually there — falling
