@@ -17,6 +17,21 @@ export type ReleaseNote = {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.1.6",
+    date: "2026-10-24",
+    title: "Voice, listening and video install themselves",
+    notes: [
+      "TRH AI now installs its own voice, listening and video tools. The first-run screen offers them with the engine and a model, a copy that is already set up is offered them once when it opens after this update, and Settings, Engine and models, installs them at any time. Each file is checked against what its makers published before it is used.",
+      "Narrated videos stay in step: each sentence now starts with its own scene, and a video no longer ends early when a scene lasts longer than its sentence.",
+      "The first reply in a conversation comes sooner. TRH AI has its model read its standing instructions ahead of time, so the model is loaded a little earlier than before: when TRH AI starts, and when you click into the chat box. It helps most on a PC without a graphics card.",
+      "The microphone says so when nothing is installed to turn speech into text, instead of recording and dropping what you said.",
+      "Telling TRH AI to forget something now also removes it from the conversation the AI reads, so it is no longer repeated back to you from earlier messages.",
+      "Asking for code in a reply (a function, a one-liner, a script) gets you the code; TRH AI no longer tries to run it as a command.",
+      "Screens now say plainly what leaves your PC (web lookups, update checks, and downloads of models and tools), and Files offers to summarise only PDF, Word (.docx) and PowerPoint (.pptx) files.",
+      "Behind the scenes, TRH AI's local service moved to Express 5."
+    ]
+  },
+  {
     version: "0.1.5",
     date: "2026-10-16",
     title: "Trial, license keys, self-updating and a safer app",
