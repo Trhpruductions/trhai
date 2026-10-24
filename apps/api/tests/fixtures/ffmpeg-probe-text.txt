@@ -1,0 +1,3 @@
+[in#0 @ 0000015143b73540] Error opening input: Invalid data found when processing input
+Error opening input file mv-probe/notes.txt.
+Error opening input files: Invalid data found when processing input
