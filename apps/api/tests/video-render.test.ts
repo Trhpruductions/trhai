@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -113,6 +113,63 @@ test("a scene's narration extends its on-screen duration", async () => {
   // 1s scene at 4fps is 4 frames; a 3s narration plus the 0.4s tail forces
   // at least (3.4 * 4) frames for that one scene alone.
   assert.ok(framesRendered > 4 + 4);
+});
+
+test("narration that ends before its scene does is padded with silence, so each scene's speech stays with its own pictures", async () => {
+  // The audio of the scenes is joined end to end. Found on 2026-10-24 by making
+  // a real video: two 5 s scenes with a 2 s sentence each came out 3.98 s long
+  // (31 of 80 frames), because the ffmpeg step stops at the shorter of the audio
+  // and the pictures, and the second sentence played over the first scene.
+  const parts: Array<{ name: string; start: number; sampleRate: number }> = [];
+  let narrationSeconds = 0;
+  const script = {
+    title: "Sync",
+    fps: 4,
+    width: 640,
+    height: 480,
+    scenes: [
+      // 0.5 s of speech in a 3 s scene.
+      { id: "short", seconds: 3, narration: "Short.", visual: { kind: "title" as const, heading: "A" } },
+      // 3 s of speech in a 1 s scene, which then lasts 3 s plus the 0.4 s tail.
+      { id: "long", seconds: 1, narration: "Long.", visual: { kind: "title" as const, heading: "B" } },
+      { id: "quiet", seconds: 1, visual: { kind: "title" as const, heading: "C" } }
+    ]
+  };
+  const speech = [makeWav(0.5, 16_000), makeWav(3, 16_000)];
+  let spoken = 0;
+
+  const result = await renderVideo(script, {
+    folder: "videos/padded",
+    narrate: async () => ({ ok: true, audio: speech[spoken++], format: "wav", voice: "test" }),
+    renderFramesFn: stubRenderFrames(),
+    runFfmpeg: async (args: string[]) => {
+      const output = args[args.length - 1];
+      if (args.includes("concat")) {
+        // The narration track is whatever this list joins, in this order.
+        for (const line of readFileSync(args[args.indexOf("-i") + 1], "utf8").split("\n")) {
+          const file = /^file '(.*)'$/.exec(line)?.[1] ?? "";
+          const audio = readFileSync(file);
+          parts.push({ name: path.basename(file), start: narrationSeconds, sampleRate: audio.readUInt32LE(24) });
+          narrationSeconds += wavDurationSeconds(audio) ?? NaN;
+        }
+      }
+      writeFileSync(output, Buffer.from("fake media"));
+      return { ok: true, code: 0, stderr: "" };
+    }
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  // Scenes of 3, 3.4 and 1 s: the narration track is as long as the pictures.
+  assert.equal(result.seconds, 7.4);
+  assert.ok(Math.abs(narrationSeconds - 7.4) < 0.001, `the narration track is ${narrationSeconds} s, not 7.4 s`);
+  // Each sentence starts when its own scene does: at 0 s, and at 3 s.
+  const starts = parts.filter((part) => part.name.startsWith("narration-")).map((part) => part.start);
+  assert.equal(starts.length, 2);
+  assert.ok(Math.abs(starts[0] - 0) < 0.001 && Math.abs(starts[1] - 3) < 0.001, `the sentences start at ${starts.join(" and ")} s`);
+  // The silence matches the voice, or the pieces could not be joined without re-encoding.
+  assert.ok(parts.length >= 5, "speech, silence, speech, silence, and a silent scene");
+  assert.deepEqual([...new Set(parts.map((part) => part.sampleRate))], [16_000]);
 });
 
 test("rejects a script that fails its own validation before doing anything", async () => {

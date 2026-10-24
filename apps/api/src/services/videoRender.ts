@@ -14,6 +14,7 @@ import path from "node:path";
 import {
   findScriptFault, frameCount, sceneHtml, type Scene, type VideoScript
 } from "@ascend/shared";
+import { ffmpegProgram } from "./ffmpegPath.js";
 import { synthesize, type SynthesisOptions, type SynthesisResult } from "./piperSpeech.js";
 import { createRenderWorkDir, frameFileName, renderFrames, type RenderFramesResult } from "./frameRenderer.js";
 import { resolveInWorkspace } from "./workspace.js";
@@ -48,7 +49,8 @@ function runFfmpegDefault(args: string[], timeoutMs: number): Promise<FfmpegResu
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn("ffmpeg", ["-y", ...args], { shell: false, windowsHide: true });
+      // The ffmpeg TRH AI installed, when it did; otherwise the PC's own.
+      child = spawn(ffmpegProgram(), ["-y", ...args], { shell: false, windowsHide: true });
     } catch (error) {
       resolve({ ok: false, code: null, stderr: error instanceof Error ? error.message : String(error) });
       return;
@@ -113,8 +115,14 @@ type NarratedScene = {
   scene: Scene;
   /** Seconds this scene actually gets, at least its scripted duration. */
   seconds: number;
-  /** Absolute path to this scene's own audio, silence when it had no narration. */
-  audioPath: string;
+  /**
+   * Absolute paths of this scene's audio, played in order, which together last
+   * exactly `seconds`: the narration then silence to the end of the scene, or
+   * silence alone when it had no narration. The audio of the scenes is joined
+   * end to end, so a scene whose audio ran short would pull every later scene's
+   * speech ahead of its own pictures.
+   */
+  audioPaths: string[];
   sampleRate: number;
   channels: number;
 };
@@ -183,7 +191,7 @@ async function narrateScenes(
     const audioPath = path.join(workDir, `narration-${String(index).padStart(4, "0")}.wav`);
 
     if (!scene.narration) {
-      narrated.push({ scene, seconds: scene.seconds, audioPath: "", sampleRate: format.sampleRate, channels: format.channels });
+      narrated.push({ scene, seconds: scene.seconds, audioPaths: [], sampleRate: format.sampleRate, channels: format.channels });
       continue;
     }
 
@@ -203,16 +211,24 @@ async function narrateScenes(
     }
 
     const seconds = Math.max(scene.seconds, duration + narrationTailSeconds);
-    narrated.push({ scene, seconds, audioPath, sampleRate: measured?.sampleRate ?? format.sampleRate, channels: measured?.channels ?? format.channels });
+    const sampleRate = measured?.sampleRate ?? format.sampleRate;
+    const channels = measured?.channels ?? format.channels;
+
+    // The narration is usually shorter than the scene it is spoken over, and is
+    // always at least the tail short of it. The rest is silence, in the same
+    // format as the speech so the two can be joined without re-encoding.
+    const padPath = path.join(workDir, `pad-${String(index).padStart(4, "0")}.wav`);
+    writeSilence(padPath, seconds - duration, sampleRate, channels);
+    narrated.push({ scene, seconds, audioPaths: [audioPath, padPath], sampleRate, channels });
   }
 
   // Now that the real format is known, fill in silence for every scene that
   // had none, at that format so concatenation works.
   for (const entry of narrated) {
-    if (entry.audioPath) continue;
+    if (entry.audioPaths.length > 0) continue;
     const silencePath = path.join(workDir, `silence-${entry.scene.id}.wav`);
     writeSilence(silencePath, entry.seconds, format.sampleRate, format.channels);
-    entry.audioPath = silencePath;
+    entry.audioPaths = [silencePath];
     entry.sampleRate = format.sampleRate;
     entry.channels = format.channels;
   }
@@ -277,7 +293,7 @@ export async function renderVideo(
     const listPath = path.join(workDir, "narration-list.txt");
     writeFileSync(
       listPath,
-      narrationResult.scenes.map((entry) => `file '${entry.audioPath.replace(/'/g, "'\\''")}'`).join("\n")
+      narrationResult.scenes.flatMap((entry) => entry.audioPaths).map((audioPath) => `file '${audioPath.replace(/'/g, "'\\''")}'`).join("\n")
     );
     const narrationPath = path.join(workDir, "narration.wav");
     const concat = await runFfmpeg(["-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", narrationPath], ffmpegTimeoutMs);
