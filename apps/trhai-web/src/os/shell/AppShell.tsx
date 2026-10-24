@@ -12,6 +12,7 @@ import { ViewBoundary } from "../ui/SystemAlert";
 import { PaywallScreen } from "../../components/PaywallScreen";
 import { UpdateNotices } from "../../components/UpdateNotices";
 import { SetupScreen } from "../../components/SetupScreen";
+import { MusicVideoWatcher } from "../../components/MusicVideoWatcher";
 import { useNav } from "../state/nav";
 import { useAssistantState, useVoice } from "../state/assistant";
 import { views, viewById, type ViewId } from "../views";
@@ -45,6 +46,7 @@ const loaders: Record<ViewId, ReturnType<typeof dynamic>> = {
   tasks: dynamic(() => import("../views/TasksView").then((module) => module.TasksView), { loading: ViewLoading }),
   automation: dynamic(() => import("../views/AutomationView").then((module) => module.AutomationView), { loading: ViewLoading }),
   tools: dynamic(() => import("../views/ToolsView").then((module) => module.ToolsView), { loading: ViewLoading }),
+  music: dynamic(() => import("../views/MusicVideoView").then((module) => module.MusicVideoView), { loading: ViewLoading }),
   system: dynamic(() => import("../views/SystemView").then((module) => module.SystemView), { loading: ViewLoading }),
   network: dynamic(() => import("../views/NetworkView").then((module) => module.NetworkView), { loading: ViewLoading }),
   settings: dynamic(() => import("../views/SettingsView").then((module) => module.SettingsView), { loading: ViewLoading })
@@ -102,7 +104,7 @@ export function AppShell() {
     notices: <NotificationCenter />, toasts: <Toasts />, palette: <CommandPalette />,
     // Over every screen, for everyone using the app: the update notices, and
     // the paywall once a trial or license has run out (it sits above them).
-    setup: <SetupScreen />, updates: <UpdateNotices />, paywall: <PaywallScreen />
+    setup: <SetupScreen />, updates: <UpdateNotices />, paywall: <PaywallScreen />, musicWatcher: <MusicVideoWatcher />
   }), []);
 
   return (
@@ -139,6 +141,7 @@ export function AppShell() {
         {chrome.setup}
         {chrome.updates}
         {chrome.paywall}
+        {chrome.musicWatcher}
       </div>
     </BackdropAnchorProvider>
   );

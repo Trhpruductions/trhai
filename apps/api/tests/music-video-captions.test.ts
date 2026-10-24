@@ -195,10 +195,20 @@ test("lines never overlap: one is taken down before the next goes up", () => {
   assert.deepEqual(found.map((event) => visible(event.text)), ["first line here", "second line follows", "third much later"], "in time order");
   assert.ok(seconds(found[0].end) <= seconds(found[1].start) + 1e-9, `${found[0].end} before ${found[1].start}`);
   assert.ok(seconds(found[0].end) > seconds(found[0].start) + 1, "and still on for a while");
+  // It is the first that gives way: the second comes up when it is sung, not when the first would have gone.
+  assert.ok(Math.abs(seconds(found[1].start) - 12.25) < 0.011, `the second comes up at ${found[1].start}`);
   assert.ok(seconds(found[2].end) - seconds(found[2].start) >= 2, "a line with room goes a little past its last word");
   // Even touching lines: the first goes before the second arrives.
   const close = events(captions([line("one two", 5, 1), line("three four", 5.9, 1)])).filter((event) => event.style === "Lyric");
   assert.ok(seconds(close[0].end) <= seconds(close[1].start), `${close[0].end} ${close[1].start}`);
+  assert.ok(Math.abs(seconds(close[1].start) - 5.75) < 0.011, `the second comes up at ${close[1].start}`);
+});
+
+test("two lines that start almost together still do not share the screen", () => {
+  const found = events(captions([line("quick one", 20, 0.1), line("and the next", 20.2, 1)])).filter((event) => event.style === "Lyric");
+  assert.equal(found.length, 2, "both are shown");
+  assert.ok(seconds(found[0].end) <= seconds(found[1].start) + 1e-9, `${found[0].end} before ${found[1].start}`);
+  assert.ok(seconds(found[1].end) > seconds(found[1].start) + 0.5, "and the second still has its time");
 });
 
 test("a short line stays up long enough to read when nothing is waiting behind it", () => {

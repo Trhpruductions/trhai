@@ -86,6 +86,8 @@ export const toolCatalogue: Record<string, CatalogueEntry> = {
   look_at_image: { area: "Media", title: "Look at an image", summary: "Looks at a screenshot, photo or scan on this PC, and reads any text in it." },
   render_mockup: { area: "Media", title: "Show a mockup", summary: "Draws a screen mockup or a diagram you can see straight away." },
   make_video: { area: "Media", title: "Make a video", summary: "Makes a short narrated motion-graphics video, rendered on this PC." },
+  make_music_video: { area: "Media", title: "Make a music video", summary: "Makes a music video from a song: a ring of bars that moves with it, its title, and the lyrics lit as they are sung. Drawn on this PC." },
+  music_video_status: { area: "Media", title: "Check a music video", summary: "Says how the music video being made is getting on, and where the finished ones are." },
   send_text: { area: "Messages", title: "Send a text", summary: "Sends a text from your own phone, through Phone Link." },
   send_email: { area: "Messages", title: "Send an email", summary: "Sends an email from your own account, or opens it in your mail app." },
   system_status: { area: "This PC", title: "Read this PC", summary: "Reads live processor, memory, graphics card, disk and network figures." },
@@ -130,6 +132,10 @@ function readinessOf(name: string, probe: ToolProbe): ToolReadiness {
     if (!probe.ffmpeg) return { state: "needs-setup", note: "Needs ffmpeg installed - it encodes the video." };
     if (!probe.piper) return { state: "needs-setup", note: "Needs a Piper voice installed - it narrates the video." };
     return ready("Narrated with Piper and encoded with ffmpeg, on this PC.");
+  }
+  if (name === "make_music_video") {
+    if (!probe.ffmpeg) return { state: "needs-setup", note: "Needs ffmpeg installed - it draws and encodes the video." };
+    return ready("Drawn and encoded with ffmpeg on this PC's processor, with no account. Times the lyrics to the singing when Listening is installed.");
   }
   if (name === "send_text") {
     if (probe.phoneLink !== "linked") {

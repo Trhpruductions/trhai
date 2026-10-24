@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { listMusicVideos, musicVideoReadiness, parseMusicVideoRequest, saveUpload } from "./services/musicVideoFiles.js";
+import { listMusicVideos, musicVideoReadiness, parseMusicVideoRequest, saveUpload, whyNotMusicVideo } from "./services/musicVideoFiles.js";
 import { cancelMusicVideo, musicVideoStatus, startMusicVideo } from "./services/musicVideoJob.js";
 
 const traceId = "trace-local";
@@ -49,6 +49,11 @@ export function registerMusicVideoRoutes(app: Express): void {
     const parsed = parseMusicVideoRequest(req.body);
     if (!parsed.ok) {
       res.status(400).json({ code: "INVALID_REQUEST", message: parsed.message, traceId });
+      return;
+    }
+    const impossible = whyNotMusicVideo(parsed.request);
+    if (impossible) {
+      res.status(400).json({ code: "INVALID_REQUEST", message: impossible, traceId });
       return;
     }
     const started = startMusicVideo(parsed.request);

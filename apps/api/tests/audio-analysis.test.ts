@@ -163,3 +163,24 @@ test("silence draws nothing", () => {
   assert.ok(Array.from(track.light).every((value) => value === 0));
   assert.ok(Math.max(...track.levels) < 40, "no bar stands up for silence");
 });
+
+test("the bars follow a sound that comes in, at once: only the bars at the tone stand up, not the whole ring", () => {
+  // Hiss all the way through, and from half a second a loud tone. The hiss fills the ring while it is all there is, because the
+  // reference for full height is set by it; when the tone comes in the reference must jump up to it straight away. If it crept up
+  // instead, the hiss would still read as loud against it and the whole ring would stay standing.
+  const noise = noiseSource(3);
+  const samples = Float32Array.from({ length: 2 * rate }, (_, i) => 0.03 * noise() + (i >= 0.5 * rate ? 0.5 * Math.sin((TAU * 1000 * i) / rate) : 0));
+  const track = visualTrack(samples, rate, 30, []);
+  const frame = (seconds: number) => Array.from(track.levels.slice(Math.round(seconds * 30) * 64, Math.round(seconds * 30) * 64 + 64));
+  const standing = (bars: number[]) => bars.filter((level) => level > 128).length;
+  assert.ok(standing(frame(0.4)) >= 20, `${standing(frame(0.4))} bars stand for hiss on its own`);
+  assert.ok(standing(frame(1.2)) <= 6, `${standing(frame(1.2))} of 64 bars stand for a single tone over the hiss, 0.7 s after it came in`);
+  assert.ok(standing(frame(1.2)) >= 1, "and the tone's own bar is one of them");
+  // And the other way: when the tone stops the bars fall, so the ring is not left standing on a sound that has gone.
+  const tone = Float32Array.from({ length: 2 * rate }, (_, i) => 0.5 * Math.sin((TAU * 1000 * i) / rate));
+  const gone = new Float32Array(tone.length + 2 * rate);
+  gone.set(tone, 0);
+  const after = visualTrack(gone, rate, 30, []);
+  const level = (seconds: number) => Math.max(...Array.from(after.levels.slice(Math.round(seconds * 30) * 64, Math.round(seconds * 30) * 64 + 64)));
+  assert.ok(level(3.5) < level(1.5) * 0.5, `the bars have fallen by ${level(3.5)} from ${level(1.5)}`);
+});

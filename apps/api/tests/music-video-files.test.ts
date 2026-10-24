@@ -108,10 +108,15 @@ test("songs that were uploaded and never used are cleared after three days", () 
   const fresh = path.join(uploads, "fresh.mp3");
   writeFileSync(old, "x");
   writeFileSync(fresh, "x");
+  const recent = path.join(uploads, "two-days.mp3");
+  writeFileSync(recent, "x");
   const longAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+  const twoDays = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
   utimesSync(old, longAgo, longAgo);
+  utimesSync(recent, twoDays, twoDays);
   pruneUploads();
   assert.equal(existsSync(old), false);
+  assert.equal(existsSync(recent), true, "two days is not yet three");
   assert.equal(existsSync(fresh), true);
 });
 
@@ -126,16 +131,17 @@ function makeVideoFolder(name: string, info: Record<string, unknown>, extra: { l
 const info = (title: string, madeAt: string) => ({ title, artist: "A", seconds: 60, height: 720, bpm: 120, palette: "neon", cover: false, preview: false, song: "song.mp3", lyricsTiming: "heard", warnings: [], madeAt });
 
 test("the videos already made are listed, newest first, with their lyrics, and half-made ones are left out", () => {
-  makeVideoFolder("older", info("Older", "2026-10-01T10:00:00.000Z"), { lyrics: ["one", "two"], thumbnail: true });
-  makeVideoFolder("newer", info("Newer", "2026-10-02T10:00:00.000Z"));
+  // Named so that the order they are found in on the disk is the opposite of the order they are shown in.
+  makeVideoFolder("a-older", info("Older", "2026-10-01T10:00:00.000Z"), { lyrics: ["one", "two"], thumbnail: true });
+  makeVideoFolder("b-newer", info("Newer", "2026-10-02T10:00:00.000Z"));
   makeVideoFolder("no-video", info("Broken", "2026-10-03T10:00:00.000Z"), { video: false });
   makeVideoFolder("bad-info", info("Bad", "2026-10-04T10:00:00.000Z"), { badInfo: true });
   const listed = listMusicVideos();
   assert.deepEqual(listed.map((entry) => entry.title), ["Newer", "Older"]);
   const older = listed[1];
-  assert.equal(older.folder, "music-videos/older");
-  assert.equal(older.video, "music-videos/older/video.mp4");
-  assert.equal(older.thumbnail, "music-videos/older/thumbnail.jpg");
+  assert.equal(older.folder, "music-videos/a-older");
+  assert.equal(older.video, "music-videos/a-older/video.mp4");
+  assert.equal(older.thumbnail, "music-videos/a-older/thumbnail.jpg");
   assert.equal(older.lyrics, "one\ntwo");
   assert.equal(older.bytes, 1234);
   assert.equal(listed[0].thumbnail, null);
@@ -148,7 +154,7 @@ test("what this PC is ready for is reported in a shape the screen can use", () =
   const ready = musicVideoReadiness({ TRHAI_FFMPEG_PATH: path.join(root, "nope.exe") });
   assert.equal(typeof ready.ffmpeg, "boolean");
   assert.equal(typeof ready.listening, "boolean");
-  assert.ok(ready.palettes.some((palette) => palette.id === "neon" && palette.label === "Neon"));
+  assert.deepEqual(ready.palettes.find((palette) => palette.id === "neon"), { id: "neon", label: "Neon", top: "#4de8ff", bottom: "#ff2fa8" }, "with its colours, for a swatch");
   assert.ok(ready.extensions.includes(".mp3") && ready.extensions.includes(".wav"));
   assert.equal(ready.longestSeconds, 900);
 });

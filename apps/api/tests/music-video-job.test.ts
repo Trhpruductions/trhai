@@ -55,6 +55,20 @@ test("a video that is being made reports how far it has got, as it says so", asy
   if (done.status === "done") assert.deepEqual(done.result, result);
 });
 
+test("a video's title is the one it turns out to have, once the song has been opened", async () => {
+  const video = slowVideo();
+  useMusicVideoRunner(video.run);
+  startMusicVideo({ audio: "a.mp3" });
+  const before = musicVideoStatus();
+  assert.equal(before.status === "running" && before.title, "your song");
+  video.context().report({ stage: "preparing", fraction: 0.04, message: "Opened the song", title: "Neon Highway" });
+  const after = musicVideoStatus();
+  assert.equal(after.status === "running" && after.title, "Neon Highway");
+  video.context().report({ stage: "drawing", fraction: 0.5, message: "Drawing" });
+  const later = musicVideoStatus();
+  assert.equal(later.status === "running" && later.title, "Neon Highway", "kept when later reports do not repeat it");
+});
+
 test("only one video is made at a time", async () => {
   const video = slowVideo();
   useMusicVideoRunner(video.run);
@@ -127,6 +141,7 @@ test("a video that goes quiet for ten minutes is stopped, but one that keeps rep
   mock.timers.tick(stallMilliseconds - 60_000);
   video.context().report({ stage: "drawing", fraction: 0.3, message: "Drawing" });
   mock.timers.tick(stallMilliseconds - 60_000);
+  await settled();
   assert.equal(musicVideoStatus().status, "running", "a report in between starts the ten minutes again");
 
   mock.timers.tick(120_000);

@@ -10,6 +10,7 @@ import { pipeline } from "node:stream/promises";
 import { ffmpegAvailable } from "./ffmpegPath.js";
 import type { LyricsTiming } from "./lyricTiming.js";
 import { audioExtensions, biggestAudioBytes, longestSongSeconds, musicVideosFolder, type MusicVideoRequest, uploadsFolder } from "./musicVideo.js";
+import type { JobState } from "./musicVideoJob.js";
 import { palettes } from "./musicVideoLook.js";
 import { whisperStatus } from "./whisperTranscribe.js";
 import { resolveInWorkspace, workspaceRelative } from "./workspace.js";
@@ -66,21 +67,42 @@ export function parseMusicVideoRequest(body: unknown): { ok: true; request: Musi
 
 // ---------------------------------------------------------------- what is ready
 
+/**
+ * Why a video cannot be started, said at once, or null when it can. The video
+ * is checked again as it starts; this is so that whoever asked is told in
+ * the same breath, not by a job that fails a moment later.
+ */
+export function whyNotMusicVideo(request: MusicVideoRequest, env: NodeJS.ProcessEnv = process.env): string | null {
+  if (!ffmpegAvailable(env)) return "ffmpeg is not installed, and music videos need it. Settings, Engine and models, installs it.";
+  const audio = resolveInWorkspace(request.audio);
+  if (!audio) return "That song is outside the workspace.";
+  if (!audioExtensions.includes(path.extname(audio).toLowerCase())) return `That is not a song file this can read. It can read ${audioExtensions.join(", ")}.`;
+  try {
+    if (!statSync(audio).isFile()) return `There is no song at "${request.audio}" in the workspace.`;
+  } catch {
+    return `There is no song at "${request.audio}" in the workspace.`;
+  }
+  return null;
+}
+
 export type Readiness = {
   /** Without ffmpeg there is no video. */
   ffmpeg: boolean;
   /** Without whisper.cpp the words cannot be timed to the singing, and the lyrics are spread evenly. */
   listening: boolean;
-  palettes: Array<{ id: string; label: string }>;
+  /** The look choices, each with the two colours of its bars as CSS colours, for a swatch. */
+  palettes: Array<{ id: string; label: string; top: string; bottom: string }>;
   extensions: string[];
   longestSeconds: number;
 };
+
+const css = (rgb: number) => `#${rgb.toString(16).padStart(6, "0")}`;
 
 export function musicVideoReadiness(env: NodeJS.ProcessEnv = process.env): Readiness {
   return {
     ffmpeg: ffmpegAvailable(env),
     listening: whisperStatus().available,
-    palettes: palettes.map(({ id, label }) => ({ id, label })),
+    palettes: palettes.map(({ id, label, barsTop, barsBottom }) => ({ id, label, top: css(barsTop), bottom: css(barsBottom) })),
     extensions: audioExtensions,
     longestSeconds: longestSongSeconds
   };
@@ -183,4 +205,34 @@ export function listMusicVideos(): LibraryEntry[] {
 
 function directoryNames(directory: string): string[] {
   try { return readdirSync(directory); } catch { return []; }
+}
+
+// ---------------------------------------------------------------- telling it in words
+
+const clock = (seconds: number) => {
+  const total = Math.max(0, Math.round(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+};
+const megabytes = (bytes: number) => (bytes >= 1024 * 1024 ? `${Math.round(bytes / (1024 * 1024))} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+
+/** How a music video is getting on, and what has been made, as the assistant tells it: what is true, and not one word of "done" for what is not. */
+export function describeMusicVideos(job: JobState, recent: LibraryEntry[]): string {
+  const lines: string[] = [];
+  if (job.status === "running") {
+    lines.push(`A music video is being made: "${job.title}"${job.preview ? " (a preview)" : ""}. ${job.message} - ${Math.round(job.fraction * 100)}% of the way, ${clock(job.elapsedSeconds)} so far. It is not finished yet.`);
+  } else if (job.status === "done") {
+    const r = job.result;
+    lines.push(`The last music video finished: "${r.title}"${r.preview ? " (a preview)" : ""}, ${clock(r.seconds)} at ${r.height}p, ${megabytes(r.bytes)}, at ${r.video}.`);
+    if (r.warnings.length > 0) lines.push(`Notes about it: ${r.warnings.join(" ")}`);
+  } else if (job.status === "failed") {
+    lines.push(`The last music video could not be made: ${job.reason}`);
+  } else if (job.status === "cancelled") {
+    lines.push("The last music video was stopped before it finished, and nothing was kept.");
+  } else {
+    lines.push("No music video is being made.");
+  }
+  lines.push(recent.length > 0
+    ? `Made so far: ${recent.map((entry) => `"${entry.title}"${entry.preview ? " (preview)" : ""} (${clock(entry.seconds)}) at ${entry.video}`).join("; ")}.`
+    : "None have been made yet.");
+  return lines.join("\n");
 }

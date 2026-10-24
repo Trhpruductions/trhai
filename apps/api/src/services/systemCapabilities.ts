@@ -34,6 +34,7 @@ export type SystemCapabilities = {
   applicationBuilding: boolean;
   /** Whether the local motion-graphics video pipeline is registered. */
   videoRendering: boolean;
+  musicVideos: boolean;
   /**
    * `web` is reaching the internet at all: fetch_url reads a page given its
    * exact URL, and web_search now finds pages for a query (scraping a no-key
@@ -134,6 +135,7 @@ export function getSystemCapabilities(model: string | null): SystemCapabilities 
     documents: hasAll(names, "search_documents", "write_document"),
     applicationBuilding: hasAll(names, "build_app"),
     videoRendering: hasAll(names, "make_video"),
+    musicVideos: hasAll(names, "make_music_video"),
     lockedData: lockedProtectedFiles(),
     failingStores: persistenceFailures(),
     // Reaching the internet at all: reading a page via fetch_url, or finding

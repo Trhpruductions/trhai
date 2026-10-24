@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import type { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,6 +22,7 @@ const { createApp } = await import("../src/server.js");
 const { resetLicensingForTests, trialDays } = await import("../src/services/licensing.js");
 const { writeProtectedJsonFile } = await import("../src/services/protectedJson.js");
 const { resetMusicVideoJob, useMusicVideoRunner } = await import("../src/services/musicVideoJob.js");
+const { useFfmpegProbe } = await import("../src/services/ffmpegPath.js");
 type Outcome = import("../src/services/musicVideo.js").Outcome;
 type MusicVideoRequest = import("../src/services/musicVideo.js").MusicVideoRequest;
 
@@ -28,10 +30,16 @@ const server = createApp().listen(0);
 await once(server, "listening");
 const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-test.beforeEach(() => { resetLicensingForTests(); resetMusicVideoJob(); useMusicVideoRunner(); });
+// Whatever this PC has, ffmpeg answers here as it would if it were installed; the songs are only files to be found.
+const ffmpegRuns = (status: number) => () => ({ status, error: undefined }) as unknown as ReturnType<typeof spawnSync>;
+mkdirSync(path.join(root, "songs"), { recursive: true });
+for (const name of ["a.mp3", "b.mp3"]) writeFileSync(path.join(root, "songs", name), "not really a song, but a file");
+
+test.beforeEach(() => { resetLicensingForTests(); resetMusicVideoJob(); useMusicVideoRunner(); useFfmpegProbe(ffmpegRuns(0)); });
 test.after(async () => {
   resetMusicVideoJob();
   useMusicVideoRunner();
+  useFfmpegProbe();
   resetLicensingForTests();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   rmSync(root, { recursive: true, force: true });
@@ -100,24 +108,24 @@ test("a video is started with JSON, only one at a time, and can be stopped", asy
   const video = slowVideo();
   useMusicVideoRunner(video.run);
 
-  assert.equal((await send("POST", "/v1/music-video", JSON.stringify({ audio: "a.mp3" }), "text/plain")).status, 415, "JSON only");
+  assert.equal((await send("POST", "/v1/music-video", JSON.stringify({ audio: "songs/a.mp3" }), "text/plain")).status, 415, "JSON only");
   const missing = await postJson("/v1/music-video", {});
   assert.equal(missing.status, 400);
   assert.match(missing.body.message, /audio is required/);
   assert.equal(missing.body.code, "INVALID_REQUEST");
-  assert.equal((await postJson("/v1/music-video", { audio: "a.mp3", palette: "rainbow" })).status, 400);
+  assert.equal((await postJson("/v1/music-video", { audio: "songs/a.mp3", palette: "rainbow" })).status, 400);
 
-  const started = await postJson("/v1/music-video", { audio: "a.mp3", title: "Neon Highway", height: 720, previewSeconds: 20, palette: "ember" });
+  const started = await postJson("/v1/music-video", { audio: "songs/a.mp3", title: "Neon Highway", height: 720, previewSeconds: 20, palette: "ember" });
   assert.equal(started.status, 202);
   assert.equal(typeof started.body.data.id, "string");
   assert.equal(started.body.data.job.status, "running");
   assert.equal(started.body.data.job.title, "Neon Highway");
   assert.equal(started.body.data.job.preview, true);
-  assert.deepEqual(video.asked, [{ audio: "a.mp3", title: "Neon Highway", height: 720, previewSeconds: 20, palette: "ember" }], "what was asked for is what is made");
+  assert.deepEqual(video.asked, [{ audio: "songs/a.mp3", title: "Neon Highway", height: 720, previewSeconds: 20, palette: "ember" }], "what was asked for is what is made");
 
   const status = await getJson("/v1/music-video");
   assert.equal(status.body.data.job.status, "running");
-  const second = await postJson("/v1/music-video", { audio: "b.mp3" });
+  const second = await postJson("/v1/music-video", { audio: "songs/b.mp3" });
   assert.equal(second.status, 409);
   assert.equal(second.body.code, "BUSY");
   assert.match(second.body.message, /Neon Highway/);
@@ -131,10 +139,31 @@ test("a video is started with JSON, only one at a time, and can be stopped", asy
   assert.equal((await postJson("/v1/music-video/cancel", {})).body.data.cancelled, false, "nothing to stop now");
 });
 
+test("a video that cannot be made is refused at once, with the reason, and nothing is started", async () => {
+  const video = slowVideo();
+  useMusicVideoRunner(video.run);
+  const missing = await postJson("/v1/music-video", { audio: "songs/not-there.mp3" });
+  assert.equal(missing.status, 400);
+  assert.match(missing.body.message, /There is no song at "songs\/not-there\.mp3"/);
+  const outside = await postJson("/v1/music-video", { audio: "../outside.mp3" });
+  assert.equal(outside.status, 400);
+  assert.match(outside.body.message, /outside the workspace/);
+  writeFileSync(path.join(root, "songs", "notes.txt"), "words");
+  const wrong = await postJson("/v1/music-video", { audio: "songs/notes.txt" });
+  assert.equal(wrong.status, 400);
+  assert.match(wrong.body.message, /not a song file/);
+  useFfmpegProbe(ffmpegRuns(1));
+  const noFfmpeg = await postJson("/v1/music-video", { audio: "songs/a.mp3" });
+  assert.equal(noFfmpeg.status, 400);
+  assert.match(noFfmpeg.body.message, /ffmpeg is not installed/);
+  assert.deepEqual(video.asked, [], "none of them started anything");
+  assert.deepEqual((await getJson("/v1/music-video")).body.data.job, { status: "idle" });
+});
+
 test("when it is done, the screen is told where the video is", async () => {
   const video = slowVideo();
   useMusicVideoRunner(video.run);
-  await postJson("/v1/music-video", { audio: "a.mp3" });
+  await postJson("/v1/music-video", { audio: "songs/a.mp3" });
   video.finish({ ok: true, result: { folder: "music-videos/x", video: "music-videos/x/video.mp4", thumbnail: "music-videos/x/thumbnail.jpg", title: "X", artist: "", seconds: 60, height: 720, bpm: 120, palette: "neon", lyricLines: 0, lyricsTiming: "none", cover: false, preview: false, warnings: ["a warning"], bytes: 9 } });
   await settled();
   const { body } = await getJson("/v1/music-video");
@@ -148,7 +177,7 @@ test("once the trial has ended, reading is open but making a video, or sending a
   resetLicensingForTests();
   assert.equal((await getJson("/v1/music-video")).status, 200);
   assert.equal((await getJson("/v1/music-video/library")).status, 200);
-  const start = await postJson("/v1/music-video", { audio: "a.mp3" });
+  const start = await postJson("/v1/music-video", { audio: "songs/a.mp3" });
   assert.equal(start.status, 402);
   assert.equal(start.body.code, "PAYMENT_REQUIRED");
   const before = uploadCount();

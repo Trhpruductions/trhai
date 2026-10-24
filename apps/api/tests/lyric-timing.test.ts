@@ -106,6 +106,15 @@ test("lyrics that share nothing with what was heard are not timed from it", () =
   assert.deepEqual(alignLyrics(["anything at all"], [], 20), { lines: [], matched: 0 });
 });
 
+test("a couple of words in common are not enough to time lyrics by", () => {
+  // "we" and "are" turn up in the singing, and nothing else of the lyrics does: not a match, a coincidence.
+  const heard = [word("we", 5, 5.3), word("are", 5.3, 5.6), word("completely", 9, 10), word("different", 10, 11)];
+  const plan = planLyrics({ pasted: lyrics, heard: { words: heard, timed: true }, duration: 68, singingFrom: 8, singingTo: 60 });
+  assert.equal(plan.timing, "approximate");
+  assert.match(plan.warnings.join(" "), /could not be made out well enough/);
+  assert.ok(Math.abs(plan.lines[0].start - 8) < 1e-9, `spread from where the singing is taken to start, not placed at ${plan.lines[0].start}`);
+});
+
 test("lyrics with no recognition are spread evenly, and flagged as only approximate", () => {
   const spread = spreadLyrics(["one two", "three four five", "", "six"], 10, 40);
   assert.equal(spread.length, 3, "blank lines are dropped");

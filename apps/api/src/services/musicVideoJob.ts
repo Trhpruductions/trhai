@@ -94,7 +94,11 @@ export function startMusicVideo(request: MusicVideoRequest, label?: string): Sta
 
   const context: RunContext = {
     signal: controller.signal,
-    report: (progress) => { job.progress = progress; job.lastProgressAt = Date.now(); }
+    report: (progress) => {
+      job.progress = progress;
+      if (progress.title) job.title = progress.title;
+      job.lastProgressAt = Date.now();
+    }
   };
   void runner(request, context).then(
     (outcome) => settle(job, outcome, stalled),

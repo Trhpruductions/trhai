@@ -55,7 +55,14 @@ export type MusicVideoRequest = {
 
 export type Stage = "preparing" | "listening" | "lyrics" | "drawing" | "finishing";
 
-export type Progress = { stage: Stage; /** 0 to 1 across the whole job. */ fraction: number; message: string };
+export type Progress = {
+  stage: Stage;
+  /** 0 to 1 across the whole job. */
+  fraction: number;
+  message: string;
+  /** What the video is called, once it is known (from the request, the song's tags or its file name). */
+  title?: string;
+};
 
 export type MusicVideoResult = {
   /** Relative to the workspace. */
@@ -400,7 +407,8 @@ export async function makeMusicVideo(request: MusicVideoRequest, context: RunCon
   const warnings: string[] = [];
   let workDir: string | null = null;
   const check = () => { if (context.signal.aborted) throw new Stop("Cancelled.", true); };
-  const report = (stage: Stage, fraction: number, message: string) => context.report({ stage, fraction, message });
+  let known: string | undefined;
+  const report = (stage: Stage, fraction: number, message: string) => context.report({ stage, fraction, message, ...(known ? { title: known } : {}) });
 
   try {
     // ---- before anything is spent: is it possible?
@@ -430,6 +438,7 @@ export async function makeMusicVideo(request: MusicVideoRequest, context: RunCon
     if (facts.duration < shortestSongSeconds) return { ok: false, reason: "That song is too short for a video." };
 
     const title = request.title?.trim() || facts.tags.title || titleFromFileName(audioPath);
+    known = title;
     const artist = request.artist !== undefined ? request.artist.trim() : facts.tags.artist ?? "";
     const wanted = preview ? Math.min(facts.duration, Math.max(3, request.previewSeconds as number)) : facts.duration;
 
