@@ -6,7 +6,7 @@
 // ffmpeg is on the PC's PATH, as it always did. TRHAI_FFMPEG_PATH names one
 // outright, for someone who wants a particular build.
 
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { runtimeDir } from "./modelEngine.js";
@@ -56,4 +56,43 @@ export function ffmpegAvailable(env: NodeJS.ProcessEnv = process.env, now: numbe
 /** Called after ffmpeg is installed, so the next question is asked of the new one. */
 export function forgetFfmpegCheck(): void {
   remembered = null;
+}
+
+type PatientOptions = {
+  attempts?: number;
+  pauseMs?: number;
+  timeoutMs?: number;
+  /** Whether `program -version` ran, within `timeoutMs`. */
+  probe?: (program: string, timeoutMs: number) => Promise<boolean>;
+  pause?: (ms: number) => Promise<void>;
+};
+
+const startsOk = (program: string, timeoutMs: number) => new Promise<boolean>((resolve) => {
+  execFile(program, ["-version"], { windowsHide: true, timeout: timeoutMs }, (error) => resolve(!error));
+});
+
+/**
+ * Whether ffmpeg runs, asked again when it does not, for a program written a
+ * moment ago.
+ *
+ * A PC's antivirus can hold a program it has not seen while it looks at it, and
+ * a 100 MB one can take longer than the five seconds the screens wait: the same
+ * ffmpeg that started at once three times in a row failed that check on the
+ * fourth install, then started in a tenth of a second. So after installing, the
+ * answer is asked for patiently, and without stopping the service (the
+ * synchronous check above would). The remembered answer is dropped either way,
+ * so the screens read the truth next.
+ */
+export async function ffmpegRunsPatiently(env: NodeJS.ProcessEnv = process.env, options: PatientOptions = {}): Promise<boolean> {
+  const { attempts = 4, pauseMs = 4_000, timeoutMs = 20_000 } = options;
+  const probe = options.probe ?? startsOk;
+  const pause = options.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const chosen = ffmpegProgram(env);
+  let runs = false;
+  for (let attempt = 1; attempt <= attempts && !runs; attempt += 1) {
+    runs = await probe(chosen, timeoutMs);
+    if (!runs && attempt < attempts) await pause(pauseMs);
+  }
+  forgetFfmpegCheck();
+  return runs;
 }
