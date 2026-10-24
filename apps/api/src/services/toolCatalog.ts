@@ -26,7 +26,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import type { PinnedFile } from "./modelSetup.js";
-import { ffmpegAvailable, ffmpegHome, forgetFfmpegCheck } from "./ffmpegPath.js";
+import { ffmpegAvailable, ffmpegHome, ffmpegRunsPatiently, forgetFfmpegCheck } from "./ffmpegPath.js";
 import { installedVoices, piperRoot, piperStatus } from "./piperSpeech.js";
 import { binaryPath as whisperProgram, installedModels, whisperRoot, whisperStatus } from "./whisperTranscribe.js";
 
@@ -48,6 +48,12 @@ export type ToolDef = {
   missing(env: NodeJS.ProcessEnv): PinnedFile[];
   /** Whether the app can use it now. */
   installed(env: NodeJS.ProcessEnv): boolean;
+  /**
+   * After the files are put in place: whether the app can use it, asked with
+   * patience and without holding up the service. A program written a moment ago
+   * may be held by antivirus while it is looked at. When absent, `installed` is the answer.
+   */
+  usable?(env: NodeJS.ProcessEnv): Promise<boolean>;
   /** Puts what was downloaded (in `downloads`, by file name) where the app looks for it, unpacking archives with `unpack`. */
   place(downloads: string, env: NodeJS.ProcessEnv, unpack: (archive: string, into: string) => void): void;
 };
@@ -220,6 +226,7 @@ const video: ToolDef = {
   files: [ffmpegArchive],
   missing: (env) => (ffmpegAvailable(env) ? [] : [ffmpegArchive]),
   installed: (env) => ffmpegAvailable(env),
+  usable: (env) => ffmpegRunsPatiently(env),
   place(downloads, env, unpack) {
     const staging = unpackedBeside(downloads, "ffmpeg-unpacked", path.join(downloads, ffmpegArchive.name), unpack);
     const folder = folderHolding(staging, ffmpegExe);

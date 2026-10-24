@@ -595,7 +595,8 @@ async function runJob(current: SetupJob, signal: AbortSignal, variant: EngineVar
         step.state = "unpacking";
         tool.place(staging, env, unpack);
         // The check that matters is the app's own: can it find and use what was just put there.
-        if (!tool.installed(env)) throw new Error(`${tool.label} was unpacked, but TRH AI still cannot use it.`);
+        const usable = tool.usable ? await tool.usable(env) : tool.installed(env);
+        if (!usable) throw new Error(`${tool.label} was unpacked, but TRH AI still cannot use it.`);
         rmSync(staging, { recursive: true, force: true });
       } else {
         const model = (deps.catalog ?? modelCatalog).find((entry) => entry.id === step.id) as CatalogModel;

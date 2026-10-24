@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ffmpegAvailable, ffmpegHome, ffmpegProgram, ffmpegSource, forgetFfmpegCheck, useFfmpegProbe } from "../src/services/ffmpegPath.js";
+import { ffmpegAvailable, ffmpegHome, ffmpegProgram, ffmpegRunsPatiently, ffmpegSource, forgetFfmpegCheck, useFfmpegProbe } from "../src/services/ffmpegPath.js";
 import { resetSetupForTests, setupJob, setupStatus, startSetup, type Hardware, type PinnedFile } from "../src/services/modelSetup.js";
 import {
   catalogueTool, ffmpegArchive, piperArchive, piperVoiceFiles, toolCatalogue, toolStatuses, whisperArchive, whisperModel,
@@ -321,6 +321,50 @@ test("video: placing ffmpeg makes the app ask again about the same file, not tru
   });
 });
 
+test("after installing, ffmpeg is asked again about starting, not given up on at the first slow start", async () => {
+  // Found 2026-10-24: three installs in a row passed the check, the fourth said "unpacked, but TRH AI
+  // still cannot use it", and the same file then started in a tenth of a second. Antivirus had it.
+  await inFreshPlaces(async ({ runtime }) => {
+    const env = { ...process.env, TRHAI_RUNTIME_DIR: runtime } as NodeJS.ProcessEnv;
+    const installed = path.join(ffmpegHome(env), "bin", ffmpegName);
+    put(installed);
+    const asked: Array<[string, number]> = [];
+    let pauses = 0;
+    const probe = async (program: string, timeoutMs: number) => { asked.push([program, timeoutMs]); return asked.length >= 3; };
+    assert.equal(await ffmpegRunsPatiently(env, { probe, pause: async () => { pauses += 1; } }), true);
+    assert.equal(asked.length, 3, "busy twice, then it started");
+    assert.equal(pauses, 2, "a pause before each new try, and none after the one that worked");
+    assert.deepEqual(asked.map(([program]) => program), [installed, installed, installed], "always the file just installed");
+    assert.ok(asked.every(([, timeoutMs]) => timeoutMs >= 15_000), "a long wait for each try, not the few seconds the screens use");
+  });
+});
+
+test("an ffmpeg that never starts is given up on after the tries, and one that starts at once is not asked twice", async () => {
+  await inFreshPlaces(async () => {
+    let asked = 0;
+    let pauses = 0;
+    const never = { attempts: 3, probe: async () => { asked += 1; return false; }, pause: async () => { pauses += 1; } };
+    assert.equal(await ffmpegRunsPatiently(process.env, never), false);
+    assert.deepEqual([asked, pauses], [3, 2], "three tries, a pause between them and none after the last");
+
+    asked = 0;
+    pauses = 0;
+    const atOnce = { probe: async () => { asked += 1; return true; }, pause: async () => { pauses += 1; } };
+    assert.equal(await ffmpegRunsPatiently(process.env, atOnce), true);
+    assert.deepEqual([asked, pauses], [1, 0]);
+  });
+});
+
+test("the 'no' remembered before ffmpeg was installed does not outlive the install", async () => {
+  await inFreshPlaces(async ({ runtime }) => {
+    const env = { ...process.env, TRHAI_RUNTIME_DIR: runtime } as NodeJS.ProcessEnv;
+    put(path.join(ffmpegHome(env), "bin", ffmpegName));
+    assert.equal(ffmpegAvailable(env, 1_000, ffmpegAnswering(1)), false, "remembered as 'no'");
+    assert.equal(await ffmpegRunsPatiently(env, { probe: async () => true, pause: async () => {} }), true);
+    assert.equal(ffmpegAvailable(env, 2_000, ffmpegAnswering(0)), true, "asked again, not told the remembered 'no'");
+  });
+});
+
 // ---------------------------------------------------------------- the job
 
 function pinned(name: string, content: Buffer): PinnedFile {
@@ -435,6 +479,26 @@ test("an archive that cannot be placed, or that placed something TRH AI cannot u
     const job = await finished();
     assert.equal(job.state, "failed");
     assert.match(job.error ?? "", expected);
+  }
+});
+
+test("the video tool is checked patiently after installing, and the others by what is on disk", () => {
+  const [speech, listening, video] = toolCatalogue;
+  assert.equal(typeof video.usable, "function", "a 100 MB program is the one antivirus holds up");
+  assert.equal(speech.usable, undefined);
+  assert.equal(listening.usable, undefined);
+});
+
+test("setup believes a tool's own patient answer about whether it can be used, over the quick one", async () => {
+  for (const [usable, quick, outcome] of [[true, false, "done"], [false, true, "failed"]] as const) {
+    resetSetupForTests();
+    const base = mkdtempSync(path.join(tmpdir(), "trhai-toolsjob-"));
+    const plain = twoPartTool(path.join(base, "tool"), [["a.bin", bodies.a], ["b.bin", bodies.b]]);
+    const tool: ToolDef = { ...plain, installed: () => quick, usable: async () => usable };
+    assert.ok(startSetup({ tools: ["speech"] }, { env: { TRHAI_RUNTIME_DIR: path.join(base, "runtime") } as NodeJS.ProcessEnv, hardware: smallPc, tools: [tool], fetcher: server(served) as never }).ok);
+    const job = await finished();
+    assert.equal(job.state, outcome, job.error ?? "");
+    if (outcome === "failed") assert.match(job.error ?? "", /still cannot use it/);
   }
 });
 
