@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import type { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -31,7 +30,7 @@ await once(server, "listening");
 const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
 // Whatever this PC has, ffmpeg answers here as it would if it were installed; the songs are only files to be found.
-const ffmpegRuns = (status: number) => () => ({ status, error: undefined }) as unknown as ReturnType<typeof spawnSync>;
+const ffmpegRuns = (status: number) => (() => ({ status, error: undefined })) as never;
 mkdirSync(path.join(root, "songs"), { recursive: true });
 for (const name of ["a.mp3", "b.mp3"]) writeFileSync(path.join(root, "songs", name), "not really a song, but a file");
 
@@ -47,7 +46,7 @@ test.after(async () => {
 });
 
 type Reply = { status: number; body: Record<string, any> };
-async function send(method: string, route: string, body?: BodyInit, type?: string): Promise<Reply> {
+async function send(method: string, route: string, body?: string | Buffer, type?: string): Promise<Reply> {
   const response = await fetch(`${baseUrl}${route}`, { method, headers: type ? { "Content-Type": type } : {}, body });
   return { status: response.status, body: (await response.json().catch(() => ({}))) as Record<string, any> };
 }

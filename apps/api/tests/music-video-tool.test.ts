@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -24,7 +23,7 @@ const { useFfmpegProbe } = await import("../src/services/ffmpegPath.js");
 type Outcome = import("../src/services/musicVideo.js").Outcome;
 type MusicVideoRequest = import("../src/services/musicVideo.js").MusicVideoRequest;
 
-const ffmpegRuns = (status: number) => () => ({ status, error: undefined }) as unknown as ReturnType<typeof spawnSync>;
+const ffmpegRuns = (status: number) => (() => ({ status, error: undefined })) as never;
 test.beforeEach(() => { resetMusicVideoJob(); useMusicVideoRunner(); useFfmpegProbe(ffmpegRuns(0)); });
 test.afterEach(() => { resetMusicVideoJob(); useMusicVideoRunner(); useFfmpegProbe(); });
 

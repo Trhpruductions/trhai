@@ -136,7 +136,7 @@ export function buildCaptions(input: CaptionsInput): string {
 
   const styles = [
     // The word being sung is filled in the first colour; the words still to come are in the second.
-    `Style: Lyric,${font},${lyricBase},${assColour(palette.sung)},${assColour(palette.unsung)},&HB0000000,&H80000000,-1,0,0,0,100,100,1,0,1,${(g.height * 0.0049).toFixed(1)},1,2,${Math.round(g.width * 0.047)},${Math.round(g.width * 0.047)},${Math.round(g.height * 0.09)},1`,
+    `Style: Lyric,${font},${lyricBase},${assColour(palette.sung)},${assColour(palette.unsung)},&HB0000000,&H80000000,-1,0,0,0,100,100,1,0,1,${(g.height * 0.0049).toFixed(1)},1,2,${Math.round(g.width * 0.047)},${Math.round(g.width * 0.047)},${Math.round(g.height * 0.085)},1`,
     `Style: Title,${font},${layout.titleSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,${Math.round(layout.titleSize * 0.09)},0,1,0,0,5,0,0,0,1`,
     `Style: Artist,${font},${Math.max(layout.artistSize, 9)},${assColour(0xc0c8d8)},${assColour(0xc0c8d8)},&H00000000,&H00000000,0,0,0,0,100,100,${Math.round(layout.artistSize * 0.2)},0,1,0,0,5,0,0,0,1`,
     `Style: Credit,${font},${creditSize},${assColour(0xffffff, 0x40)},${assColour(0xffffff, 0x40)},&H80000000,&H00000000,-1,0,0,0,100,100,2,0,1,1,0,7,${Math.round(g.width * 0.03)},0,${Math.round(g.height * 0.04)},1`

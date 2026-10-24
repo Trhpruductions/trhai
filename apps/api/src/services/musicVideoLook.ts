@@ -35,8 +35,9 @@ export const controlHeight = controlBarRows + controlGlowRows;
 
 export function geometryFor(height: 720 | 1080): Geometry {
   const width = Math.round((height * 16) / 9 / 2) * 2;
-  // The ring sits a little above the middle so the lyrics have the bottom to themselves.
-  return { width, height, centreX: width / 2, centreY: Math.round(height * 0.43), inner: Math.round(height * 0.2), outer: Math.round(height * 0.4) };
+  // The ring sits above the middle so the lyrics have the bottom to themselves: its longest bar ends at 80% of the way down,
+  // and two rows of lyrics, the most that is set at a comfortable size, start at about 78%.
+  return { width, height, centreX: width / 2, centreY: Math.round(height * 0.415), inner: Math.round(height * 0.2), outer: Math.round(height * 0.385) };
 }
 
 // ---------------------------------------------------------------- colours

@@ -46,7 +46,8 @@ test("the ring sits above the middle of a 16 by 9 frame, with room for lyrics be
     assert.equal(g.width % 2, 0);
     assert.ok(Math.abs(g.width / g.height - 16 / 9) < 0.01, "16 by 9");
     assert.ok(g.inner < g.outer && g.outer < g.height * 0.45, "the ring is inside the frame");
-    assert.ok(g.centreY + g.outer < g.height * 0.86, "the longest bar stops above the lyrics");
+    assert.ok(g.centreY + g.outer <= g.height * 0.8 + 1, "the longest bar stops above the lyrics, which two rows of take the bottom fifth");
+    assert.ok(g.centreY - g.outer >= g.height * 0.03 - 1, "with a margin above the ring");
     assert.ok(g.centreY - g.outer > 0, "and below the top of the frame");
   }
 });
