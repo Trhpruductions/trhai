@@ -233,3 +233,42 @@ test("a preview, which hears only the start of the song, is judged by the part i
   assert.ok(Math.abs(spread.lines[0].start - 68 * 0.06) < 1e-9, `${spread.lines[0].start}`);
   assert.ok(spread.lines.length < lyrics.length && spread.lines.every((line) => line.start < 24.7), `${spread.lines.length} lines`);
 });
+
+// ---------------------------------------------------------------- a song that was only partly heard
+
+test("a preview shows exactly the lines sung inside it, each where it was sung", () => {
+  // Real whisper output cut at three lengths, against the twelve lines the voice really sang, four seconds apart from 8.25 s.
+  const sungBy = (seconds: number) => truth.lines.filter((line) => line.start + 0.2 < seconds - 0.3).length;
+  for (const [window, expected] of [[12, 1], [20, 3], [25, 5], [40, 8]] as const) {
+    const heard = wordsFromWhisper(dtw, truth.duration).filter((w) => w.end < window);
+    const plan = planLyrics({ pasted: lyrics, heard: { words: heard, timed: true }, duration: window, fullDuration: truth.duration });
+    assert.equal(plan.lines.length, expected, `${window} s of the song shows ${plan.lines.length} lines`);
+    assert.equal(sungBy(window), expected, "and that is how many were sung in it (fixture check)");
+    plan.lines.forEach((line, i) => {
+      assert.equal(line.text, lyrics[i]);
+      assert.ok(Math.abs(line.start - (truth.lines[i].start + 0.2)) < 0.4, `${window} s: line ${i + 1} at ${line.start}, sung at about ${truth.lines[i].start + 0.2}`);
+    });
+  }
+});
+
+test("heard words land on the first place they fit, not the last: a repeated chorus is not a second chance", () => {
+  const song = ["we are the champions my friends", "a verse that nobody hears", "we are the champions my friends", "and a last line to finish"];
+  // Only the first chorus was heard, at 10 s.
+  const heard = "we are the champions my friends".split(" ").map((text, i) => word(text, 10 + i * 0.4, 10.35 + i * 0.4));
+  const { lines } = alignLyrics(song, heard, 60);
+  assert.ok(Math.abs(lines[0].start - 10) < 0.01, `the first chorus is at ${lines[0].start}`);
+  assert.ok(lines[2].start > lines[0].start + 1, `and the second is not put where the first was heard (${lines[2].start})`);
+  assert.equal(lines[0].words.every((w) => w.confidence >= 0.5), true, "every word of the first chorus was found there");
+  assert.equal(lines[2].words.some((w) => w.confidence >= 0.5), false, "and none of the second");
+});
+
+test("heard words that come before or after the lyrics, or only part of them, still find their place", () => {
+  const song = ["first words here", "then the middle part", "and the ending words"];
+  // The recogniser added a word of its own at each end, and missed the first line.
+  const heard = [word("so", 5, 5.2), word("then", 20, 20.3), word("the", 20.3, 20.5), word("middle", 20.5, 21), word("part", 21, 21.4), word("yeah", 40, 40.3)];
+  const { lines, matched } = alignLyrics(song, heard, 60);
+  assert.ok(Math.abs(lines[1].start - 20) < 0.01 && Math.abs(lines[1].end - 21.4) < 0.01, `${lines[1].start}-${lines[1].end}`);
+  assert.ok(lines[0].end <= 20.01, "the line before it was not heard and is placed before");
+  assert.ok(lines[2].start >= 21.3, "and the line after it after");
+  assert.ok(Math.abs(matched - 4 / 11) < 0.01, `${matched}: four of the eleven words were found`);
+});

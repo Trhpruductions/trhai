@@ -17,6 +17,17 @@ export type ReleaseNote = {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.1.7",
+    date: "2026-10-25",
+    title: "Make a music video from a song",
+    notes: [
+      "A new Music video screen turns a song into a finished music video. Drop in an MP3 (or a WAV, M4A or FLAC), paste the lyrics if you have them, and it draws a video the length of the song: a ring of bars that moves with the music, a glow on the beat, the title in the middle (or the song's own cover art), and the lyrics lit word by word as they are sung. Try the first 20 seconds, then make the whole thing in 1080p, or in the quicker 720p.",
+      "It is drawn on your PC's processor, with no graphics card, no account and nothing sent anywhere, and the PC stays usable while it works. Finished videos are kept, with the song and the lyrics, in the music-videos folder of TRH AI's workspace, and any of them can be changed and made again.",
+      "The lyrics are timed to the singing by listening to the song, which needs Listening installed (Settings, Engine and models). Without it, pasted lyrics are spread evenly over the song and the video says so. Singing over a band is hard to hear, so pasting the real lyrics works best.",
+      "You can also ask TRH AI in a chat to make a music video from a song, and ask how it is getting on. It says when one has started, not that it is made, and the app tells you when it is done."
+    ]
+  },
+  {
     version: "0.1.6",
     date: "2026-10-24",
     title: "Voice, listening and video install themselves",

@@ -176,18 +176,26 @@ export function alignLyrics(lyrics: string[], heard: Word[], duration: number): 
   const m = heard.length;
   const plainHeard = heard.map((word) => plainOf(word.text));
 
-  // Needleman-Wunsch: a match is worth 2, a mismatch -1, a gap -1.
+  // Needleman-Wunsch, with the two ends left free: a match is worth 2, a mismatch -1, a gap between matches -1, and a start or an end
+  // that is not matched costs nothing. What was heard may begin after the lyrics do (the first verse was not made out), may stop
+  // before they end (a preview, or a recogniser that gave up), and may have words of its own at either end. With every gap costed
+  // alike, where a few heard words land does not change the score, and they land on the LAST word that looks like them: "we are
+  // running" heard at 24 s was matched to the chorus the second time round, and "night" was matched to "light" three lines on.
   const score: Int32Array[] = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
-  for (let i = 1; i <= n; i += 1) score[i][0] = -i;
-  for (let j = 1; j <= m; j += 1) score[0][j] = -j;
   for (let i = 1; i <= n; i += 1) {
     for (let j = 1; j <= m; j += 1) {
       const diagonal = score[i - 1][j - 1] + (sameWord(lyricWords[i - 1].plain, plainHeard[j - 1]) ? 2 : -1);
       score[i][j] = Math.max(diagonal, score[i - 1][j] - 1, score[i][j - 1] - 1);
     }
   }
+  // The alignment ends where the score is best: on the last heard word (or the last lyric word), the earliest such place if several.
+  let endI = n;
+  let endJ = m;
+  let best = score[n][m];
+  for (let i = 0; i <= n; i += 1) if (score[i][m] > best) { best = score[i][m]; endI = i; endJ = m; }
+  for (let j = 0; j <= m; j += 1) if (score[n][j] > best) { best = score[n][j]; endI = n; endJ = j; }
   const counterpart = new Array<number>(n).fill(-1);
-  for (let i = n, j = m; i > 0 && j > 0;) {
+  for (let i = endI, j = endJ; i > 0 && j > 0;) {
     const isMatch = sameWord(lyricWords[i - 1].plain, plainHeard[j - 1]);
     if (score[i][j] === score[i - 1][j - 1] + (isMatch ? 2 : -1)) {
       if (isMatch) counterpart[i - 1] = j - 1;
@@ -365,6 +373,9 @@ export function planLyrics(input: LyricPlanInput): LyricPlan {
   const preview = full > duration + 0.5;
   const warnings: string[] = [];
   const within = (lines: LyricLine[]) => lines.filter((line) => line.start < duration - 0.3);
+  // Where the last word that was really found ends. A preview did not hear what comes after it, so the lines there have no time
+  // of their own: they were only packed in behind the last word found, and shown they would appear before they are sung.
+  const reached = (lines: LyricLine[]) => Math.max(0, ...lines.flatMap((line) => line.words).filter((word) => word.confidence >= 0.5).map((word) => word.end));
 
   const spread = (reason: string): LyricPlan => {
     const first = !preview && input.singingFrom !== undefined ? input.singingFrom : full * 0.06;
@@ -379,7 +390,8 @@ export function planLyrics(input: LyricPlanInput): LyricPlan {
     const matched = Math.min(1, aligned.matched / Math.min(1, duration / full));
     if (matched >= 0.25 && aligned.lines.length > 0) {
       if (matched < 0.6) warnings.push(`Only ${Math.round(matched * 100)}% of your words could be found in the singing, so the lines are timed between the words that were. Check the video, and fix any line that is off.`);
-      return { lines: within(aligned.lines), source: "pasted", timing: heard.timed ? "heard" : "approximate", warnings };
+      const shown = preview ? within(aligned.lines).filter((line) => line.start < reached(aligned.lines)) : within(aligned.lines);
+      return { lines: shown, source: "pasted", timing: heard.timed ? "heard" : "approximate", warnings };
     }
     return spread("The singing could not be made out well enough to time your words by.");
   }
