@@ -166,7 +166,7 @@ test("what cannot be read says why, and what would help", async () => {
 
   const unknown = await extractDocumentText(Buffer.from([1, 2, 3]), "photo.jpg");
   assert.equal(unknown.ok, false);
-  if (!unknown.ok) assert.match(unknown.reason, /PDF, Word \(\.docx\), PowerPoint \(\.pptx\) and plain-text/);
+  if (!unknown.ok) assert.match(unknown.reason, /PDF, Word \(\.docx\), PowerPoint \(\.pptx\), Excel \(\.xlsx\) and plain-text/);
 
   const empty = await extractDocumentText(Buffer.alloc(0), "x.pdf");
   assert.equal(empty.ok, false);

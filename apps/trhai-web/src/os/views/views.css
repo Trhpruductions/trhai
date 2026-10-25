@@ -66,6 +66,17 @@
 .os-file-media { display: block; max-width: 100%; max-height: 64vh; margin: 0 auto; border-radius: var(--os-r-md); background: rgba(5, 9, 18, 0.6); }
 .os-file-audio { width: 100%; }
 .os-file-markdown { font-size: var(--os-fs-md); line-height: 1.6; }
+/* The sheets of a workbook, as tables. */
+.os-sheets { display: grid; gap: var(--os-4); }
+.os-sheet { display: grid; gap: var(--os-2); min-width: 0; }
+.os-sheet-name { margin: 0; font: 600 var(--os-fs-md) var(--os-font-display); color: var(--os-accent-hi); }
+.os-sheet-scroll { overflow-x: auto; border: 1px solid var(--os-line); border-radius: var(--os-r-md); }
+.os-sheet-table { border-collapse: collapse; min-width: 100%; font-size: var(--os-fs-sm); }
+.os-sheet-table th, .os-sheet-table td { padding: 5px 10px; border-bottom: 1px solid var(--os-line); border-right: 1px solid var(--os-line); text-align: left; vertical-align: top; max-width: 36ch; overflow-wrap: anywhere; }
+.os-sheet-table th:last-child, .os-sheet-table td:last-child { border-right: 0; }
+.os-sheet-table tbody tr:last-child td { border-bottom: 0; }
+.os-sheet-table th { background: var(--os-accent-soft); color: var(--os-text); font-weight: 600; white-space: nowrap; }
+.os-sheet-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* The words of a PDF or Word file, as the reader found them: paragraphs, not code. */
 .os-doc-text { margin: var(--os-2) 0 0; max-width: 86ch; font: inherit; font-size: var(--os-fs-md); line-height: 1.6; color: var(--os-text); white-space: pre-wrap; overflow-wrap: anywhere; }
 

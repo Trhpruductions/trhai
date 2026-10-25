@@ -5,7 +5,7 @@ import { Markdown } from "../../components/Markdown";
 import { apiBaseUrl, apiGet } from "../../lib/api";
 import { whenUsed } from "../../lib/conversationGroups";
 import {
-  absolutePath, crumbs, fileKind, formatBytes, languageOf, parentOf, readableDocument, sortEntries,
+  absolutePath, crumbs, fileKind, formatBytes, languageOf, parentOf, readableDocument, sheetsFromText, sortEntries,
   type FileEntry, type FileKind, type FileSort
 } from "../../lib/files";
 import { FileActions } from "../ui/FileActions";
@@ -27,7 +27,7 @@ type Listing = { root: string; path: string; entries: FileEntry[]; truncated: bo
 type Found = { query: string; names: FileEntry[]; lines: Array<{ path: string; line: number; text: string }>; truncated: boolean };
 type Opened = { path: string; content: string; binary: boolean; truncated: boolean; bytes?: number; modifiedAt?: number };
 /** The words in a PDF, Word or PowerPoint file, as the API read them. */
-type DocumentWords = { path: string; kind: "pdf" | "docx" | "pptx" | "text"; pages?: number; text: string; truncated: boolean; characters: number };
+type DocumentWords = { path: string; kind: "pdf" | "docx" | "pptx" | "xlsx" | "text"; pages?: number; text: string; truncated: boolean; characters: number };
 /** A file to preview. Size and date only when they came from the disk - a search hit has neither until it is read. */
 type PreviewTarget = { name: string; path: string; bytes?: number; modifiedAt?: number };
 
@@ -64,6 +64,34 @@ function CodeLines({ content, wrap }: { content: string; wrap: boolean }) {
         ))}
       </code>
     </pre>
+  );
+}
+
+/** The sheets of a workbook as tables: the first row is the heading, numbers sit to the right. */
+function Sheets({ text }: { text: string }) {
+  const sheets = useMemo(() => sheetsFromText(text), [text]);
+  if (sheets.length === 0) return <pre className="os-doc-text">{text}</pre>;
+  return (
+    <div className="os-sheets">
+      {sheets.map((sheet, index) => (
+        <section key={`${sheet.name}-${index}`} className="os-sheet">
+          <h4 className="os-sheet-name">{sheet.name}{sheet.hidden ? <span className="os-faint"> (hidden)</span> : null}</h4>
+          {sheet.rows.length === 0 ? <p className="os-faint os-small">Nothing in this sheet.</p> : (
+            <div className="os-sheet-scroll">
+              <table className="os-sheet-table">
+                <thead><tr>{sheet.rows[0].map((cell, column) => <th key={column}>{cell}</th>)}</tr></thead>
+                <tbody>
+                  {sheet.rows.slice(1).map((row, rowIndex) => (
+                    <tr key={rowIndex}>{row.map((cell, column) => <td key={column} className={/^-?[\d,.]+%?(?: \[=.*\])?$/.test(cell) ? "num" : undefined}>{cell}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {sheet.note ? <p className="os-faint os-small">{sheet.note}.</p> : null}
+        </section>
+      ))}
+    </div>
   );
 }
 
@@ -160,17 +188,18 @@ function Preview({ entry, root, onAsk }: { entry: PreviewTarget; root: string; o
                     : (
                       <>
                         <p className="os-faint os-small">
-                          The words in this file{words.pages !== undefined ? `, ${words.pages} page${words.pages === 1 ? "" : "s"}` : ""}
+                          {words.kind === "xlsx" ? "The cells in this workbook" : "The words in this file"}
+                          {words.pages !== undefined ? `, ${words.pages} ${words.kind === "xlsx" ? "sheet" : words.kind === "pptx" ? "slide" : "page"}${words.pages === 1 ? "" : "s"}` : ""}
                           {" - open it to see how it is laid out."}
                           {words.truncated ? ` Showing the first ${words.text.length.toLocaleString()} of ${words.characters.toLocaleString()} characters.` : ""}
                         </p>
-                        <pre className="os-doc-text">{words.text}</pre>
+                        {words.kind === "xlsx" ? <Sheets text={words.text} /> : <pre className="os-doc-text">{words.text}</pre>}
                       </>
                     )
               ) : kind === "document" ? (
                 <div className="os-empty">
                   <strong>No preview for this kind of file</strong>
-                  <p>TRH AI reads PDF, Word (.docx) and PowerPoint (.pptx) files. Open this one in the program it belongs to.</p>
+                  <p>TRH AI reads PDF, Word (.docx), PowerPoint (.pptx) and Excel (.xlsx) files. Open this one in the program it belongs to.</p>
                 </div>
               ) : failed ? <p className="os-task-alert"><Icon name="alert" size={14} />{failed}</p>
                 : !opened ? <p className="os-faint">Reading…</p>

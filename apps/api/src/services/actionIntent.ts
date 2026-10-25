@@ -494,6 +494,23 @@ export function wantsAFileMade(message: string): boolean {
   return thingsKeptAsFiles.test(text) && creatingOne.test(text);
 }
 
+const spreadsheetNamed = /\b(?:xlsx|excel|spreadsheets?|workbooks?|worksheets?)\b/i;
+const thingsKeptAsSpreadsheets = /\b(?:budget|timesheet|time\s+sheet|gradebook|grade\s+book|ledger|roster|payroll|cash\s*flow|amortization)\b/i;
+
+/**
+ * Whether a request asks for a spreadsheet to be made - an Excel file, or a
+ * budget, timesheet or gradebook, which are spreadsheets before they are
+ * anything else - so make_spreadsheet is worth offering.
+ *
+ * A table to read in the reply needs no file, so a bare "csv" is not a trigger:
+ * "save these rows to data.csv" is a text file, and write_file does it.
+ */
+export function wantsASpreadsheetMade(message: string): boolean {
+  const text = message ?? "";
+  if (spreadsheetNamed.test(text) && makingAFile.test(text)) return true;
+  return thingsKeptAsSpreadsheets.test(text) && creatingOne.test(text);
+}
+
 /**
  * Whether a request is about this computer or its software at all, so the
  * shell is worth offering.

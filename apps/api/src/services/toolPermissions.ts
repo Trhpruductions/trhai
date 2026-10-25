@@ -97,6 +97,8 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // where the user said when machine access allows it, and never replaces one
   // that is there. The same bound as write_file, with less reach to do harm.
   make_document: 2,
+  // The same as make_document: new Excel and CSV files, never replacing one.
+  make_spreadsheet: 2,
   write_file: 2,
   // Targeted rather than wholesale, so if anything it is the safer of the two:
   // it changes the text it was given and cannot silently drop the rest of a file.

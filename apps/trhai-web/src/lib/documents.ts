@@ -1,18 +1,18 @@
 // Documents in the knowledge base, as the Memory view shows them. A file is
 // sent as itself to /v1/knowledge/import, read on this machine (PDF, Word,
-// PowerPoint, plain text), and kept as text the assistant can search and quote.
+// PowerPoint, Excel, plain text), and kept as text the assistant can search and quote.
 
 export type StoredDocument = { id: string; title: string; body: string; createdAt: string };
 
 export type ImportResult = {
   document: { id: string; title: string; createdAt: string; characters: number };
-  kind: "pdf" | "docx" | "pptx" | "text";
+  kind: "pdf" | "docx" | "pptx" | "xlsx" | "text";
   pages?: number;
   truncated: boolean;
 };
 
 /** What the file picker offers: the kinds the API can read. */
-export const acceptedDocumentTypes = ".pdf,.docx,.pptx,.txt,.md,.markdown,.csv,.tsv,.json,.html,.htm,.log,.xml,.yml,.yaml";
+export const acceptedDocumentTypes = ".pdf,.docx,.pptx,.xlsx,.txt,.md,.markdown,.csv,.tsv,.json,.html,.htm,.log,.xml,.yml,.yaml";
 
 /** The largest file worth sending; the API refuses anything bigger. */
 export const maxImportBytes = 40 * 1024 * 1024;
@@ -26,8 +26,9 @@ export function describeLength(characters: number): string {
 
 /** The line shown once a file has been added. */
 export function describeImport(result: ImportResult): string {
-  const kind = { pdf: "PDF", docx: "Word document", pptx: "presentation", text: "text file" }[result.kind];
-  const pages = result.pages ? `, ${result.pages} ${result.kind === "pptx" ? "slide" : "page"}${result.pages === 1 ? "" : "s"}` : "";
+  const kind = { pdf: "PDF", docx: "Word document", pptx: "presentation", xlsx: "spreadsheet", text: "text file" }[result.kind];
+  const unit = result.kind === "pptx" ? "slide" : result.kind === "xlsx" ? "sheet" : "page";
+  const pages = result.pages ? `, ${result.pages} ${unit}${result.pages === 1 ? "" : "s"}` : "";
   const cut = result.truncated ? " It was long, so only the first part was kept." : "";
   return `Added "${result.document.title}" (${kind}${pages}, ${describeLength(result.document.characters)}).${cut}`;
 }
@@ -40,7 +41,7 @@ export function refuseBeforeSending(file: { name: string; size: number }): strin
   }
   const extension = /\.[^.]+$/.exec(file.name.toLowerCase())?.[0] ?? "";
   if (!acceptedDocumentTypes.split(",").includes(extension)) {
-    return `"${file.name}" is not a kind of document TRH AI can read. It reads PDF, Word (.docx), PowerPoint (.pptx) and plain-text files.`;
+    return `"${file.name}" is not a kind of document TRH AI can read. It reads PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx) and plain-text files.`;
   }
   return null;
 }

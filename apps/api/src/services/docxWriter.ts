@@ -21,9 +21,12 @@ export type DocxOptions = {
 
 const forbidden = new RegExp(`[${String.fromCharCode(0)}-${String.fromCharCode(8)}${String.fromCharCode(11)}${String.fromCharCode(12)}${String.fromCharCode(14)}-${String.fromCharCode(31)}${String.fromCharCode(0xfffe)}${String.fromCharCode(0xffff)}]`, "g");
 
+/** Text without the control characters XML does not allow, which is what any file made of XML holds of it. */
+export const withoutForbiddenCharacters = (text: string): string => text.replace(forbidden, "");
+
 /** Text that can sit in XML: the marks escaped, and the control characters XML does not allow dropped. */
 export const escapeXml = (text: string): string =>
-  text.replace(forbidden, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  withoutForbiddenCharacters(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 const namespaces = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
 const declaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';

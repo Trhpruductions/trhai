@@ -48,11 +48,11 @@ function extensionOf(name: string): string {
 /** What kind of file a name is, for how to show it. A name with no extension (README, Dockerfile) is text. */
 /**
  * Whether TRH AI can read this document (the API's documentText.ts reads PDF,
- * Word .docx and PowerPoint .pptx). Older Office files and spreadsheets are
+ * Word .docx, PowerPoint .pptx and Excel .xlsx). Older Office files are
  * documents to the file list, but there is nothing in them TRH AI can read.
  */
 export function readableDocument(name: string): boolean {
-  return ["pdf", "docx", "pptx"].includes(extensionOf(name));
+  return ["pdf", "docx", "pptx", "xlsx"].includes(extensionOf(name));
 }
 
 /**
@@ -86,7 +86,7 @@ export function madeFilesFrom(value: unknown): string[] {
 }
 
 /** A line of a reply as the assistant's file tools write it: "- documents/Report.docx (Word document)", "- documents/Report.pdf (PDF, 2 pages)". */
-const madeFileLine = /^\s*[-*]\s+(\S.*?) \((?:Word document|PDF|web page|Markdown file|text file)(?:, \d+ pages?)?\)\s*$/;
+const madeFileLine = /^\s*[-*]\s+(\S.*?) \((?:Word document|PDF|web page|Markdown file|text file|Excel workbook|CSV file)(?:, \d+ (?:pages?|sheets?))?\)\s*$/;
 
 /**
  * The files an earlier reply made, read from its text: a conversation opened
@@ -95,6 +95,34 @@ const madeFileLine = /^\s*[-*]\s+(\S.*?) \((?:Word document|PDF|web page|Markdow
  */
 export function madeFilesInText(text: string): string[] {
   return madeFilesFrom(text.split(/\r?\n/).map((line) => madeFileLine.exec(line)?.[1] ?? ""));
+}
+
+export type SheetPreview = { name: string; hidden: boolean; rows: string[][]; note: string | null };
+
+/**
+ * The sheets in a workbook's text, as the API gives it: "Sheet: Name", then the
+ * sheet's rows with their cells between tabs, a blank line, the next sheet. A
+ * heading is only a heading at the start or after a blank line, so a cell that
+ * starts with the same words is still a cell.
+ */
+export function sheetsFromText(text: string): SheetPreview[] {
+  const sheets: SheetPreview[] = [];
+  let current: SheetPreview | null = null;
+  let afterBlank = true;
+  for (const line of text.split(/\r?\n/)) {
+    const heading = afterBlank ? /^Sheet: (.*?)( \(hidden\))?$/.exec(line) : null;
+    afterBlank = line === "";
+    if (heading) {
+      current = { name: heading[1], hidden: Boolean(heading[2]), rows: [], note: null };
+      sheets.push(current);
+      continue;
+    }
+    if (!current || line === "" || line === "(empty)") continue;
+    const cut = /^\[\.\.\. (.+ not shown)\]$/.exec(line);
+    if (cut) { current.note = cut[1]; continue; }
+    current.rows.push(line.split("\t"));
+  }
+  return sheets;
 }
 
 export function fileKind(name: string): FileKind {
