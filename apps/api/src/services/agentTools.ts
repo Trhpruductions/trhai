@@ -14,6 +14,8 @@ import {
 import { renderVideo } from "./videoRender.js";
 import { describeMusicVideos, listMusicVideos, parseMusicVideoRequest, whyNotMusicVideo } from "./musicVideoFiles.js";
 import { musicVideoStatus, startMusicVideo } from "./musicVideoJob.js";
+import { describeMadeDocument, documentsFolder, makeDocument, parseDocumentFormats } from "./documentMaker.js";
+import { expandKnownFolder } from "./knownFolders.js";
 import type { RunningApp, StartResult } from "./appRunner.js";
 import { authorPrompt, findAppFault, parseAuthoredFiles, type AuthoredFile } from "./appAuthor.js";
 import { verifyBuiltProject } from "./buildVerification.js";
@@ -25,6 +27,7 @@ import {
   readFileAt,
   readWorkspaceFile,
   resolveInWorkspace,
+  workspaceRelative,
   workspaceRoot,
   writeFileAt,
   writeWorkspaceFile
@@ -749,6 +752,39 @@ export const toolDefinitions: ToolDefinition[] = [
       }
     }
   },
+  {
+    type: "function",
+    function: {
+      name: "make_document",
+      description:
+        "Make a real document FILE the user can open, print or send - a Word document (.docx), a PDF, a web page "
+        + "(.html), a Markdown or a plain-text file - from text you write, and save it. Use this when the user asks "
+        + "for a Word or PDF file, or for a report, resume, invoice, contract, handout or the like as a file. Write "
+        + "the WHOLE document yourself in content, in Markdown: # for the title, ## for sections, - for bullets, "
+        + "1. for numbers, **bold**, *italic*, [text](https://address), tables with | and a |---| line, and a line "
+        + "with only \\pagebreak to start a new page. Never describe a document instead of writing it, and leave no "
+        + "[placeholders] you could fill in: the file is exactly the text given. It makes a new file every time and "
+        + "never replaces one, reads each file back to check it, and says where the files are - give the user "
+        + "that. For notes to keep in the knowledge base use write_document; for code, use write_file.",
+      parameters: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "The whole document, written out in Markdown." },
+          title: { type: "string", description: "The document's title, which names the file. If left out, the first heading is used." },
+          format: {
+            type: "string",
+            description: "docx for a Word document (the default), pdf, html, md or txt - or several at once, such as \"docx, pdf\". Use what the user asked for."
+          },
+          folder: {
+            type: "string",
+            description: "Only if the user said where: a folder in the workspace, or Desktop, Downloads or Documents on this PC, or a full path (these need machine access)."
+          },
+          paper: { type: "string", description: "A4 or Letter. Leave out unless the user said; this PC's own country decides." }
+        },
+        required: ["content"]
+      }
+    }
+  },
   // The app has a scheduler. The assistant could not reach it.
   //
   // Asked "remind me every day at 9am to check the build", it called no tool
@@ -1093,7 +1129,7 @@ const scaffoldingTools = new Set(["build_app", "plan_app"]);
  * the port" is an ordinary thing to ask.
  */
 const machineChangingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "plan_app", "run_command", "run_script", "run_app"
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "plan_app", "run_command", "run_script", "run_app"
 ]);
 
 /**
@@ -1153,7 +1189,7 @@ const dateTools = new Set(["days_between", "shift_date"]);
  * A question does not write files, documents or apps, though.
  */
 const writingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "plan_app",
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "plan_app",
   "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule"
 ]);
 
@@ -1181,6 +1217,13 @@ const scheduleTools = new Set(["add_schedule"]);
 const videoTools = new Set(["make_video"]);
 /** Offered only when the request is about a music video; see mentionsMusicVideo. Then make_video is withheld: it makes narrated slides, not a video of a song. */
 const musicVideoTools = new Set(["make_music_video", "music_video_status"]);
+/**
+ * Offered only when the request asks for a file to be made - a Word or PDF
+ * document, a report as a file; see wantsAFileMade. A request for words to read
+ * ("write a cover letter") is answered in the reply, and a tool that saves a
+ * file is the wrong thing to have within reach of it.
+ */
+const fileMakingTools = new Set(["make_document"]);
 /**
  * The knowledge-base writers, withheld from a request that only reads unless
  * it asks for something to be kept. machineChangingTools already stops a read
@@ -1230,7 +1273,7 @@ export function availableTools(
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
     schedules?: boolean; video?: boolean; musicVideo?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
-    messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean;
+    messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean; fileMaking?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1256,6 +1299,7 @@ export function availableTools(
   const allowSummaries = options.summaries ?? true;
   const allowReaders = options.readers ?? true;
   const allowImages = options.images ?? true;
+  const allowFileMaking = options.fileMaking ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1291,6 +1335,8 @@ export function availableTools(
     if (!allowReaders && (name === "read_file" || name === "read_document")) return false;
     // Only when the request is about an image; see mentionsAnImage.
     if (!allowImages && name === "look_at_image") return false;
+    // Only when the request asks for a file to be made; see wantsAFileMade.
+    if (!allowFileMaking && fileMakingTools.has(name)) return false;
     return true;
   }).sort((a, b) => (offerOrder.get(a.function.name) ?? 0) - (offerOrder.get(b.function.name) ?? 0));
 }
@@ -1700,10 +1746,13 @@ async function readDocumentAt(absolutePath: string): Promise<{ ok: true; text: s
  * nothing can open.
  */
 function writesOverADocument(target: string): string | null {
-  return isDocumentPath(target)
-    ? `${path.basename(target)} is a ${path.extname(target).slice(1).toUpperCase()} document, and the file tools write plain `
-      + "text - saving it there would leave a file nothing can open. Write the text to a .txt or .md file instead."
-    : null;
+  if (!isDocumentPath(target)) return null;
+  const kind = path.extname(target).toLowerCase();
+  return `${path.basename(target)} is a ${kind.slice(1).toUpperCase()} document, and the file tools write plain `
+    + "text - saving it there would leave a file nothing can open. "
+    + (kind === ".docx" || kind === ".pdf"
+      ? "To make a real Word or PDF file, use make_document with the text of the document; or write the text to a .txt or .md file instead."
+      : "Write the text to a .txt or .md file instead.");
 }
 
 /** Why `content` must not be written, when it is a shortened view; see elisionIn. */
@@ -2996,6 +3045,59 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
           : `Wrote ${result.path}.`,
         path: target
       };
+    }
+
+    case "make_document": {
+      const content = typeof call.arguments.content === "string" ? call.arguments.content : null;
+      if (!content?.trim()) {
+        return { ok: false, content: "make_document needs the whole text of the document in content, written out in Markdown. Nothing was made." };
+      }
+      const placeholder = placeholderIn("document.md", content);
+      if (placeholder) return { ok: false, content: `${placeholder} Nothing was made.` };
+      const shortened = elisionIn(content);
+      if (shortened) return { ok: false, content: `This has ${shortened} in it, so it is not the whole document. Write the whole document out. Nothing was made.` };
+
+      // Where it goes: the documents folder in the workspace, or the place the
+      // user named - a folder in the words a person uses for it ("Desktop"), or
+      // a path. A model that passes a file's whole path as the folder is
+      // understood too: the file's name titles the document and its ending is
+      // the format, unless it was told which.
+      let asked = requireString(call.arguments.folder);
+      let nameGiven: string | null = null;
+      let formatGiven: unknown = call.arguments.format ?? call.arguments.formats;
+      const named = asked ? /^(.*?)([^\\/]*)\.(docx|pdf|html|md|txt)$/i.exec(asked) : null;
+      if (asked && named) {
+        asked = named[1].replace(/[\\/]+$/, "") || null;
+        nameGiven = named[2].trim() || null;
+        if (formatGiven === undefined || formatGiven === null || formatGiven === "") formatGiven = named[3].toLowerCase();
+      }
+      const formats = parseDocumentFormats(formatGiven);
+      if (!formats.ok) return { ok: false, content: `${formats.reason} Nothing was made.` };
+
+      const paperGiven = requireString(call.arguments.paper);
+      const paper = /^(?:us[- ]?)?letter$/i.test(paperGiven ?? "") ? "Letter" as const : /^a4$/i.test(paperGiven ?? "") ? "A4" as const : undefined;
+      if (paperGiven && !paper) return { ok: false, content: 'paper must be "A4" or "Letter". Nothing was made.' };
+
+      const verdict = resolveForAccess(asked ? (expandKnownFolder(asked) ?? asked) : documentsFolder, {
+        // As above: an unattended run stays in the workspace.
+        granted: commandsArmed() && !context.unattended,
+        intent: "write",
+        insideWorkspace: resolveInWorkspace
+      });
+      if (!verdict.ok) return { ok: false, content: `${verdict.reason} Nothing was made.` };
+
+      const made = await makeDocument(
+        { content, title: requireString(call.arguments.title) ?? nameGiven ?? undefined, formats: formats.formats, paper },
+        verdict.path
+      );
+      if (!made.ok) return { ok: false, content: describeMadeDocument(made) };
+
+      // Named the way the user would find it: a file in the workspace by its short path, one outside by where it really is.
+      const show = (absolute: string) => {
+        const relative = workspaceRelative(absolute);
+        return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : absolute;
+      };
+      return { ok: true, content: describeMadeDocument(made, show), path: show(made.files[0].path) };
     }
 
     case "edit_file": {

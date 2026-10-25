@@ -3,6 +3,7 @@ import { toolDefinitions } from "./agentTools.js";
 import { armedUntil, commandsArmed } from "./commandRunner.js";
 import { readEmailAccount } from "./emailAccount.js";
 import { ffmpegProgram } from "./ffmpegPath.js";
+import { resolveElectronBinary } from "./frameRenderer.js";
 import { checkAvailability, readLocalModelConfig } from "./localModel.js";
 import { linkedPhone, phoneLinkStatus } from "./messaging.js";
 import { piperStatus } from "./piperSpeech.js";
@@ -62,6 +63,7 @@ export const toolCatalogue: Record<string, CatalogueEntry> = {
   read_document: { area: "Documents", title: "Read a document", summary: "Reads a whole document from your knowledge base." },
   summarize_document: { area: "Documents", title: "Summarise a document", summary: "Summarises a document of any length, from your knowledge base or a PDF, Word, PowerPoint or text file on this PC." },
   write_document: { area: "Documents", title: "Write a document", summary: "Saves notes or a draft as a new document in your knowledge base." },
+  make_document: { area: "Documents", title: "Make a Word or PDF file", summary: "Makes a Word document, PDF, web page, Markdown or text file from what you ask for, and saves it where you can open, print or send it." },
   update_document: { area: "Documents", title: "Update a document", summary: "Adds to or changes a document already in your knowledge base." },
   delete_document: { area: "Documents", title: "Delete a document", summary: "Deletes a document from your knowledge base." },
   list_files: { area: "Files", title: "List files", summary: "Lists what is in a folder." },
@@ -107,6 +109,8 @@ export type ToolProbe = {
   phone?: "iphone" | "android" | null;
   /** The address an email account is set up with, if one is. */
   emailAccount: string | null;
+  /** Whether TRH AI's own window, which prints PDFs, can be started; optional for older callers. */
+  pdfPrinter?: boolean;
 };
 
 const fileTools = new Set(["list_files", "search_files", "read_file", "write_file", "edit_file"]);
@@ -136,6 +140,12 @@ function readinessOf(name: string, probe: ToolProbe): ToolReadiness {
   if (name === "make_music_video") {
     if (!probe.ffmpeg) return { state: "needs-setup", note: "Needs ffmpeg installed - it draws and encodes the video." };
     return ready("Drawn and encoded with ffmpeg on this PC's processor, with no account. Times the lyrics to the singing when Listening is installed.");
+  }
+  if (name === "make_document") {
+    // Word, web page, Markdown and text files are written directly; only a PDF needs the window that prints it.
+    return probe.pdfPrinter === false
+      ? ready("Makes Word, web page, Markdown and text files. PDFs need TRH AI's own window to print them, and it is not here.")
+      : ready("Makes Word, PDF, web page, Markdown and text files on this PC, with no account.");
   }
   if (name === "send_text") {
     if (probe.phoneLink !== "linked") {
@@ -218,6 +228,7 @@ export async function probeTools(): Promise<ToolProbe> {
     piper: piperStatus().available,
     phoneLink: phoneLinkStatus(),
     phone: linkedPhone(),
-    emailAccount: readEmailAccount()?.address ?? null
+    emailAccount: readEmailAccount()?.address ?? null,
+    pdfPrinter: resolveElectronBinary().ok
   };
 }

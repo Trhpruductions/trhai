@@ -470,6 +470,30 @@ export function mentionsMusicVideo(message: string): boolean {
     && /\b(?:videos?|clips?|mp4)\b/i.test(text);
 }
 
+const fileKindNamed = /\b(?:docx|pdfs?|word\s+(?:doc|docs|document|documents|file|files)|ms[- ]?word|microsoft\s+word|(?:in|as|into|to)\s+(?:a\s+)?(?:ms\s+|microsoft\s+)?word)\b/i;
+const makingAFile = /\b(?:make|made|create|generate|produce|prepare|draft|write|compose|build|design|put|turn|convert|export|save|print|give|send|output|type\s+up)\b/i;
+const thingsKeptAsFiles = /\b(?:resume|r[eé]sum[eé]|cv|curriculum\s+vitae|invoice|report|proposal|contract|agreement|brochure|newsletter|certificate|agenda|handout|worksheet|syllabus|business\s+plan|lesson\s+plan|press\s+release|(?:meeting\s+)?minutes|white\s*paper|one[- ]?pager|itinerary)\b/i;
+const creatingOne = /\b(?:make|create|generate|produce|prepare|draft|write|compose|build|design|put\s+together|type\s+up|need|want)\b/i;
+
+/**
+ * Whether a request asks for a file to be made - a Word document, a PDF, or a
+ * report, resume or invoice, which are files before they are anything else -
+ * so make_document is worth offering.
+ *
+ * Not for words to read. "Write me a cover letter" or "write a two-sentence
+ * description" is answered in the reply; the same words with "as a Word
+ * document" name a file. Offered when a kind of file the tool makes is named
+ * with something being made, or one of the things people keep as a file is
+ * being created. Plain text and Markdown files are not a trigger: asked for
+ * "a text file called notes.txt", write_file is the tool, and having two
+ * for one job was a way to get the wrong one.
+ */
+export function wantsAFileMade(message: string): boolean {
+  const text = message ?? "";
+  if (fileKindNamed.test(text) && makingAFile.test(text)) return true;
+  return thingsKeptAsFiles.test(text) && creatingOne.test(text);
+}
+
 /**
  * Whether a request is about this computer or its software at all, so the
  * shell is worth offering.

@@ -93,6 +93,10 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   pin_memory: 2,
   write_document: 2,
   update_document: 2,
+  // Writes new files - a Word document, a PDF - into the documents folder, or
+  // where the user said when machine access allows it, and never replaces one
+  // that is there. The same bound as write_file, with less reach to do harm.
+  make_document: 2,
   write_file: 2,
   // Targeted rather than wholesale, so if anything it is the safer of the two:
   // it changes the text it was given and cannot silently drop the rest of a file.
