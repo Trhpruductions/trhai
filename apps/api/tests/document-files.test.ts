@@ -70,6 +70,24 @@ test("a document becomes a page that says what it said, with nothing it did not"
   for (const words of ["Quarterly Report", "Sales rose 12% & margins held.", "one in lyrics", "South & East", "Measure twice, cut once.", "const total = a < b && b > c;", "Last words."]) assert.ok(text.includes(words), words);
 });
 
+test("a checklist shows its boxes without bullets, and a numbered list of tasks keeps its numbers", () => {
+  const blocks = parseMarkdown("- [x] book the venue\n- [ ] send the agenda\n- plain item\n\n1. [ ] first\n2. [x] second");
+  const html = documentHtml(blocks, { title: "x" });
+  assert.match(html, /<ul><li class="task">☑ book the venue<\/li><li class="task">☐ send the agenda<\/li><li>plain item<\/li><\/ul>/);
+  assert.match(html, /<ol><li>☐ first<\/li><li>☑ second<\/li><\/ol>/);
+  assert.match(html, /li\.task \{ list-style: none;/);
+  const xml = part(docxFile(blocks, { title: "x", date: when }), "word/document.xml");
+  const paragraphs = xml.split("<w:p>").filter((chunk) => /[☐☑]/.test(chunk));
+  assert.equal(paragraphs.length, 4);
+  // The two bulleted tasks are indented where a bullet would be and have no numbering; the numbered ones keep theirs.
+  for (const chunk of paragraphs.slice(0, 2)) {
+    assert.match(chunk, /<w:pStyle w:val="ListParagraph"\/><w:ind w:left="360"\/>/);
+    assert.doesNotMatch(chunk, /<w:numPr>/);
+  }
+  for (const chunk of paragraphs.slice(2)) assert.match(chunk, /<w:numPr><w:ilvl w:val="0"\/><w:numId w:val="\d+"\/><\/w:numPr>/);
+  assert.match(xml, /<w:pStyle w:val="ListParagraph"\/><w:numPr><w:ilvl w:val="0"\/><w:numId w:val="1"\/><\/w:numPr><\/w:pPr><w:r><w:t xml:space="preserve">plain item/);
+});
+
 test("a numbered list starts at its own number, and the start is only written when it is not one", () => {
   const html = documentHtml(parseMarkdown("3. three\n4. four\n\nbetween\n\n1. one\n2. two"), { title: "x" });
   assert.match(html, /<ol start="3"><li>three<\/li><li>four<\/li><\/ol>/);

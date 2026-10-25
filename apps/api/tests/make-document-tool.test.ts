@@ -18,6 +18,7 @@ const { wantsAFileMade } = await import("../src/services/actionIntent.js");
 const { extractDocumentText } = await import("../src/services/documentText.js");
 const { armCommandsFor, disarmCommands } = await import("../src/services/commandRunner.js");
 const { describeTools } = await import("../src/services/toolCenter.js");
+const { takeMadeFiles } = await import("../src/services/madeFiles.js");
 const { permissionLevelOf } = await import("../src/services/toolPermissions.js");
 
 test.after(() => {
@@ -220,6 +221,24 @@ test("with machine access on, a full path is written to, and an unattended run s
   assert.equal(unattended.ok, false);
   assert.match(unattended.content, /outside my workspace/);
   assert.equal(existsSync(path.join(outside, "Unattended")), false);
+});
+
+test("the screen is offered the files made in the workspace to open, and not those made anywhere else", async () => {
+  takeMadeFiles("offered");
+  const inside = await tool({ content: "# Inside The Workspace\n\nBody text here." }, undefined, { sessionId: "offered" });
+  assert.equal(inside.ok, true, inside.content);
+  assert.deepEqual(takeMadeFiles("offered"), ["documents/Inside The Workspace.docx"]);
+  assert.deepEqual(takeMadeFiles("offered"), [], "handed over once");
+  armCommandsFor(60_000);
+  const elsewhere = await tool({ content: "# Somewhere Else\n\nBody text here.", folder: path.join(outside, "Elsewhere") }, undefined, { sessionId: "offered" });
+  assert.equal(elsewhere.ok, true, elsewhere.content);
+  assert.deepEqual(takeMadeFiles("offered"), [], "a file outside the workspace is not one the screen can open");
+  const both = await tool({ content: "# Two Formats\n\nBody text here.", format: "docx, txt" }, undefined, { sessionId: "offered" });
+  assert.equal(both.ok, true, both.content);
+  assert.deepEqual(takeMadeFiles("offered"), ["documents/Two Formats.docx", "documents/Two Formats.txt"]);
+  const unnamed = await tool({ content: "# No Conversation\n\nBody text here." });
+  assert.equal(unnamed.ok, true);
+  assert.deepEqual(takeMadeFiles(undefined), [], "with no conversation there is nobody to tell");
 });
 
 test("a system folder is refused even with machine access on", async () => {

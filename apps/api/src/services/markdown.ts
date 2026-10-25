@@ -15,7 +15,8 @@ export type Inline =
 
 export type Align = "left" | "center" | "right" | null;
 
-export type ListItem = { inlines: Inline[]; children: Block[] };
+/** `task` marks a checklist item, whose box is drawn in place of a bullet. */
+export type ListItem = { inlines: Inline[]; children: Block[]; task?: boolean };
 
 export type Block =
   | { kind: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6; inlines: Inline[] }
@@ -273,8 +274,9 @@ function parseList(lines: string[], from: number): { block: Block; next: number 
     const strip = child.reduce((least, line) => (line.trim() === "" ? least : Math.min(least, indentOf(line))), Number.POSITIVE_INFINITY);
     const inner = child.map((line) => (line.trim() === "" ? "" : line.slice(Number.isFinite(strip) ? strip : 0)));
     // A checklist item - "[ ] pack the charger", "[x] book the flights" - shows its box.
-    text[0] = text[0].replace(/^\[([ xX])\]\s+/, (_, mark: string) => (mark === " " ? "☐ " : "☑ "));
-    items.push({ inlines: parseInlines(text.join("\n")), children: inner.some((line) => line.trim() !== "") ? parseBlocks(inner) : [] });
+    let task = false;
+    text[0] = text[0].replace(/^\[([ xX])\]\s+/, (_, mark: string) => { task = true; return mark === " " ? "☐ " : "☑ "; });
+    items.push({ inlines: parseInlines(text.join("\n")), children: inner.some((line) => line.trim() !== "") ? parseBlocks(inner) : [], ...(task ? { task: true } : {}) });
     // Blank lines between items do not end the list.
     let ahead = i;
     while (ahead < lines.length && lines[ahead].trim() === "") ahead += 1;

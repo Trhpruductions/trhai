@@ -188,4 +188,5 @@ test("a checklist item shows its box, ticked or not, and a link that starts with
   const [list] = parseMarkdown("- [ ] pack the charger\n- [x] book the flights\n- [X] renew the passport\n- [x](https://example.com) a link\n- [x]no space\n1. [ ] numbered too") as Array<Extract<Block, { kind: "list" }>>;
   assert.deepEqual(list.items.map((entry) => plainText(entry.inlines)), ["☐ pack the charger", "☑ book the flights", "☑ renew the passport", "x a link", "[x]no space"]);
   assert.deepEqual(show(list.items[3].inlines), ["@https://example.com:x", ": a link"]);
+  assert.deepEqual(list.items.map((entry) => entry.task === true), [true, true, true, false, false], "only the checklist items are marked, so a renderer can leave their bullet out");
 });

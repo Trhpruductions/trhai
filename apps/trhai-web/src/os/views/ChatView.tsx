@@ -5,6 +5,8 @@ import { Markdown } from "../../components/Markdown";
 import { replyProvenance, unanswered } from "../../components/provenance";
 import type { ChatMessage } from "../../hooks/useAssistant";
 import { apiGet } from "../../lib/api";
+import { madeFilesInText } from "../../lib/files";
+import { MadeFiles } from "../ui/FileActions";
 import { Icon } from "../ui/Icon";
 import { ViewFrame } from "../ui/ViewFrame";
 import { useAssistantState, useConversations } from "../state/assistant";
@@ -35,6 +37,8 @@ function Message({ message, last, onConfirm, onRegenerate }: {
     );
   }
   const credit = replyProvenance(message.strategy, message.model);
+  // The files this reply made: from the API when it just arrived, from its own text when the conversation was opened again.
+  const files = message.streaming ? [] : message.files ?? madeFilesInText(message.text);
   const sending = message.pendingConfirmation?.tool === "send_text" || message.pendingConfirmation?.tool === "send_email";
   const failed = unanswered(message.strategy);
   return (
@@ -43,6 +47,7 @@ function Message({ message, last, onConfirm, onRegenerate }: {
       <div className="os-msg-body">
         <Markdown text={message.text || " "} className="os-markdown" />
         {message.streaming ? <span className="os-cursor" aria-label="Still writing" /> : null}
+        {!message.streaming && files.length > 0 ? <MadeFiles files={files} /> : null}
         {last && message.pendingConfirmation && !message.streaming ? (
           <div className="os-confirm" role="group" aria-label={message.pendingConfirmation.verb}>
             <button type="button" className="os-btn os-btn-primary" onClick={() => onConfirm(sending ? "send it" : "yes")}>

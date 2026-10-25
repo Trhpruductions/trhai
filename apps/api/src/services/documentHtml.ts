@@ -32,9 +32,9 @@ function inlineHtml(inlines: Inline[]): string {
     .join("");
 }
 
-function itemHtml(item: ListItem): string {
-  return `<li>${inlineHtml(item.inlines)}${blocksHtml(item.children)}</li>`;
-}
+/** A checklist item in a bulleted list shows its box and no bullet; in a numbered list it keeps its number. */
+const itemHtml = (ordered: boolean) => (item: ListItem): string =>
+  `<li${item.task && !ordered ? ' class="task"' : ""}>${inlineHtml(item.inlines)}${blocksHtml(item.children)}</li>`;
 
 function blocksHtml(blocks: Block[]): string {
   return blocks
@@ -45,7 +45,7 @@ function blocksHtml(blocks: Block[]): string {
         case "list": {
           const tag = block.ordered ? "ol" : "ul";
           const start = block.ordered && block.start !== 1 ? ` start="${block.start}"` : "";
-          return `<${tag}${start}>${block.items.map(itemHtml).join("")}</${tag}>`;
+          return `<${tag}${start}>${block.items.map(itemHtml(block.ordered)).join("")}</${tag}>`;
         }
         case "code": return `<pre><code>${escapeHtml(block.text)}</code></pre>`;
         case "table": {
@@ -73,6 +73,7 @@ h2 { font-size: 15pt; } h3 { font-size: 12.5pt; } h4 { font-size: 11.5pt; } h5, 
 p { margin: 0 0 8pt; orphans: 3; widows: 3; }
 ul, ol { margin: 0 0 8pt; padding-left: 20pt; }
 li { margin: 0 0 2pt; } li > ul, li > ol { margin: 2pt 0 2pt; }
+li.task { list-style: none; margin-left: -14pt; }
 table { border-collapse: collapse; width: 100%; margin: 6pt 0 12pt; break-inside: auto; font-size: 10.5pt; }
 tr { break-inside: avoid; }
 th, td { border: 1px solid #b8c0cc; padding: 4pt 7pt; vertical-align: top; text-align: left; }

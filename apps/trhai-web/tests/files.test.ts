@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { absolutePath, crumbs, fileKind, formatBytes, languageOf, parentOf, readableDocument, sortEntries, type FileEntry } from "../src/lib/files.js";
+import { absolutePath, canOpenInProgram, crumbs, fileKind, formatBytes, languageOf, madeFilesFrom, madeFilesInText, parentOf, readableDocument, sortEntries, type FileEntry } from "../src/lib/files.js";
 import { detailFromHash, hashFor, viewFromHash } from "../src/os/views.js";
 
 // The Files and Code workspaces' wording and ordering, and the address that
@@ -61,4 +61,41 @@ test("summarising is offered only for the documents TRH AI can read", () => {
   for (const name of ["report.pdf", "notes.DOCX", "deck.pptx"]) assert.equal(readableDocument(name), true, name);
   // Documents to the file list, but the API has nothing that reads them.
   for (const name of ["old.doc", "old.ppt", "sheet.xlsx", "sheet.xls", "readme.md"]) assert.equal(readableDocument(name), false, name);
+});
+
+test("a button to open a file is offered for documents, pictures, sound and video, and never for anything that could run", () => {
+  for (const name of ["Report.docx", "scan.PDF", "sheet.xlsx", "deck.pptx", "photo.jpg", "song.mp3", "clip.mp4", "notes.txt", "data.csv", "documents/Quarterly Report.docx"]) assert.equal(canOpenInProgram(name), true, name);
+  for (const name of ["setup.exe", "run.bat", "go.ps1", "page.html", "drawing.svg", "macro.docm", "app.js", "README", "archive.zip", "link.lnk", ""]) assert.equal(canOpenInProgram(name), false, name);
+});
+
+test("the files a reply says it made are paths in the workspace, a few, and nothing else the reply names is trusted", () => {
+  assert.deepEqual(madeFilesFrom(["documents/Report.docx", "documents/Report.pdf"]), ["documents/Report.docx", "documents/Report.pdf"]);
+  assert.deepEqual(madeFilesFrom(undefined), []);
+  assert.deepEqual(madeFilesFrom("documents/Report.docx"), []);
+  const nasty = [42, null, {}, "", "/etc/passwd", "C:\\Windows\\notepad.exe", "d:/x.docx", "../outside.docx", "a/../../b.docx", "a\\..\\b.docx", "x".repeat(1001), "a\0b.docx"];
+  assert.deepEqual(madeFilesFrom([...nasty, "documents/ok.docx"]), ["documents/ok.docx"]);
+  assert.equal(madeFilesFrom(Array.from({ length: 50 }, (_, index) => `documents/${index}.docx`)).length, 20);
+});
+
+test("a conversation opened again finds its files in the reply's own lines, and in nothing else", () => {
+  const reply = [
+    "Here you go.",
+    "",
+    'Made "Meeting Notes", 47 words, and read each file back to check it:',
+    "- documents/Meeting Notes.docx (Word document)",
+    "- documents/Meeting Notes.pdf (PDF, 2 pages)",
+    "- documents/Meeting Notes.html (web page)",
+    "- documents/Meeting Notes.md (Markdown file)",
+    "- documents/Meeting Notes.txt (text file)",
+    "Note: The PDF opens, but its words were not found."
+  ].join("\n");
+  assert.deepEqual(madeFilesInText(reply), [
+    "documents/Meeting Notes.docx", "documents/Meeting Notes.pdf", "documents/Meeting Notes.html", "documents/Meeting Notes.md", "documents/Meeting Notes.txt"
+  ]);
+  assert.deepEqual(madeFilesInText("- documents/A.pdf (PDF, 1 page)\r\n* documents/B.docx (Word document)"), ["documents/A.pdf", "documents/B.docx"], "one page, and the other bullet and line end");
+  // A file outside the workspace is told by its whole path, and is not offered; nor is a line the tools did not write.
+  assert.deepEqual(madeFilesInText("- C:\\Users\\Sam\\Desktop\\Report.docx (Word document)"), []);
+  assert.deepEqual(madeFilesInText("- notes.txt (my own notes)\n- see documents/Report.docx (Word document) for more\nWord document: documents/Report.docx"), []);
+  assert.deepEqual(madeFilesInText("- ../outside.docx (Word document)"), []);
+  assert.deepEqual(madeFilesInText(""), []);
 });

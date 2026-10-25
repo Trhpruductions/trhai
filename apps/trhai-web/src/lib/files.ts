@@ -55,6 +55,48 @@ export function readableDocument(name: string): boolean {
   return ["pdf", "docx", "pptx"].includes(extensionOf(name));
 }
 
+/**
+ * What the API opens with the program it belongs to (openableExtensions in the
+ * API's openInSystem.ts): documents, pictures, sound and video, and nothing a
+ * person could run. The API is the one that decides; this is so a button is
+ * only offered where it can work.
+ */
+const openableInProgram = new Set([
+  "docx", "pdf", "xlsx", "pptx", "csv", "txt", "md", "srt", "vtt",
+  "png", "jpg", "jpeg", "gif", "webp", "bmp",
+  "mp3", "wav", "m4a", "flac", "ogg", "mp4", "mkv", "mov", "webm"
+]);
+
+export function canOpenInProgram(name: string): boolean {
+  return openableInProgram.has(extensionOf(name));
+}
+
+/**
+ * The files a reply says it made, as the API sent them: paths in the
+ * workspace, a few at most. Anything else in the field is ignored rather than
+ * trusted - a button that opens whatever a reply names is only as good as
+ * what the reply was allowed to name.
+ */
+export function madeFilesFrom(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string" && entry.length > 0 && entry.length <= 1000
+      && !entry.includes("\0") && !entry.startsWith("/") && !/^[A-Za-z]:/.test(entry) && !entry.split(/[\\/]/).includes(".."))
+    .slice(0, 20);
+}
+
+/** A line of a reply as the assistant's file tools write it: "- documents/Report.docx (Word document)", "- documents/Report.pdf (PDF, 2 pages)". */
+const madeFileLine = /^\s*[-*]\s+(\S.*?) \((?:Word document|PDF|web page|Markdown file|text file)(?:, \d+ pages?)?\)\s*$/;
+
+/**
+ * The files an earlier reply made, read from its text: a conversation opened
+ * again has no list from the API, but the tools' own result lines are in the
+ * reply word for word. Held to the same rules as any file a reply names.
+ */
+export function madeFilesInText(text: string): string[] {
+  return madeFilesFrom(text.split(/\r?\n/).map((line) => madeFileLine.exec(line)?.[1] ?? ""));
+}
+
 export function fileKind(name: string): FileKind {
   const extension = extensionOf(name);
   if (!extension) return "text";

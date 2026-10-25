@@ -13,6 +13,9 @@ import {
 } from "./services/conversationStore.js";
 import { isModelName, listChatModels } from "./services/modelCatalog.js";
 import { takeContextUse } from "./services/contextUse.js";
+import { takeMadeFiles } from "./services/madeFiles.js";
+import { registerFileOpenRoutes } from "./fileOpenRoutes.js";
+import { registerDocumentPreviewRoutes } from "./documentPreviewRoutes.js";
 import {
   forgetAllMemories,
   forgetMemory,
@@ -417,8 +420,8 @@ function reportStages(sessionId: string): void {
 function readTurnContext(req: express.Request, message: string) {
   const sessionId = resolveMemoryKey(req, normalizeSessionId(req.body?.sessionId));
   // A measurement left by an earlier request that failed must not be reported
-  // as this one's.
-  if (sessionId) takeContextUse(sessionId);
+  // as this one's. Nor the files an earlier request made.
+  if (sessionId) { takeContextUse(sessionId); takeMadeFiles(sessionId); }
   // A new request starts a fresh trace. The panel is for watching the work
   // happening now; keeping every step since the browser opened would bury the
   // one that matters at the moment it matters most.
@@ -693,8 +696,8 @@ export function createApp(options: AppOptions = {}) {
       // than pooling callers into a shared bucket.
       const sessionId = resolveMemoryKey(req, normalizeSessionId(req.body?.sessionId));
       // A measurement left by an earlier request that failed must not be
-      // reported as this one's.
-      if (sessionId) takeContextUse(sessionId);
+      // reported as this one's. Nor the files an earlier request made.
+      if (sessionId) { takeContextUse(sessionId); takeMadeFiles(sessionId); }
       const savedMemories = sessionId ? recordMemoriesFromMessage(sessionId, message) : [];
       // Widen the candidate set: the composer scores for relevance, so limiting to
       // the 5 newest would hide the one memory that actually answers the question.
@@ -814,6 +817,9 @@ export function createApp(options: AppOptions = {}) {
           // How full the model's context window was, as measured when the
           // prompt was sent. Null when no model was asked.
           context: sessionId ? takeContextUse(sessionId) : null,
+          // The files this turn made, as paths in the workspace, so the screen
+          // can offer to open them.
+          files: takeMadeFiles(sessionId),
           // Report what was actually used so the client can label provenance
           // from the server's behaviour rather than from what it hoped to send.
           // Both counts mean "actually used in the reply", not "sent to the model".
@@ -1430,6 +1436,12 @@ export function createApp(options: AppOptions = {}) {
   // A song in, a finished music video out. See musicVideoRoutes.ts.
   registerMusicVideoRoutes(app);
 
+  // Open a file the assistant made in the program it belongs to, or show where it is.
+  registerFileOpenRoutes(app);
+
+  // The words in a PDF, Word or PowerPoint file, for the Files screen's preview.
+  registerDocumentPreviewRoutes(app);
+
   // Scheduled work. These are machine-wide rather than per-session: the
   // scheduler runs them from the API process whether or not anyone has a tab
   // open, which is the only arrangement under which "every day at 9:00 AM"
@@ -1649,7 +1661,7 @@ export function createApp(options: AppOptions = {}) {
       // the tokens it happened to receive - which conversation it is now in,
       // and how full the model's context window was when it was asked.
       finished = true;
-      send("done", { ...result, conversationId, context: sessionId ? takeContextUse(sessionId) : null });
+      send("done", { ...result, conversationId, context: sessionId ? takeContextUse(sessionId) : null, files: takeMadeFiles(sessionId) });
     } catch (error) {
       // An error mid-stream cannot be a status code — the headers are long
       // gone — so it is an event the client can render as a failed turn.

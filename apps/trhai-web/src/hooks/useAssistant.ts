@@ -5,6 +5,7 @@ import { apiBaseUrl, apiFetch, requestHeaders, sessionId as resolveSessionId } f
 import { applyAgentDisclaimer, applyResponseStyle } from "@ascend/shared";
 import { readStoredPersonality } from "../lib/personality";
 import { readActiveAgent } from "../lib/agents";
+import { madeFilesFrom } from "../lib/files";
 
 // Conversation state, talking to the real local orchestrator — the same
 // service the rest of this monorepo already built, tested, and runs against
@@ -21,6 +22,8 @@ export type ChatMessage = {
   strategy?: string;
   model?: string;
   toolsUsed?: Array<{ name: string; ok: boolean }>;
+  /** Files this reply made, as paths in the workspace, so the screen can offer to open them. */
+  files?: string[];
   /**
    * An action this reply is waiting on a yes for - a text or an email to send,
    * something to delete - as the API described it. The reply's own text says
@@ -459,6 +462,7 @@ export function useAssistant() {
         strategy: data.strategy as string | undefined,
         model: data.model as string | undefined,
         toolsUsed: data.toolsUsed as ChatMessage["toolsUsed"],
+        ...(madeFilesFrom(data.files).length > 0 ? { files: madeFilesFrom(data.files) } : {}),
         ...(isContextUse(data.context) ? { context: data.context } : {}),
         ...(isPendingConfirmation(data.pendingConfirmation) ? { pendingConfirmation: data.pendingConfirmation } : {})
       };

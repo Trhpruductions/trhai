@@ -89,12 +89,39 @@ placed in documents yet. Word files are written to the Office Open XML format an
 this app's own reader and with python-docx while building it; they have not been opened in Microsoft
 Word itself.
 
+## Opening what it made
+
+A reply that made a file shows it as a card with **Open** (in the program it belongs
+to: Word, the PDF reader) and **Show in folder** (Explorer, with the file selected).
+The Files screen has the same two buttons on every file, **Open folder** for the folder
+in view, and shows the words of a PDF, Word or PowerPoint file in its preview.
+
+- `POST /v1/files/open { path, action: "open" | "reveal" }` (`fileOpenRoutes.ts`): JSON
+  only; only from this PC (the file appears on this PC's screen, so another device that
+  has been let in is refused); not behind the paywall; the path must be inside the
+  workspace and exist.
+- What is opened: documents, pictures, sound and video (`openableExtensions` in
+  `openInSystem.ts`) - never anything that could run (`.exe`, `.bat`, `.ps1`, `.lnk`, ...)
+  and no web page, which can run script when opened from disk. Anything in the workspace
+  can be shown in its folder.
+- On Windows `explorer.exe <path>` opens and `explorer.exe /select,"<path>"` selects, with
+  the quotes round the path alone and the arguments sent as they are (tried for real with a
+  path that has spaces, an ampersand and brackets in it).
+- The files a turn made come back with its reply as `files` (from `/v1/assist`, and in the
+  stream's `done` event) through a hand-off keyed by conversation (`madeFiles.ts`). A
+  conversation opened again finds them in the reply's own result lines. A file made outside
+  the workspace is told by its whole path and has no button.
+- `GET /v1/files/document?path=` gives the words of a PDF, Word or PowerPoint file (the first
+  200,000 characters) for the preview, read the way the assistant reads documents.
+
 ## Tests
 
 `markdown.test.ts`, `zip-writer.test.ts` (read back with the system's `tar`), `document-files.test.ts`
 (Word files read with the app's own reader and checked well-formed, HTML whitelisted tag by tag),
 `document-maker.test.ts` (names, formats, paper, checking, partial failure), `make-document-tool.test.ts`
 (when the tool is offered, where it may write, what it refuses), `known-folders.test.ts`, and
+`open-in-system.test.ts`, `file-open-routes.test.ts` (who may ask, what comes back, and that the reply carries the file),
+`made-files.test.ts`, `document-preview-routes.test.ts`, the web's `files.test.ts`, and
 `pdf-render.test.ts`: the printing and checking around Electron run against a stand-in script, and with
 `TRHAI_REAL_ELECTRON=1` two tests print with the real Electron - one checks a multi-page A4 file reads
 back, the other that a page which tries to run a script or reach the network can do neither.
