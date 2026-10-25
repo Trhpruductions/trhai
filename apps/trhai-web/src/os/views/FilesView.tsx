@@ -8,6 +8,7 @@ import {
   absolutePath, crumbs, fileKind, formatBytes, languageOf, parentOf, readableDocument, sortEntries,
   type FileEntry, type FileKind, type FileSort
 } from "../../lib/files";
+import { FileActions } from "../ui/FileActions";
 import { Icon } from "../ui/Icon";
 import { ViewFrame } from "../ui/ViewFrame";
 import { useAssistantState } from "../state/assistant";
@@ -25,6 +26,8 @@ import "./views.css";
 type Listing = { root: string; path: string; entries: FileEntry[]; truncated: boolean; limit: number };
 type Found = { query: string; names: FileEntry[]; lines: Array<{ path: string; line: number; text: string }>; truncated: boolean };
 type Opened = { path: string; content: string; binary: boolean; truncated: boolean; bytes?: number; modifiedAt?: number };
+/** The words in a PDF, Word or PowerPoint file, as the API read them. */
+type DocumentWords = { path: string; kind: "pdf" | "docx" | "pptx" | "text"; pages?: number; text: string; truncated: boolean; characters: number };
 /** A file to preview. Size and date only when they came from the disk - a search hit has neither until it is read. */
 type PreviewTarget = { name: string; path: string; bytes?: number; modifiedAt?: number };
 
@@ -72,6 +75,10 @@ function Preview({ entry, root, onAsk }: { entry: PreviewTarget; root: string; o
   const [rendered, setRendered] = useState(true);
   const [wrap, setWrap] = useState(false);
   const textual = kind === "code" || kind === "text" || kind === "markdown" || kind === "other";
+  // A PDF, Word or PowerPoint file is not drawn, but its words can be shown.
+  const readable = kind === "document" && readableDocument(entry.name);
+  const [words, setWords] = useState<DocumentWords | null>(null);
+  const [wordsFailed, setWordsFailed] = useState<string | null>(null);
 
   useEffect(() => {
     if (!textual) return;
@@ -83,6 +90,17 @@ function Preview({ entry, root, onAsk }: { entry: PreviewTarget; root: string; o
     });
     return () => { current = false; };
   }, [entry.path, textual]);
+
+  useEffect(() => {
+    if (!readable) return;
+    let current = true;
+    void apiGet<DocumentWords>(`/v1/files/document?path=${encodeURIComponent(entry.path)}`).then((result) => {
+      if (!current) return;
+      if (result.ok) setWords(result.data);
+      else setWordsFailed(result.reason);
+    });
+    return () => { current = false; };
+  }, [entry.path, readable]);
 
   const copy = async () => {
     try {
@@ -118,6 +136,7 @@ function Preview({ entry, root, onAsk }: { entry: PreviewTarget; root: string; o
           {(kind === "code" || kind === "text" || (kind === "markdown" && !rendered)) ? (
             <button type="button" className={`os-btn os-btn-sm${wrap ? " on" : ""}`} aria-pressed={wrap} onClick={() => setWrap(!wrap)}>Wrap lines</button>
           ) : null}
+          <FileActions path={entry.path} />
           <button type="button" className="os-btn os-btn-sm" onClick={() => void copy()}><Icon name="copy" size={14} />Copy path</button>
           {kind !== "document" || readableDocument(entry.name) ? (
             <button type="button" className="os-btn os-btn-sm os-btn-primary"
@@ -135,12 +154,23 @@ function Preview({ entry, root, onAsk }: { entry: PreviewTarget; root: string; o
           ? <img className="os-file-media" src={rawUrl(entry.path)} alt={entry.name} />
           : kind === "video" ? <video className="os-file-media" src={rawUrl(entry.path)} controls preload="metadata" />
             : kind === "audio" ? <audio className="os-file-audio" src={rawUrl(entry.path)} controls preload="metadata" />
-              : kind === "document" ? (
+              : kind === "document" && readable ? (
+                wordsFailed ? <p className="os-task-alert"><Icon name="alert" size={14} />{wordsFailed}</p>
+                  : !words ? <p className="os-faint">Reading…</p>
+                    : (
+                      <>
+                        <p className="os-faint os-small">
+                          The words in this file{words.pages !== undefined ? `, ${words.pages} page${words.pages === 1 ? "" : "s"}` : ""}
+                          {" - open it to see how it is laid out."}
+                          {words.truncated ? ` Showing the first ${words.text.length.toLocaleString()} of ${words.characters.toLocaleString()} characters.` : ""}
+                        </p>
+                        <pre className="os-doc-text">{words.text}</pre>
+                      </>
+                    )
+              ) : kind === "document" ? (
                 <div className="os-empty">
                   <strong>No preview for this kind of file</strong>
-                  <p>{readableDocument(entry.name)
-                    ? "TRH AI can read PDF, Word and PowerPoint files - ask it to summarise this one."
-                    : "TRH AI reads PDF, Word (.docx) and PowerPoint (.pptx) files. Open this one in the program it belongs to."}</p>
+                  <p>TRH AI reads PDF, Word (.docx) and PowerPoint (.pptx) files. Open this one in the program it belongs to.</p>
                 </div>
               ) : failed ? <p className="os-task-alert"><Icon name="alert" size={14} />{failed}</p>
                 : !opened ? <p className="os-faint">Reading…</p>
@@ -248,7 +278,12 @@ export function FilesView() {
   return (
     <ViewFrame
       id="files"
-      actions={root ? <span className="os-chip os-mono" title="The workspace folder on this PC">{root}</span> : null}
+      actions={root ? (
+        <>
+          <span className="os-chip os-mono" title="The workspace folder on this PC">{root}</span>
+          <FileActions path={path} folder />
+        </>
+      ) : null}
     >
       <div className="os-files-layout">
         <section className="os-panel os-file-browser" aria-label="Folder">

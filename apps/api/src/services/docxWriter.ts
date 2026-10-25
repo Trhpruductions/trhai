@@ -75,7 +75,9 @@ function listXml(block: Extract<Block, { kind: "list" }>, level: number, context
   }
   const numbering = `<w:numPr><w:ilvl w:val="${depth}"/><w:numId w:val="${numId}"/></w:numPr>`;
   return block.items.map((item: ListItem) => {
-    const own = paragraph(item.inlines.length ? item.inlines : [{ kind: "text", text: "" }], context, `<w:pStyle w:val="ListParagraph"/>${numbering}`);
+    // A checklist item in a bulleted list has its box where the bullet would be, and no bullet.
+    const marker = item.task && !block.ordered ? `<w:ind w:left="${360 + 360 * depth}"/>` : numbering;
+    const own = paragraph(item.inlines.length ? item.inlines : [{ kind: "text", text: "" }], context, `<w:pStyle w:val="ListParagraph"/>${marker}`);
     const children = item.children.map((child) => {
       if (child.kind === "list") return listXml(child, level + 1, context);
       // A paragraph or anything else under an item lines up with the item's text.

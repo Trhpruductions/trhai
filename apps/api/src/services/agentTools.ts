@@ -16,6 +16,7 @@ import { describeMusicVideos, listMusicVideos, parseMusicVideoRequest, whyNotMus
 import { musicVideoStatus, startMusicVideo } from "./musicVideoJob.js";
 import { describeMadeDocument, documentsFolder, makeDocument, parseDocumentFormats } from "./documentMaker.js";
 import { expandKnownFolder } from "./knownFolders.js";
+import { noteMadeFiles } from "./madeFiles.js";
 import type { RunningApp, StartResult } from "./appRunner.js";
 import { authorPrompt, findAppFault, parseAuthoredFiles, type AuthoredFile } from "./appAuthor.js";
 import { verifyBuiltProject } from "./buildVerification.js";
@@ -3097,6 +3098,8 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
         const relative = workspaceRelative(absolute);
         return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : absolute;
       };
+      // The ones in the workspace can be opened from the screen; see madeFiles.ts.
+      noteMadeFiles(context.sessionId, made.files.map((file) => show(file.path)).filter((shown) => !path.isAbsolute(shown)));
       return { ok: true, content: describeMadeDocument(made, show), path: show(made.files[0].path) };
     }
 

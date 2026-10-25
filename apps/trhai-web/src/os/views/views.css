@@ -66,6 +66,8 @@
 .os-file-media { display: block; max-width: 100%; max-height: 64vh; margin: 0 auto; border-radius: var(--os-r-md); background: rgba(5, 9, 18, 0.6); }
 .os-file-audio { width: 100%; }
 .os-file-markdown { font-size: var(--os-fs-md); line-height: 1.6; }
+/* The words of a PDF or Word file, as the reader found them: paragraphs, not code. */
+.os-doc-text { margin: var(--os-2) 0 0; max-width: 86ch; font: inherit; font-size: var(--os-fs-md); line-height: 1.6; color: var(--os-text); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Code and text, numbered. The numbers are not part of a copy. */
 .os-code { margin: 0; padding: var(--os-2) 0; border-radius: var(--os-r-md); border: 1px solid var(--os-line); background: rgba(3, 6, 13, 0.7); overflow-x: auto; font: 400 var(--os-fs-xs)/1.6 var(--os-font-mono); color: var(--os-text); tab-size: 2; }
@@ -715,6 +717,13 @@ select.os-input { color-scheme: dark; }
 .os-msg-body { flex: 1; min-width: 0; display: grid; gap: var(--os-2); }
 .os-msg.error .os-msg-body { padding: var(--os-3) var(--os-4); border-radius: var(--os-r-lg); border: 1px solid rgba(255, 95, 115, 0.35); background: var(--os-danger-soft); }
 .os-msg-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--os-2); font-size: var(--os-fs-xs); }
+/* Files a reply made, each with the buttons to open it. */
+.os-made-files { display: grid; gap: var(--os-2); }
+.os-made-file { display: flex; flex-wrap: wrap; align-items: center; gap: var(--os-2) var(--os-3); padding: var(--os-2) var(--os-3); border-radius: var(--os-r-md); border: 1px solid var(--os-accent-line); background: var(--os-accent-soft); }
+.os-made-file > svg { flex: none; color: var(--os-accent-hi); }
+.os-made-file-name { font-weight: 600; overflow-wrap: anywhere; }
+.os-made-file-where { overflow-wrap: anywhere; }
+.os-made-file-actions { display: flex; flex-wrap: wrap; gap: var(--os-2); margin-left: auto; }
 .os-cursor { display: inline-block; width: 8px; height: 16px; border-radius: 2px; background: var(--os-accent); animation: os-pulse 1s steps(2) infinite; }
 .os-msg.thinking .os-msg-body { display: flex; align-items: center; gap: var(--os-3); }
 .os-thinking { display: inline-flex; gap: 5px; }
