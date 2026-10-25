@@ -30,7 +30,28 @@ app.whenReady().then(async () => {
   const results = [];
   let win;
 
+  // Pages to print as PDF: a document made from escaped text, written to a file by the caller. Printed in a window of its own with
+  // JavaScript off and every request that is not for a local file refused: nothing a document says can run, or reach out.
+  for (const pdf of manifest.pdfs ?? []) {
+    let printer;
+    try {
+      printer = new BrowserWindow({ show: false, width: 1024, height: 1400, webPreferences: { sandbox: true, contextIsolation: true, javascript: false } });
+      printer.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith("file:") }));
+      await printer.loadFile(pdf.htmlPath);
+      // The page's own @page rule gives the paper and the margins. Tagged, with the headings as the outline, so a screen reader and the
+      // reader's side panel can follow the document.
+      const data = await printer.webContents.printToPDF({ preferCSSPageSize: true, printBackground: true, generateTaggedPDF: true, generateDocumentOutline: true });
+      writeFileSync(pdf.outputPath, data);
+      results.push({ index: pdf.index, ok: true });
+    } catch (error) {
+      results.push({ index: pdf.index, ok: false, reason: error && error.message ? error.message : String(error) });
+    } finally {
+      try { printer?.destroy(); } catch { /* already gone */ }
+    }
+  }
+
   try {
+    if ((manifest.frames ?? []).length === 0) throw new Error("no frames");
     win = new BrowserWindow({
       width: manifest.width,
       height: manifest.height,
@@ -49,7 +70,7 @@ app.whenReady().then(async () => {
 
     await win.loadURL("data:text/html,<!doctype html><html><body></body></html>");
 
-    for (const frame of manifest.frames) {
+    for (const frame of manifest.frames ?? []) {
       try {
         // The whole document is replaced per frame, then two animation
         // frames are awaited before capture so layout and paint have
@@ -72,7 +93,8 @@ app.whenReady().then(async () => {
       }
     }
   } catch (error) {
-    results.push({ index: -1, ok: false, reason: `window setup failed: ${error && error.message ? error.message : error}` });
+    // Nothing to capture is not a failure: a manifest of pages to print has no frames.
+    if (!(error && error.message === "no frames")) results.push({ index: -1, ok: false, reason: `window setup failed: ${error && error.message ? error.message : error}` });
   } finally {
     try { win?.destroy(); } catch { /* already gone */ }
   }

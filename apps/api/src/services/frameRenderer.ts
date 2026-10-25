@@ -19,7 +19,7 @@
 
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -107,8 +107,45 @@ export function findElectronPackage(fromDir: string): string | null {
   }
 }
 
-/** The Electron main-process script this module spawns. Kept alongside it. */
-const rendererScript = path.join(here, "frameRendererElectron.mjs");
+/**
+ * The Electron main-process script this module spawns. Kept alongside it;
+ * TRHAI_RENDERER_SCRIPT swaps in another, so a test can stand in for Electron
+ * (with TRHAI_ELECTRON_PATH pointing at node) and still run the real spawning,
+ * timeout and verification around it.
+ */
+const rendererScript = (): string => process.env.TRHAI_RENDERER_SCRIPT || path.join(here, "frameRendererElectron.mjs");
+
+/** Runs the script on a manifest and waits for it: null when it exited cleanly, otherwise what went wrong. */
+function runElectron(electronPath: string, manifestPath: string, timeoutMs: number): Promise<string | null> {
+  return new Promise<string | null>((resolve) => {
+    const child = spawn(electronPath, [rendererScript(), manifestPath], {
+      shell: false,
+      windowsHide: true,
+      // Offscreen rendering does not need a display, but it does need the
+      // GPU process; nothing here disables hardware acceleration.
+      env: { ...process.env, ELECTRON_DISABLE_SANDBOX: "1" }
+    });
+
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve(`Rendering took longer than ${Math.round(timeoutMs / 1000)}s and was stopped.`);
+    }, timeoutMs);
+
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.stdout?.on("data", () => { /* Electron/Chromium logging; not needed on success */ });
+
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve(`Electron could not be started: ${error.message}`);
+    });
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0 ? null : `Electron exited with code ${code}. ${stderr.slice(-400)}`.trim());
+    });
+  });
+}
 
 /**
  * Render every job to a PNG at its `outputPath`.
@@ -143,34 +180,7 @@ export async function renderFrames(
   const timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
 
   try {
-    const failure = await new Promise<string | null>((resolve) => {
-      const child = spawn(electron.path, [rendererScript, manifestPath], {
-        shell: false,
-        windowsHide: true,
-        // Offscreen rendering does not need a display, but it does need the
-        // GPU process; nothing here disables hardware acceleration.
-        env: { ...process.env, ELECTRON_DISABLE_SANDBOX: "1" }
-      });
-
-      const timer = setTimeout(() => {
-        child.kill();
-        resolve(`Rendering took longer than ${Math.round(timeoutMs / 1000)}s and was stopped.`);
-      }, timeoutMs);
-
-      let stderr = "";
-      child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-      child.stdout?.on("data", () => { /* Electron/Chromium logging; not needed on success */ });
-
-      child.on("error", (error) => {
-        clearTimeout(timer);
-        resolve(`Electron could not be started: ${error.message}`);
-      });
-
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        resolve(code === 0 ? null : `Electron exited with code ${code}. ${stderr.slice(-400)}`.trim());
-      });
-    });
+    const failure = await runElectron(electron.path, manifestPath, timeoutMs);
 
     const rendered = jobs.filter((job) => {
       try {
@@ -186,6 +196,67 @@ export async function renderFrames(
       return { ok: false, reason, rendered };
     }
 
+    return { ok: true, rendered };
+  } finally {
+    try { rmSync(workDir, { recursive: true, force: true }); } catch { /* a temp manifest is not worth failing over */ }
+  }
+}
+
+/** One page of HTML to print as a PDF. */
+export type PdfJob = {
+  index: number;
+  /** A whole page; its @page rule chooses the paper and the margins. */
+  html: string;
+  outputPath: string;
+};
+
+/** A PDF starts with this; Chromium writes a fresh file for every print, so a file without it is not one. */
+const pdfHeader = Buffer.from("%PDF-");
+
+/**
+ * Print every job to a PDF at its `outputPath`, with the same Electron that
+ * draws the video frames.
+ *
+ * Each page is printed in a window with JavaScript off that refuses every
+ * request that is not for a local file (see frameRendererElectron.mjs), and
+ * lands in a scratch folder first: it is copied to `outputPath` only once it
+ * is checked to be a PDF, so a failed print never leaves half a file where the
+ * caller will look for the result.
+ */
+export async function renderPdfs(jobs: PdfJob[], options: { timeoutMs?: number } = {}): Promise<RenderFramesResult> {
+  if (jobs.length === 0) return { ok: false, reason: "There were no pages to print.", rendered: 0 };
+
+  const electron = resolveElectronBinary();
+  if (!electron.ok) return { ok: false, reason: electron.reason, rendered: 0 };
+
+  const workDir = mkdtempSync(path.join(tmpdir(), "trhai-pdf-"));
+  const manifestPath = path.join(workDir, "manifest.json");
+  const resultsPath = path.join(workDir, "results.json");
+  const printed = jobs.map((job) => ({ job, htmlPath: path.join(workDir, `page${job.index}.html`), pdfPath: path.join(workDir, `page${job.index}.pdf`) }));
+
+  try {
+    for (const { job, htmlPath } of printed) writeFileSync(htmlPath, job.html);
+    writeFileSync(manifestPath, JSON.stringify({
+      resultsPath,
+      pdfs: printed.map(({ job, htmlPath, pdfPath }) => ({ index: job.index, htmlPath, outputPath: pdfPath }))
+    }));
+
+    const failure = await runElectron(electron.path, manifestPath, options.timeoutMs ?? defaultTimeoutMs);
+
+    let rendered = 0;
+    for (const { job, pdfPath } of printed) {
+      try {
+        const bytes = readFileSync(pdfPath);
+        if (bytes.length > pdfHeader.length && bytes.subarray(0, pdfHeader.length).equals(pdfHeader)) {
+          copyFileSync(pdfPath, job.outputPath);
+          rendered += 1;
+        }
+      } catch { /* not written: counted below */ }
+    }
+
+    if (rendered < jobs.length) {
+      return { ok: false, reason: failure ?? `only ${rendered} of ${jobs.length} pages were printed`, rendered };
+    }
     return { ok: true, rendered };
   } finally {
     try { rmSync(workDir, { recursive: true, force: true }); } catch { /* a temp manifest is not worth failing over */ }
