@@ -20,7 +20,7 @@ import {
   correctionFor, inventsAReading, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { asksAboutMachineState, asksForAReading, asksForCodeInTheReply, asksForWordsInTheReply, asksToStartSomething, drivePath, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
+import { asksAboutMachineState, asksForAReading, asksForCodeInTheReply, asksForWordsInTheReply, asksToStartSomething, drivePath, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsMusicVideo, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -521,7 +521,7 @@ export function wordsCarriedBy(call: { name: string; arguments?: Record<string, 
  */
 const mutatingTools = new Set([
   "remember", "forget", "write_document", "update_document", "delete_document",
-  "pin_memory", "write_file", "build_app", "change_app", "make_video",
+  "pin_memory", "write_file", "build_app", "change_app", "make_video", "make_music_video",
   // "I added the schedule for you." said nothing about when. The tool's
   // own line - Scheduled "Build Check": Every weekday at 8:00 AM - is what
   // the user needs to check it against what they asked.
@@ -1675,7 +1675,7 @@ export async function runAgent(
   const changesAsked = new Set<string>();
   // Tools that make one thing per request, whatever the arguments: a second
   // schedule, app or video in the same turn is never what was asked for.
-  const oncePerTurn = new Set(["add_schedule", "build_app", "change_app", "make_video", "render_mockup"]);
+  const oncePerTurn = new Set(["add_schedule", "build_app", "change_app", "make_video", "make_music_video", "render_mockup"]);
   const madeThisTurn = new Set<string>();
 
   // How many times each exact call has actually been run, across every round
@@ -1823,6 +1823,8 @@ export async function runAgent(
         // and a video only when it mentions one.
         schedules: mentionsScheduling(question),
         video: mentionsVideo(question),
+        // A music video, the one made from a song, when the request is about one.
+        musicVideo: mentionsMusicVideo(question),
         // The knowledge base is written only when keeping something is asked
         // for - "save", "note", "document" - or a saved document is named.
         // "Write a two-sentence product description for a water bottle" asks

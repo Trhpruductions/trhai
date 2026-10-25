@@ -80,6 +80,7 @@ import { maxImagesPerTurn, parseImages, warmVisionModel } from "./services/visio
 import { warmUpEngine, warmUpStatus } from "./services/warmUp.js";
 import path from "node:path";
 import { maxAudioBytes, requiredChannels, requiredSampleRate, transcribe, whisperStatus } from "./services/whisperTranscribe.js";
+import { registerMusicVideoRoutes } from "./musicVideoRoutes.js";
 import {
   addSchedule,
   describeAction,
@@ -558,7 +559,7 @@ export function createApp(options: AppOptions = {}) {
   // refuses is the work: talking to the assistant, building and running apps,
   // commands, schedules and tasks. See services/licensing.ts for the shape of
   // a key and why the app itself never touches a payment provider.
-  for (const gated of ["/v1/assist", "/v1/apps", "/v1/commands", "/v1/schedules", "/v1/tasks", "/v1/agent-tasks", "/v1/flow", "/v1/vision"]) {
+  for (const gated of ["/v1/assist", "/v1/apps", "/v1/commands", "/v1/schedules", "/v1/tasks", "/v1/agent-tasks", "/v1/flow", "/v1/vision", "/v1/music-video"]) {
     app.use(gated, paywallGate);
   }
 
@@ -1425,6 +1426,9 @@ export function createApp(options: AppOptions = {}) {
 
       res.json({ data: { text: result.text, model: result.model }, traceId: "trace-local" });
     });
+
+  // A song in, a finished music video out. See musicVideoRoutes.ts.
+  registerMusicVideoRoutes(app);
 
   // Scheduled work. These are machine-wide rather than per-session: the
   // scheduler runs them from the API process whether or not anyone has a tab

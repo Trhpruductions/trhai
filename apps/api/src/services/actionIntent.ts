@@ -457,6 +457,20 @@ export function mentionsVideo(message: string): boolean {
 }
 
 /**
+ * Whether a request is about a video of a song, so make_music_video is worth
+ * offering - and make_video, which makes narrated slides, is not. A song is
+ * named (music, a song, an mp3, lyrics) and a video or its like is asked for
+ * ("a music video", "a video for my song", "turn this mp3 into a clip"), or
+ * the thing wanted is a visualizer or a karaoke or lyric video by name.
+ */
+export function mentionsMusicVideo(message: string): boolean {
+  const text = message ?? "";
+  if (/\b(?:visuali[sz]er|visuali[sz]ation|karaoke|lyric\s+video)\b/i.test(text)) return true;
+  return /\b(?:music|songs?|mp3|tracks?|lyrics?|album|audio)\b/i.test(text)
+    && /\b(?:videos?|clips?|mp4)\b/i.test(text);
+}
+
+/**
  * Whether a request is about this computer or its software at all, so the
  * shell is worth offering.
  *

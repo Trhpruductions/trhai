@@ -8,7 +8,7 @@
 export type ViewId =
   | "home" | "chat" | "voice"
   | "memory" | "files" | "browser"
-  | "code" | "tasks" | "automation" | "tools"
+  | "code" | "tasks" | "automation" | "tools" | "music"
   | "system" | "network" | "settings";
 
 export type ViewGroup = "Command" | "Knowledge" | "Work" | "System";
@@ -66,6 +66,10 @@ export const views: ViewDef[] = [
   {
     id: "tools", label: "Tools", group: "Work", blurb: "Everything TRH AI can do, and how much each is allowed.",
     icon: "M14.5 6a3.5 3.5 0 0 0-4.9 4.2l-6 6L6 18.5l6-6A3.5 3.5 0 0 0 18 8l-2.3 2.3-1.7-1.7L16.3 6.3A3.5 3.5 0 0 0 14.5 6Z", keywords: "capabilities permissions commands machine access status usage ready"
+  },
+  {
+    id: "music", label: "Music video", group: "Work", blurb: "Turn a song into a finished music video - the beat, the lyrics, the title - made on this PC.",
+    icon: "M9 17V6l10-2v11M9 17a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0ZM19 15a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z", keywords: "mp3 song audio music video lyrics karaoke visualizer spectrum clip album cover"
   },
   {
     id: "system", label: "System", group: "System", blurb: "This machine, measured live. Anything that cannot be read says so.",

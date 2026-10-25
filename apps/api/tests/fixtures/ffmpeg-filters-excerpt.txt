@@ -1,0 +1,80 @@
+Filters:
+  T.. = Timeline support
+  .S. = Slice threading
+  A = Audio input/output
+  V = Video input/output
+  N = Dynamic number and/or type of input/output
+  | = Source or sink filter
+  ------
+ TS aap               AA->A      Apply Affine Projection algorithm to first audio stream.
+ .. abench            A->A       Benchmark part of a filtergraph.
+ .. acompressor       A->A       Audio compressor.
+ .. acontrast         A->A       Simple audio dynamic range compression/expansion filter.
+ .. acopy             A->A       Copy the input audio unchanged to the output.
+ .. acue              A->A       Delay filtering to match a cue.
+ .. acrossfade        N->A       Cross fade two input audio streams.
+ .S acrossover        A->N       Split audio into per-bands streams.
+ T. acrusher          A->A       Reduce audio bit resolution.
+ TS adeclick          A->A       Remove impulsive noise from input audio.
+ TS adeclip           A->A       Remove clipping from input audio.
+ TS adecorrelate      A->A       Apply decorrelation to input audio.
+ T. adelay            A->A       Delay one or more audio channels.
+ TS adenorm           A->A       Remedy denormals by adding extremely low-level noise.
+ T. aderivative       A->A       Compute derivative of input audio.
+ TS adrc              A->A       Audio Spectral Dynamic Range Controller.
+ TS adynamicequalizer A->A       Apply Dynamic Equalization of input audio.
+ T. adynamicsmooth    A->A       Apply Dynamic Smoothing of input audio.
+ .. aecho             A->A       Add echoing to the audio.
+ TS aemphasis         A->A       Audio emphasis.
+ T. aeval             A->A       Filter audio signal according to a specified expression.
+ T. aexciter          A->A       Enhance high frequency part of audio.
+ T. afade             A->A       Fade in/out input audio.
+ TS afftdn            A->A       Denoise audio samples using FFT.
+ TS afftfilt          A->A       Apply arbitrary expressions to samples in frequency domain.
+ TS afir              N->A       Apply Finite Impulse Response filter with supplied coefficients in additional stream(s).
+ .. aformat           A->A       Convert the input audio to one of the specified formats.
+ TS afreqshift        A->A       Apply frequency shifting to input audio.
+ TS afwtdn            A->A       Denoise audio stream using Wavelets.
+ T. agate             A->A       Audio gate.
+ .S aiir              A->N       Apply Infinite Impulse Response filter with supplied coefficients.
+ T. aintegral         A->A       Compute integral of input audio.
+ .. ainterleave       N->A       Temporally interleave audio inputs.
+ T. alatency          A->A       Report audio filtering latency.
+ T. alimiter          A->A       Audio lookahead limiter.
+ TS allpass           A->A       Apply a two-pole all-pass filter.
+ .. aloop             A->A       Loop audio samples.
+ .. amerge            N->A       Merge two or more audio streams into a single multi-channel stream.
+ T. ametadata         A->A       Manipulate audio frame metadata.
+ .. amix              N->A       Audio mixing.
+ .. amultiply         AA->A      Multiply two audio streams.
+ TS anequalizer       A->N       Apply high-order audio parametric multi band equalizer.
+ TS anlmdn            A->A       Reduce broadband noise from stream using Non-Local Means.
+ TS anlmf             AA->A      Apply Normalized Least-Mean-Fourth algorithm to first audio stream.
+ TS anlms             AA->A      Apply Normalized Least-Mean-Squares algorithm to first audio stream.
+ .. anull             A->A       Pass the source unchanged to the output.
+ T. apad              A->A       Pad audio with silence.
+ T. aperms            A->A       Set permissions for the output audio frame.
+ .. aphaser           A->A       Add a phasing effect to the audio.
+ TS aphaseshift       A->A       Apply phase shifting to input audio.
+ TS apsnr             AA->A      Measure Audio Peak Signal-to-Noise Ratio.
+ TS apsyclip          A->A       Audio Psychoacoustic Clipper.
+ .. apulsator         A->A       Audio pulsator.
+ .. arealtime         A->A       Slow down filtering to match realtime.
+ .. aresample         A->A       Resample audio data.
+ .. areverse          A->A       Reverse an audio clip.
+ TS arls              AA->A      Apply Recursive Least Squares algorithm to first audio stream.
+ TS arnndn            A->A       Reduce noise from speech using Recurrent Neural Networks.
+ TS asdr              AA->A      Measure Audio Signal-to-Distortion Ratio.
+ .. asegment          A->N       Segment audio stream.
+ .. aselect           A->N       Select audio frames to pass in output.
+ .. asendcmd          A->A       Send commands to filters.
+ T. asetnsamples      A->A       Set the number of samples for each output audio frames.
+ .. asetpts           A->A       Set PTS for the output audio frame.
+ .. asetrate          A->A       Change the sample rate without altering the data.
+ .. asettb            A->A       Set timebase for the audio output link.
+ .. ashowinfo         A->A       Show textual information for each audio frame.
+ T. asidedata         A->A       Manipulate audio frame side data.
+ TS asisdr            AA->A      Measure Audio Scale-Invariant Signal-to-Distortion Ratio.
+ TS asoftclip         A->A       Audio Soft Clipper.
+ .S aspectralstats    A->A       Show frequency domain statistics about audio frames.
+ .. asplit            A->N       Pass on the audio input to N audio outputs.

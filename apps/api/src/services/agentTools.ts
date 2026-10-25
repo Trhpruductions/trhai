@@ -12,6 +12,8 @@ import {
   parseVideoScript, planProject, slugify, titleFrom, videoScriptPrompt, withChanges, type VideoScript
 } from "@ascend/shared";
 import { renderVideo } from "./videoRender.js";
+import { describeMusicVideos, listMusicVideos, parseMusicVideoRequest, whyNotMusicVideo } from "./musicVideoFiles.js";
+import { musicVideoStatus, startMusicVideo } from "./musicVideoJob.js";
 import type { RunningApp, StartResult } from "./appRunner.js";
 import { authorPrompt, findAppFault, parseAuthoredFiles, type AuthoredFile } from "./appAuthor.js";
 import { verifyBuiltProject } from "./buildVerification.js";
@@ -978,6 +980,43 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "make_music_video",
+      description:
+        "Make a music video from a song file in the workspace (an MP3, or WAV, M4A or FLAC): a ring of bars "
+        + "that moves with the music, the title in the middle and the lyrics lit word by word as they are "
+        + "sung, drawn on this PC and written to the workspace. It takes a minute or two for each minute of "
+        + "the song, so this only STARTS the video and returns at once: the video does not exist until it is "
+        + "finished, and the Music video screen shows how far it has got. Use this when the user wants a "
+        + "music video made from a song; make_video is for narrated presentations, not for songs. If the "
+        + "user has not said which file the song is, look for it in the workspace first. Pass the lyrics if "
+        + "the user gave them; without them TRH AI listens for the words.",
+      parameters: {
+        type: "object",
+        properties: {
+          song: { type: "string", description: "The song's path in the workspace, for example songs/my-song.mp3." },
+          title: { type: "string", description: "What to call the video, if the user said; otherwise the song's own title is used." },
+          artist: { type: "string", description: "The artist's name, if the user said." },
+          lyrics: { type: "string", description: "The lyrics, one line to a line, if the user gave them." },
+          preview: { type: "boolean", description: "True to make only the first 20 seconds, to try the look first." }
+        },
+        required: ["song"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "music_video_status",
+      description:
+        "Say how the music video being made is getting on, or how the last one ended, and list the most "
+        + "recent finished ones with where they are. Use this when the user asks if their music video is "
+        + "done, how long it has left, or where it is.",
+      parameters: { type: "object", properties: {}, required: [] }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "send_text",
       description:
         "Send a text message to a phone number, from the user's own phone through Phone Link. "
@@ -1054,7 +1093,7 @@ const scaffoldingTools = new Set(["build_app", "plan_app"]);
  * the port" is an ordinary thing to ask.
  */
 const machineChangingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "plan_app", "run_command", "run_script", "run_app"
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "plan_app", "run_command", "run_script", "run_app"
 ]);
 
 /**
@@ -1114,7 +1153,7 @@ const dateTools = new Set(["days_between", "shift_date"]);
  * A question does not write files, documents or apps, though.
  */
 const writingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "plan_app",
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "plan_app",
   "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule"
 ]);
 
@@ -1140,6 +1179,8 @@ const clockTools = new Set(["shift_time"]);
 const scheduleTools = new Set(["add_schedule"]);
 /** Offered only when the request is about a video; see mentionsVideo. */
 const videoTools = new Set(["make_video"]);
+/** Offered only when the request is about a music video; see mentionsMusicVideo. Then make_video is withheld: it makes narrated slides, not a video of a song. */
+const musicVideoTools = new Set(["make_music_video", "music_video_status"]);
 /**
  * The knowledge-base writers, withheld from a request that only reads unless
  * it asks for something to be kept. machineChangingTools already stops a read
@@ -1188,7 +1229,7 @@ export function availableTools(
   options: {
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
-    schedules?: boolean; video?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
+    schedules?: boolean; video?: boolean; musicVideo?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
     messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean;
   } = {}
 ): ToolDefinition[] {
@@ -1207,6 +1248,7 @@ export function availableTools(
   const allowMemory = options.memory ?? true;
   const allowSchedules = options.schedules ?? true;
   const allowVideo = options.video ?? true;
+  const allowMusicVideo = options.musicVideo ?? true;
   const allowDocumentWrites = options.documents ?? true;
   const allowStatus = options.status ?? true;
   const allowLaunch = options.launch ?? true;
@@ -1231,6 +1273,9 @@ export function availableTools(
     if (!allowMemory && memoryWritingTools.has(name)) return false;
     if (!allowSchedules && scheduleTools.has(name)) return false;
     if (!allowVideo && videoTools.has(name)) return false;
+    if (!allowMusicVideo && musicVideoTools.has(name)) return false;
+    // Asked for a music video, the narrated-slides tool is not the one wanted.
+    if (options.musicVideo === true && name === "make_video") return false;
     if (!allowDocumentWrites && documentWritingTools.has(name)) return false;
     if (!allowStatus && statusTools.has(name)) return false;
     if (!allowLaunch && launchTools.has(name)) return false;
@@ -2692,6 +2737,34 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
           + `${rendered.frames} frames, ${script.scenes.length} scene${script.scenes.length === 1 ? "" : "s"}.`
       };
     }
+
+    case "make_music_video": {
+      const song = requireString(call.arguments.song);
+      if (!song) return { ok: false, content: "make_music_video needs the song's path in the workspace." };
+      const preview = call.arguments.preview === true || call.arguments.preview === "true";
+      const parsed = parseMusicVideoRequest({
+        audio: song,
+        title: requireString(call.arguments.title) ?? undefined,
+        artist: requireString(call.arguments.artist) ?? undefined,
+        lyrics: requireString(call.arguments.lyrics) ?? undefined,
+        previewSeconds: preview ? 20 : undefined
+      });
+      if (!parsed.ok) return { ok: false, content: parsed.message };
+      const impossible = whyNotMusicVideo(parsed.request);
+      if (impossible) return { ok: false, content: impossible };
+      const started = startMusicVideo(parsed.request);
+      if (!started.ok) return { ok: false, content: started.reason };
+      // The video does not exist yet, and the model must not say it does.
+      return {
+        ok: true,
+        content: `Started making a music video from ${song}${preview ? ", a 20-second preview" : ""}. It is NOT finished: it takes about a minute or two for each minute of the song, `
+          + "drawn on this PC's processor in the background, and the Music video screen shows how far it has got. Tell the user it has started, not that it is made, "
+          + "and do not give a path to a video that does not exist yet; music_video_status says when it is done."
+      };
+    }
+
+    case "music_video_status":
+      return { ok: true, content: describeMusicVideos(musicVideoStatus(), listMusicVideos().slice(0, 5)) };
 
     case "list_files": {
       const directory = typeof call.arguments.directory === "string" && call.arguments.directory.trim()
