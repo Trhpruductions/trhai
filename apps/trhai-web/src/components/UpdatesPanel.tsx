@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../os/ui/Icon";
-import { readUpdates, showWhatsNewEvent, type UpdateCheck } from "../lib/updates";
+import { readUpdates, recheckUpdatesEvent, showWhatsNewEvent, type UpdateCheck } from "../lib/updates";
 import { DesktopUpdateButton } from "./DesktopUpdateButton";
 import "./paywall.css";
 
@@ -20,6 +20,8 @@ export function UpdatesPanel() {
     setBusy(false);
     setFailed(next === null);
     if (next) setCheck(next);
+    // So that a release marked required is acted on now, not at the next look.
+    if (refresh) window.dispatchEvent(new Event(recheckUpdatesEvent));
   }, []);
 
   useEffect(() => {
@@ -46,7 +48,7 @@ export function UpdatesPanel() {
         {check ? (
           <>
             <div className={`billing-status ${check.updateAvailable ? "fresh" : ""}`}>
-              <span className="os-label">{check.updateAvailable ? "Update available" : "This version"}</span>
+              <span className="os-label">{check.updateAvailable ? (check.latest?.required ? "Required update" : "Update available") : "This version"}</span>
               <strong className="billing-plan">v{check.updateAvailable && check.latest ? check.latest.version : check.currentVersion}</strong>
               <p>
                 {check.updateAvailable && check.latest

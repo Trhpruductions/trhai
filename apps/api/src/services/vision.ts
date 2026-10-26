@@ -6,15 +6,18 @@ import { engineFetch } from "./engineFetch.js";
 // Looking at an image, with a local vision model.
 //
 // The chat model reads text only. An image - pasted into the chat, or a file
-// on disk - goes to a separate vision model (qwen2.5-vl-3b by default,
-// TRHAI_VISION_MODEL to change it), which answers the question asked about
-// it. Nothing leaves the machine and nothing needs a key, the same as
-// everything else here. The engine keeps one model in memory, so the two swap
-// on an 8 GB card, and a cold load off a hard disk took 73 s on a busy one -
-// so the client warms the vision model the moment an image is attached
-// (warmVisionModel), while the question is still being typed.
+// on disk - goes to a separate vision model (qwen3-vl-8b-abliterated by
+// default, the 4B one on a small PC, TRHAI_VISION_MODEL to change it), which
+// answers the question asked about it; when the named model is not installed,
+// any other that takes images does. Nothing leaves the machine and nothing
+// needs a key, the same as everything else here. The engine keeps one model
+// in memory, so the two swap on an 8 GB card, and a cold load off a hard disk
+// took 73 s on a busy one - so the client warms the vision model the moment
+// an image is attached (warmVisionModel), while the question is still being
+// typed.
 
-export const defaultVisionModel = "qwen2.5-vl-3b";
+/** Looked for first. A small PC is given the 4B by modelSetup's hardwareDefaults. */
+export const defaultVisionModel = "qwen3-vl-8b-abliterated";
 
 /** The most images looked at in one turn. */
 export const maxImagesPerTurn = 4;

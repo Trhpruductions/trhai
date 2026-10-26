@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  describeHardware, formatBytes, initialSelection, initialToolSelection, jobPercent, plannedBytes, setupReason, stepText, type SetupStatus, type ToolEntry
+  describeHardware, formatBytes, initialSelection, initialToolSelection, jobPercent, plannedBytes, requiredNotice, setupReason, stepText, toolHasMore, toolRemainingBytes,
+  type RequiredStatus, type SetupStatus, type ToolEntry
 } from "../src/lib/setup.js";
 
 // What the setup screens work out from the API's answer.
@@ -32,6 +33,22 @@ test("a new PC starts with the recommended model picked, and the engine counted 
   assert.deepEqual(initialSelection(fresh), ["small"]);
   assert.equal(plannedBytes(fresh, ["small"]), 2.5 * gib + 19_328_326);
   assert.equal(formatBytes(plannedBytes(fresh, ["small"])), "2.5 GB");
+});
+
+test("a new PC starts with the recommended chat model and the recommended picture model both picked, and counts both", () => {
+  const fresh = status({
+    catalog: [
+      ...status().catalog,
+      { id: "see", label: "See", summary: "", needs: "", license: { name: "Apache 2.0", url: "", commercialUse: true }, vision: true, sizeBytes: 2.9 * gib, installed: false, recommended: true }
+    ]
+  });
+  assert.deepEqual(initialSelection(fresh), ["small", "see"]);
+  assert.equal(plannedBytes(fresh, initialSelection(fresh)), 2.5 * gib + 2.9 * gib + 19_328_326);
+  // A picture model already there is not picked again; one that is not the recommended is no reason to leave it out.
+  const seeing = { ...fresh, installed: [{ id: "other-vl", sizeBytes: 1, vision: true, inCatalog: false }] };
+  assert.deepEqual(initialSelection(seeing), ["small"]);
+  // A PC that can already chat is left as it is.
+  assert.deepEqual(initialSelection({ ...fresh, installed: [{ id: "x", sizeBytes: 1, vision: false, inCatalog: false }] }), []);
 });
 
 test("a PC that can already chat starts with nothing picked; a vision model alone does not count", () => {
@@ -68,6 +85,26 @@ test("every tool that is not installed starts ticked and counts in the download;
   assert.equal(plannedBytes(fresh, ["small"]), 2.5 * gib + 19_328_326, "with no tools ticked, the tools are not counted");
 });
 
+test("a tool that works but is short of some of its own parts (one voice of five) is offered ticked, and counts only what is missing", () => {
+  const oneVoice = tool("speech", { installed: true, sizeBytes: 0, missingBytes: 400 * mib });
+  const fresh = status({ tools: [oneVoice, tool("video", { installed: true, sizeBytes: 0, missingBytes: 0 })] });
+  assert.equal(toolHasMore(oneVoice), true);
+  assert.equal(toolRemainingBytes(oneVoice), 400 * mib);
+  assert.deepEqual(initialToolSelection(fresh), ["speech"], "the complete tool is left out");
+  assert.equal(plannedBytes(fresh, [], ["speech", "video"]), 19_328_326 + 400 * mib);
+  // A service that does not say what is missing is read as before: installed means nothing is left.
+  const older = tool("speech", { installed: true, sizeBytes: 0 });
+  assert.equal(toolHasMore(older), false);
+  assert.equal(toolRemainingBytes(older), 0);
+  assert.equal(toolRemainingBytes(tool("speech", { sizeBytes: 130 * mib })), 130 * mib, "not installed: all of it");
+});
+
+test("being short of a tool's own parts is not a reason to open the setup screen by itself", () => {
+  // The update installs them without asking (the API's required setup); a screen asking again would be a second question.
+  const ready = status({ needsSetup: false, tools: [tool("speech", { installed: true, sizeBytes: 0, missingBytes: 400 * mib })] });
+  assert.equal(setupReason(ready, false), null);
+});
+
 test("a tool this PC cannot use is not offered ticked", () => {
   const other = status({ tools: [tool("speech", { supported: false }), tool("video")] });
   assert.deepEqual(initialToolSelection(other), ["video"]);
@@ -98,6 +135,77 @@ test("nothing is offered to a PC that can answer and has every tool, or cannot u
   assert.equal(setupReason(elsewhere, false), null);
   const older = status({ needsSetup: false, tools: undefined as unknown as ToolEntry[] });
   assert.equal(setupReason(older, false), null, "a service that sends no tools has none to offer");
+});
+
+const requiredState = (overrides: Partial<RequiredStatus> = {}): RequiredStatus => ({
+  generation: 1, applies: true, state: "waiting", error: null, attempts: 0, remainingBytes: 12 * gib, ...overrides
+});
+const requiredJob = {
+  id: "j", state: "running" as const, startedAt: "", finishedAt: null, error: null,
+  steps: [
+    { kind: "model" as const, id: "a", label: "Qwen2.5 Coder 7B (no refusals)", totalBytes: 100, doneBytes: 100, state: "done" as const, error: null },
+    { kind: "model" as const, id: "b", label: "Qwen3 VL 8B (pictures, no refusals)", totalBytes: 100, doneBytes: 50, state: "downloading" as const, error: null },
+    { kind: "tool" as const, id: "speech", label: "Voice (Piper)", totalBytes: 200, doneBytes: 0, state: "waiting" as const, error: null }
+  ]
+};
+
+test("the install an update brings is shown on a copy that is set up, in the words of how far it has got", () => {
+  const running = requiredNotice(status({ needsSetup: false, job: requiredJob, required: requiredState({ state: "running" }) }));
+  assert.ok(running);
+  assert.equal(running.tone, "working");
+  assert.equal(running.percent, 37, "by bytes across every step, rounded down: 150 of 400");
+  assert.match(running.text, /now Qwen3 VL 8B \(pictures, no refusals\)/, "the step that is going, not one that is done or waiting");
+  assert.deepEqual(running.action, { kind: "stop", label: "Stop" });
+
+  const waiting = requiredNotice(status({ needsSetup: false, required: requiredState() }));
+  assert.ok(waiting);
+  assert.match(waiting.text, /12\.0 GB to download/);
+  assert.deepEqual(waiting.action, { kind: "start", label: "Start now" });
+  assert.equal(waiting.percent, null);
+
+  // Running, but the job is not in the answer yet: no progress to show, and nothing breaks.
+  const early = requiredNotice(status({ needsSetup: false, job: null, required: requiredState({ state: "running" }) }));
+  assert.ok(early);
+  assert.equal(early.percent, null);
+  assert.doesNotMatch(early.text, /now /);
+});
+
+test("a stopped install, or one that did not finish, says what is left and why, and offers to carry on", () => {
+  const failed = requiredNotice(status({ needsSetup: false, required: requiredState({ state: "failed", error: "Not enough free space: this needs about 14.3 GB and the drive has 9.0 GB. Free some space and try again.", remainingBytes: 5.5 * gib }) }));
+  assert.ok(failed);
+  assert.equal(failed.tone, "attention");
+  assert.match(failed.title, /did not finish/);
+  assert.match(failed.text, /Not enough free space: this needs about 14\.3 GB and the drive has 9\.0 GB/);
+  assert.match(failed.text, /5\.5 GB still to download/);
+  assert.deepEqual(failed.action, { kind: "start", label: "Try again" });
+
+  const noReason = requiredNotice(status({ needsSetup: false, required: requiredState({ state: "failed", error: null }) }));
+  assert.match(noReason?.text ?? "", /Something went wrong\./, "a failure with no reason still says something");
+
+  const stopped = requiredNotice(status({ needsSetup: false, required: requiredState({ state: "stopped", remainingBytes: 7 * gib }) }));
+  assert.ok(stopped);
+  assert.equal(stopped.tone, "attention");
+  assert.match(stopped.title, /was stopped/);
+  assert.match(stopped.text, /7\.0 GB .* still to download.*What was fetched is kept/);
+  assert.deepEqual(stopped.action, { kind: "start", label: "Continue" });
+});
+
+test("nothing is said of an install that is finished, that does not apply, or that an older service knows nothing of", () => {
+  assert.equal(requiredNotice(null), null);
+  assert.equal(requiredNotice(status({ needsSetup: false, required: requiredState({ state: "done", remainingBytes: 0 }) })), null);
+  assert.equal(requiredNotice(status({ needsSetup: true, required: requiredState({ applies: false }) })), null, "a new install is asked by its first-run screen");
+  assert.equal(requiredNotice(status({ needsSetup: false })), null, "an older service sends no 'required'");
+});
+
+test("while an update installs the tools by itself, the setup screen does not ask about them as well", () => {
+  const lacking = [tool("speech", { sizeBytes: 400 * mib })];
+  assert.equal(setupReason(status({ needsSetup: false, tools: lacking }), false), "tools", "without it: asked once, as before");
+  for (const state of ["waiting", "running", "failed", "stopped"] as const) {
+    assert.equal(setupReason(status({ needsSetup: false, tools: lacking, required: requiredState({ state }) }), false), null, state);
+  }
+  assert.equal(setupReason(status({ needsSetup: false, tools: lacking, required: requiredState({ state: "done", remainingBytes: 0 }) }), false), "tools");
+  assert.equal(setupReason(status({ needsSetup: false, tools: lacking, required: requiredState({ applies: false }) }), false), "tools");
+  assert.equal(setupReason(status({ needsSetup: true, tools: lacking, required: requiredState({ applies: false }) }), false), "first-run", "a new install still gets its screen");
 });
 
 test("a tool's step reads like any other step, and counts in the progress", () => {

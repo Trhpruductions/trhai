@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "../os/ui/Icon";
 import {
   describeHardware, formatBytes, initialSelection, initialToolSelection, jobPercent, plannedBytes, readSetup, removeInstalledModel,
-  startInstall, stepText, stopInstall, type SetupStatus
+  startInstall, stepText, stopInstall, toolHasMore, toolRemainingBytes, type SetupStatus
 } from "../lib/setup";
 import "./setup.css";
 
@@ -50,7 +50,7 @@ export function SetupPanel({ mode, focus = "everything", onDone }: { mode: "firs
   const selected = focus === "tools" ? [] : picked ?? initialSelection(status);
   // Every tool that is not installed starts ticked, so that one click installs everything.
   const selectedTools = pickedTools ?? initialToolSelection(status);
-  const toolsToInstall = selectedTools.filter((id) => status.tools?.some((tool) => tool.id === id && !tool.installed));
+  const toolsToInstall = selectedTools.filter((id) => status.tools?.some((tool) => tool.id === id && toolHasMore(tool)));
   const job = status.job;
   const running = job?.state === "running";
   const needed = plannedBytes(status, selected, selectedTools);
@@ -178,28 +178,38 @@ export function SetupPanel({ mode, focus = "everything", onDone }: { mode: "firs
           <ul className="setup-models">
             {status.tools.map((tool) => {
               const installing = running && Boolean(job?.steps.some((step) => step.kind === "tool" && step.id === tool.id && step.state !== "done"));
-              const checked = tool.installed || installing || selectedTools.includes(tool.id);
+              // A copy that works but is short of some of its own parts (one voice of five) can add them.
+              const more = toolHasMore(tool);
+              const checked = !more || installing || selectedTools.includes(tool.id);
               return (
                 <li key={tool.id} className={tool.installed ? "installed" : ""}>
                   <label>
                     <input
                       type="checkbox"
                       checked={checked}
-                      disabled={tool.installed || running || !tool.supported}
+                      disabled={!more || running || !tool.supported}
                       onChange={() => toggleTool(tool.id)}
                     />
                     <span className="setup-model-text">
                       <span className="setup-model-head">
                         <strong>{tool.label}</strong>
-                        {tool.installed ? <span className="setup-tag ok">Installed</span>
-                          : installing ? <span className="setup-tag rec">Installing</span>
+                        {installing ? <span className="setup-tag rec">Installing</span>
+                          : tool.installed ? <span className="setup-tag ok">Installed</span>
                             : !tool.supported ? <span className="setup-tag todo">Windows only</span>
-                              : <span className="os-faint os-small">{formatBytes(tool.sizeBytes)}</span>}
+                              : null}
+                        {!installing && more && tool.supported ? <span className="os-faint os-small">{tool.installed ? `${formatBytes(toolRemainingBytes(tool))} more to add` : formatBytes(toolRemainingBytes(tool))}</span> : null}
                       </span>
                       <span>{tool.summary}</span>
                       <span className="os-faint os-small">
                         Needs {tool.needs}. Licence: <a href={tool.license.url} target="_blank" rel="noreferrer">{tool.license.name}</a>.
                       </span>
+                      {(tool.included ?? []).length > 0 ? (
+                        <ul className="setup-parts os-faint os-small" aria-label={`Licences of what ${tool.label} installs`}>
+                          {(tool.included ?? []).map((part) => (
+                            <li key={part.label}>{part.label}: <a href={part.license.url} target="_blank" rel="noreferrer">{part.license.name}</a></li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </span>
                   </label>
                 </li>

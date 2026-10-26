@@ -18,7 +18,7 @@ process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 
 const {
   defaultVisionModel, describeQuestion, findVisionModel, imageKind, imageSize, imageTokens, lookAtImages, maxImagesPerTurn,
-  parseImages, tokensNeededFor, warmVisionModel
+  parseImages, tokensNeededFor, visionModelName, warmVisionModel
 } = await import("../src/services/vision.js");
 const { runTool, availableTools } = await import("../src/services/agentTools.js");
 const { mentionsAnImage } = await import("../src/services/actionIntent.js");
@@ -178,6 +178,18 @@ test("the named vision model is used when it is installed, and any vision model 
     { reachable: true, model: null });
   const down = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
   assert.deepEqual(await findVisionModel("http://engine", "qwen2.5-vl-3b", down), { reachable: false, model: null });
+});
+
+test("the picture model looked for is the 8B with its refusals taken out, what the PC or the user names instead, and any other if it is not there", async () => {
+  assert.equal(defaultVisionModel, "qwen3-vl-8b-abliterated");
+  assert.equal(visionModelName({} as NodeJS.ProcessEnv), "qwen3-vl-8b-abliterated");
+  assert.equal(visionModelName({ TRHAI_VISION_MODEL: " qwen3-vl-4b-abliterated " } as NodeJS.ProcessEnv), "qwen3-vl-4b-abliterated");
+  // Installed beside an older picture model, the new one is used: by its name, not by being first in the folder.
+  const both = standIn(["qwen2.5-vl-3b", "qwen3-vl-8b-abliterated"], { vision: ["qwen2.5-vl-3b", "qwen3-vl-8b-abliterated"] });
+  assert.deepEqual(await findVisionModel("http://engine", defaultVisionModel, both.fetcher), { reachable: true, model: "qwen3-vl-8b-abliterated" });
+  // Only the older one is there (an update that has not finished fetching): it still looks at pictures.
+  const older = standIn(["qwen2.5-vl-3b"], { vision: ["qwen2.5-vl-3b"] });
+  assert.deepEqual(await findVisionModel("http://engine", defaultVisionModel, older.fetcher), { reachable: true, model: "qwen2.5-vl-3b" });
 });
 
 test("the image and the question go to the vision model together", async () => {

@@ -218,7 +218,12 @@ export function promptTooLong(config: Pick<LocalModelConfig, "model" | "contextT
     + `${contextWindow(config).toLocaleString("en-US")} tokens). Ask about less of it at a time.`;
 }
 
-/** The model asked for when none is named: the head of preferredModels. */
+/**
+ * The model family asked for when none is named, and the one code work looks
+ * for first. Any size or build of it counts (isModelOrSize), the one with its
+ * refusals taken out among them; which of those answers is preferredModels'
+ * business.
+ */
 export const defaultModel = "qwen2.5-coder";
 
 export function readLocalModelConfig(env: NodeJS.ProcessEnv = process.env): LocalModelConfig {
@@ -271,6 +276,13 @@ type FetchLike = typeof fetch;
  * overrule a choice.
  */
 const preferredModels = [
+  // The builds with their refusals taken out, ahead of the models they were
+  // made from, so that a PC with both answers with the one that answers. Each
+  // is named in full: the family names below match the original too, and
+  // `find` takes whichever of the two comes first in the folder, which is the
+  // original ("qwen2.5-coder-7b" sorts before "qwen2.5-coder-7b-abliterated").
+  "qwen2.5-coder-7b-abliterated",
+  "qwen3-4b-instruct-2507-abliterated",
   // Tuned for code, the best tool-caller of these, and the one the assistant
   // was measured with (84% of 54 tasks).
   defaultModel,

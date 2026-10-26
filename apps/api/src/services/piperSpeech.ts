@@ -55,13 +55,29 @@ export type NeuralVoice = {
  * this needing an update. A speaker not listed here gets `gender: null`
  * rather than a guess — an unfamiliar voice is exactly the case where
  * inventing an answer would be worse than admitting this does not know.
+ *
+ * Jarvis is the odd one out: nobody named it for how it sounds, it is a
+ * character's voice, and the character is a man.
  */
 const knownSpeakerGender: Record<string, VoiceGender> = {
   ryan: "male",
   alan: "male",
+  jarvis: "male",
   cori: "female",
   amy: "female"
 };
+
+/**
+ * The voice used when nobody has picked one: the same voice the app itself
+ * starts on (`defaultVoice` in the interface's lib/voicePreference.ts), so the
+ * service and the screen agree about what "the default" sounds like.
+ *
+ * It is named rather than left to the ranking below, because the ranking only
+ * says which voice is likely to sound best. With every voice installed it
+ * would put a voice that is not the app's own choice first - Jarvis is male,
+ * British and high quality, which is exactly what the ranking prefers.
+ */
+export const defaultVoiceId = "en_GB-alan-medium";
 
 export type PiperStatus =
   | { available: true; voice: NeuralVoice; voices: NeuralVoice[]; binaryPath: string }
@@ -192,11 +208,13 @@ export function piperStatus(): PiperStatus {
 
   // An explicit preference wins, but only if it is actually there — falling
   // back silently to a different voice would make a configured choice look
-  // like it took when it did not.
+  // like it took when it did not. Without one, the app's own default if it is
+  // installed, and the best-ranked voice if it is not.
   const preferred = process.env.VEXORA_PIPER_VOICE;
   const chosen = preferred ? voices.find((voice) => voice.id === preferred) : undefined;
+  const standard = voices.find((voice) => voice.id === defaultVoiceId);
 
-  return { available: true, voice: chosen ?? voices[0], voices, binaryPath: binary };
+  return { available: true, voice: chosen ?? standard ?? voices[0], voices, binaryPath: binary };
 }
 
 export type SynthesisResult =

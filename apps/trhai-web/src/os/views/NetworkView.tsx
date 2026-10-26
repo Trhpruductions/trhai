@@ -160,8 +160,8 @@ export function NetworkView() {
                 <li><strong>Web pages and searches</strong> - only when TRH AI is asked to read or look something up, or you use the Browser. Searches go to DuckDuckGo.</li>
                 <li><strong>Email</strong> - only one you approve, through your own account or your mail app.</li>
                 <li><strong>Texts</strong> - only one you approve, from your own phone through Phone Link.</li>
-                <li><strong>Updates</strong> - every few hours TRH AI asks GitHub whether a newer version is out, sending nothing about you, and downloads one only when you choose to install it.</li>
-                <li><strong>Engine and models</strong> - downloaded once, from GitHub and Hugging Face, when you set them up, and checked against their published fingerprints.</li>
+                <li><strong>Updates</strong> - every few hours TRH AI asks GitHub whether a newer version is out, sending nothing about you, and downloads one when you choose to install it - or by itself, when the release is marked required.</li>
+                <li><strong>Engine, models, voices and tools</strong> - downloaded from GitHub and Hugging Face when you set them up, and by itself after an update that brings new ones, each checked against its published fingerprint.</li>
               </ul>
             </div>
           </section>

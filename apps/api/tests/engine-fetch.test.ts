@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { once } from "node:events";
-import { engineFetch } from "../src/services/engineFetch.js";
+import { engineFetch, engineRequestsInFlight } from "../src/services/engineFetch.js";
 
 // The engine's client: a standard Response, streamed, stopped by its signal,
 // and with no wait limit of its own (the reason it exists - see engineFetch.ts).
@@ -117,6 +117,55 @@ test("each request has a connection of its own: the engine closes them after an 
     assert.deepEqual(connections, ["close", "close", "close"]);
   } finally {
     await engine.close();
+  }
+});
+
+test("the requests that are open are counted, from the first byte sent to the last read, stopped or finished", async () => {
+  const waitForCount = async (expected: number) => {
+    for (let waited = 0; waited < 2000 && engineRequestsInFlight() !== expected; waited += 10) await new Promise((resolve) => setTimeout(resolve, 10));
+    return engineRequestsInFlight();
+  };
+  const engine = await serve((request, response) => {
+    if (request.url === "/never") return; // never answers
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.write("data: first\n\n");
+    if (request.url === "/short") setTimeout(() => response.end(), 30);
+  });
+  try {
+    // The earlier tests' sockets close a moment after their bodies were read.
+    assert.equal(await waitForCount(0), 0);
+
+    // One that never answers is open until it is stopped; stopping closes it.
+    const stop = new AbortController();
+    const waiting = engineFetch(`${engine.url}/never`, { signal: stop.signal });
+    waiting.catch(() => undefined);
+    assert.equal(await waitForCount(1), 1);
+    stop.abort();
+    await assert.rejects(waiting, { name: "AbortError" });
+    assert.equal(await waitForCount(0), 0, "a stopped request is not still counted");
+
+    // A reply still being written counts, though its headers have long arrived; reading it to the end ends it.
+    const reply = await engineFetch(`${engine.url}/short`);
+    assert.equal(engineRequestsInFlight(), 1);
+    await reply.text();
+    assert.equal(await waitForCount(0), 0);
+
+    // Two at once, and a refused connection leaves nothing counted.
+    const more = new AbortController();
+    const first = engineFetch(`${engine.url}/never`, { signal: more.signal });
+    const second = engineFetch(`${engine.url}/never`, { signal: more.signal });
+    first.catch(() => undefined);
+    second.catch(() => undefined);
+    assert.equal(await waitForCount(2), 2);
+    more.abort();
+    await Promise.allSettled([first, second]);
+    assert.equal(await waitForCount(0), 0);
+    const { url } = engine;
+    await engine.close();
+    await assert.rejects(engineFetch(`${url}/health`), TypeError);
+    assert.equal(await waitForCount(0), 0, "a request that never connected is not counted");
+  } finally {
+    await engine.close().catch(() => undefined);
   }
 });
 

@@ -13,9 +13,42 @@ export type ReleaseNote = {
   title: string;
   /** One change per line, each a plain sentence. */
   notes: string[];
+  /**
+   * Every copy has to move to this version: an installed copy older than it
+   * downloads it by itself and restarts into it, instead of offering it.
+   * A copy only does so if its own version knows how (0.1.8 and later), so a
+   * note that is the first one such a copy has seen is offered as usual.
+   */
+  required?: boolean;
 };
 
+/**
+ * The line a required release's page carries under its title. The installed
+ * app reads the page back and looks for exactly this line: a fixed sentence,
+ * rather than a hidden marker or a guess from the notes' own words, so that
+ * what the page says and what the app does cannot drift apart.
+ */
+export const requiredUpdateLine = "Required update: TRH AI downloads this one by itself and restarts to install it.";
+
+/** Whether the text of a release page marks it as required: the line, on a line of its own. */
+export function isRequiredReleaseText(text: string): boolean {
+  return text.split(/\r?\n/).some((line) => line.trim() === requiredUpdateLine);
+}
+
 export const releaseNotes: ReleaseNote[] = [
+  {
+    version: "0.1.8",
+    date: "2026-10-26",
+    title: "Five voices, models that answer what you ask, and an update that finishes its own install",
+    notes: [
+      "Five voices to choose from, all installed for you: Alan, Amy, Cori, Ryan and the Jarvis voice. Settings, Engine and models, lists each one's licence beside it, because they are not all the same: only Cori is free to use in anything.",
+      "New models that answer what they are asked: Qwen2.5 Coder 7B or Qwen3 4B Instruct to talk with, and Qwen3 VL 8B or 4B to read pictures, screenshots and documents, whichever your PC can run. They are the original models with their refusals taken out, and they still use TRH AI's tools. The earlier models stay in Settings, Engine and models, for anyone who wants them.",
+      "TRH AI's own checks before it changes anything on your PC, the machine-access switch and the confirmations, are not part of a model and are unchanged.",
+      "An update now installs what it brings. A little after TRH AI opens following this update, it downloads the new models, voices and tools by itself, shows at the top of every screen how far it has got, and carries on after an interruption. Every file is checked against what its makers published, and the AI engine is restarted only when you are not waiting on a reply. It downloads about 11 GB on a PC that runs the larger models and about 6 GB on a smaller one, and says so if the drive does not have room.",
+      "A new PC is offered both models and all of the tools, ticked, at the first run.",
+      "From this version on, a release can be marked required: TRH AI then downloads it by itself and restarts into it, instead of only offering it."
+    ]
+  },
   {
     version: "0.1.7",
     date: "2026-10-25",
@@ -105,6 +138,8 @@ export function releasePageText(version: string, options: { candidate?: boolean 
   return [
     note.title,
     "",
+    // Not on a release candidate's page: it is a pre-release, which no installed copy is offered or downloads.
+    ...(note.required && !options.candidate ? [requiredUpdateLine, ""] : []),
     ...note.notes.map((line) => `- ${line}`),
     "",
     ...(options.candidate ? ["This is a release candidate, published for testing. Installed copies of TRH AI are not offered it.", ""] : []),

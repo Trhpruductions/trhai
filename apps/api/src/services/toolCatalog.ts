@@ -17,22 +17,29 @@
 //   whisperTranscribe.ts), so a copy a person installed by hand keeps working,
 //   and a tool that is already there is left alone.
 //
-// The voice is Cori, an English (British) voice recorded from public-domain
-// LibriVox readings. It is the default because its licence allows what the rest
-// of the app allows; the most popular Piper voice, Ryan, is CC BY-NC-SA and is
-// not offered for that reason. More voices can be added by putting their two
-// files beside Piper's.
+// The voices are Alan, Amy, Cori, Ryan and Jarvis: what the app's owner has on
+// their own PC, so that everyone else hears the same ones. They do not share a
+// licence. Cori, recorded from public-domain LibriVox readings, is the only one
+// plainly free to use in anything. Ryan is CC BY-NC-SA (non-commercial), Alan's
+// licence file says "All Rights Reserved", Amy's makers state none, and Jarvis
+// is a fan-made imitation of a film character's voice. Each is labelled with
+// what is known of it, below and on the screen that installs it, so that none
+// is passed off as free; dropping one is deleting its entry from `piperVoices`.
+// More voices can be added by putting their two files beside Piper's.
 
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import type { PinnedFile } from "./modelSetup.js";
 import { ffmpegAvailable, ffmpegHome, ffmpegRunsPatiently, forgetFfmpegCheck } from "./ffmpegPath.js";
-import { installedVoices, piperRoot, piperStatus } from "./piperSpeech.js";
+import { piperRoot, piperStatus } from "./piperSpeech.js";
 import { binaryPath as whisperProgram, installedModels, whisperRoot, whisperStatus } from "./whisperTranscribe.js";
 
 export type ToolId = "speech" | "listening" | "video";
 
 export type ToolLicense = { name: string; url: string; commercialUse: boolean };
+
+/** Something a tool installs that has a licence of its own: one of the voices. */
+export type IncludedPart = { label: string; license: ToolLicense };
 
 export type ToolDef = {
   id: ToolId;
@@ -42,6 +49,8 @@ export type ToolDef = {
   /** What using it needs besides the tool. */
   needs: string;
   license: ToolLicense;
+  /** What it installs that is not under `license`: each part with the licence it came with. */
+  included?: IncludedPart[];
   /** Everything it downloads when none of it is here yet. */
   files: PinnedFile[];
   /** The files still to fetch: all of them, or only the part that is missing. Empty when it is all there. */
@@ -64,8 +73,9 @@ const github = (repo: string, tag: string, name: string, sizeBytes: number, sha2
   name, sizeBytes, sha256, url: `https://github.com/${repo}/releases/download/${tag}/${name}`
 });
 
-const huggingFace = (repo: string, commit: string, folder: string, name: string, sizeBytes: number, sha256: string): PinnedFile => ({
-  name, sizeBytes, sha256, url: `https://huggingface.co/${repo}/resolve/${commit}/${folder}${name}`
+/** `saveAs` is the name the file is kept under, for one whose makers named it something the app cannot use. */
+const huggingFace = (repo: string, commit: string, folder: string, name: string, sizeBytes: number, sha256: string, saveAs = name): PinnedFile => ({
+  name: saveAs, sizeBytes, sha256, url: `https://huggingface.co/${repo}/resolve/${commit}/${folder}${name}`
 });
 
 // ---------------------------------------------------------------- what is on disk
@@ -119,35 +129,105 @@ function unpackedBeside(downloads: string, name: string, archive: string, unpack
   return staging;
 }
 
-// ---------------------------------------------------------------- speech: Piper and a voice
+// ---------------------------------------------------------------- speech: Piper and its voices
 
 const piperVoiceCommit = "5041a7a49ae5b3a0f30e6837769eb03fdbb231bd";
+/** The Jarvis voice is not in Piper's collection: it is its maker's own repository, pinned the same way. */
+const jarvisVoiceCommit = "37f8763122312665f091d1fc760abaf1f79b02cc";
 
 export const piperArchive = github(
   "rhasspy/piper", "2023.11.14-2", "piper_windows_amd64.zip", 22_477_236,
   "f3c58906402b24f3a96d92145f58acba6d86c9b5db896d207f78dc80811efcea"
 );
 
-/** A voice is two files, and Piper cannot load one without the other. */
-export const piperVoiceFiles: PinnedFile[] = [
-  huggingFace("rhasspy/piper-voices", piperVoiceCommit, "en/en_GB/cori/high/", "en_GB-cori-high.onnx", 114_219_352,
-    "470b4dd634c98f8a4850d7626ffc3dfc90774628eeef6605a6dd8f88f30a5903"),
-  huggingFace("rhasspy/piper-voices", piperVoiceCommit, "en/en_GB/cori/high/", "en_GB-cori-high.onnx.json", 4_963,
-    "9e7fb5b5671612c22f3c81cbe46c1ae87b031a4632bcb509e499dad6f1e2adec")
+/** One voice as Piper wants it. */
+export type PiperVoiceDef = {
+  /** The id the app and the picker use: the model's file stem, `locale-speaker-quality`, which is how Piper names them. */
+  id: string;
+  label: string;
+  license: ToolLicense;
+  /** The model and the json beside it: Piper cannot load one without the other. */
+  files: PinnedFile[];
+};
+
+/**
+ * A voice's two files, kept under the app's id for it. `published` is what the
+ * makers called them when that is not the same: the app reads a voice's speaker
+ * and quality from its file name, and the Jarvis files are called `jarvis-high`.
+ */
+function voiceFiles(
+  repo: string, commit: string, folder: string, id: string, published: string,
+  model: [sizeBytes: number, sha256: string], config: [sizeBytes: number, sha256: string]
+): PinnedFile[] {
+  return [
+    huggingFace(repo, commit, folder, `${published}.onnx`, model[0], model[1], `${id}.onnx`),
+    huggingFace(repo, commit, folder, `${published}.onnx.json`, config[0], config[1], `${id}.onnx.json`)
+  ];
+}
+
+const piperVoicesRepo = "rhasspy/piper-voices";
+
+/**
+ * Every voice the voice tool installs, the app's own default first. What is
+ * written in `license` is what each voice's makers say and no more; `commercialUse`
+ * is true only where they say it outright.
+ */
+export const piperVoices: PiperVoiceDef[] = [
+  {
+    id: "en_GB-alan-medium", label: "Alan",
+    license: { name: "All rights reserved (Mycroft AI)", url: "https://github.com/MycroftAI/mimic3-voices/blob/master/voices/en_UK/apope_low/LICENSE", commercialUse: false },
+    files: voiceFiles(piperVoicesRepo, piperVoiceCommit, "en/en_GB/alan/medium/", "en_GB-alan-medium", "en_GB-alan-medium",
+      [63_201_294, "0a309668932205e762801f1efc2736cd4b0120329622adf62be09e56339d3330"],
+      [4_888, "c0f0d124e5895c00e7c03b35dcc8287f319a6998a365b182deb5c8e752ee8c1e"])
+  },
+  {
+    id: "en_GB-cori-high", label: "Cori",
+    license: { name: "Public domain (LibriVox recordings)", url: "https://librivox.org/pages/public-domain/", commercialUse: true },
+    files: voiceFiles(piperVoicesRepo, piperVoiceCommit, "en/en_GB/cori/high/", "en_GB-cori-high", "en_GB-cori-high",
+      [114_219_352, "470b4dd634c98f8a4850d7626ffc3dfc90774628eeef6605a6dd8f88f30a5903"],
+      [4_963, "9e7fb5b5671612c22f3c81cbe46c1ae87b031a4632bcb509e499dad6f1e2adec"])
+  },
+  {
+    id: "en_GB-jarvis-high", label: "Jarvis",
+    license: { name: "Fan-made imitation of a film character (tagged MIT, not cleared)", url: "https://huggingface.co/jgkawell/jarvis", commercialUse: false },
+    files: voiceFiles("jgkawell/jarvis", jarvisVoiceCommit, "en/en_GB/jarvis/high/", "en_GB-jarvis-high", "jarvis-high",
+      [114_199_011, "9791877d9c099fabbf30be2825e011451c39b3431e21e81e866f5b6507e72993"],
+      [7_262, "d0b8772d81c1da2fcdfd79e90bff027f46f040450e1deb89b43a9f6b1946c5a7"])
+  },
+  {
+    id: "en_US-ryan-high", label: "Ryan",
+    license: { name: "CC BY-NC-SA 4.0 (non-commercial)", url: "https://creativecommons.org/licenses/by-nc-sa/4.0/", commercialUse: false },
+    files: voiceFiles(piperVoicesRepo, piperVoiceCommit, "en/en_US/ryan/high/", "en_US-ryan-high", "en_US-ryan-high",
+      [120_786_792, "b3990d7606e183ec8dbfba70a4607074f162de1a0c412e0180d1ff60bb154eca"],
+      [4_166, "c6d3b98f08315cb4bebf0d49d50fc4ff491b503c64b940cd3d5ca28543b48011"])
+  },
+  {
+    id: "en_US-amy-medium", label: "Amy",
+    license: { name: "No licence stated (Mimic 3 collection)", url: "https://github.com/MycroftAI/mimic3-voices", commercialUse: false },
+    files: voiceFiles(piperVoicesRepo, piperVoiceCommit, "en/en_US/amy/medium/", "en_US-amy-medium", "en_US-amy-medium",
+      [63_201_294, "b3a6e47b57b8c7fbe6a0ce2518161a50f59a9cdd8a50835c02cb02bdd6206c18"],
+      [4_882, "95a23eb4d42909d38df73bb9ac7f45f597dbfcde2d1bf9526fdeaf5466977d77"])
+  }
 ];
+
+/** Every voice file, two to a voice. */
+export const piperVoiceFiles: PinnedFile[] = piperVoices.flatMap((voice) => voice.files);
 
 const piperProgram = windows ? "piper.exe" : "piper";
 
 const speech: ToolDef = {
   id: "speech",
   label: "Voice (Piper)",
-  summary: "Lets TRH AI read its answers aloud in a natural voice. Installs Piper and the Cori voice, in British English.",
+  summary: "Lets TRH AI read its answers aloud in a natural voice, with five to choose from: Alan, Amy, Cori, Ryan and Jarvis. Installs Piper and all five.",
   needs: "speakers or headphones",
-  license: { name: "Piper is MIT; the Cori voice is public domain", url: "https://github.com/rhasspy/piper/blob/master/LICENSE.md", commercialUse: true },
+  license: { name: "Piper is MIT; each voice has a licence of its own, listed below", url: "https://github.com/rhasspy/piper/blob/master/LICENSE.md", commercialUse: false },
+  included: piperVoices.map(({ label, license }) => ({ label, license })),
   files: [piperArchive, ...piperVoiceFiles],
+  // Every voice that is not there yet, whether or not Piper can speak with one already: a copy
+  // that had only Cori is brought up to all five, and a voice a person put there themselves stays.
   missing: () => [
     ...(existsSync(path.join(piperRoot(), piperProgram)) ? [] : [piperArchive]),
-    ...(installedVoices().length > 0 ? [] : piperVoiceFiles)
+    ...piperVoiceFiles.filter((file) => !existsSync(path.join(piperRoot(), file.name)))
   ],
   installed: () => piperStatus().available,
   place(downloads, _env, unpack) {
@@ -257,9 +337,17 @@ export type ToolStatus = {
   summary: string;
   needs: string;
   license: ToolLicense;
+  /** The parts with a licence of their own (the voices); empty for a tool that is one thing. */
+  included: IncludedPart[];
   installed: boolean;
   /** Bytes still to download: all of them, part of them, or none when it is installed. */
   sizeBytes: number;
+  /**
+   * Bytes of the tool's own files that are not here yet, whether or not it works:
+   * a copy that could speak in one voice and is short of four others still works,
+   * and this is what is left to fetch.
+   */
+  missingBytes: number;
   /** False on a PC the tool is not built for. */
   supported: boolean;
 };
@@ -267,14 +355,17 @@ export type ToolStatus = {
 export function toolStatuses(env: NodeJS.ProcessEnv = process.env, tools: ToolDef[] = toolCatalogue): ToolStatus[] {
   return tools.map((tool) => {
     const installed = tool.installed(env);
+    const missingBytes = tool.missing(env).reduce((sum, file) => sum + file.sizeBytes, 0);
     return {
       id: tool.id,
       label: tool.label,
       summary: tool.summary,
       needs: tool.needs,
       license: tool.license,
+      included: tool.included ?? [],
       installed,
-      sizeBytes: installed ? 0 : tool.missing(env).reduce((sum, file) => sum + file.sizeBytes, 0),
+      sizeBytes: installed ? 0 : missingBytes,
+      missingBytes,
       // Read now rather than at load, so that a test can stand in for another PC.
       supported: process.platform === "win32"
     };

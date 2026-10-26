@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ffmpegAvailable, ffmpegHome, ffmpegProgram, ffmpegRunsPatiently, ffmpegSource, forgetFfmpegCheck, useFfmpegProbe } from "../src/services/ffmpegPath.js";
 import { resetSetupForTests, setupJob, setupStatus, startSetup, type Hardware, type PinnedFile } from "../src/services/modelSetup.js";
+import { defaultVoiceId, describeVoiceFile, installedVoices, piperStatus } from "../src/services/piperSpeech.js";
 import {
-  catalogueTool, ffmpegArchive, piperArchive, piperVoiceFiles, toolCatalogue, toolStatuses, whisperArchive, whisperModel,
+  catalogueTool, ffmpegArchive, piperArchive, piperVoiceFiles, piperVoices, toolCatalogue, toolStatuses, whisperArchive, whisperModel,
   type ToolDef
 } from "../src/services/toolCatalog.js";
 
@@ -24,7 +25,7 @@ const ffmpegName = windows ? "ffmpeg.exe" : "ffmpeg";
 
 type Roots = { piper: string; whisper: string; runtime: string; base: string };
 
-const watched = ["VEXORA_PIPER_DIR", "VEXORA_WHISPER_DIR", "TRHAI_RUNTIME_DIR", "TRHAI_FFMPEG_PATH", "PATH"] as const;
+const watched = ["VEXORA_PIPER_DIR", "VEXORA_PIPER_VOICE", "VEXORA_WHISPER_DIR", "TRHAI_RUNTIME_DIR", "TRHAI_FFMPEG_PATH", "PATH"] as const;
 
 /**
  * Runs with the three places the tools live pointed at a fresh folder, and with
@@ -42,6 +43,7 @@ async function inFreshPlaces<T>(run: (roots: Roots) => T | Promise<T>): Promise<
   process.env.TRHAI_RUNTIME_DIR = roots.runtime;
   process.env.PATH = emptyBin;
   delete process.env.TRHAI_FFMPEG_PATH;
+  delete process.env.VEXORA_PIPER_VOICE;
   forgetFfmpegCheck();
   try {
     return await run(roots);
@@ -79,27 +81,62 @@ const sum = (files: PinnedFile[]) => files.reduce((total, file) => total + file.
 
 test("every tool download is pinned: https, a fixed release or commit, a size and a SHA-256", () => {
   const files = toolCatalogue.flatMap((tool) => tool.files);
-  assert.equal(files.length, 6);
+  assert.equal(piperVoiceFiles.length, 10, "five voices, two files each");
+  assert.equal(files.length, 1 + piperVoiceFiles.length + 2 + 1, "Piper and its voices, whisper.cpp and its model, ffmpeg");
   for (const file of files) {
     assert.match(file.sha256, /^[0-9a-f]{64}$/, file.name);
     assert.ok(file.sizeBytes > 1_000, file.name);
     assert.match(
       file.url,
-      /^https:\/\/(github\.com\/(rhasspy\/piper|ggml-org\/whisper\.cpp|GyanD\/codexffmpeg)\/releases\/download\/[^/]+\/|huggingface\.co\/(rhasspy\/piper-voices|ggerganov\/whisper\.cpp)\/resolve\/[0-9a-f]{40}\/)/,
+      /^https:\/\/(github\.com\/(rhasspy\/piper|ggml-org\/whisper\.cpp|GyanD\/codexffmpeg)\/releases\/download\/[^/]+\/|huggingface\.co\/(rhasspy\/piper-voices|jgkawell\/jarvis|ggerganov\/whisper\.cpp)\/resolve\/[0-9a-f]{40}\/)/,
       file.name
     );
-    assert.ok(file.url.endsWith(`/${file.name}`), file.name);
   }
+  // Each file is kept under the name its makers gave it, except the Jarvis voice's: they call it
+  // jarvis-high, and the app reads a voice's speaker and quality from its file name.
+  const renamed = files.filter((file) => !file.url.endsWith(`/${file.name}`));
+  assert.deepEqual(renamed.map((file) => [file.name, file.url.split("/").pop()]), [
+    ["en_GB-jarvis-high.onnx", "jarvis-high.onnx"],
+    ["en_GB-jarvis-high.onnx.json", "jarvis-high.onnx.json"]
+  ]);
   assert.equal(new Set(files.map((file) => file.sha256)).size, files.length, "no two files share a fingerprint");
+  assert.equal(new Set(files.map((file) => file.name)).size, files.length, "no two files are kept under one name");
   assert.deepEqual(toolCatalogue.map((tool) => tool.id), ["speech", "listening", "video"]);
 });
 
-test("everything offered may be used commercially, and the voice is not one that may not", () => {
-  for (const tool of toolCatalogue) assert.equal(tool.license.commercialUse, true, tool.id);
-  // Ryan, the best-known Piper voice, is CC BY-NC-SA; so are hfc and semaine.
-  for (const file of piperVoiceFiles) assert.doesNotMatch(file.name, /ryan|hfc_|semaine|l2arctic/i, file.name);
-  assert.match(piperVoiceFiles[0].name, /^en_GB-cori-high\.onnx$/);
-  assert.match(piperVoiceFiles[1].name, /^en_GB-cori-high\.onnx\.json$/, "a voice is two files, and Piper cannot load one without the other");
+test("the voices: five, each with its two files and the licence its makers gave it, and only Cori plainly free", () => {
+  assert.deepEqual(piperVoices.map((voice) => voice.label), ["Alan", "Cori", "Jarvis", "Ryan", "Amy"], "the app's own default first");
+  assert.equal(piperVoices[0].id, defaultVoiceId);
+  for (const voice of piperVoices) {
+    // A voice is two files, and Piper cannot load one without the other.
+    assert.deepEqual(voice.files.map((file) => file.name), [`${voice.id}.onnx`, `${voice.id}.onnx.json`], voice.id);
+    // The id is a name the app can read a speaker from, and one whose gender it knows: the picker sorts on it.
+    const described = describeVoiceFile(`${voice.id}.onnx`);
+    assert.equal(described?.name, voice.label, voice.id);
+    assert.ok(described?.gender, `${voice.id} has a known gender`);
+    assert.ok(voice.license.name.length > 10 && voice.license.url.startsWith("https://"), voice.id);
+  }
+  // What is claimed for each is what its makers say, and no more.
+  const licence = Object.fromEntries(piperVoices.map((voice) => [voice.label, voice.license]));
+  assert.equal(licence.Cori.commercialUse, true);
+  assert.match(licence.Cori.name, /public domain/i);
+  assert.equal(licence.Ryan.commercialUse, false);
+  assert.match(licence.Ryan.name, /NC/);
+  assert.equal(licence.Alan.commercialUse, false);
+  assert.match(licence.Alan.name, /all rights reserved/i);
+  assert.equal(licence.Amy.commercialUse, false);
+  assert.equal(licence.Jarvis.commercialUse, false);
+  assert.match(licence.Jarvis.name, /fan-made/i);
+  assert.deepEqual(piperVoices.filter((voice) => voice.license.commercialUse).map((voice) => voice.label), ["Cori"]);
+});
+
+test("the voice tool says it is not all free to use commercially, and lists each voice's licence; the others are free", () => {
+  for (const tool of toolCatalogue) assert.equal(tool.license.commercialUse, tool.id !== "speech", tool.id);
+  const speech = catalogueTool("speech") as ToolDef;
+  assert.match(speech.license.name, /licence of its own/);
+  assert.deepEqual((speech.included ?? []).map((part) => part.label), piperVoices.map((voice) => voice.label));
+  const shown = toolStatuses({ TRHAI_RUNTIME_DIR: path.join(tmpdir(), "trhai-nothing-here") } as NodeJS.ProcessEnv);
+  assert.deepEqual(shown.map((tool) => tool.included.length), [5, 0, 0], "only the voice tool has parts of its own");
 });
 
 test("the tools say what they are for, what they need, and what they cost to download", () => {
@@ -107,7 +144,10 @@ test("the tools say what they are for, what they need, and what they cost to dow
     assert.ok(tool.label.length > 3 && tool.summary.length > 40 && tool.needs.length > 3, tool.id);
   }
   const total = sum(toolCatalogue.flatMap((tool) => tool.files));
-  assert.ok(total > 300 * 1024 ** 2 && total < 500 * 1024 ** 2, `about 400 MB in all, not ${total} bytes`);
+  assert.ok(total > 700 * 1024 ** 2 && total < 800 * 1024 ** 2, `about 730 MB in all, not ${total} bytes`);
+  // The summary names every voice, so what is offered is what is said.
+  const speech = catalogueTool("speech") as ToolDef;
+  for (const voice of piperVoices) assert.ok(speech.summary.includes(voice.label), voice.label);
 });
 
 // ---------------------------------------------------------------- what is on this PC
@@ -123,7 +163,7 @@ test("on a PC with none of them, each tool reports everything it would download"
   });
 });
 
-test("Piper without a voice needs only the voice, and with both needs nothing", async () => {
+test("Piper without a voice needs the voices, and a voice of a person's own works but does not stand in for them", async () => {
   await inFreshPlaces(({ piper, runtime }) => {
     const env = { TRHAI_RUNTIME_DIR: runtime } as NodeJS.ProcessEnv;
     const speech = catalogueTool("speech") as ToolDef;
@@ -134,9 +174,41 @@ test("Piper without a voice needs only the voice, and with both needs nothing", 
     put(path.join(piper, "en_US-john-medium.onnx"));
     assert.equal(speech.installed(env), false);
     put(path.join(piper, "en_US-john-medium.onnx.json"), "{}");
+    assert.equal(speech.installed(env), true, "a voice the person put there themselves is a voice Piper can use");
+    // It works, and the five that come with the tool are still to come.
+    assert.deepEqual(speech.missing(env).map((file) => file.name), piperVoiceFiles.map((file) => file.name));
+    const status = toolStatuses(env)[0];
+    assert.equal(status.sizeBytes, 0, "nothing is needed for it to work");
+    assert.equal(status.missingBytes, sum(piperVoiceFiles), "but the voices that come with it are still to fetch");
+    for (const file of piperVoiceFiles) put(path.join(piper, file.name));
+    assert.deepEqual(speech.missing(env), []);
+    assert.equal(toolStatuses(env)[0].missingBytes, 0);
+  });
+});
+
+test("a copy that had only Cori is brought up to the other four voices, and downloads nothing it already has", async () => {
+  await inFreshPlaces(({ piper, runtime }) => {
+    const env = { TRHAI_RUNTIME_DIR: runtime } as NodeJS.ProcessEnv;
+    const speech = catalogueTool("speech") as ToolDef;
+    put(path.join(piper, piperProgram));
+    const cori = piperVoices.find((voice) => voice.label === "Cori")!;
+    for (const file of cori.files) put(path.join(piper, file.name));
     assert.equal(speech.installed(env), true);
-    assert.deepEqual(speech.missing(env), [], "a voice the person put there themselves is a voice");
-    assert.equal(toolStatuses(env)[0].sizeBytes, 0);
+    const others = piperVoices.filter((voice) => voice !== cori).flatMap((voice) => voice.files);
+    assert.deepEqual(speech.missing(env).map((file) => file.name), others.map((file) => file.name));
+    assert.equal(toolStatuses(env)[0].missingBytes, sum(others), "Cori's 114 MB is not asked for again");
+  });
+});
+
+test("a voice that has its model but lost its json is short of the json alone", async () => {
+  await inFreshPlaces(({ piper, runtime }) => {
+    const env = { TRHAI_RUNTIME_DIR: runtime } as NodeJS.ProcessEnv;
+    put(path.join(piper, piperProgram));
+    for (const file of piperVoiceFiles) put(path.join(piper, file.name));
+    const alan = piperVoices[0];
+    rmSync(path.join(piper, alan.files[1].name));
+    assert.deepEqual((catalogueTool("speech") as ToolDef).missing(env).map((file) => file.name), [alan.files[1].name]);
+    assert.equal(installedVoices().some((voice) => voice.id === alan.id), false, "without its json Piper cannot load it, so it is not offered");
   });
 });
 
@@ -176,6 +248,13 @@ test("speech: Piper goes where the app looks for it, with its data, and the voic
     assert.ok(existsSync(path.join(piper, "en_GB-cori-high.onnx.json")));
     assert.equal(existsSync(path.join(downloads, "piper-unpacked")), false, "no unpacked copy is left behind");
     assert.equal(speech.installed(process.env), true);
+    // All five are in place, each under the name the app reads its speaker from, and nothing is left to fetch.
+    for (const file of piperVoiceFiles) assert.ok(existsSync(path.join(piper, file.name)), file.name);
+    assert.deepEqual(speech.missing(process.env), []);
+    assert.deepEqual(installedVoices().map((voice) => voice.id).sort(), piperVoices.map((voice) => voice.id).sort());
+    // And with all of them to choose from, it speaks in the app's own default unless told otherwise.
+    const status = piperStatus();
+    assert.equal(status.available && status.voice.id, defaultVoiceId);
   });
 });
 

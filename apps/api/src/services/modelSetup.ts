@@ -7,8 +7,10 @@
 // the app, the same way the script did:
 //
 // - Everything comes from the people who made it: llama.cpp's own releases on
-//   GitHub, and the model makers' own files on Hugging Face (one model, Qwen3
-//   4B Instruct 2507, has no GGUF from Qwen itself and comes from unsloth).
+//   GitHub, and the model makers' own files on Hugging Face. Where the makers
+//   publish no GGUF, a well-known quantiser's is used (Qwen3 4B Instruct 2507
+//   from unsloth; the models with their refusals taken out from bartowski and
+//   mradermacher, who quantise huihui-ai's builds) - and pinned the same way.
 // - Every file is pinned: a release tag or a repository commit, its exact
 //   size, and its SHA-256, recorded here. A download that does not match is
 //   thrown away, never installed.
@@ -125,8 +127,14 @@ export type CatalogModel = {
   files: PinnedFile[];
 };
 
-const hf = (repo: string, commit: string, name: string, sizeBytes: number, sha256: string): PinnedFile => ({
-  name, sizeBytes, sha256, url: `https://huggingface.co/${repo}/resolve/${commit}/${name}`
+/**
+ * `saveAs` is the name the file is kept under, for one whose makers named it
+ * something the app cannot use: it finds a model's picture part by a file name
+ * that starts with "mmproj" (discoverModels), and some quantisers put the
+ * model's name first.
+ */
+const hf = (repo: string, commit: string, name: string, sizeBytes: number, sha256: string, saveAs = name): PinnedFile => ({
+  name: saveAs, sizeBytes, sha256, url: `https://huggingface.co/${repo}/resolve/${commit}/${name}`
 });
 
 const apache: ModelLicense = { name: "Apache 2.0", url: "https://www.apache.org/licenses/LICENSE-2.0", commercialUse: true };
@@ -142,8 +150,65 @@ const qwenResearch = (repo: string): ModelLicense => ({
  * The licence shown is the original model's, not the download page's: the
  * GGUF repository for the 3B vision model says Apache 2.0, while the model it
  * was made from is under Qwen's research licence.
+ *
+ * The first four are the ones this app recommends: models with their refusals
+ * taken out ("abliterated": the direction in the model that makes it refuse is
+ * removed from its weights), asked for by the owner so that the assistant
+ * answers what it is asked. They are huihui-ai's, quantised by bartowski and
+ * by mradermacher, and each is the model the original on this list is, with
+ * that change and no other: the same families, the same chat templates and tool
+ * calling, the same Apache 2.0 licence. The original models stay on the list,
+ * for anyone who wants the refusals. Tools keep their own limits (permissions,
+ * confirmations, the machine-access switch); those are about what the assistant
+ * may do to a PC, and are not part of a model.
+ *
+ * The 7B coder's source repository on Hugging Face (huihui-ai/Qwen2.5-Coder-7B-
+ * Instruct-abliterated) answered 401 when checked on 2026-10-25; the quantised
+ * file is in a public repository and is pinned by hash like the rest.
  */
 export const modelCatalog: CatalogModel[] = [
+  {
+    id: "qwen2.5-coder-7b-abliterated",
+    label: "Qwen2.5 Coder 7B (no refusals)",
+    summary: "TRH AI's own model with its refusals taken out: it answers what it is asked, and still uses TRH AI's tools.",
+    needs: "16 GB of memory, or a graphics card with 8 GB",
+    license: apache,
+    vision: false,
+    files: [hf("bartowski/Qwen2.5-Coder-7B-Instruct-abliterated-GGUF", "a416f57ecabe9841551055493e6945895e54e135", "Qwen2.5-Coder-7B-Instruct-abliterated-Q4_K_M.gguf", 4_683_074_400, "fdf02c16fb654ff60b2c30f1e91573ebc603a7084df3449df89120dca2b18170")]
+  },
+  {
+    id: "qwen3-4b-instruct-2507-abliterated",
+    label: "Qwen3 4B Instruct (no refusals)",
+    summary: "The everyday model for a PC without a graphics card, with its refusals taken out: quick to answer, and it answers what it is asked.",
+    needs: "8 GB of memory",
+    license: apache,
+    vision: false,
+    files: [hf("mradermacher/Huihui-Qwen3-4B-Instruct-2507-abliterated-GGUF", "c9e90669eeb205d5af35c28a3e9983fc9293c2ec", "Huihui-Qwen3-4B-Instruct-2507-abliterated.Q4_K_M.gguf", 2_497_281_312, "b1324e2f1bd2e0610d591f54f93e38d90b187f69d1f215f4cace349eade678d7")]
+  },
+  {
+    id: "qwen3-vl-8b-abliterated",
+    label: "Qwen3 VL 8B (pictures, no refusals)",
+    summary: "Reads the pictures, screenshots and documents you share, the text in them included, and describes what it sees without refusing.",
+    needs: "16 GB of memory, or a graphics card with 8 GB",
+    license: apache,
+    vision: true,
+    files: [
+      hf("mradermacher/Huihui-Qwen3-VL-8B-Instruct-abliterated-GGUF", "03f1e8f28be1177d430866b31e0bc9a939c669d6", "Huihui-Qwen3-VL-8B-Instruct-abliterated.Q4_K_M.gguf", 5_027_785_728, "c9592053aab8874021ecd3f80e45cc12dd167454bebfb215a36bdf690f22dc52"),
+      hf("mradermacher/Huihui-Qwen3-VL-8B-Instruct-abliterated-GGUF", "03f1e8f28be1177d430866b31e0bc9a939c669d6", "Huihui-Qwen3-VL-8B-Instruct-abliterated.mmproj-Q8_0.gguf", 752_290_176, "8083b2ccf0351ce673fca1dd5667ad1fd49861c72dccebb16f3dd32aa6c42fb6", "mmproj-Huihui-Qwen3-VL-8B-Instruct-abliterated-Q8_0.gguf")
+    ]
+  },
+  {
+    id: "qwen3-vl-4b-abliterated",
+    label: "Qwen3 VL 4B (pictures, no refusals)",
+    summary: "Reads pictures and screenshots on a smaller PC, text in them included, and describes what it sees without refusing.",
+    needs: "8 GB of memory",
+    license: apache,
+    vision: true,
+    files: [
+      hf("mradermacher/Huihui-Qwen3-VL-4B-Instruct-abliterated-GGUF", "abf99adf548eb2aa6f9a3d56f976968996959e7f", "Huihui-Qwen3-VL-4B-Instruct-abliterated.Q4_K_M.gguf", 2_497_282_496, "20d58872549c13f5476622d2385027e1b346298558822eca8aa33cb8846d5765"),
+      hf("mradermacher/Huihui-Qwen3-VL-4B-Instruct-abliterated-GGUF", "abf99adf548eb2aa6f9a3d56f976968996959e7f", "Huihui-Qwen3-VL-4B-Instruct-abliterated.mmproj-Q8_0.gguf", 453_974_624, "cd4503cef5b48c55da5f04edd06e88f3c10344129f19bd9ebffdab32d0590a02", "mmproj-Huihui-Qwen3-VL-4B-Instruct-abliterated-Q8_0.gguf")
+    ]
+  },
   {
     id: "qwen3-4b-instruct-2507",
     label: "Qwen3 4B Instruct",
@@ -221,9 +286,14 @@ export function hasRoomForSevenB(hardware: Hardware): boolean {
   return (hardware.gpu !== null && hardware.gpu.memoryMiB >= 7500) || hardware.totalMemoryBytes >= 15 * gib;
 }
 
-/** The chat model to install first on this PC. */
+/** The chat model to install first on this PC: the one with its refusals taken out, in the size the PC suits. */
 export function recommendedModel(hardware: Hardware): string {
-  return hasRoomForSevenB(hardware) ? "qwen2.5-coder-7b" : "qwen3-4b-instruct-2507";
+  return hasRoomForSevenB(hardware) ? "qwen2.5-coder-7b-abliterated" : "qwen3-4b-instruct-2507-abliterated";
+}
+
+/** The model that looks at pictures, to install beside it, in the size the PC suits. */
+export function recommendedVisionModel(hardware: Hardware): string {
+  return hasRoomForSevenB(hardware) ? "qwen3-vl-8b-abliterated" : "qwen3-vl-4b-abliterated";
 }
 
 /**
@@ -245,9 +315,14 @@ export function hardwareDefaults(hardware: Hardware, env: NodeJS.ProcessEnv): Re
     if (unset("TRHAI_IDLE_UNLOAD_SECONDS")) defaults.TRHAI_IDLE_UNLOAD_SECONDS = "1800";
   }
   // On a small PC the small model answers even when a bigger one is also
-  // installed; the bigger one stays a choice in Settings.
+  // installed; the bigger one stays a choice in Settings. The same goes for
+  // the model that looks at pictures. (A big PC needs neither: the first
+  // choice of each is already the big one.)
   if (!hasRoomForSevenB(hardware) && unset("TRHAI_MODEL") && unset("OLLAMA_MODEL")) {
     defaults.TRHAI_MODEL = recommendedModel(hardware);
+  }
+  if (!hasRoomForSevenB(hardware) && unset("TRHAI_VISION_MODEL")) {
+    defaults.TRHAI_VISION_MODEL = recommendedVisionModel(hardware);
   }
   return defaults;
 }
@@ -294,6 +369,8 @@ export type SetupStatus = {
   /** True when the app cannot answer yet: no engine, or no model that can hold a conversation. */
   needsSetup: boolean;
   recommendedModel: string;
+  /** The model that looks at pictures this PC should have: the other half of what is recommended. */
+  recommendedVisionModel: string;
   runtimeDir: string;
   freeBytes: number | null;
   job: SetupJob | null;
@@ -313,15 +390,30 @@ function freeSpace(dir: string): number | null {
 
 const visionName = /(^|[-_.])vl([-_.]|\d|$)|vision|llava|minicpm-v|moondream/i;
 
-export function setupStatus(env: NodeJS.ProcessEnv = process.env): SetupStatus {
-  const hardware = readHardware();
-  const paths = enginePaths(env);
-  const found = discoverModels(paths.modelsDir);
-  const installed: InstalledModel[] = found.map((model) => {
+/** The models in the models folder, each with whether it looks at pictures and whether the catalogue knows it. */
+function listInstalled(modelsDir: string): InstalledModel[] {
+  return discoverModels(modelsDir).map((model) => {
     const known = modelCatalog.find((entry) => sameModel(entry.id, model.id));
     return { id: model.id, sizeBytes: model.sizeBytes, vision: known ? known.vision : Boolean(model.mmproj) || visionName.test(model.id), inCatalog: Boolean(known) };
   });
+}
+
+/**
+ * Whether this PC can answer a question now: it has an engine and a model that
+ * can hold a conversation. A copy that can is an install that was set up; one
+ * that cannot is new, and its first-run screen asks what to install.
+ */
+export function canAnswer(env: NodeJS.ProcessEnv = process.env): boolean {
+  const paths = enginePaths(env);
+  return paths.exe !== null && listInstalled(paths.modelsDir).some((model) => !model.vision);
+}
+
+export function setupStatus(env: NodeJS.ProcessEnv = process.env): SetupStatus {
+  const hardware = readHardware();
+  const paths = enginePaths(env);
+  const installed = listInstalled(paths.modelsDir);
   const recommended = recommendedModel(hardware);
+  const recommendedVision = recommendedVisionModel(hardware);
   const variant = engineVariantFor(hardware);
   const engine = engineState();
   return {
@@ -338,12 +430,13 @@ export function setupStatus(env: NodeJS.ProcessEnv = process.env): SetupStatus {
       ...model,
       sizeBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0),
       installed: installed.some((entry) => sameModel(entry.id, model.id)),
-      recommended: model.id === recommended
+      recommended: model.id === recommended || model.id === recommendedVision
     })),
     installed,
     tools: toolStatuses(env),
     needsSetup: paths.exe === null || !installed.some((model) => !model.vision),
     recommendedModel: recommended,
+    recommendedVisionModel: recommendedVision,
     runtimeDir: paths.runtimeDir,
     freeBytes: freeSpace(paths.runtimeDir),
     job
@@ -377,6 +470,22 @@ export async function downloadVerified(
   const fetcher = options.fetcher ?? fetch;
   const part = `${destination}.part`;
   mkdirSync(path.dirname(destination), { recursive: true });
+
+  // A file that is already here, whole and as published - left by a setup that
+  // stopped after it and is being tried again - is not fetched a second time:
+  // a vision model is two files, and one that failed on the second would
+  // otherwise start the first over, several gigabytes of it.
+  if (existsSync(destination) && statSync(destination).size === file.sizeBytes) {
+    const present = createHash("sha256");
+    for await (const chunk of createReadStream(destination)) {
+      if (options.signal?.aborted) throw new SetupCancelled();
+      present.update(chunk as Buffer);
+    }
+    if (present.digest("hex") === file.sha256) {
+      options.onProgress?.(file.sizeBytes);
+      return;
+    }
+  }
 
   let hash = createHash("sha256");
   let have = 0;
@@ -488,15 +597,28 @@ export type SetupDeps = {
   engineFiles?: Record<EngineVariant, PinnedFile[]>;
   /** The tools that can be installed, when not the real ones. */
   tools?: ToolDef[];
+  /**
+   * Called when a started job ends, whichever way: done, stopped or failed.
+   * Before the engine is restarted for what was installed, which can take a while.
+   */
+  onFinish?: (job: SetupJob) => void;
 };
 
 export type StartResult = { ok: true; job: SetupJob } | { ok: false; error: string };
 
 const sizeText = (bytes: number) => (bytes >= gib ? `${(bytes / gib).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`);
 
-/** Starts installing what was asked for, in the background. One setup at a time. */
-export function startSetup(request: SetupRequest, deps: SetupDeps = {}): StartResult {
-  if (job?.state === "running") return { ok: false, error: "Setup is already running." };
+/** What a request comes to: the steps it would run, in order, and the engine build among them. */
+export type SetupPlan = { steps: SetupStep[]; variant: EngineVariant | null };
+
+/**
+ * What installing a request would download on this PC, worked out without
+ * starting anything: the steps, each for what is missing only (Piper without a
+ * voice gets the voice, a model that is there gets nothing), or why the request
+ * cannot be done. Nothing here looks at whether a setup is already running, or
+ * at the drive: that is for starting one.
+ */
+export function planSetup(request: SetupRequest, deps: SetupDeps = {}): { ok: true; plan: SetupPlan } | { ok: false; error: string } {
   const env = deps.env ?? process.env;
   const hardware = deps.hardware ?? readHardware();
   const paths = enginePaths(env);
@@ -537,6 +659,21 @@ export function startSetup(request: SetupRequest, deps: SetupDeps = {}): StartRe
     if (files.length === 0) continue;
     steps.push({ kind: "tool", id, label: tool.label, totalBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0), doneBytes: 0, state: "waiting", error: null });
   }
+  return { ok: true, plan: { steps, variant } };
+}
+
+/** Starts installing what was asked for, in the background. One setup at a time. */
+export function startSetup(request: SetupRequest, deps: SetupDeps = {}): StartResult {
+  if (job?.state === "running") return { ok: false, error: "Setup is already running." };
+  const env = deps.env ?? process.env;
+  const paths = enginePaths(env);
+  const catalog = deps.catalog ?? modelCatalog;
+  const archives = deps.engineFiles ?? engineArchives;
+  const tools = deps.tools ?? toolCatalogue;
+
+  const planned = planSetup(request, deps);
+  if (!planned.ok) return planned;
+  const { steps, variant } = planned.plan;
 
   const needed = steps.reduce((sum, step) => sum + step.totalBytes, 0);
   const free = freeSpace(paths.runtimeDir);
@@ -639,6 +776,9 @@ async function runJob(current: SetupJob, signal: AbortSignal, variant: EngineVar
   } finally {
     current.finishedAt = new Date().toISOString();
     if (controller?.signal === signal) controller = null;
+    // Told before the restart below, which waits for the engine: whoever keeps
+    // a record of the job should not have to wait for that to learn how it ended.
+    try { deps.onFinish?.(current); } catch { /* a listener's failure is not the install's */ }
     // The engine reads its models when it starts: what was installed is
     // picked up by starting it again. Also after a failure, for whatever did
     // finish before it.

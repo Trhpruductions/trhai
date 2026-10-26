@@ -27,6 +27,18 @@ import { engineKey } from "./engineKey.js";
 
 const oneConnectionEach = new http.Agent({ keepAlive: false });
 
+let open = 0;
+
+/**
+ * How many requests to the engine are open at this moment, a reply that is
+ * still being written among them. What a restart of the engine looks at: it
+ * would end every one of them, and a setup running in the background waits
+ * for none to be (requiredSetup.ts).
+ */
+export function engineRequestsInFlight(): number {
+  return open;
+}
+
 function abortError(signal: AbortSignal | null | undefined): Error {
   const reason = signal?.reason;
   if (reason instanceof Error) return reason;
@@ -77,7 +89,11 @@ export function engineFetch(input: string | URL | Request, init: RequestInit = {
       if (!settled) reject(reason);
     };
     signal?.addEventListener("abort", onAbort, { once: true });
-    request.on("close", () => signal?.removeEventListener("abort", onAbort));
+    open += 1;
+    request.once("close", () => {
+      open -= 1;
+      signal?.removeEventListener("abort", onAbort);
+    });
     request.on("error", (error) => {
       if (settled) return;
       settled = true;

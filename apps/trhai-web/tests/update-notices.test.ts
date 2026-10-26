@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dismissUpdate, markVersionSeen, noticeToShow, readDismissedUpdate, readSeenVersion, type UpdateCheck } from "../src/lib/updates.js";
+import { dismissUpdate, markVersionSeen, noticeToShow, readDismissedUpdate, readSeenVersion, requiredUpdate, type UpdateCheck } from "../src/lib/updates.js";
 
 // Which notice everyone using the app sees, and when it stops showing.
 
@@ -37,6 +37,24 @@ test("a newer release shows the update card until that release is dismissed; the
   assert.equal(noticeToShow(available, "0.1.5", "0.1.6"), null);
   const later = check({ updateAvailable: true, latest: latest("0.1.7") });
   assert.equal(noticeToShow(later, "0.1.5", "0.1.6")?.kind, "update");
+});
+
+test("a required release is not put off: it shows although 'Later' was pressed for it", () => {
+  const required = check({ updateAvailable: true, latest: { ...latest("0.1.6"), required: true } });
+  assert.equal(noticeToShow(required, "0.1.5", null)?.kind, "update");
+  assert.equal(noticeToShow(required, "0.1.5", "0.1.6")?.kind, "update");
+  // An ordinary one, and one a service says is not required, can be put off.
+  assert.equal(noticeToShow(check({ updateAvailable: true, latest: latest("0.1.6") }), "0.1.5", "0.1.6"), null);
+  assert.equal(noticeToShow(check({ updateAvailable: true, latest: { ...latest("0.1.6"), required: false } }), "0.1.5", "0.1.6"), null);
+});
+
+test("the release every copy has to move to is the latest, when it is newer than this copy and marked required", () => {
+  assert.equal(requiredUpdate(null), null);
+  assert.equal(requiredUpdate(check({ updateAvailable: true, latest: latest("0.1.6") })), null);
+  const marked = { ...latest("0.1.6"), required: true };
+  assert.equal(requiredUpdate(check({ updateAvailable: true, latest: marked }))?.version, "0.1.6");
+  assert.equal(requiredUpdate(check({ updateAvailable: false, latest: marked })), null, "not newer than this copy: nothing to move to");
+  assert.equal(requiredUpdate(check({ updateAvailable: true, latest: null })), null);
 });
 
 test("What's new comes before the update card when both apply", () => {

@@ -130,7 +130,15 @@ test("the preset file fits every model to the card, and gives each model its fil
   assert.deepEqual(samplingFor("qwen3-8b"), { temp: "0.6", "top-k": "20", "top-p": "0.95", "min-p": "0" });
   assert.deepEqual(samplingFor("Qwen3-14B-Q4"), samplingFor("qwen3-8b"));
   assert.deepEqual(samplingFor("qwen2.5-coder-7b"), {});
+  assert.deepEqual(samplingFor("qwen2.5-coder-7b-abliterated"), {}, "the same engine defaults as the model it was made from");
   assert.deepEqual(samplingFor("qwen30-8b"), {}, "another model whose name starts the same way");
+  // The instruct builds are sampled as their makers publish for instruct models, not as the thinking ones.
+  const instruct = { temp: "0.7", "top-k": "20", "top-p": "0.8", "min-p": "0" };
+  assert.deepEqual(samplingFor("qwen3-4b-instruct-2507"), instruct);
+  assert.deepEqual(samplingFor("qwen3-4b-instruct-2507-abliterated"), instruct);
+  assert.deepEqual(samplingFor("qwen3-vl-8b-abliterated"), instruct);
+  assert.deepEqual(samplingFor("qwen3-vl-4b-abliterated"), instruct);
+  assert.deepEqual(samplingFor("qwen3-8b"), { temp: "0.6", "top-k": "20", "top-p": "0.95", "min-p": "0" }, "the thinking model keeps its own");
   assert.ok(!lines.slice(second).some((line) => line.startsWith("temp")), "the vision model's section has none");
 
   // TRHAI_CONTEXT_TOKENS forces one window on every model, never below what the prompt needs.

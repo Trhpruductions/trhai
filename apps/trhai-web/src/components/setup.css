@@ -52,6 +52,36 @@
 .setup-model-text { display: grid; gap: 3px; color: var(--os-text-2); line-height: 1.45; min-width: 0; }
 .setup-model-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--os-text); }
 .setup-model-text a { color: var(--os-accent); }
+/* The bar for what an update installs by itself (RequiredSetupBanner): in the page's flow, in the row the
+   shell keeps under the top bar (os.css), so it pushes the screen down and covers nothing. */
+.required-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 8px var(--os-5) 0;
+  padding: 10px 14px;
+  border-radius: var(--os-r-lg);
+  border: 1px solid var(--os-accent-line);
+  background: var(--os-surface-2);
+  color: var(--os-text);
+}
+.required-bar.attention { border-color: var(--os-warn); }
+.required-bar-icon { color: var(--os-accent); display: inline-flex; }
+.required-bar.attention .required-bar-icon { color: var(--os-warn); }
+.required-bar-text { display: grid; gap: 2px; flex: 1 1 280px; min-width: 0; }
+.required-bar-text span { color: var(--os-text-2); font-size: var(--os-fs-sm); line-height: 1.4; }
+.required-bar-text .required-bar-refused { color: var(--os-warn); }
+.required-bar-progress { display: flex; align-items: center; gap: 8px; flex: none; }
+.required-bar-progress .setup-bar { width: 160px; }
+
+/* The window over everything while a required update downloads (RequiredUpdate). */
+.required-update-progress { display: flex; align-items: center; gap: 10px; }
+.required-update-progress .setup-bar { flex: 1; }
+
+/* The licences of what a tool installs (the voices): a plain list inside the card, not a card each. */
+.setup-models .setup-parts { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 1px; }
+.setup-models .setup-parts li { display: block; padding: 0; border: 0; border-radius: 0; }
 
 .setup-others ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
 .setup-others li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

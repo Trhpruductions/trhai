@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { compareVersions, notesUpTo, releaseNotes } from "@ascend/shared";
+import { compareVersions, notesUpTo, releaseNotes, requiredUpdateLine } from "@ascend/shared";
 import { checkForUpdates, parseRelease, resetUpdatesForTests } from "../src/services/updates.js";
 
 process.env.TRHAI_VERSION = "0.1.4";
@@ -52,11 +52,31 @@ test("a GitHub release is read into the installer link and its notes; drafts and
   assert.equal(parsed.version, "0.1.5");
   assert.equal(parsed.downloadUrl, "https://github.com/x/TRH-AI-Setup-0.1.5.exe", "the Setup build, not the portable one");
   assert.equal(parsed.notes, "Fixes and improvements.");
+  assert.equal(parsed.required, false, "an ordinary release is only offered");
   assert.equal(parseRelease(release("0.1.5", { draft: true })), null);
   assert.equal(parseRelease(release("0.1.5", { html_url: "javascript:alert(1)" })), null);
   assert.equal(parseRelease({ tag_name: "nightly" }), null);
   assert.equal(parseRelease(null), null);
   assert.equal(parseRelease(release("0.1.5", { assets: [{ name: "x.exe", browser_download_url: "ftp://bad" }] }))?.downloadUrl, null);
+});
+
+test("a release whose page carries the required-update line is marked required, wherever the line sits and however its lines end", async () => {
+  const page = ["A title", "", requiredUpdateLine, "", "- A change"].join("\n");
+  assert.equal(parseRelease(release("0.1.5", { body: page }))?.required, true);
+  assert.equal(parseRelease(release("0.1.5", { body: page.replace(/\n/g, "\r\n") }))?.required, true);
+  // The notes keep the first 4,000 characters; the line is looked for in the whole page.
+  const long = ["A title", "", ...Array.from({ length: 200 }, (_, index) => `- A change number ${index} with some words in it`), requiredUpdateLine].join("\n");
+  const parsed = parseRelease(release("0.1.5", { body: long }));
+  assert.equal(parsed?.required, true);
+  assert.ok((parsed?.notes.length ?? 0) <= 4000);
+  // A bullet that quotes it, or no page at all, is not it.
+  assert.equal(parseRelease(release("0.1.5", { body: `- ${requiredUpdateLine}` }))?.required, false);
+  assert.equal(parseRelease(release("0.1.5", { body: undefined }))?.required, false);
+  // It reaches the screens with the rest of the check.
+  resetUpdatesForTests();
+  const check = await checkForUpdates({ fetcher: fetcherAnswering(200, release("0.1.5", { body: page })) });
+  assert.equal(check.updateAvailable, true);
+  assert.equal(check.latest?.required, true);
 });
 
 test("a newer release means an update is available; the same or older does not", async () => {

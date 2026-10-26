@@ -8,6 +8,7 @@ import { startScheduler, stopScheduler } from "./services/scheduler.js";
 import { noteListening } from "./services/runtimeStatus.js";
 import { startEngine, stopEngine } from "./services/modelEngine.js";
 import { hardwareDefaults, readHardware } from "./services/modelSetup.js";
+import { startRequiredSetup } from "./services/requiredSetup.js";
 import { listenOn, listenPlan, type Listener } from "./services/networkAccess.js";
 import { encryptPlainStores } from "./services/dataInventory.js";
 import { licenseStatus } from "./services/licensing.js";
@@ -108,6 +109,19 @@ listenOn(() => createServer(app), port, plan.hosts).then(({ listeners: bound, sk
         void warmUpEngine({ reason: "start" }).then((result) => console.log(describeWarmUp(result)));
       }
     });
+  }
+  // What an update brings that has to be installed too - the models, the voices,
+  // the other tools - fetched by the service itself on a copy that is already
+  // set up (requiredSetup.ts). A little after start, so the window is up before
+  // the downloads begin. Started here for the reason the engine is: a test that
+  // builds an app must never download anything. TRHAI_REQUIRED_SETUP=off leaves it out.
+  if (process.env.TRHAI_REQUIRED_SETUP !== "off") {
+    setTimeout(() => {
+      const started = startRequiredSetup({ manual: false });
+      console.log(started.started
+        ? `required setup started: ${started.job.steps.map((step) => step.label).join("; ")}`
+        : `required setup not started: ${started.message}`);
+    }, 15_000).unref();
   }
 }).catch((error: NodeJS.ErrnoException) => {
   if (error.code === "EADDRINUSE") {
