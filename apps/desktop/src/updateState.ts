@@ -62,12 +62,14 @@ export function plainUpdateError(error: unknown): string {
  * The script that brings the app back after an update installs.
  *
  * electron-updater asks the installer to start the app when it finishes
- * (--force-run), and on this app's installer that does not happen: tried with
- * both the assisted and the one-click installer, the update installed and
- * nothing started. So the app starts this, hidden and detached, just before it
- * quits into the installer. It waits for the app to exit, then for the
- * installer to finish, then starts the app - unless something already has.
- * Quotes in the path are doubled for PowerShell's single-quoted strings.
+ * (--force-run). That has not always happened: tried with both the assisted
+ * and the one-click installer, an update installed and nothing started; in
+ * other runs the installer did start the app, through Explorer. So the app
+ * also starts this, hidden and detached, just before it quits into the
+ * installer. It waits for the app to exit, then for the installer to finish,
+ * then starts the app - unless something already has, which is why both can
+ * be in play at once. Quotes in the path are doubled for PowerShell's
+ * single-quoted strings.
  */
 export function relaunchScript(exePath: string, appPid: number, options: { logPath?: string; installerPattern?: string } = {}): string {
   const quoted = (value: string) => `'${value.replace(/'/g, "''")}'`;
