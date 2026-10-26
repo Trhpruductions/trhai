@@ -91,18 +91,21 @@ export function UpdateNotices() {
     if (local) dismissUpdate(local, notice.latest.version);
     setNotice(null);
   };
+  // A release every copy has to move to is not put off: on the installed app the window over everything
+  // (RequiredUpdate) installs it, and anywhere else this card stays until it is.
+  const required = notice.latest.required === true;
   return (
-    <aside className="update-card" role="status" aria-live="polite" aria-label="Update available">
+    <aside className="update-card" role="status" aria-live="polite" aria-label={required ? "Required update" : "Update available"}>
       <span className="update-card-icon" aria-hidden="true"><Icon name="down" size={18} /></span>
       <div className="update-card-text">
-        <strong>TRH AI v{notice.latest.version} is out</strong>
+        <strong>TRH AI v{notice.latest.version} {required ? "is required" : "is out"}</strong>
         <span>You have v{check?.currentVersion}. Install it over this one; your data stays where it is.</span>
         <div className="os-view-actions">
           <DesktopUpdateButton version={notice.latest.version} downloadUrl={notice.latest.downloadUrl} releaseUrl={notice.latest.url} small />
-          <button type="button" className="os-btn os-btn-ghost os-btn-sm" onClick={later}>Later</button>
+          {required ? null : <button type="button" className="os-btn os-btn-ghost os-btn-sm" onClick={later}>Later</button>}
         </div>
       </div>
-      <button type="button" className="os-btn os-btn-icon update-card-close" onClick={later} aria-label="Close"><Icon name="close" size={14} /></button>
+      {required ? null : <button type="button" className="os-btn os-btn-icon update-card-close" onClick={later} aria-label="Close"><Icon name="close" size={14} /></button>}
     </aside>
   );
 }

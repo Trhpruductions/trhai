@@ -12,7 +12,7 @@
 // The answer is cached for six hours. Checking is cheap, but a popup that
 // re-appears every time the app is opened is not.
 
-import { compareVersions, notesUpTo, releaseNotes, type ReleaseNote } from "@ascend/shared";
+import { compareVersions, isRequiredReleaseText, notesUpTo, releaseNotes, type ReleaseNote } from "@ascend/shared";
 import { getBuildInfo } from "./buildInfo.js";
 
 export type LatestRelease = {
@@ -24,6 +24,12 @@ export type LatestRelease = {
   publishedAt: string | null;
   /** The release's own notes, as written on GitHub. */
   notes: string;
+  /**
+   * The release page carries the required-update line (`requiredUpdateLine` in
+   * releaseNotes.ts): an installed copy older than it downloads it by itself
+   * and restarts into it, where it would otherwise only offer it.
+   */
+  required: boolean;
 };
 
 export type UpdateCheck = {
@@ -85,12 +91,15 @@ export function parseRelease(value: unknown): LatestRelease | null {
   const downloadUrl = installer && typeof installer.browser_download_url === "string" && /^https:\/\//.test(installer.browser_download_url)
     ? installer.browser_download_url
     : null;
+  const body = typeof release.body === "string" ? release.body : "";
   return {
     version,
     url,
     downloadUrl,
     publishedAt: typeof release.published_at === "string" ? release.published_at : null,
-    notes: typeof release.body === "string" ? release.body.trim().slice(0, 4000) : ""
+    notes: body.trim().slice(0, 4000),
+    // Read from the whole page, not the part that is kept.
+    required: isRequiredReleaseText(body)
   };
 }
 

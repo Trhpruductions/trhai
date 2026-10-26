@@ -74,8 +74,9 @@ export function SetupScreen() {
             <h2 id="setup-title">Set up TRH AI on this PC</h2>
             <p>
               TRH AI runs entirely on this PC, so it needs two things here before it can answer: the engine that runs AI models,
-              and at least one model. The one recommended below suits this PC. The voice, listening and video tools are ticked too,
-              so that everything works from the first minute; untick any you do not want.
+              and at least one model. The two recommended below suit this PC: one to talk with and one that reads pictures, both
+              answering what they are asked. The voice, listening and video tools are ticked too, so that everything works from
+              the first minute; untick any you do not want.
             </p>
           </>
         ) : (

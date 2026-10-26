@@ -24,6 +24,8 @@ export type LatestRelease = {
   downloadUrl: string | null;
   publishedAt: string | null;
   notes: string;
+  /** The release page marks it required: an older installed copy downloads it by itself. Absent from an older service. */
+  required?: boolean;
 };
 
 export type UpdateCheck = {
@@ -41,6 +43,9 @@ export const dismissedUpdateKey = "trhai.update.dismissed.v1";
 
 /** Fired on window to open the What's new notice on demand, from Settings. */
 export const showWhatsNewEvent = "trhai:whatsnew";
+
+/** Fired on window after Settings has asked the release page again, so that a required release is acted on at once. */
+export const recheckUpdatesEvent = "trhai:updates-recheck";
 
 type Store = Pick<Storage, "getItem" | "setItem">;
 
@@ -74,10 +79,16 @@ export function noticeToShow(check: UpdateCheck | null, seenVersion: string | nu
   if (!check) return null;
   const current = check.notes.find((note) => note.version === check.currentVersion);
   if (current && seenVersion !== check.currentVersion) return { kind: "whatsnew", note: current };
-  if (check.updateAvailable && check.latest && dismissedUpdate !== check.latest.version) {
+  // A release every copy has to move to is not put off with "Later": it stays until it is installed.
+  if (check.updateAvailable && check.latest && (check.latest.required === true || dismissedUpdate !== check.latest.version)) {
     return { kind: "update", latest: check.latest };
   }
   return null;
+}
+
+/** The release every copy has to move to, when there is one: newer than this copy, and marked required. */
+export function requiredUpdate(check: UpdateCheck | null): LatestRelease | null {
+  return check?.updateAvailable && check.latest?.required === true ? check.latest : null;
 }
 
 export function readSeenVersion(store: Store): string | null {

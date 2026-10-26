@@ -153,7 +153,9 @@ newest release and the notes of recent versions.
 2. Add a note for that version at the top of `releaseNotes.ts`. Its title and
    lines also become the release page's text, which installed copies show
    when they offer the update, so write them for the people using the app.
-   The workflow refuses to publish a version that has no note.
+   The workflow refuses to publish a version that has no note. If every copy
+   has to move to it, give the note `required: true`: see *Required updates*
+   below.
 3. Merge the change. Tag a release candidate first, such as `v0.1.5-rc.1`.
    It is published as a pre-release, which no installed copy is offered, so
    it can be installed and updated to by hand (`TRHAI_DESKTOP_UPDATE_URL` set
@@ -194,3 +196,28 @@ published the same way, marked as a pre-release.
 - To try an update without publishing one, serve a folder holding
   `latest.yml` and the new Setup file over http, and start the installed app
   with `TRHAI_DESKTOP_UPDATE_URL` set to that address.
+
+### Required updates (from 0.1.8)
+
+An update that the app has to be on - because the parts of it that matter
+(the models, the voices, the service's answers) changed together - can be
+marked required. A note with `required: true` puts one fixed line under the
+release page's title (`requiredUpdateLine` in `releaseNotes.ts`, "Required
+update: TRH AI downloads this one by itself and restarts to install it."), and
+the API reads that line back out of the latest release (`LatestRelease.required`
+in `updates.ts`).
+
+On an installed copy that is on an older version, a required release is not
+offered, it is installed: the app downloads it by itself as soon as the release
+is seen, then shows a window over everything with how far it has got and, once
+it is ready, a restart that happens by itself after two minutes (or at once
+from the button). The window cannot be closed; if the download fails it says
+why, with *Try again* and *Not now* (the update is still installed when the app
+quits, as any downloaded one is).
+
+What it cannot do: **force a copy whose own version does not know the line.** A
+0.1.7 copy cannot, so 0.1.8 itself reaches it as an ordinary update, with
+*Later*, or by hand (the installer is also copied to `D:\TRHAI-Installer` for
+sending); from 0.1.8 on, the next release can be forced. The portable build, a
+browser and a copy run from source have nothing to install over, so for them a
+required release is the ordinary card, without *Later*.

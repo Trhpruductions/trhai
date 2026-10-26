@@ -316,7 +316,9 @@ the PC, and every tool - the same installer as the first-run screen, with the
 same checks.
 
 - Not on a new install (its first-run screen asks, with both models and every
-  tool ticked), and not where `TRHAI_REQUIRED_SETUP=off`.
+  tool ticked), not where `TRHAI_REQUIRED_SETUP=off`, and not with an engine of
+  the person's own (`TRHAI_ENGINE_URL`, or `TRHAI_ENGINE=off`): the models folder
+  is not what answers there, so 11 GB is not put in it.
 - Recorded in `runtime\required-setup.json` against a generation number
   (`requiredSetupGeneration`, 1 for 0.1.8). A copy that finished a generation is
   left alone until the bundle changes, so a model or voice a person removes

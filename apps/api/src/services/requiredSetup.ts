@@ -47,7 +47,7 @@ export type RequiredState = "waiting" | "running" | "done" | "failed" | "stopped
 
 export type RequiredStatus = {
   generation: number;
-  /** False where nothing is forced: a new install (its first-run screen asks), a PC that cannot have it, or TRHAI_REQUIRED_SETUP=off. */
+  /** False where nothing is forced: a new install (its first-run screen asks), an engine of the person's own, or TRHAI_REQUIRED_SETUP=off. */
   applies: boolean;
   state: RequiredState;
   /** Why the last try did not finish, in a sentence; null otherwise. */
@@ -119,6 +119,15 @@ export function requiredRequest(hardware: Hardware, tools: ToolDef[] = toolCatal
   };
 }
 
+/**
+ * An engine that is someone else's (TRHAI_ENGINE_URL), or one this PC was told
+ * not to run (TRHAI_ENGINE=off): the models folder is not what answers there,
+ * so nothing is forced into it.
+ */
+function ownEngine(env: NodeJS.ProcessEnv): boolean {
+  return env.TRHAI_ENGINE === "off" || Boolean(env.TRHAI_ENGINE_URL?.trim());
+}
+
 /** The job this module started, so that a job someone else started is not taken for it. */
 let activeRun: string | null = null;
 
@@ -138,7 +147,7 @@ export function requiredStatus(options: StatusOptions = {}): RequiredStatus {
   const planned = planSetup(requiredRequest(hardware, options.tools), { ...options, env, hardware });
   const remainingBytes = planned.ok ? planned.plan.steps.reduce((sum, step) => sum + step.totalBytes, 0) : 0;
   const needsSetup = options.needsSetup ?? !canAnswer(env);
-  const applies = env.TRHAI_REQUIRED_SETUP !== "off" && !needsSetup && planned.ok;
+  const applies = env.TRHAI_REQUIRED_SETUP !== "off" && !needsSetup && planned.ok && !ownEngine(env);
 
   const job = setupJob();
   let state: RequiredState;
@@ -170,7 +179,7 @@ export function setupStatusWithRequired(env: NodeJS.ProcessEnv = process.env): S
 
 export type RequiredStart =
   | { started: true; job: SetupJob }
-  | { started: false; reason: "off" | "new-install" | "done" | "busy" | "gave-up" | "refused"; message: string };
+  | { started: false; reason: "off" | "new-install" | "own-engine" | "done" | "busy" | "gave-up" | "refused"; message: string };
 
 /**
  * Restarts the engine, which it has to for the models that were just installed
@@ -216,6 +225,7 @@ export function startRequiredSetup(options: { manual?: boolean } = {}, deps: Req
   const env = deps.env ?? process.env;
   if (env.TRHAI_REQUIRED_SETUP === "off") return { started: false, reason: "off", message: "Switched off (TRHAI_REQUIRED_SETUP=off)." };
   if (!canAnswer(env)) return { started: false, reason: "new-install", message: "This PC is not set up yet: the first-run screen offers the install." };
+  if (ownEngine(env)) return { started: false, reason: "own-engine", message: "TRH AI is told to use an engine of its own (TRHAI_ENGINE_URL, or TRHAI_ENGINE=off), so no models are installed for it." };
   const hardware = deps.hardware ?? readHardware();
   const marker = readMarker(env);
   if (marker?.state === "done") return { started: false, reason: "done", message: "Everything this version brings is already installed." };

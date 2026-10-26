@@ -13,7 +13,27 @@ export type ReleaseNote = {
   title: string;
   /** One change per line, each a plain sentence. */
   notes: string[];
+  /**
+   * Every copy has to move to this version: an installed copy older than it
+   * downloads it by itself and restarts into it, instead of offering it.
+   * A copy only does so if its own version knows how (0.1.8 and later), so a
+   * note that is the first one such a copy has seen is offered as usual.
+   */
+  required?: boolean;
 };
+
+/**
+ * The line a required release's page carries under its title. The installed
+ * app reads the page back and looks for exactly this line: a fixed sentence,
+ * rather than a hidden marker or a guess from the notes' own words, so that
+ * what the page says and what the app does cannot drift apart.
+ */
+export const requiredUpdateLine = "Required update: TRH AI downloads this one by itself and restarts to install it.";
+
+/** Whether the text of a release page marks it as required: the line, on a line of its own. */
+export function isRequiredReleaseText(text: string): boolean {
+  return text.split(/\r?\n/).some((line) => line.trim() === requiredUpdateLine);
+}
 
 export const releaseNotes: ReleaseNote[] = [
   {
@@ -105,6 +125,8 @@ export function releasePageText(version: string, options: { candidate?: boolean 
   return [
     note.title,
     "",
+    // Not on a release candidate's page: it is a pre-release, which no installed copy is offered or downloads.
+    ...(note.required && !options.candidate ? [requiredUpdateLine, ""] : []),
     ...note.notes.map((line) => `- ${line}`),
     "",
     ...(options.candidate ? ["This is a release candidate, published for testing. Installed copies of TRH AI are not offered it.", ""] : []),

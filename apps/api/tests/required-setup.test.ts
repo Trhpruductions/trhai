@@ -162,6 +162,18 @@ test("an engine and only a picture model cannot answer yet, so that is a new ins
   assert.equal(!started.started && started.reason, "new-install");
 });
 
+test("an engine of the person's own, or none to run, is not given models: nothing applies and nothing starts", () => {
+  const f = fixture();
+  for (const own of [{ TRHAI_ENGINE_URL: "http://10.0.0.5:8080" }, { TRHAI_ENGINE: "off" }]) {
+    const env = { ...f.env, ...own } as NodeJS.ProcessEnv;
+    assert.equal(requiredStatus({ ...f.deps, env }).applies, false, JSON.stringify(own));
+    const started = startRequiredSetup({ manual: true }, { ...f.deps, env });
+    assert.equal(!started.started && started.reason, "own-engine", JSON.stringify(own));
+  }
+  assert.equal(setupJob()?.steps.length ?? 0, 0, "nothing was downloaded");
+  assert.equal(requiredStatus(f.deps).applies, true, "and without them it applies");
+});
+
 test("it can be switched off, and then it neither applies nor starts", () => {
   const f = fixture();
   const env = { ...f.env, TRHAI_REQUIRED_SETUP: "off" } as NodeJS.ProcessEnv;
