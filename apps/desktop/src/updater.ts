@@ -15,7 +15,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { app, BrowserWindow } from "electron";
 import updaterPackage from "electron-updater";
-import { encodedCommand, helperPowerShell, plainUpdateError, relaunchScript, updateSupport, type DesktopUpdateStatus } from "./updateState.js";
+import { encodedCommand, helperLaunches, helperPowerShell, plainUpdateError, relaunchScript, updateSupport, type DesktopUpdateStatus } from "./updateState.js";
 
 const { autoUpdater } = updaterPackage;
 
@@ -54,32 +54,34 @@ async function download(): Promise<void> {
 /**
  * Started detached, so it outlives this process: an ordinary child is put in
  * a job that Windows ends when this process does. PowerShell started detached
- * has no console and exits before running a line, so it is given one that
- * has no window - Windows' own console host, headless - with `cmd /c start`,
- * minimised, as the fallback. Both were tried from outside any job: the
- * helper outlived its launcher, waited for the installer and started the app.
- * Failing to start it only means the person opens the app again themselves.
+ * has no console and exits before running a line, so it is started through
+ * something that gives it one (helperLaunches says which, and why in that
+ * order). Tried from outside any job, the helper outlived its launcher, waited
+ * for the installer and started the app. Failing to start it only means the
+ * person opens the app again themselves.
  */
 function startRelaunchHelper(): void {
   const powershell = helperPowerShell(encodedCommand(relaunchScript(process.execPath, process.pid, {
     logPath: path.join(app.getPath("userData"), "logs", "update-restart.log")
   })));
-  const launch = (file: string, args: string[]) => {
-    const helper = spawn(file, args, { detached: true, stdio: "ignore", windowsHide: true });
-    helper.unref();
-    return helper;
+  const attempts = helperLaunches(powershell);
+  const attempt = (index: number): void => {
+    const way = attempts[index];
+    if (!way) {
+      console.warn("[updater] could not arrange the restart after the update");
+      return;
+    }
+    try {
+      const helper = spawn(way.file, way.args, { detached: true, stdio: "ignore", windowsHide: true });
+      // Not started at all: the next way.
+      helper.on("error", () => attempt(index + 1));
+      helper.unref();
+    } catch (error) {
+      console.warn(`[updater] could not start the restart helper with ${way.file}: ${error instanceof Error ? error.message : String(error)}`);
+      attempt(index + 1);
+    }
   };
-  try {
-    launch("conhost.exe", ["--headless", ...powershell]).on("error", () => {
-      try {
-        launch("cmd.exe", ["/d", "/c", "start", "\"\"", "/min", ...powershell]);
-      } catch (error) {
-        console.warn(`[updater] could not arrange the restart after the update: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    });
-  } catch (error) {
-    console.warn(`[updater] could not arrange the restart after the update: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  attempt(0);
 }
 
 type Register = (channel: string, listener: () => unknown) => void;

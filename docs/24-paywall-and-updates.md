@@ -182,10 +182,11 @@ published the same way, marked as a pre-release.
   The download runs in the app, with its progress shown. Then the button
   becomes **Restart to update**. Nothing is downloaded or installed until the
   person asks.
-- The app quits and runs the installer silently. A small hidden helper waits
-  for the installer to finish, then opens the new version. The installer's own
-  "open the app afterwards" switch did not do that, so the helper does it, and
-  writes each step to `%APPDATA%\TRH AI\logs\update-restart.log`.
+- The app quits and runs the installer silently. The installer reopens the new
+  version itself (its "open the app afterwards" switch), and a small hidden
+  helper covers the times it does not: it waits for the installer to finish,
+  then opens the app unless one is already running, and writes each step to
+  `%APPDATA%\TRH AI\logs\update-restart.log`.
 - A downloaded update that is not installed then is installed the next time
   the app quits.
 - The portable build, a browser, and a copy run from source keep the
@@ -195,7 +196,11 @@ published the same way, marked as a pre-release.
   so the workflow refuses to publish one without it.
 - To try an update without publishing one, serve a folder holding
   `latest.yml` and the new Setup file over http, and start the installed app
-  with `TRHAI_DESKTOP_UPDATE_URL` set to that address.
+  with `TRHAI_DESKTOP_UPDATE_URL` set to that address. The installer starts
+  its own copy of the app through Explorer, which gives that copy Explorer's
+  settings, not the test's: to keep a test from touching real data, and to
+  leave the restart to the helper, stop that copy the moment it appears (the
+  helper then starts the app from the settings the old app had).
 
 ### Required updates (from 0.1.8)
 

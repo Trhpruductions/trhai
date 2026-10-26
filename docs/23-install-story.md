@@ -389,17 +389,34 @@ failed with the error above.
   - The installer became **one-click** for it. The assisted installer, which
     let people pick a folder, showed its "install for whom" page during a
     silent update and gave up.
-  - Neither installer reopens the app after a silent update, whatever
-    `--force-run` says. So the app starts a hidden helper before it quits,
-    and the helper waits for the installer, then starts the app. The helper
-    must be detached, because Node ends non-detached children with their
-    parent. Detached PowerShell has no console and exits at once, so it runs
-    under `conhost --headless`, with `cmd /c start /min` as the fallback.
+  - The app is reopened after a silent update by two things, because
+    neither has been reliable alone. The installer is asked to
+    (`--force-run`): with 0.1.5 updating to 0.1.6 it did not, and on
+    2026-10-26 it did, four updates out of four, but through Explorer, so that
+    copy has Explorer's settings and not the old app's. And the app starts a
+    hidden helper before it quits, which waits for the installer, then starts
+    the app unless one is already running. The helper must be detached,
+    because Node ends non-detached children with their parent. Detached
+    PowerShell has no console and exits at once, so it is started with a
+    console of its own: `cmd /c start /min`, then `conhost --headless` if that
+    cannot be started. The console host was the first way until 2026-10-26,
+    when, on Windows 11 build 26300, it started and returned without running
+    the script (the shipped 0.1.7 and the 0.1.8 build left no restart log);
+    `cmd /c start /min` ran it.
   - Verified on this PC: 0.1.5 was installed one-click. Its own buttons found
     a local 0.1.6, downloaded it, quit and installed it. The helper reopened
     it about 80 s later, reporting 0.1.6. Uninstalling then removed the
     program, its shortcut and its Windows entry, and left the user's own
     `TRHAI.lnk` alone.
+  - Verified again on 2026-10-26, from installed copies kept apart from this
+    PC's own data. The shipped 0.1.7 Setup (the published asset, same
+    SHA-256) was offered a stand-in feed's 0.1.8 build; its update card's
+    **Download and install** and **Restart to update** buttons took it there,
+    and the installed program was then 0.1.8 with the app started again by the
+    installer. That 0.1.8 then took a required 0.1.9 by itself, two minutes
+    after the window said so. With the installer's own restart stopped the
+    moment it appeared, the helper logged "starting the app" 3 s after the
+    installer finished, and the app it started reported 0.1.9.
 - A CI job that builds the installer on a version tag and attaches it to the
   release (`release.yml`, built with the paywall work), and a CHANGELOG
   (`releaseNotes.ts` is the in-app one).

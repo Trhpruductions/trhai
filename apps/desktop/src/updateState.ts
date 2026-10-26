@@ -62,12 +62,14 @@ export function plainUpdateError(error: unknown): string {
  * The script that brings the app back after an update installs.
  *
  * electron-updater asks the installer to start the app when it finishes
- * (--force-run), and on this app's installer that does not happen: tried with
- * both the assisted and the one-click installer, the update installed and
- * nothing started. So the app starts this, hidden and detached, just before it
- * quits into the installer. It waits for the app to exit, then for the
- * installer to finish, then starts the app - unless something already has.
- * Quotes in the path are doubled for PowerShell's single-quoted strings.
+ * (--force-run). That has not always happened: tried with both the assisted
+ * and the one-click installer, an update installed and nothing started; in
+ * other runs the installer did start the app, through Explorer. So the app
+ * also starts this, hidden and detached, just before it quits into the
+ * installer. It waits for the app to exit, then for the installer to finish,
+ * then starts the app - unless something already has, which is why both can
+ * be in play at once. Quotes in the path are doubled for PowerShell's
+ * single-quoted strings.
  */
 export function relaunchScript(exePath: string, appPid: number, options: { logPath?: string; installerPattern?: string } = {}): string {
   const quoted = (value: string) => `'${value.replace(/'/g, "''")}'`;
@@ -109,4 +111,26 @@ export function encodedCommand(script: string): string {
 /** PowerShell's command line for the helper: no profile, no prompts, hidden, the script encoded. */
 export function helperPowerShell(encoded: string): string[] {
   return ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-EncodedCommand", encoded];
+}
+
+export type HelperLaunch = { file: string; args: string[] };
+
+/**
+ * The ways to start the helper, in the order to try them: the next is tried when
+ * one cannot be started at all.
+ *
+ * `cmd /c start` first. It gives PowerShell a console of its own - minimised, and
+ * PowerShell hides itself as it begins - and it is the way that ran on every PC
+ * it was tried on. Windows' console host in headless mode was first, because it
+ * shows nothing, but on a current build of Windows 11 it starts, returns at once
+ * and never runs the script: found by watching an update install on an installed
+ * copy, which left no restart log (the installer's own restart saved that run).
+ * It stays as the second way, where it is known to work. PowerShell started
+ * detached on its own has no console and exits before running a line.
+ */
+export function helperLaunches(powershell: string[]): HelperLaunch[] {
+  return [
+    { file: "cmd.exe", args: ["/d", "/c", "start", "\"\"", "/min", ...powershell] },
+    { file: "conhost.exe", args: ["--headless", ...powershell] }
+  ];
 }
