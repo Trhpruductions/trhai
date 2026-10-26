@@ -15,6 +15,7 @@ import { renderVideo } from "./videoRender.js";
 import { describeMusicVideos, listMusicVideos, parseMusicVideoRequest, whyNotMusicVideo } from "./musicVideoFiles.js";
 import { musicVideoStatus, startMusicVideo } from "./musicVideoJob.js";
 import { describeMadeDocument, documentsFolder, makeDocument, parseDocumentFormats } from "./documentMaker.js";
+import { describeMadeSpreadsheet, makeSpreadsheet, parseSpreadsheetFormats } from "./spreadsheetMaker.js";
 import { expandKnownFolder } from "./knownFolders.js";
 import { noteMadeFiles } from "./madeFiles.js";
 import type { RunningApp, StartResult } from "./appRunner.js";
@@ -786,6 +787,36 @@ export const toolDefinitions: ToolDefinition[] = [
       }
     }
   },
+  {
+    type: "function",
+    function: {
+      name: "make_spreadsheet",
+      description:
+        "Make a real SPREADSHEET FILE the user can open in Excel - an Excel workbook (.xlsx) or a CSV file - from data "
+        + "you write, and save it. Use this when the user asks for a spreadsheet or an Excel file, or for something that "
+        + "is one, such as a budget, a timesheet or a tracker. Write ALL of the data yourself in content: as CSV (the "
+        + "first line the column names), or as a Markdown table under a ## heading for each sheet. Numbers, percentages "
+        + "(12%), money ($1,200.50) and dates (2026-03-04) become real ones, and a cell that starts with = is a formula "
+        + "that works - =SUM(B2:B10), =B2*C2, =IF(D2>100,\"high\",\"low\"), =Sheet2!A1 - so add totals as formulas, not "
+        + "as numbers you worked out. Put a ' before something that only looks like a number, such as '007. It makes a new "
+        + "file every time and never replaces one, reads each file back and checks every cell, and says where the files "
+        + "are - give the user that. A table to read in the reply needs no file.",
+      parameters: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "All of the data: CSV, or Markdown tables with a ## heading above each for its sheet's name." },
+          title: { type: "string", description: "What to call the file. If left out, the sheet's name is used." },
+          format: { type: "string", description: "xlsx for an Excel workbook (the default), csv, or both: \"xlsx, csv\"." },
+          header: { type: "boolean", description: "Whether the first row is column names. Left out, it is when the first row is all words." },
+          folder: {
+            type: "string",
+            description: "Only if the user said where: a folder in the workspace, or Desktop, Downloads or Documents on this PC, or a full path (these need machine access)."
+          }
+        },
+        required: ["content"]
+      }
+    }
+  },
   // The app has a scheduler. The assistant could not reach it.
   //
   // Asked "remind me every day at 9am to check the build", it called no tool
@@ -1130,7 +1161,7 @@ const scaffoldingTools = new Set(["build_app", "plan_app"]);
  * the port" is an ordinary thing to ask.
  */
 const machineChangingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "plan_app", "run_command", "run_script", "run_app"
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "plan_app", "run_command", "run_script", "run_app"
 ]);
 
 /**
@@ -1190,7 +1221,7 @@ const dateTools = new Set(["days_between", "shift_date"]);
  * A question does not write files, documents or apps, though.
  */
 const writingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "plan_app",
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "plan_app",
   "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule"
 ]);
 
@@ -1225,6 +1256,8 @@ const musicVideoTools = new Set(["make_music_video", "music_video_status"]);
  * file is the wrong thing to have within reach of it.
  */
 const fileMakingTools = new Set(["make_document"]);
+/** Offered only when the request asks for a spreadsheet to be made; see wantsASpreadsheetMade. */
+const spreadsheetTools = new Set(["make_spreadsheet"]);
 /**
  * The knowledge-base writers, withheld from a request that only reads unless
  * it asks for something to be kept. machineChangingTools already stops a read
@@ -1274,7 +1307,7 @@ export function availableTools(
     scaffolding?: boolean; changes?: boolean; arithmetic?: boolean; dates?: boolean; clock?: boolean;
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
     schedules?: boolean; video?: boolean; musicVideo?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
-    messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean; fileMaking?: boolean;
+    messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean; fileMaking?: boolean; spreadsheets?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1301,6 +1334,7 @@ export function availableTools(
   const allowReaders = options.readers ?? true;
   const allowImages = options.images ?? true;
   const allowFileMaking = options.fileMaking ?? true;
+  const allowSpreadsheets = options.spreadsheets ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1338,6 +1372,8 @@ export function availableTools(
     if (!allowImages && name === "look_at_image") return false;
     // Only when the request asks for a file to be made; see wantsAFileMade.
     if (!allowFileMaking && fileMakingTools.has(name)) return false;
+    // Only when the request asks for a spreadsheet; see wantsASpreadsheetMade.
+    if (!allowSpreadsheets && spreadsheetTools.has(name)) return false;
     return true;
   }).sort((a, b) => (offerOrder.get(a.function.name) ?? 0) - (offerOrder.get(b.function.name) ?? 0));
 }
@@ -1753,7 +1789,9 @@ function writesOverADocument(target: string): string | null {
     + "text - saving it there would leave a file nothing can open. "
     + (kind === ".docx" || kind === ".pdf"
       ? "To make a real Word or PDF file, use make_document with the text of the document; or write the text to a .txt or .md file instead."
-      : "Write the text to a .txt or .md file instead.");
+      : kind === ".xlsx"
+        ? "To make a real Excel file, use make_spreadsheet with the data; or write the rows to a .csv file instead."
+        : "Write the text to a .txt or .md file instead.");
 }
 
 /** Why `content` must not be written, when it is a shortened view; see elisionIn. */
@@ -1763,6 +1801,43 @@ function writesAShortenedView(content: string): string | null {
     ? `This has ${elided} in it: it is a shortened view, and writing it would put the note where the `
       + "left-out lines belong. To change part of a file, use edit_file with old_text and new_text."
     : null;
+}
+
+/**
+ * Where a file the assistant makes goes, and what the request's own words add to
+ * the order: the folder in the workspace for such files, or the place the user
+ * named - a folder in the words a person uses for it ("Desktop") or a path.
+ * A model that passes a file's whole path as the folder is understood too: the
+ * file's name titles it and its ending is the format, unless it was told which.
+ * `endings` are the file endings the tool makes, written as an alternation.
+ */
+function madeFileTarget(
+  args: Record<string, unknown>,
+  context: ToolContext,
+  endings: string
+): { ok: true; directory: string; title: string | null; format: unknown } | { ok: false; reason: string } {
+  let asked = requireString(args.folder);
+  let title: string | null = null;
+  let format: unknown = args.format ?? args.formats;
+  const named = asked ? new RegExp(`^(.*?)([^\\\\/]*)\\.(${endings})$`, "i").exec(asked) : null;
+  if (asked && named) {
+    asked = named[1].replace(/[\\/]+$/, "") || null;
+    title = named[2].trim() || null;
+    if (format === undefined || format === null || format === "") format = named[3].toLowerCase();
+  }
+  const verdict = resolveForAccess(asked ? (expandKnownFolder(asked) ?? asked) : documentsFolder, {
+    // As above: an unattended run stays in the workspace.
+    granted: commandsArmed() && !context.unattended,
+    intent: "write",
+    insideWorkspace: resolveInWorkspace
+  });
+  return verdict.ok ? { ok: true, directory: verdict.path, title, format } : { ok: false, reason: verdict.reason };
+}
+
+/** A made file named the way the user would find it: in the workspace by its short path, outside it by where it really is. */
+function shownPath(absolute: string): string {
+  const relative = workspaceRelative(absolute);
+  return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : absolute;
 }
 
 /**
@@ -3058,49 +3133,50 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
       const shortened = elisionIn(content);
       if (shortened) return { ok: false, content: `This has ${shortened} in it, so it is not the whole document. Write the whole document out. Nothing was made.` };
 
-      // Where it goes: the documents folder in the workspace, or the place the
-      // user named - a folder in the words a person uses for it ("Desktop"), or
-      // a path. A model that passes a file's whole path as the folder is
-      // understood too: the file's name titles the document and its ending is
-      // the format, unless it was told which.
-      let asked = requireString(call.arguments.folder);
-      let nameGiven: string | null = null;
-      let formatGiven: unknown = call.arguments.format ?? call.arguments.formats;
-      const named = asked ? /^(.*?)([^\\/]*)\.(docx|pdf|html|md|txt)$/i.exec(asked) : null;
-      if (asked && named) {
-        asked = named[1].replace(/[\\/]+$/, "") || null;
-        nameGiven = named[2].trim() || null;
-        if (formatGiven === undefined || formatGiven === null || formatGiven === "") formatGiven = named[3].toLowerCase();
-      }
-      const formats = parseDocumentFormats(formatGiven);
+      const target = madeFileTarget(call.arguments, context, "docx|pdf|html|md|txt");
+      if (!target.ok) return { ok: false, content: `${target.reason} Nothing was made.` };
+      const formats = parseDocumentFormats(target.format);
       if (!formats.ok) return { ok: false, content: `${formats.reason} Nothing was made.` };
 
       const paperGiven = requireString(call.arguments.paper);
       const paper = /^(?:us[- ]?)?letter$/i.test(paperGiven ?? "") ? "Letter" as const : /^a4$/i.test(paperGiven ?? "") ? "A4" as const : undefined;
       if (paperGiven && !paper) return { ok: false, content: 'paper must be "A4" or "Letter". Nothing was made.' };
 
-      const verdict = resolveForAccess(asked ? (expandKnownFolder(asked) ?? asked) : documentsFolder, {
-        // As above: an unattended run stays in the workspace.
-        granted: commandsArmed() && !context.unattended,
-        intent: "write",
-        insideWorkspace: resolveInWorkspace
-      });
-      if (!verdict.ok) return { ok: false, content: `${verdict.reason} Nothing was made.` };
-
       const made = await makeDocument(
-        { content, title: requireString(call.arguments.title) ?? nameGiven ?? undefined, formats: formats.formats, paper },
-        verdict.path
+        { content, title: requireString(call.arguments.title) ?? target.title ?? undefined, formats: formats.formats, paper },
+        target.directory
       );
       if (!made.ok) return { ok: false, content: describeMadeDocument(made) };
 
-      // Named the way the user would find it: a file in the workspace by its short path, one outside by where it really is.
-      const show = (absolute: string) => {
-        const relative = workspaceRelative(absolute);
-        return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : absolute;
-      };
       // The ones in the workspace can be opened from the screen; see madeFiles.ts.
-      noteMadeFiles(context.sessionId, made.files.map((file) => show(file.path)).filter((shown) => !path.isAbsolute(shown)));
-      return { ok: true, content: describeMadeDocument(made, show), path: show(made.files[0].path) };
+      noteMadeFiles(context.sessionId, made.files.map((file) => shownPath(file.path)).filter((shown) => !path.isAbsolute(shown)));
+      return { ok: true, content: describeMadeDocument(made, shownPath), path: shownPath(made.files[0].path) };
+    }
+
+    case "make_spreadsheet": {
+      const content = typeof call.arguments.content === "string" ? call.arguments.content : null;
+      if (!content?.trim()) {
+        return { ok: false, content: "make_spreadsheet needs all of the data in content, as CSV or as Markdown tables. Nothing was made." };
+      }
+      const placeholder = placeholderIn("data.csv", content);
+      if (placeholder) return { ok: false, content: `${placeholder} Nothing was made.` };
+      const shortened = elisionIn(content);
+      if (shortened) return { ok: false, content: `This has ${shortened} in it, so it is not all of the data. Write all of it out. Nothing was made.` };
+
+      const target = madeFileTarget(call.arguments, context, "xlsx|csv");
+      if (!target.ok) return { ok: false, content: `${target.reason} Nothing was made.` };
+      const formats = parseSpreadsheetFormats(target.format);
+      if (!formats.ok) return { ok: false, content: `${formats.reason} Nothing was made.` };
+      const header = call.arguments.header === true || call.arguments.header === "true" ? true : call.arguments.header === false || call.arguments.header === "false" ? false : undefined;
+
+      const made = await makeSpreadsheet(
+        { content, title: requireString(call.arguments.title) ?? target.title ?? undefined, formats: formats.formats, header },
+        target.directory
+      );
+      if (!made.ok) return { ok: false, content: describeMadeSpreadsheet(made) };
+
+      noteMadeFiles(context.sessionId, made.files.map((file) => shownPath(file.path)).filter((shown) => !path.isAbsolute(shown)));
+      return { ok: true, content: describeMadeSpreadsheet(made, shownPath), path: shownPath(made.files[0].path) };
     }
 
     case "edit_file": {

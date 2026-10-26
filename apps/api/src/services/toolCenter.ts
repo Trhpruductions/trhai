@@ -64,6 +64,7 @@ export const toolCatalogue: Record<string, CatalogueEntry> = {
   summarize_document: { area: "Documents", title: "Summarise a document", summary: "Summarises a document of any length, from your knowledge base or a PDF, Word, PowerPoint or text file on this PC." },
   write_document: { area: "Documents", title: "Write a document", summary: "Saves notes or a draft as a new document in your knowledge base." },
   make_document: { area: "Documents", title: "Make a Word or PDF file", summary: "Makes a Word document, PDF, web page, Markdown or text file from what you ask for, and saves it where you can open, print or send it." },
+  make_spreadsheet: { area: "Documents", title: "Make an Excel file", summary: "Makes an Excel workbook or a CSV file from your data, with working formulas for the totals, and saves it where you can open it in Excel." },
   update_document: { area: "Documents", title: "Update a document", summary: "Adds to or changes a document already in your knowledge base." },
   delete_document: { area: "Documents", title: "Delete a document", summary: "Deletes a document from your knowledge base." },
   list_files: { area: "Files", title: "List files", summary: "Lists what is in a folder." },
@@ -147,6 +148,7 @@ function readinessOf(name: string, probe: ToolProbe): ToolReadiness {
       ? ready("Makes Word, web page, Markdown and text files. PDFs need TRH AI's own window to print them, and it is not here.")
       : ready("Makes Word, PDF, web page, Markdown and text files on this PC, with no account.");
   }
+  if (name === "make_spreadsheet") return ready("Makes Excel and CSV files on this PC, with no account; formulas are worked out and written beside their answers.");
   if (name === "send_text") {
     if (probe.phoneLink !== "linked") {
       return { state: "needs-setup", note: probe.phoneLink === "not-linked" ? "Link your phone in Phone Link to send texts." : "Needs Phone Link, from the Microsoft Store." };

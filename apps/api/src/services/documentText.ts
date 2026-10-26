@@ -10,7 +10,7 @@ import path from "node:path";
 // of XML, and the few lines of zip reading they need are here rather than a
 // library, because the parts read are always the same two or three.
 
-export type DocumentKind = "pdf" | "docx" | "pptx" | "text";
+export type DocumentKind = "pdf" | "docx" | "pptx" | "xlsx" | "text";
 
 export type ExtractedText =
   | { ok: true; kind: DocumentKind; text: string; pages?: number }
@@ -28,13 +28,14 @@ export function documentKind(bytes: Uint8Array, fileName: string): DocumentKind 
   const zip = bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
   if (zip && extension === ".docx") return "docx";
   if (zip && extension === ".pptx") return "pptx";
+  if (zip && extension === ".xlsx") return "xlsx";
   if (textExtensions.has(extension)) return "text";
   return null;
 }
 
 /** Whether read_file should read a path as a document rather than as text. */
 export function isDocumentPath(fileName: string): boolean {
-  return [".pdf", ".docx", ".pptx"].includes(path.extname(fileName).toLowerCase());
+  return [".pdf", ".docx", ".pptx", ".xlsx"].includes(path.extname(fileName).toLowerCase());
 }
 
 /**
@@ -82,7 +83,7 @@ export function readZip(bytes: Buffer): Map<string, () => Buffer> {
 
 const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
 
-function decodeEntities(text: string): string {
+export function decodeEntities(text: string): string {
   return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, code: string) => {
     if (code[0] === "#") {
       const value = code[1].toLowerCase() === "x" ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
@@ -192,6 +193,14 @@ export async function extractDocumentText(bytes: Buffer, fileName: string): Prom
           .join("\n\n");
         return text ? { ok: true, kind, text, pages: slides.length } : { ok: false, reason: "This presentation has no text in it." };
       }
+      case "xlsx": {
+        // Loaded when a spreadsheet is read: the reader needs this module, so it is not imported at the top.
+        const { readWorkbook, workbookText } = await import("./xlsxReader.js");
+        const book = readWorkbook(bytes);
+        const words = workbookText(book);
+        const filled = book.sheets.some((sheet) => sheet.rows.some((row) => row.some((cell) => cell.kind !== "empty")));
+        return filled ? { ok: true, kind, text: words, pages: book.sheets.length } : { ok: false, reason: "This spreadsheet has nothing in its cells." };
+      }
       case "text": {
         const raw = bytes.toString("utf8").replace(/^﻿/, "");
         const extension = path.extname(fileName).toLowerCase();
@@ -202,7 +211,7 @@ export async function extractDocumentText(bytes: Buffer, fileName: string): Prom
         return {
           ok: false,
           reason: `"${path.basename(fileName) || "That file"}" is not a kind of document TRH AI can read. `
-            + "It reads PDF, Word (.docx), PowerPoint (.pptx) and plain-text files."
+            + "It reads PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx) and plain-text files."
         };
     }
   } catch (error) {

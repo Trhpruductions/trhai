@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { absolutePath, canOpenInProgram, crumbs, fileKind, formatBytes, languageOf, madeFilesFrom, madeFilesInText, parentOf, readableDocument, sortEntries, type FileEntry } from "../src/lib/files.js";
+import { absolutePath, canOpenInProgram, crumbs, fileKind, formatBytes, languageOf, madeFilesFrom, madeFilesInText, parentOf, readableDocument, sheetsFromText, sortEntries, type FileEntry } from "../src/lib/files.js";
 import { detailFromHash, hashFor, viewFromHash } from "../src/os/views.js";
 
 // The Files and Code workspaces' wording and ordering, and the address that
@@ -58,9 +58,9 @@ test("an address carries a folder within its view, and survives the round trip",
 });
 
 test("summarising is offered only for the documents TRH AI can read", () => {
-  for (const name of ["report.pdf", "notes.DOCX", "deck.pptx"]) assert.equal(readableDocument(name), true, name);
+  for (const name of ["report.pdf", "notes.DOCX", "deck.pptx", "sheet.xlsx", "Budget.XLSX"]) assert.equal(readableDocument(name), true, name);
   // Documents to the file list, but the API has nothing that reads them.
-  for (const name of ["old.doc", "old.ppt", "sheet.xlsx", "sheet.xls", "readme.md"]) assert.equal(readableDocument(name), false, name);
+  for (const name of ["old.doc", "old.ppt", "sheet.xls", "readme.md"]) assert.equal(readableDocument(name), false, name);
 });
 
 test("a button to open a file is offered for documents, pictures, sound and video, and never for anything that could run", () => {
@@ -87,10 +87,13 @@ test("a conversation opened again finds its files in the reply's own lines, and 
     "- documents/Meeting Notes.html (web page)",
     "- documents/Meeting Notes.md (Markdown file)",
     "- documents/Meeting Notes.txt (text file)",
+    "- documents/Budget.xlsx (Excel workbook, 2 sheets)",
+    "- documents/Budget.csv (CSV file)",
     "Note: The PDF opens, but its words were not found."
   ].join("\n");
   assert.deepEqual(madeFilesInText(reply), [
-    "documents/Meeting Notes.docx", "documents/Meeting Notes.pdf", "documents/Meeting Notes.html", "documents/Meeting Notes.md", "documents/Meeting Notes.txt"
+    "documents/Meeting Notes.docx", "documents/Meeting Notes.pdf", "documents/Meeting Notes.html", "documents/Meeting Notes.md", "documents/Meeting Notes.txt",
+    "documents/Budget.xlsx", "documents/Budget.csv"
   ]);
   assert.deepEqual(madeFilesInText("- documents/A.pdf (PDF, 1 page)\r\n* documents/B.docx (Word document)"), ["documents/A.pdf", "documents/B.docx"], "one page, and the other bullet and line end");
   // A file outside the workspace is told by its whole path, and is not offered; nor is a line the tools did not write.
@@ -98,4 +101,23 @@ test("a conversation opened again finds its files in the reply's own lines, and 
   assert.deepEqual(madeFilesInText("- notes.txt (my own notes)\n- see documents/Report.docx (Word document) for more\nWord document: documents/Report.docx"), []);
   assert.deepEqual(madeFilesInText("- ../outside.docx (Word document)"), []);
   assert.deepEqual(madeFilesInText(""), []);
+});
+
+test("a workbook's text is cut into its sheets, each with its rows and cells, and a heading is only a heading after a blank line", () => {
+  const text = [
+    "Sheet: Costs", "Item\tCost\tShare", "Rent\t$1,200\t60%", "Total\t2000 [=SUM(B2:B3)]\t100%", "",
+    "Sheet: Old Data (hidden)", "Sheet: not a heading\tx", "[... 20 more rows not shown]", "",
+    "Sheet: Empty", "(empty)"
+  ].join("\n");
+  const sheets = sheetsFromText(text);
+  assert.deepEqual(sheets.map((sheet) => [sheet.name, sheet.hidden, sheet.rows.length, sheet.note]), [
+    ["Costs", false, 3, null],
+    ["Old Data", true, 1, "20 more rows not shown"],
+    ["Empty", false, 0, null]
+  ]);
+  assert.deepEqual(sheets[0].rows[0], ["Item", "Cost", "Share"]);
+  assert.deepEqual(sheets[0].rows[2], ["Total", "2000 [=SUM(B2:B3)]", "100%"]);
+  assert.deepEqual(sheets[1].rows[0], ["Sheet: not a heading", "x"], "a cell that starts like a heading is a cell");
+  assert.deepEqual(sheetsFromText(""), []);
+  assert.deepEqual(sheetsFromText("just some words\nwith no sheet"), []);
 });
