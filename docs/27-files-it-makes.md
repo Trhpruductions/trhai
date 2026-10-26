@@ -41,7 +41,7 @@ address, a phone number or a place in the page is left as text.
 | Format | How | Notes |
 | --- | --- | --- |
 | Word (`.docx`) | written by hand: a zip of XML (`zipWriter.ts`, `docxWriter.ts`), no library | real styles (Heading 1-6, lists with numbering, table grid), page size and margins, document properties |
-| PDF | printed by TRH AI's own window - the Electron that draws video frames - with JavaScript off and every request that is not for a local file refused (`frameRendererElectron.mjs`) | tagged, with the headings as bookmarks; paper from the page's own `@page` rule |
+| PDF | printed by TRH AI's own window - the Electron that draws video frames - with JavaScript off and every request that is not for a local file refused (`frameRendererElectron.mjs`; in the installed app that Electron is started in render mode, `docs/23-install-story.md` M2d) | tagged, with the headings as bookmarks; paper from the page's own `@page` rule |
 | Web page | one self-contained `.html` file (`documentHtml.ts`) | prints well too |
 | Markdown / text | the text as written / a plain rendering with headings underlined, tables in columns and link addresses written out | text has Windows line ends |
 

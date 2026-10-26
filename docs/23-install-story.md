@@ -349,6 +349,36 @@ same checks.
   again, Settings listed the new models and each voice's licence, and the bar
   wrapped on a phone-width screen.
 
+### M2d — printing and drawing in the installed app (found and fixed 2026-10-26)
+
+Trying the installed build for the first time showed that it could not print a
+PDF or draw a video frame. The installed app runs the API as its own Electron
+acting as Node (`ELECTRON_RUN_AS_NODE=1`); the API started the renderer with that
+flag still in its environment, so the renderer script ran as Node, where there is
+no window: "The requested module 'electron' does not provide an export named
+'BrowserWindow'". Every PDF (documents, presentations) and every video frame
+(narrated and music videos) failed in an installed copy, 0.1.7's included. The
+checkout was never affected, which is why nothing had shown it.
+
+The fix has two halves:
+
+- `rendererEnvironment` (`frameRenderer.ts`) starts the renderer without the
+  flag, and with two variables: `TRHAI_RENDER_MANIFEST`, and a profile folder
+  inside the job's own scratch folder (removed with it).
+- The installed app's entry point (`entry.ts`, now package.json's `main`; the
+  checkout's launcher still goes straight to `main.js`) reads them
+  (`renderMode.ts`): a process started with a manifest loads the renderer script
+  from the install's resources and does nothing else (`renderMain.ts`) - no window
+  of its own, no services, no lock against the running app. Before, such a process
+  would have been a second copy of the app, because a packaged Electron runs its
+  own app whatever script it is handed (`onlyLoadAppFromAsar`).
+
+Verified on the rebuilt unpacked app: the real renderer code, from a parent that
+carries `ELECTRON_RUN_AS_NODE=1` as the installed API does, printed a one-page A4
+PDF in 0.5 s (28,566 bytes, its words read back) and drew a 640x360 frame in
+0.4 s, and no TRH AI process was left behind. Before the change the same run
+failed with the error above.
+
 ### M3 — releases
 
 - Code signing: unsigned today, so SmartScreen warns on first run. Needs a

@@ -12,10 +12,24 @@
 //
 // FAKE_RENDER_LOG, when set, names a file that gets the HTML of each page as it
 // was handed over, to show it reached the renderer.
+//
+// FAKE_RENDER_ENV_LOG, when set, names a file that gets what the renderer was
+// started with that an installed app's Electron cares about: whether it was told
+// to run as Node, the two variables that say it was started to render, and the
+// arguments it was given.
 import { readFileSync, writeFileSync } from "node:fs";
 
 const manifest = JSON.parse(readFileSync(process.argv[process.argv.length - 1], "utf8"));
 const mode = process.env.FAKE_RENDER ?? "ok";
+
+if (process.env.FAKE_RENDER_ENV_LOG) {
+  writeFileSync(process.env.FAKE_RENDER_ENV_LOG, JSON.stringify({
+    runAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,
+    manifest: process.env.TRHAI_RENDER_MANIFEST ?? null,
+    userData: process.env.TRHAI_RENDER_USER_DATA ?? null,
+    argv: process.argv.slice(2)
+  }));
+}
 
 /** The text on a page of HTML, a line to each tag. */
 function textOf(html) {
