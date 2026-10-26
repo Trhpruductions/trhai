@@ -70,6 +70,19 @@ export function toolHasMore(tool: ToolEntry): boolean {
   return !tool.installed || (tool.missingBytes ?? 0) > 0;
 }
 
+/** What an update brings that has to be installed too (the API's requiredSetup.ts). */
+export type RequiredStatus = {
+  generation: number;
+  /** False where nothing is forced: a new install (its first-run screen asks), or it is switched off. */
+  applies: boolean;
+  state: "waiting" | "running" | "done" | "failed" | "stopped";
+  /** Why the last try did not finish, in a sentence. */
+  error: string | null;
+  attempts: number;
+  /** Bytes still to download for it. */
+  remainingBytes: number;
+};
+
 export type SetupStatus = {
   hardware: Hardware;
   engine: { installed: boolean; build: string | null; running: boolean; reason: string | null; recommendedVariant: string; downloadBytes: number };
@@ -78,9 +91,13 @@ export type SetupStatus = {
   tools: ToolEntry[];
   needsSetup: boolean;
   recommendedModel: string;
+  /** The picture model recommended beside it. Absent from an older service. */
+  recommendedVisionModel?: string;
   runtimeDir: string;
   freeBytes: number | null;
   job: SetupJob | null;
+  /** Absent from an older service. */
+  required?: RequiredStatus;
 };
 
 export async function readSetup(): Promise<SetupStatus | null> {
@@ -113,6 +130,11 @@ export function stopInstall(): Promise<SetupOutcome> {
   return send("DELETE", "/v1/setup/job");
 }
 
+/** Starts (or starts again) what the update brings: the banner's "Try again". */
+export function startRequired(): Promise<SetupOutcome> {
+  return send("POST", "/v1/setup/required");
+}
+
 export function removeInstalledModel(id: string): Promise<SetupOutcome> {
   return send("DELETE", `/v1/setup/models/${encodeURIComponent(id)}`);
 }
@@ -132,12 +154,18 @@ export function describeHardware(hardware: Hardware): string {
   return `${memory}, ${cores}, ${card}`;
 }
 
-/** The models picked to start with: what is recommended, unless something that can chat is already there. */
+/**
+ * The models picked to start with: what is recommended - the model to chat
+ * with and the one that looks at pictures - unless something that can chat is
+ * already there. A picture model is left out when one is installed.
+ */
 export function initialSelection(status: SetupStatus): string[] {
   const canChat = status.installed.some((model) => !model.vision);
   if (canChat) return [];
-  const recommended = status.catalog.find((model) => model.recommended && !model.installed);
-  return recommended ? [recommended.id] : [];
+  const canSee = status.installed.some((model) => model.vision);
+  return status.catalog
+    .filter((model) => model.recommended && !model.installed && !(model.vision && canSee))
+    .map((model) => model.id);
 }
 
 /** The tools to offer ticked: every one this PC can use that has something left to install, so that one click installs everything. */
@@ -155,8 +183,69 @@ export function initialToolSelection(status: SetupStatus): string[] {
  */
 export function setupReason(status: SetupStatus, toolsAlreadyOffered: boolean): "first-run" | "tools" | null {
   if (status.needsSetup) return "first-run";
+  // The update installs the tools by itself on a copy that is set up (the banner
+  // shows how it is getting on); asking whether to install them as well would be
+  // a second question about the same download.
+  if (status.required?.applies && status.required.state !== "done") return null;
   if (!toolsAlreadyOffered && (status.tools ?? []).some((tool) => tool.supported && !tool.installed)) return "tools";
   return null;
+}
+
+export type RequiredNotice = {
+  tone: "working" | "attention";
+  title: string;
+  text: string;
+  /** 0 to 100 while it downloads; null when there is no progress to show. */
+  percent: number | null;
+  action: { kind: "stop" | "start"; label: string } | null;
+};
+
+/**
+ * What the banner over every screen says about the install an update brings,
+ * or null when there is nothing to say: a new install, one that is switched
+ * off, or one that has finished. Pure, so the wording is tested without a screen.
+ */
+export function requiredNotice(status: SetupStatus | null): RequiredNotice | null {
+  const required = status?.required;
+  if (!status || !required || !required.applies || required.state === "done") return null;
+  const left = formatBytes(required.remainingBytes);
+  switch (required.state) {
+    case "running": {
+      const job = status.job;
+      const current = job?.steps.find((step) => step.state !== "done" && step.state !== "waiting") ?? job?.steps.find((step) => step.state === "waiting");
+      return {
+        tone: "working",
+        title: "Installing what this update brings",
+        text: `New models, voices and tools are downloading in the background${current ? ` - now ${current.label}` : ""}. TRH AI keeps working while they do.`,
+        percent: job ? jobPercent(job) : null,
+        action: { kind: "stop", label: "Stop" }
+      };
+    }
+    case "failed":
+      return {
+        tone: "attention",
+        title: "The install did not finish",
+        text: `${required.error ?? "Something went wrong."} ${left} still to download.`,
+        percent: null,
+        action: { kind: "start", label: "Try again" }
+      };
+    case "stopped":
+      return {
+        tone: "attention",
+        title: "The install was stopped",
+        text: `${left} of models, voices and tools still to download. What was fetched is kept.`,
+        percent: null,
+        action: { kind: "start", label: "Continue" }
+      };
+    default:
+      return {
+        tone: "working",
+        title: "This update brings new models, voices and tools",
+        text: `${left} to download. It starts by itself in a moment.`,
+        percent: null,
+        action: { kind: "start", label: "Start now" }
+      };
+  }
 }
 
 /** What an install of the selection would download, engine included when it is missing. */

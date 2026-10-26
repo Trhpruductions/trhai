@@ -66,7 +66,8 @@ import { getBuildInfo } from "./services/buildInfo.js";
 import { activateLicense, licenseStatus, paywallGate, removeLicense } from "./services/licensing.js";
 import { checkForUpdates } from "./services/updates.js";
 import { engineFetch } from "./services/engineFetch.js";
-import { cancelSetup, removeModel, setupStatus, startSetup } from "./services/modelSetup.js";
+import { cancelSetup, removeModel, startSetup } from "./services/modelSetup.js";
+import { setupStatusWithRequired, startRequiredSetup } from "./services/requiredSetup.js";
 import { getSystemCapabilities, toolsByLevel } from "./services/systemCapabilities.js";
 import { describeTools, probeTools } from "./services/toolCenter.js";
 import { addTask, listTasks, removeTask, setTaskDone } from "./services/taskListStore.js";
@@ -587,7 +588,7 @@ export function createApp(options: AppOptions = {}) {
   // by the app (services/modelSetup.ts). Not behind the paywall: a PC has to
   // be able to get to the point of answering before anyone pays for it.
   app.get("/v1/setup", (_req, res) => {
-    res.json({ data: setupStatus(), traceId: "trace-local" });
+    res.json({ data: setupStatusWithRequired(), traceId: "trace-local" });
   });
 
   app.post("/v1/setup/install", (req, res) => {
@@ -599,12 +600,24 @@ export function createApp(options: AppOptions = {}) {
       res.status(409).json({ code: "SETUP_REFUSED", message: started.error, traceId: "trace-local" });
       return;
     }
-    res.status(202).json({ data: setupStatus(), traceId: "trace-local" });
+    res.status(202).json({ data: setupStatusWithRequired(), traceId: "trace-local" });
+  });
+
+  // What an update brings that has to be installed too (services/requiredSetup.ts):
+  // started by the service itself when it opens, and from here when a person
+  // asks - the banner's Try again, after it was stopped or did not finish.
+  app.post("/v1/setup/required", (_req, res) => {
+    const started = startRequiredSetup({ manual: true });
+    if (!started.started && started.reason !== "done") {
+      res.status(409).json({ code: "SETUP_REFUSED", message: started.message, traceId: "trace-local" });
+      return;
+    }
+    res.status(202).json({ data: setupStatusWithRequired(), traceId: "trace-local" });
   });
 
   app.delete("/v1/setup/job", (_req, res) => {
     cancelSetup();
-    res.json({ data: setupStatus(), traceId: "trace-local" });
+    res.json({ data: setupStatusWithRequired(), traceId: "trace-local" });
   });
 
   app.delete("/v1/setup/models/:id", async (req, res, next) => {
@@ -614,7 +627,7 @@ export function createApp(options: AppOptions = {}) {
         res.status(409).json({ code: "REMOVE_REFUSED", message: removed.error, traceId: "trace-local" });
         return;
       }
-      res.json({ data: setupStatus(), traceId: "trace-local" });
+      res.json({ data: setupStatusWithRequired(), traceId: "trace-local" });
     } catch (error) {
       next(error);
     }

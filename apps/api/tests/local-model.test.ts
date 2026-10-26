@@ -20,7 +20,7 @@ import {
   replyTooLong,
   unfinishedWithin,
   type LocalModelConfig, orderedCandidates, pinnedModel, withCoderFirst } from "../src/services/localModel.js";
-import { defaultEnginePort } from "../src/services/modelEngine.js";
+import { defaultEnginePort, isModelOrSize } from "../src/services/modelEngine.js";
 import { completionBody, fakeWindow, modelsBody } from "./helpers/fakeEngine.js";
 
 /**
@@ -59,8 +59,8 @@ test("configuration falls back to the usual local defaults", () => {
 
   // TRH AI's own engine, on this PC, on its own port.
   assert.equal(config.baseUrl, `http://127.0.0.1:${defaultEnginePort}`);
-  // The head of preferredModels in localModel.ts: the model the assistant was
-  // measured with.
+  // The family the assistant was measured with. preferredModels in localModel.ts
+  // puts its build with the refusals taken out ahead of it.
   assert.equal(config.model, defaultModel);
   assert.equal(defaultModel, "qwen2.5-coder");
   assert.ok(config.timeoutMs >= 10000, "local inference is slow; a short timeout abandons live replies");
@@ -490,6 +490,32 @@ test("with nothing named, the coding model answers, then the thinking one", () =
   assert.equal(pickModel(defaultModel, ["qwen2.5-3b", "qwen3-8b"], false), "qwen3-8b");
   assert.deepEqual(orderedCandidates(defaultModel, ["qwen2.5-3b", "qwen3-8b", "qwen2.5-coder-7b"], false),
     ["qwen2.5-coder-7b", "qwen3-8b", "qwen2.5-3b"]);
+});
+
+test("a build with its refusals taken out answers ahead of the model it was made from, whatever order the folder lists them in", () => {
+  // The engine lists models by name, so "qwen2.5-coder-7b" comes before "qwen2.5-coder-7b-abliterated".
+  // The family names in the preference list match both builds and would take the first; each build
+  // is named in full ahead of them.
+  const folder = ["qwen2.5-3b", "qwen2.5-coder-7b", "qwen2.5-coder-7b-abliterated", "qwen3-4b-instruct-2507", "qwen3-4b-instruct-2507-abliterated", "qwen3-8b"];
+  assert.equal(pickModel(defaultModel, folder, false), "qwen2.5-coder-7b-abliterated");
+  assert.deepEqual(orderedCandidates(defaultModel, folder, false).slice(0, 4), [
+    "qwen2.5-coder-7b-abliterated", "qwen3-4b-instruct-2507-abliterated", "qwen2.5-coder-7b", "qwen3-4b-instruct-2507"
+  ]);
+  // A PC with no room for the 7B has only the small pair, and the same rule holds for it.
+  assert.equal(pickModel(defaultModel, ["qwen3-4b-instruct-2507", "qwen3-4b-instruct-2507-abliterated"], false), "qwen3-4b-instruct-2507-abliterated");
+  // Alone, each is still found, by the family it belongs to.
+  assert.equal(pickModel(defaultModel, ["qwen2.5-coder-7b-abliterated"], false), "qwen2.5-coder-7b-abliterated");
+  assert.equal(pickModel(defaultModel, ["qwen3-4b-instruct-2507-abliterated"], false), "qwen3-4b-instruct-2507-abliterated");
+});
+
+test("naming the original still gets the original: a named model is never overruled, and is not a size of the other build", () => {
+  const folder = ["qwen2.5-coder-7b", "qwen2.5-coder-7b-abliterated"];
+  assert.equal(pickModel("qwen2.5-coder-7b", folder, true), "qwen2.5-coder-7b");
+  assert.equal(pickModel("qwen2.5-coder-7b-abliterated", folder, true), "qwen2.5-coder-7b-abliterated");
+  assert.equal(pickModel("qwen3-4b-instruct-2507", ["qwen3-4b-instruct-2507-abliterated", "qwen3-4b-instruct-2507"], true), "qwen3-4b-instruct-2507");
+  assert.equal(isModelOrSize("qwen2.5-coder-7b", "qwen2.5-coder-7b-abliterated"), false);
+  assert.equal(isModelOrSize("qwen3-4b-instruct-2507", "qwen3-4b-instruct-2507-abliterated"), false);
+  assert.equal(isModelOrSize("qwen2.5-coder", "qwen2.5-coder-7b-abliterated"), true, "but the family still includes it");
 });
 
 test("the built-in default does not block a better model", () => {

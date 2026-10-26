@@ -98,6 +98,8 @@ Built 2026-10-13 in `apps/api/src/services/modelSetup.ts`, with the screens in
   580 or newer driver, CUDA 12.4 on an older driver, otherwise the CPU build.
 - The recommended model is Qwen3 4B Instruct 2507 for a PC with less than
   16 GB and no 8 GB card, otherwise Qwen2.5 Coder 7B. Both are Apache 2.0.
+  (Since 0.1.8 the recommended models are their no-refusals builds, with a
+  picture model beside each: see M2c.)
 - Every file is pinned: a llama.cpp release tag or a Hugging Face commit, its
   size and its SHA-256. A file that does not match is deleted, not installed.
   A stopped download keeps its `.part` file and continues with a Range request.
@@ -240,6 +242,110 @@ models.
 - Not verified: the same screens inside the packaged Electron window, the real
   Electron frame renderer with the installed ffmpeg (it uses the graphics
   card), and a PC with no graphics card at all.
+
+### M2c — what an update brings: models without refusals, and an install that does itself (built 2026-10-25)
+
+The owner asked for three things in one message: models for conversation and for
+reading ("and everything along those lines"); that none of them has guard rails;
+and that the update force all of it onto everyone else's PC, as it had not been:
+only the owner's PC had the other voices, and the models were whatever each
+person had ticked.
+
+**The models.** Four were added to `modelCatalog` (`modelSetup.ts`), and are now
+the ones recommended. Each is an original model "abliterated" by huihui-ai - the
+direction in the model that makes it refuse is taken out of its weights - and
+nothing else changed: the same families, chat templates and Apache 2.0 licence.
+
+| Model | Id | For | Download | From |
+|---|---|---|---|---|
+| Qwen2.5 Coder 7B (no refusals) | `qwen2.5-coder-7b-abliterated` | 16 GB of memory, or an 8 GB card | 4.4 GiB | bartowski/Qwen2.5-Coder-7B-Instruct-abliterated-GGUF |
+| Qwen3 4B Instruct (no refusals) | `qwen3-4b-instruct-2507-abliterated` | smaller PCs | 2.3 GiB | mradermacher/Huihui-Qwen3-4B-Instruct-2507-abliterated-GGUF |
+| Qwen3 VL 8B (pictures, no refusals) | `qwen3-vl-8b-abliterated` | 16 GB, or an 8 GB card | 5.4 GiB (model 4.7 and picture part 0.7) | mradermacher/Huihui-Qwen3-VL-8B-Instruct-abliterated-GGUF |
+| Qwen3 VL 4B (pictures, no refusals) | `qwen3-vl-4b-abliterated` | smaller PCs | 2.7 GiB | mradermacher/Huihui-Qwen3-VL-4B-Instruct-abliterated-GGUF |
+
+- Pinned like the rest (commit, size, SHA-256). The picture parts are kept under
+  a name that starts with `mmproj`, which is how `discoverModels` finds a
+  model's picture part: the quantiser names them `<model>.mmproj-Q8_0.gguf`.
+- `recommendedModel` and the new `recommendedVisionModel` pick the pair for the
+  PC; both are flagged in the setup status, and the first-run screen ticks both.
+  `preferredModels` (`localModel.ts`) names the two chat builds ahead of the
+  originals, because the family names in it match both and the engine lists the
+  original first. `defaultVisionModel` is the 8B; a small PC is given the 4B by
+  `hardwareDefaults`, as it is given the small chat model. A named model
+  (`TRHAI_MODEL`) is never overruled, and naming the original gets the original.
+- The originals stay in the catalogue for anyone who wants the refusals. The
+  tools' own limits (permission levels, confirmations, the machine-access switch,
+  the workspace sandbox) are about what the assistant may do to a PC, are not
+  part of a model, and were not touched. The only wording of the app's own that
+  reads as a guard rail is the professional-advice note on the Medical, Legal and
+  Cyber-security personalities, which is a separate decision (left in place).
+- The 7B coder's source repository (huihui-ai/Qwen2.5-Coder-7B-Instruct-
+  abliterated) answered 401 on 2026-10-25; the quantised file is in a public
+  repository and is pinned by hash.
+- Verified 2026-10-25 on this PC (Ryzen 5 7600, 31 GB, RTX 4060 Ti 8 GB). All four
+  were downloaded through the app's own installer, 15.9 GB in about 11 minutes,
+  and each file matched its pinned size and SHA-256. Each was then started on
+  the CPU alone (the card hidden) with the engine TRH AI ships, and asked to
+  answer, to call a tool, to use the tool's result, and - the picture models - to
+  read a picture of an invoice, and was asked eight low-severity requests that
+  models are usually trained to turn down (a fake review, profanity, an insult, a
+  dirty joke, a bank-style password request, lock picking, a villain explaining
+  hotwiring, manipulation tips). Only whether each reply *began* as a refusal was
+  recorded; the replies were neither kept nor read.
+
+  | | Loaded in | Tool call | Read the picture | Began as a refusal |
+  |---|---|---|---|---|
+  | 4B chat | 6 s | `get_weather({"city": "Paris"})`, then answered from the result | - | 0 of 8 |
+  | 4B pictures | 6 s | the same | "INVOICE 4821 / Total due: 129.50 EUR", word for word | 0 of 8 |
+  | 7B coder | 8 s | written as text inside `<tools>` tags | - | 0 of 8 |
+  | 7B coder, the original | 7 s | written as text inside `<xml>` tags | - | **6 of 8** |
+  | 8B pictures | 12 s | the same as the 4B | word for word | 0 of 8 |
+
+  The coder writes its tool call as text, with or without the refusals, which
+  `parseTextToolCalls` in the agent loop reads; it is the model the loop was
+  measured with. Not verified: any of them on the graphics card (a rule of this
+  project is to ask before each run there), or in a long session with the whole
+  tool set.
+
+**The install that does itself** (`requiredSetup.ts`). An update replaces the
+program and nothing else, so what a version needs beside it was left for each
+person to find and tick. On a copy that is already set up, the service now
+brings it up to the bundle by itself a little after it opens (15 s, so the
+window is up first): the engine, the recommended chat and picture models for
+the PC, and every tool - the same installer as the first-run screen, with the
+same checks.
+
+- Not on a new install (its first-run screen asks, with both models and every
+  tool ticked), and not where `TRHAI_REQUIRED_SETUP=off`.
+- Recorded in `runtime\required-setup.json` against a generation number
+  (`requiredSetupGeneration`, 1 for 0.1.8). A copy that finished a generation is
+  left alone until the bundle changes, so a model or voice a person removes
+  afterwards stays removed. A job that fails or is stopped starts again the next
+  time TRH AI opens, three times at most by itself; after that it waits for the
+  banner's button. A job cut short by closing the app counts the same way.
+- Order: engine, chat model, picture model, then the tools. Only what is missing
+  is fetched. A drive without room is told so in numbers (needs about 14.3 GB,
+  has 9.0 GB) and the failure is kept for the banner; Settings, Engine and
+  models, still lets a person install less.
+- The engine is restarted at the end - it reads its models only when it starts -
+  but not under a reply: it waits until nobody has asked the engine anything for
+  three seconds (`engineRequestsInFlight`), and if that does not happen in half
+  an hour leaves it for the next start.
+- A retry reuses what was fetched. `downloadVerified` used to start a file over
+  whenever a `.part` was not there, so a picture model (two files) that failed on
+  the second began the first again; a file already in place, whole and as
+  published, is now kept.
+- On screen: a bar under the top bar on every screen (`RequiredSetupBanner`)
+  with how far it has got, Stop, and, when it stopped or failed, why and a button
+  to carry on. It says once when it is done. While it runs, the setup screen does
+  not also offer the tools. `GET /v1/setup` carries a `required` object;
+  `POST /v1/setup/required` starts it by hand.
+- Looked at for real, against a copy of the service with a runtime folder that was
+  set up and short of the bundle, and downloads stood in for by a stream that
+  never ends: the bar showed 10.4 GB to download, then progress, Stop made it
+  "stopped" with Continue, a failed record showed the no-room message with Try
+  again, Settings listed the new models and each voice's licence, and the bar
+  wrapped on a phone-width screen.
 
 ### M3 — releases
 

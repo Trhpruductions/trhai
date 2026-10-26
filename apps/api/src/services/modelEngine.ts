@@ -184,6 +184,9 @@ const familySampling: Array<{ family: RegExp; settings: Record<string, string> }
   // Qwen3's 2507 instruct models do not think first, and their makers publish
   // other settings for them. Before the family line below, which would match.
   { family: /^qwen3-[\d.]+b-instruct-2507/i, settings: { temp: "0.7", "top-k": "20", "top-p": "0.8", "min-p": "0" } },
+  // Qwen3 VL's instruct models: no thinking mode, and the settings their makers
+  // publish are the 2507 instruct ones. Also before the family line below.
+  { family: /^qwen3-vl-[\d.]+b/i, settings: { temp: "0.7", "top-k": "20", "top-p": "0.8", "min-p": "0" } },
   { family: /^qwen3(?![\d.])/i, settings: { temp: "0.6", "top-k": "20", "top-p": "0.95", "min-p": "0" } }
 ];
 

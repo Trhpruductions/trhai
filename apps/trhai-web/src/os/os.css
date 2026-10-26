@@ -175,10 +175,16 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-rows: var(--os-topbar) minmax(0, 1fr) auto;
+  /* The row under the top bar is for a bar that is only sometimes there (what an update is installing):
+     with nothing in it, it has no height. */
+  grid-template-rows: var(--os-topbar) auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
 }
+.os-main > .os-topbar { grid-row: 1; }
+.os-main > .required-bar { grid-row: 2; }
+.os-main > .os-workspace { grid-row: 3; }
+.os-main > .os-commandbar-wrap { grid-row: 4; }
 
 .os-workspace {
   position: relative;

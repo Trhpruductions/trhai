@@ -13,6 +13,7 @@ import { PaywallScreen } from "../../components/PaywallScreen";
 import { UpdateNotices } from "../../components/UpdateNotices";
 import { SetupScreen } from "../../components/SetupScreen";
 import { MusicVideoWatcher } from "../../components/MusicVideoWatcher";
+import { RequiredSetupBanner } from "../../components/RequiredSetupBanner";
 import { useNav } from "../state/nav";
 import { useAssistantState, useVoice } from "../state/assistant";
 import { views, viewById, type ViewId } from "../views";
@@ -104,7 +105,9 @@ export function AppShell() {
     notices: <NotificationCenter />, toasts: <Toasts />, palette: <CommandPalette />,
     // Over every screen, for everyone using the app: the update notices, and
     // the paywall once a trial or license has run out (it sits above them).
-    setup: <SetupScreen />, updates: <UpdateNotices />, paywall: <PaywallScreen />, musicWatcher: <MusicVideoWatcher />
+    setup: <SetupScreen />, updates: <UpdateNotices />, paywall: <PaywallScreen />, musicWatcher: <MusicVideoWatcher />,
+    // What an update installs by itself (new models, voices and tools), and how far it has got.
+    requiredSetup: <RequiredSetupBanner />
   }), []);
 
   return (
@@ -114,6 +117,7 @@ export function AppShell() {
         {chrome.sidebar}
         <div className="os-main">
           {chrome.topbar}
+          {chrome.requiredSetup}
           <main
             ref={workspace}
             className="os-workspace"
