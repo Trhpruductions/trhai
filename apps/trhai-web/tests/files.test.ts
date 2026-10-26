@@ -89,11 +89,14 @@ test("a conversation opened again finds its files in the reply's own lines, and 
     "- documents/Meeting Notes.txt (text file)",
     "- documents/Budget.xlsx (Excel workbook, 2 sheets)",
     "- documents/Budget.csv (CSV file)",
+    "- documents/Board Update.pptx (PowerPoint presentation, 12 slides)",
+    "- documents/Board Update.pdf (PDF, 12 pages)",
+    "- documents/Tiny.pptx (PowerPoint presentation, 1 slide)",
     "Note: The PDF opens, but its words were not found."
   ].join("\n");
   assert.deepEqual(madeFilesInText(reply), [
     "documents/Meeting Notes.docx", "documents/Meeting Notes.pdf", "documents/Meeting Notes.html", "documents/Meeting Notes.md", "documents/Meeting Notes.txt",
-    "documents/Budget.xlsx", "documents/Budget.csv"
+    "documents/Budget.xlsx", "documents/Budget.csv", "documents/Board Update.pptx", "documents/Board Update.pdf", "documents/Tiny.pptx"
   ]);
   assert.deepEqual(madeFilesInText("- documents/A.pdf (PDF, 1 page)\r\n* documents/B.docx (Word document)"), ["documents/A.pdf", "documents/B.docx"], "one page, and the other bullet and line end");
   // A file outside the workspace is told by its whole path, and is not offered; nor is a line the tools did not write.

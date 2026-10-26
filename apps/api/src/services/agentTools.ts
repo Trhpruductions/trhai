@@ -15,6 +15,7 @@ import { renderVideo } from "./videoRender.js";
 import { describeMusicVideos, listMusicVideos, parseMusicVideoRequest, whyNotMusicVideo } from "./musicVideoFiles.js";
 import { musicVideoStatus, startMusicVideo } from "./musicVideoJob.js";
 import { describeMadeDocument, documentsFolder, makeDocument, parseDocumentFormats } from "./documentMaker.js";
+import { describeMadePresentation, makePresentation, parsePresentationFormats } from "./presentationMaker.js";
 import { describeMadeSpreadsheet, makeSpreadsheet, parseSpreadsheetFormats } from "./spreadsheetMaker.js";
 import { expandKnownFolder } from "./knownFolders.js";
 import { noteMadeFiles } from "./madeFiles.js";
@@ -817,6 +818,36 @@ export const toolDefinitions: ToolDefinition[] = [
       }
     }
   },
+  {
+    type: "function",
+    function: {
+      name: "make_presentation",
+      description:
+        "Make a real PRESENTATION FILE the user can open in PowerPoint - a .pptx, and/or a PDF of the slides - from an "
+        + "outline you write, and save it. Use this when the user asks for a presentation, slides, a slide deck or a "
+        + "PowerPoint. Write the WHOLE deck yourself in content, in Markdown: # for the deck's title with one line under "
+        + "it for the subtitle, then a ## heading for each slide with what goes on it under that: a few short bullets "
+        + "(- ), numbered steps (1. ), a table (| and a |---| line), a > quote, or a few lines of code. About six bullets "
+        + "to a slide, each one short, and a heading on every slide. For the speaker's notes, end a slide with a "
+        + "paragraph that begins Notes: - they go in the file's notes, not on the slide. Never describe a deck instead of "
+        + "writing it, and leave no [placeholders] you could fill in. It makes a new file every time and never replaces "
+        + "one, reads each file back and checks every slide, and says where the files are - give the user that. For "
+        + "words to read, not slides, answer in the reply.",
+      parameters: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "The whole deck, written out as a Markdown outline: # title, then ## for each slide." },
+          title: { type: "string", description: "What to call the file. If left out, the deck's # title is used." },
+          format: { type: "string", description: "pptx for a PowerPoint file (the default), pdf for a PDF of the slides, or both: \"pptx, pdf\"." },
+          folder: {
+            type: "string",
+            description: "Only if the user said where: a folder in the workspace, or Desktop, Downloads or Documents on this PC, or a full path (these need machine access)."
+          }
+        },
+        required: ["content"]
+      }
+    }
+  },
   // The app has a scheduler. The assistant could not reach it.
   //
   // Asked "remind me every day at 9am to check the build", it called no tool
@@ -1161,7 +1192,7 @@ const scaffoldingTools = new Set(["build_app", "plan_app"]);
  * the port" is an ordinary thing to ask.
  */
 const machineChangingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "plan_app", "run_command", "run_script", "run_app"
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "plan_app", "run_command", "run_script", "run_app"
 ]);
 
 /**
@@ -1221,7 +1252,7 @@ const dateTools = new Set(["days_between", "shift_date"]);
  * A question does not write files, documents or apps, though.
  */
 const writingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "plan_app",
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "plan_app",
   "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule"
 ]);
 
@@ -1258,6 +1289,8 @@ const musicVideoTools = new Set(["make_music_video", "music_video_status"]);
 const fileMakingTools = new Set(["make_document"]);
 /** Offered only when the request asks for a spreadsheet to be made; see wantsASpreadsheetMade. */
 const spreadsheetTools = new Set(["make_spreadsheet"]);
+/** Offered only when the request asks for a presentation to be made; see wantsAPresentationMade. */
+const presentationTools = new Set(["make_presentation"]);
 /**
  * The knowledge-base writers, withheld from a request that only reads unless
  * it asks for something to be kept. machineChangingTools already stops a read
@@ -1308,6 +1341,7 @@ export function availableTools(
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
     schedules?: boolean; video?: boolean; musicVideo?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
     messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean; fileMaking?: boolean; spreadsheets?: boolean;
+    presentations?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1335,6 +1369,7 @@ export function availableTools(
   const allowImages = options.images ?? true;
   const allowFileMaking = options.fileMaking ?? true;
   const allowSpreadsheets = options.spreadsheets ?? true;
+  const allowPresentations = options.presentations ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1374,6 +1409,8 @@ export function availableTools(
     if (!allowFileMaking && fileMakingTools.has(name)) return false;
     // Only when the request asks for a spreadsheet; see wantsASpreadsheetMade.
     if (!allowSpreadsheets && spreadsheetTools.has(name)) return false;
+    // Only when the request asks for a presentation; see wantsAPresentationMade.
+    if (!allowPresentations && presentationTools.has(name)) return false;
     return true;
   }).sort((a, b) => (offerOrder.get(a.function.name) ?? 0) - (offerOrder.get(b.function.name) ?? 0));
 }
@@ -1791,7 +1828,9 @@ function writesOverADocument(target: string): string | null {
       ? "To make a real Word or PDF file, use make_document with the text of the document; or write the text to a .txt or .md file instead."
       : kind === ".xlsx"
         ? "To make a real Excel file, use make_spreadsheet with the data; or write the rows to a .csv file instead."
-        : "Write the text to a .txt or .md file instead.");
+        : kind === ".pptx"
+          ? "To make a real PowerPoint file, use make_presentation with an outline of the slides; or write the text to a .txt or .md file instead."
+          : "Write the text to a .txt or .md file instead.");
 }
 
 /** Why `content` must not be written, when it is a shortened view; see elisionIn. */
@@ -3177,6 +3216,31 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
 
       noteMadeFiles(context.sessionId, made.files.map((file) => shownPath(file.path)).filter((shown) => !path.isAbsolute(shown)));
       return { ok: true, content: describeMadeSpreadsheet(made, shownPath), path: shownPath(made.files[0].path) };
+    }
+
+    case "make_presentation": {
+      const content = typeof call.arguments.content === "string" ? call.arguments.content : null;
+      if (!content?.trim()) {
+        return { ok: false, content: "make_presentation needs the whole outline of the deck in content, written out in Markdown: a # title, then a ## heading for each slide. Nothing was made." };
+      }
+      const placeholder = placeholderIn("slides.md", content);
+      if (placeholder) return { ok: false, content: `${placeholder} Nothing was made.` };
+      const shortened = elisionIn(content);
+      if (shortened) return { ok: false, content: `This has ${shortened} in it, so it is not the whole deck. Write every slide out. Nothing was made.` };
+
+      const target = madeFileTarget(call.arguments, context, "pptx|pdf");
+      if (!target.ok) return { ok: false, content: `${target.reason} Nothing was made.` };
+      const formats = parsePresentationFormats(target.format);
+      if (!formats.ok) return { ok: false, content: `${formats.reason} Nothing was made.` };
+
+      const made = await makePresentation(
+        { content, title: requireString(call.arguments.title) ?? target.title ?? undefined, formats: formats.formats },
+        target.directory
+      );
+      if (!made.ok) return { ok: false, content: describeMadePresentation(made) };
+
+      noteMadeFiles(context.sessionId, made.files.map((file) => shownPath(file.path)).filter((shown) => !path.isAbsolute(shown)));
+      return { ok: true, content: describeMadePresentation(made, shownPath), path: shownPath(made.files[0].path) };
     }
 
     case "edit_file": {

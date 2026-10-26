@@ -20,7 +20,7 @@ import {
   correctionFor, inventsAReading, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { asksAboutMachineState, asksForAReading, asksForCodeInTheReply, asksForWordsInTheReply, asksToStartSomething, drivePath, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsMusicVideo, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, wantsAFileMade, wantsASpreadsheetMade, type ActionKind } from "./actionIntent.js";
+import { asksAboutMachineState, asksForAReading, asksForCodeInTheReply, asksForWordsInTheReply, asksToStartSomething, drivePath, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsMusicVideo, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, wantsAFileMade, wantsAPresentationMade, wantsASpreadsheetMade, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -521,7 +521,7 @@ export function wordsCarriedBy(call: { name: string; arguments?: Record<string, 
  */
 const mutatingTools = new Set([
   "remember", "forget", "write_document", "update_document", "delete_document",
-  "pin_memory", "write_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet",
+  "pin_memory", "write_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation",
   // "I added the schedule for you." said nothing about when. The tool's
   // own line - Scheduled "Build Check": Every weekday at 8:00 AM - is what
   // the user needs to check it against what they asked.
@@ -1829,6 +1829,8 @@ export async function runAgent(
         fileMaking: wantsAFileMade(question),
         // An Excel file, when the request asks for a spreadsheet; see wantsASpreadsheetMade.
         spreadsheets: wantsASpreadsheetMade(question),
+        // A PowerPoint file, when the request asks for a presentation; see wantsAPresentationMade.
+        presentations: wantsAPresentationMade(question),
         // The knowledge base is written only when keeping something is asked
         // for - "save", "note", "document" - or a saved document is named.
         // "Write a two-sentence product description for a water bottle" asks

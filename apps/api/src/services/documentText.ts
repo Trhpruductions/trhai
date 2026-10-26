@@ -121,11 +121,40 @@ export function docxText(documentXml: string): string {
   return tidy(decodeEntities(text));
 }
 
-/** The text of one PowerPoint slide: each paragraph on its own line. */
+/**
+ * The text of one PowerPoint slide: each paragraph on its own line. A line break inside a paragraph is written
+ * both ways - `<a:br/>` and `<a:br><a:rPr .../></a:br>`, which is how PowerPoint itself writes one.
+ */
 export function slideText(slideXml: string): string {
-  const marked = slideXml.replace(/<\/a:p>/g, "\n").replace(/<a:br\b[^>]*\/>/g, "\n");
+  const marked = slideXml.replace(/<\/a:p>/g, "\n").replace(/<a:br\b[^>]*\/>|<a:br\b[^>]*>[\s\S]*?<\/a:br>/g, "\n");
   const text = marked.replace(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>|<[^>]+>/g, (_tag, run: string | undefined) => run ?? "");
   return tidy(decodeEntities(text));
+}
+
+/** The speaker's notes on a notes page: what is in its notes placeholder, and not the picture of the slide or its number. */
+export function notesText(notesXml: string): string {
+  const shapes = notesXml.match(/<p:sp\b[\s\S]*?<\/p:sp>/g) ?? [];
+  return tidy(shapes.filter((shape) => /<p:ph\b[^>]*\btype="body"/.test(shape)).map((shape) => slideText(shape)).join("\n"));
+}
+
+export type ReadSlide = { number: number; text: string; notes: string };
+
+/** The slides of a PowerPoint file in order, each with its text and the speaker's notes that go with it. */
+export function readSlides(bytes: Buffer): ReadSlide[] {
+  const zip = readZip(bytes);
+  return [...zip.keys()]
+    .map((name) => ({ name, number: Number(/^ppt\/slides\/slide(\d+)\.xml$/.exec(name)?.[1]) }))
+    .filter((entry) => Number.isFinite(entry.number))
+    .sort((a, b) => a.number - b.number)
+    .map(({ name, number }) => {
+      // The notes page is found through the slide's own relationships, as its name need not be the slide's number.
+      const rels = zip.get(`ppt/slides/_rels/slide${number}.xml.rels`)?.().toString("utf8") ?? "";
+      const link = (rels.match(/<Relationship\b[^>]*>/g) ?? []).find((tag) => /\bType="[^"]*\/notesSlide"/.test(tag));
+      const target = link ? /\bTarget="([^"]*)"/.exec(link)?.[1] : undefined;
+      const notesPart = target ? path.posix.normalize(target.startsWith("/") ? target.slice(1) : path.posix.join("ppt/slides", target)) : "";
+      const notes = notesPart && zip.has(notesPart) ? notesText(zip.get(notesPart)!().toString("utf8")) : "";
+      return { number, text: slideText(zip.get(name)!().toString("utf8")), notes };
+    });
 }
 
 /** Readable text from an HTML page: no tags, scripts or styles. */
@@ -179,15 +208,11 @@ export async function extractDocumentText(bytes: Buffer, fileName: string): Prom
         return text ? { ok: true, kind, text } : { ok: false, reason: "This Word document has no text in it." };
       }
       case "pptx": {
-        const zip = readZip(bytes);
-        const slides = [...zip.keys()]
-          .map((name) => ({ name, number: Number(/^ppt\/slides\/slide(\d+)\.xml$/.exec(name)?.[1]) }))
-          .filter((entry) => Number.isFinite(entry.number))
-          .sort((a, b) => a.number - b.number);
+        const slides = readSlides(bytes);
         const text = slides
-          .map(({ name, number }) => {
-            const content = slideText(zip.get(name)!().toString("utf8"));
-            return content ? `Slide ${number}\n${content}` : "";
+          .map(({ number, text: content, notes }) => {
+            if (!content && !notes) return "";
+            return `Slide ${number}\n${[content, notes ? `Speaker notes:\n${notes}` : ""].filter(Boolean).join("\n")}`;
           })
           .filter(Boolean)
           .join("\n\n");

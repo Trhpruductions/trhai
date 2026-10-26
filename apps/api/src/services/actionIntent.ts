@@ -511,6 +511,22 @@ export function wantsASpreadsheetMade(message: string): boolean {
   return thingsKeptAsSpreadsheets.test(text) && creatingOne.test(text);
 }
 
+const presentationNamed = /\b(?:pptx|power\s*points?|slide\s*decks?|slideshows?|slides|presentations?|keynote|(?:pitch|sales|investor)\s+decks?)\b/i;
+
+/**
+ * Whether a request asks for a presentation to be made - slides, a slide deck,
+ * a PowerPoint or a pitch deck - so make_presentation is worth offering.
+ *
+ * "Deck" alone is not a trigger: it is a deck of cards and a deck on a house
+ * as often as it is slides, and "slide" is a verb. Nor is a presentation in the
+ * sense of one given aloud without something being made: "how do I open a
+ * presentation" has no verb that makes a file.
+ */
+export function wantsAPresentationMade(message: string): boolean {
+  const text = message ?? "";
+  return presentationNamed.test(text) && (makingAFile.test(text) || creatingOne.test(text));
+}
+
 /**
  * Whether a request is about this computer or its software at all, so the
  * shell is worth offering.

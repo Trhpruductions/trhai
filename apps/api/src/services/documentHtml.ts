@@ -16,7 +16,7 @@ export function safeHref(href: string): string | null {
   return /^(?:https?:\/\/|mailto:|tel:|#)/i.test(trimmed) ? trimmed : null;
 }
 
-function inlineHtml(inlines: Inline[]): string {
+export function inlineHtml(inlines: Inline[]): string {
   return inlines
     .map((run) => {
       if (run.kind === "break") return "<br>";

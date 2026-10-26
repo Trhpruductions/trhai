@@ -296,7 +296,7 @@ test("the file tools do not write a Word or PDF file that nothing can open, and 
   const slides = await runTool({ name: "write_file", arguments: { path: "deck.pptx", content: "Slide one and more words." } }, context("write deck.pptx"));
   assert.equal(slides.ok, false);
   assert.doesNotMatch(slides.content, /make_document/, "a presentation is not one of its files");
-  assert.match(slides.content, /Write the text to a \.txt or \.md file instead\./);
+  assert.match(slides.content, /use make_presentation with an outline of the slides; or write the text to a \.txt or \.md file instead\./);
   assert.equal(existsSync(inWorkspace("letter.docx")), false);
 });
 
