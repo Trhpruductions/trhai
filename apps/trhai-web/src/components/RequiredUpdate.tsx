@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../os/ui/Icon";
 import { desktopUpdater, type DesktopUpdateStatus } from "../lib/desktopUpdates";
 import { countdownText, requiredUpdateStep, restartCountdownSeconds } from "../lib/requiredUpdate";
-import { readUpdates, recheckUpdatesEvent, requiredUpdate, type UpdateCheck } from "../lib/updates";
+import { clearInstallTried, markInstallTried, readInstallTried, readUpdates, recheckUpdatesEvent, requiredUpdate, type UpdateCheck } from "../lib/updates";
 import "./paywall.css";
 import "./setup.css";
 
@@ -18,12 +18,27 @@ import "./setup.css";
 // Elsewhere (a browser, the portable build, a copy run from source) there is
 // nothing to install over, and the update card is shown as usual, without
 // "Later". What it does at each point is in lib/requiredUpdate.ts.
+//
+// The restart comes by itself once per version. It is noted the moment it is
+// asked for; a copy that comes back still on the old version is not restarted
+// again, it is told the install did not take and asked.
 
 const recheckMs = 6 * 60 * 60 * 1000;
+
+/** The version this copy last restarted to install, or null: nothing noted, or a browser that will not say. */
+function installTriedBefore(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return readInstallTried(window.localStorage);
+  } catch {
+    return null;
+  }
+}
 
 export function RequiredUpdate() {
   const [check, setCheck] = useState<UpdateCheck | null>(null);
   const [status, setStatus] = useState<DesktopUpdateStatus | null>(null);
+  const [tried, setTried] = useState<string | null>(installTriedBefore);
   // When the update became ready, and the clock the countdown reads (ticking only while one runs).
   const [readyAt, setReadyAt] = useState<number | null>(null);
   const [now, setNow] = useState(0);
@@ -58,7 +73,7 @@ export function RequiredUpdate() {
   }, [check]);
 
   const release = requiredUpdate(check);
-  const step = notNow ? { kind: "none" as const } : requiredUpdateStep(release, status);
+  const step = notNow ? { kind: "none" as const } : requiredUpdateStep(release, status, tried);
   const stepKind = step.kind;
   const statusState = status?.state;
   const version = release?.version;
@@ -86,9 +101,15 @@ export function RequiredUpdate() {
   }, [ready]);
   const elapsed = readyAt !== null && now > readyAt ? Math.floor((now - readyAt) / 1000) : 0;
   const secondsLeft = Math.max(0, restartCountdownSeconds - elapsed);
+
+  /** Asks the app to restart into the update - after noting that it has, so that a restart which does not take is not repeated by itself. */
+  const restartInto = useCallback((releaseVersion: string) => {
+    try { markInstallTried(window.localStorage, releaseVersion); } catch { /* the restart goes ahead without the note */ }
+    void desktopUpdater()?.install();
+  }, []);
   useEffect(() => {
-    if (ready && secondsLeft === 0) void desktopUpdater()?.install();
-  }, [ready, secondsLeft]);
+    if (ready && secondsLeft === 0 && version) restartInto(version);
+  }, [ready, secondsLeft, version, restartInto]);
 
   if (step.kind === "none" || !release) return null;
 
@@ -96,21 +117,28 @@ export function RequiredUpdate() {
     asked.current = "";
     void desktopUpdater()?.download().then(receive).catch(() => undefined);
   };
-  const restartNow = () => { void desktopUpdater()?.install(); };
+  const restartNow = () => restartInto(release.version);
+  // One more automatic restart, from the person's own word: the note is cleared, and the window carries on as it would have.
+  const tryInstallAgain = () => {
+    try { clearInstallTried(window.localStorage); } catch { /* nothing to clear */ }
+    setTried(null);
+  };
 
   return (
     <div className="paywall-scrim required-update-scrim">
       <section className="paywall" role="alertdialog" aria-modal="true" aria-labelledby="required-update-title" aria-describedby="required-update-text">
         <span className="os-label">Required update</span>
-        <h2 id="required-update-title">TRH AI v{release.version} is installing</h2>
+        <h2 id="required-update-title">{step.kind === "retry" ? `TRH AI v${release.version} did not finish installing` : `TRH AI v${release.version} is installing`}</h2>
         <p id="required-update-text">
           {step.kind === "restart"
             ? `v${step.version} is ready. TRH AI restarts to finish updating in ${countdownText(secondsLeft)}; finish what you are doing first.`
-            : step.kind === "failed"
-              ? step.message
-              : step.kind === "downloading"
-                ? `Downloading v${release.version}, which every copy of TRH AI needs. Nothing of yours is touched.`
-                : `TRH AI is getting v${release.version}, which every copy of it needs.`}
+            : step.kind === "retry"
+              ? `TRH AI restarted to install v${step.version}, but this copy is still on v${check?.currentVersion}, so it will not restart by itself again. Try again, or install it from the update card whenever you like. Nothing of yours was touched.`
+              : step.kind === "failed"
+                ? step.message
+                : step.kind === "downloading"
+                  ? `Downloading v${release.version}, which every copy of TRH AI needs. Nothing of yours is touched.`
+                  : `TRH AI is getting v${release.version}, which every copy of it needs.`}
         </p>
         {step.kind === "downloading" ? (
           <div className="required-update-progress">
@@ -123,6 +151,12 @@ export function RequiredUpdate() {
         <div className="os-view-actions">
           {step.kind === "restart" ? (
             <button type="button" className="os-btn os-btn-primary" onClick={restartNow} autoFocus><Icon name="refresh" size={15} />Restart now</button>
+          ) : null}
+          {step.kind === "retry" ? (
+            <>
+              <button type="button" className="os-btn os-btn-primary" onClick={tryInstallAgain} autoFocus><Icon name="refresh" size={15} />Try again</button>
+              <button type="button" className="os-btn os-btn-ghost" onClick={() => setNotNow(true)}>Not now</button>
+            </>
           ) : null}
           {step.kind === "failed" ? (
             <>

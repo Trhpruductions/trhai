@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dismissUpdate, markVersionSeen, noticeToShow, readDismissedUpdate, readSeenVersion, requiredUpdate, type UpdateCheck } from "../src/lib/updates.js";
+import {
+  clearInstallTried, dismissUpdate, installTriedKey, markInstallTried, markVersionSeen, noticeToShow, readDismissedUpdate,
+  readInstallTried, readSeenVersion, requiredUpdate, type UpdateCheck
+} from "../src/lib/updates.js";
 
 // Which notice everyone using the app sees, and when it stops showing.
 
@@ -76,4 +79,26 @@ test("what was seen and dismissed is remembered, and a store that throws does no
   const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
   assert.equal(readSeenVersion(broken), null);
   assert.doesNotThrow(() => markVersionSeen(broken, "0.1.5"));
+});
+
+test("the restart that was asked for is noted, can be cleared, and a store that throws does not break anything", () => {
+  const values = new Map<string, string>();
+  const store = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); }
+  };
+  assert.equal(readInstallTried(store), null, "nothing tried yet");
+  markInstallTried(store, "0.1.9");
+  assert.equal(readInstallTried(store), "0.1.9");
+  assert.equal(values.get(installTriedKey), "0.1.9", "kept under its own key, apart from What's new and Later");
+  assert.equal(readSeenVersion(store), null);
+  assert.equal(readDismissedUpdate(store), null);
+  clearInstallTried(store);
+  assert.equal(readInstallTried(store), null, "cleared by the person's own Try again");
+
+  const refuses = () => { throw new Error("blocked"); };
+  assert.equal(readInstallTried({ getItem: refuses }), null);
+  assert.doesNotThrow(() => markInstallTried({ setItem: refuses }, "0.1.9"));
+  assert.doesNotThrow(() => clearInstallTried({ removeItem: refuses }));
 });

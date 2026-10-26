@@ -40,6 +40,7 @@ export type UpdateCheck = {
 
 export const seenVersionKey = "trhai.whatsnew.seen.v1";
 export const dismissedUpdateKey = "trhai.update.dismissed.v1";
+export const installTriedKey = "trhai.update.install-tried.v1";
 
 /** Fired on window to open the What's new notice on demand, from Settings. */
 export const showWhatsNewEvent = "trhai:whatsnew";
@@ -105,6 +106,26 @@ export function readDismissedUpdate(store: Store): string | null {
 
 export function dismissUpdate(store: Store, version: string): void {
   safely(() => store.setItem(dismissedUpdateKey, version), undefined);
+}
+
+/**
+ * The version the app last restarted to install, on its own or from the button.
+ *
+ * Written the moment the restart is asked for, before the installer has run, so
+ * that a copy which comes back still on the old version knows it has already
+ * tried, and does not restart into the same installer again every two minutes
+ * (see requiredUpdateStep).
+ */
+export function readInstallTried(store: Pick<Storage, "getItem">): string | null {
+  return safely(() => store.getItem(installTriedKey), null);
+}
+
+export function markInstallTried(store: Pick<Storage, "setItem">, version: string): void {
+  safely(() => store.setItem(installTriedKey, version), undefined);
+}
+
+export function clearInstallTried(store: Pick<Storage, "removeItem">): void {
+  safely(() => store.removeItem(installTriedKey), undefined);
 }
 
 /** Opens a release or download link; the desktop shell hands web links to the OS. */

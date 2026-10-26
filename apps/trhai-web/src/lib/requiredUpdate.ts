@@ -19,9 +19,17 @@ export type RequiredUpdateStep =
   | { kind: "download" }
   | { kind: "downloading"; percent: number }
   | { kind: "restart"; version: string }
+  /** Ready, but this copy already restarted once to install this very version and is still on the old one: it is not restarted by itself again. */
+  | { kind: "retry"; version: string }
   | { kind: "failed"; message: string };
 
-export function requiredUpdateStep(release: LatestRelease | null, status: DesktopUpdateStatus | null): RequiredUpdateStep {
+/**
+ * `installTried` is the version this copy last restarted to install (lib/updates.ts). The restart
+ * comes by itself once per version: an installer that did not take - blocked, out of space, closed
+ * early - would otherwise bring the old version back, find the same required release, and restart into
+ * it again every two minutes, in a window that cannot be closed while the countdown runs.
+ */
+export function requiredUpdateStep(release: LatestRelease | null, status: DesktopUpdateStatus | null, installTried: string | null = null): RequiredUpdateStep {
   // A browser, the portable build and a copy run from source have no updater: they keep the ordinary card.
   if (!release || !status) return { kind: "none" };
   switch (status.state) {
@@ -32,7 +40,10 @@ export function requiredUpdateStep(release: LatestRelease | null, status: Deskto
     case "checking": return { kind: "checking" };
     case "available": return { kind: "download" };
     case "downloading": return { kind: "downloading", percent: Math.max(0, Math.min(100, Math.round(status.percent))) };
-    case "downloaded": return { kind: "restart", version: status.version || release.version };
+    case "downloaded": {
+      const version = status.version || release.version;
+      return installTried === release.version ? { kind: "retry", version } : { kind: "restart", version };
+    }
     case "error": return { kind: "failed", message: status.message };
   }
 }
