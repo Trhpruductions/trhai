@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderFrames, renderPdfs, resolveElectronBinary } from "../src/services/frameRenderer.js";
+import { renderFrames, renderPdfs, rendererEnvironment, resolveElectronBinary } from "../src/services/frameRenderer.js";
 import { extractDocumentText } from "../src/services/documentText.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -45,6 +45,41 @@ test("every page is printed, handed over as the HTML it was given, and copied wh
   assert.match(readFileSync(out("two.pdf"), "latin1"), /a page 1/);
   const seen = JSON.parse(readFileSync(log, "utf8")) as Array<{ index: number; html: string }>;
   assert.deepEqual(seen.map((page) => page.html), ["<!doctype html><title>One</title><p>first</p>", "<!doctype html><title>Two</title><p>second</p>"]);
+});
+
+test("the renderer is never started as Node, and is told it was started to render, with a profile of its own in the job's scratch folder", async () => {
+  // The installed app runs the service as its own Electron acting as Node, so the service carries this flag, and a
+  // child that inherited it would run the renderer script as Node, where there is nothing to print with.
+  const log = out("env.json");
+  const before = { asNode: process.env.ELECTRON_RUN_AS_NODE, envLog: process.env.FAKE_RENDER_ENV_LOG };
+  process.env.ELECTRON_RUN_AS_NODE = "1";
+  process.env.FAKE_RENDER_ENV_LOG = log;
+  try {
+    assert.deepEqual(await withFake("ok", () => renderPdfs([{ index: 0, html: "<p>x</p>", outputPath: out("env.pdf") }])), { ok: true, rendered: 1 });
+    assert.equal(process.env.ELECTRON_RUN_AS_NODE, "1", "this process's own environment is not touched");
+  } finally {
+    restore("ELECTRON_RUN_AS_NODE", before.asNode);
+    restore("FAKE_RENDER_ENV_LOG", before.envLog);
+  }
+  const seen = JSON.parse(readFileSync(log, "utf8")) as { runAsNode: string | null; manifest: string; userData: string; argv: string[] };
+  assert.equal(seen.runAsNode, null);
+  assert.match(seen.manifest, /manifest\.json$/);
+  assert.equal(seen.argv[seen.argv.length - 1], seen.manifest, "the manifest is also the last argument, which is where the script reads it");
+  assert.equal(path.dirname(seen.userData), path.dirname(seen.manifest), "inside the job's own folder, which is removed with it");
+  assert.equal(path.basename(seen.userData), "profile");
+});
+
+test("the renderer's environment keeps everything else, names only what it adds, and does not change the one it was given", () => {
+  const given = { PATH: "C:\\bin", ELECTRON_RUN_AS_NODE: "1", NODE_ENV: "production", TRHAI_RENDER_MANIFEST: "stale" };
+  const made = rendererEnvironment("D:\\scratch\\job\\manifest.json", given);
+  assert.equal("ELECTRON_RUN_AS_NODE" in made, false);
+  assert.equal(made.PATH, "C:\\bin");
+  assert.equal(made.NODE_ENV, "production");
+  assert.equal(made.ELECTRON_DISABLE_SANDBOX, "1");
+  assert.equal(made.TRHAI_RENDER_MANIFEST, "D:\\scratch\\job\\manifest.json", "this job's, not one left in the environment");
+  assert.equal(made.TRHAI_RENDER_USER_DATA, path.join("D:\\scratch\\job", "profile"));
+  assert.equal(given.ELECTRON_RUN_AS_NODE, "1");
+  assert.equal(given.TRHAI_RENDER_MANIFEST, "stale");
 });
 
 test("what is not a PDF is not delivered, whatever the renderer says", async () => {

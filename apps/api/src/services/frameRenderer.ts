@@ -115,6 +115,33 @@ export function findElectronPackage(fromDir: string): string | null {
  */
 const rendererScript = (): string => process.env.TRHAI_RENDERER_SCRIPT || path.join(here, "frameRendererElectron.mjs");
 
+/**
+ * The environment the renderer is started with: this process's own, except
+ * that it must not be started as Node.
+ *
+ * The installed app runs this service as its own Electron acting as Node
+ * (ELECTRON_RUN_AS_NODE=1, apps/desktop/src/main.ts), and a child that inherits
+ * the flag runs the script as Node too, where there is no window to print or
+ * draw in: "The requested module 'electron' does not provide an export named
+ * 'BrowserWindow'". Found by trying the installed build, where until now no
+ * PDF was printed and no video frame was drawn.
+ *
+ * Two variables tell the installed app's Electron that it was started to
+ * render, and not to be the app (apps/desktop/src/renderMode.ts): the manifest,
+ * and a profile folder of its own inside this job's scratch folder, so that it
+ * neither shares the running app's profile nor leaves one behind. Anywhere
+ * else (the checkout's Electron, a test's stand-in) they are ignored.
+ */
+export function rendererEnvironment(manifestPath: string, inherited: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const { ELECTRON_RUN_AS_NODE: _startedAsNode, ...rest } = inherited;
+  return {
+    ...rest,
+    ELECTRON_DISABLE_SANDBOX: "1",
+    TRHAI_RENDER_MANIFEST: manifestPath,
+    TRHAI_RENDER_USER_DATA: path.join(path.dirname(manifestPath), "profile")
+  };
+}
+
 /** Runs the script on a manifest and waits for it: null when it exited cleanly, otherwise what went wrong. */
 function runElectron(electronPath: string, manifestPath: string, timeoutMs: number): Promise<string | null> {
   return new Promise<string | null>((resolve) => {
@@ -123,7 +150,7 @@ function runElectron(electronPath: string, manifestPath: string, timeoutMs: numb
       windowsHide: true,
       // Offscreen rendering does not need a display, but it does need the
       // GPU process; nothing here disables hardware acceleration.
-      env: { ...process.env, ELECTRON_DISABLE_SANDBOX: "1" }
+      env: rendererEnvironment(manifestPath)
     });
 
     const timer = setTimeout(() => {
