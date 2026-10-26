@@ -23,12 +23,13 @@ Neither the binary nor the voice models are in this repository — the models ar
 
 **On Windows, TRH AI installs them for you.** The first-run screen offers the
 voice ticked, and *Settings → Engine and models* installs it at any time: Piper
-2023.11.14-2 and the Cori voice (British English, high quality), 130 MiB
+2023.11.14-2 and five voices - Alan, Amy, Cori, Ryan and Jarvis - 475 MiB
 together, each file checked against a pinned size and SHA-256 before it is used.
-It needs no restart; `GET /v1/speech` reports the voice straight away. Cori is
-public domain and Piper is MIT, so both may be used commercially. The most used
-Piper voice, Ryan, is CC BY-NC-SA, so it is not offered. See
-`23-install-story.md`, M2b.
+It needs no restart; `GET /v1/speech` reports the voices straight away. The
+voices have different licences: only Cori's (public domain) is plainly free to
+use in anything, and Ryan's is non-commercial. The install screen lists each
+one's, and `23-install-story.md`, M2b, says what is known of every voice and
+what to delete to drop one.
 
 By hand, which is also how to add another voice:
 
@@ -70,6 +71,12 @@ been used.
 then British locales ahead of others, then by id so the default does not move
 around between reads. The user can override the ranking from Settings, and the
 choice persists.
+
+The ranking only orders the picker. When nobody has chosen, the voice used is
+`defaultVoiceId` (`en_GB-alan-medium`) if it is installed - the same voice the
+interface starts on - and the best-ranked one if it is not. It is named rather
+than ranked because, with every voice installed, the ranking would put Jarvis
+(male, British, high quality) first.
 
 ## How it sounds
 

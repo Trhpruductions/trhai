@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  describeHardware, formatBytes, initialSelection, initialToolSelection, jobPercent, plannedBytes, setupReason, stepText, type SetupStatus, type ToolEntry
+  describeHardware, formatBytes, initialSelection, initialToolSelection, jobPercent, plannedBytes, setupReason, stepText, toolHasMore, toolRemainingBytes,
+  type SetupStatus, type ToolEntry
 } from "../src/lib/setup.js";
 
 // What the setup screens work out from the API's answer.
@@ -66,6 +67,26 @@ test("every tool that is not installed starts ticked and counts in the download;
   assert.equal(plannedBytes(fresh, ["small"], ["speech", "listening"]), 2.5 * gib + 19_328_326 + 280 * mib);
   assert.equal(plannedBytes(fresh, [], ["video"]), 19_328_326, "an installed tool adds nothing, even if it is ticked");
   assert.equal(plannedBytes(fresh, ["small"]), 2.5 * gib + 19_328_326, "with no tools ticked, the tools are not counted");
+});
+
+test("a tool that works but is short of some of its own parts (one voice of five) is offered ticked, and counts only what is missing", () => {
+  const oneVoice = tool("speech", { installed: true, sizeBytes: 0, missingBytes: 400 * mib });
+  const fresh = status({ tools: [oneVoice, tool("video", { installed: true, sizeBytes: 0, missingBytes: 0 })] });
+  assert.equal(toolHasMore(oneVoice), true);
+  assert.equal(toolRemainingBytes(oneVoice), 400 * mib);
+  assert.deepEqual(initialToolSelection(fresh), ["speech"], "the complete tool is left out");
+  assert.equal(plannedBytes(fresh, [], ["speech", "video"]), 19_328_326 + 400 * mib);
+  // A service that does not say what is missing is read as before: installed means nothing is left.
+  const older = tool("speech", { installed: true, sizeBytes: 0 });
+  assert.equal(toolHasMore(older), false);
+  assert.equal(toolRemainingBytes(older), 0);
+  assert.equal(toolRemainingBytes(tool("speech", { sizeBytes: 130 * mib })), 130 * mib, "not installed: all of it");
+});
+
+test("being short of a tool's own parts is not a reason to open the setup screen by itself", () => {
+  // The update installs them without asking (the API's required setup); a screen asking again would be a second question.
+  const ready = status({ needsSetup: false, tools: [tool("speech", { installed: true, sizeBytes: 0, missingBytes: 400 * mib })] });
+  assert.equal(setupReason(ready, false), null);
 });
 
 test("a tool this PC cannot use is not offered ticked", () => {

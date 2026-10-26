@@ -52,6 +52,9 @@
 .setup-model-text { display: grid; gap: 3px; color: var(--os-text-2); line-height: 1.45; min-width: 0; }
 .setup-model-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--os-text); }
 .setup-model-text a { color: var(--os-accent); }
+/* The licences of what a tool installs (the voices): a plain list inside the card, not a card each. */
+.setup-models .setup-parts { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 1px; }
+.setup-models .setup-parts li { display: block; padding: 0; border: 0; border-radius: 0; }
 
 .setup-others ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
 .setup-others li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

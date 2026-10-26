@@ -50,11 +50,25 @@ export type ToolEntry = {
   summary: string;
   needs: string;
   license: { name: string; url: string; commercialUse: boolean };
+  /** The parts that have a licence of their own - the voices - each with it. Absent from an older service. */
+  included?: Array<{ label: string; license: { name: string; url: string; commercialUse: boolean } }>;
   installed: boolean;
   /** Bytes still to download: none once it is installed. */
   sizeBytes: number;
+  /** Bytes of its own parts not here yet, whether or not it works: a copy with one voice still speaks. Absent from an older service. */
+  missingBytes?: number;
   supported: boolean;
 };
+
+/** What is left to download for a tool, counting the parts a working copy is still short of. */
+export function toolRemainingBytes(tool: ToolEntry): number {
+  return tool.missingBytes ?? tool.sizeBytes;
+}
+
+/** Whether a tool has anything left to install: it is not installed, or it works and is short of some of its own parts. */
+export function toolHasMore(tool: ToolEntry): boolean {
+  return !tool.installed || (tool.missingBytes ?? 0) > 0;
+}
 
 export type SetupStatus = {
   hardware: Hardware;
@@ -126,9 +140,9 @@ export function initialSelection(status: SetupStatus): string[] {
   return recommended ? [recommended.id] : [];
 }
 
-/** The tools to offer ticked: every one this PC can use that is not installed yet, so that one click installs everything. */
+/** The tools to offer ticked: every one this PC can use that has something left to install, so that one click installs everything. */
 export function initialToolSelection(status: SetupStatus): string[] {
-  return (status.tools ?? []).filter((tool) => tool.supported && !tool.installed).map((tool) => tool.id);
+  return (status.tools ?? []).filter((tool) => tool.supported && toolHasMore(tool)).map((tool) => tool.id);
 }
 
 /**
@@ -148,7 +162,7 @@ export function setupReason(status: SetupStatus, toolsAlreadyOffered: boolean): 
 /** What an install of the selection would download, engine included when it is missing. */
 export function plannedBytes(status: SetupStatus, selected: string[], selectedTools: string[] = []): number {
   const models = status.catalog.filter((model) => selected.includes(model.id) && !model.installed).reduce((sum, model) => sum + model.sizeBytes, 0);
-  const tools = (status.tools ?? []).filter((tool) => selectedTools.includes(tool.id) && !tool.installed).reduce((sum, tool) => sum + tool.sizeBytes, 0);
+  const tools = (status.tools ?? []).filter((tool) => selectedTools.includes(tool.id) && toolHasMore(tool)).reduce((sum, tool) => sum + toolRemainingBytes(tool), 0);
   return models + tools + (status.engine.installed ? 0 : status.engine.downloadBytes);
 }
 

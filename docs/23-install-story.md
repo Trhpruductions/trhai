@@ -150,7 +150,7 @@ models.
 
 | Tool | Installs | Left to download | Licence |
 |---|---|---|---|
-| Voice | Piper 2023.11.14-2 and the Cori voice (British English, high quality) | 130.4 MiB | Piper is MIT; the voice is public domain |
+| Voice | Piper 2023.11.14-2 and five voices: Alan, Amy, Cori, Ryan and Jarvis (the four after Cori added 2026-10-25) | 475.1 MiB | Piper is MIT; each voice has a licence of its own, see below |
 | Listening | whisper.cpp b4938 and `ggml-base.en` | 149.1 MiB | MIT |
 | Video | ffmpeg 9.0.2, the gyan.dev "essentials" build | 109.5 MiB | GPL 3; run as its own program, not linked |
 
@@ -171,9 +171,38 @@ models.
   install is, and is not". ffmpeg keeps only `bin\ffmpeg.exe` and its licence under the
   runtime folder, and is used before an `ffmpeg` on PATH, so TRH AI neither
   depends on the PC's own copy nor changes it.
-- The voice is Cori because her licence allows what the rest of the app allows.
-  The most used Piper voice, Ryan, is CC BY-NC-SA (non-commercial) and is not
-  offered.
+- **Five voices, from 2026-10-25.** The owner asked for every voice on their own
+  PC to be installed for everyone else, and for the Jarvis voice besides. Until
+  then the tool installed Cori alone, because her licence allows what the rest of
+  the app allows and the most used Piper voice, Ryan, is CC BY-NC-SA
+  (non-commercial). The five do not share a licence, so the tool is no longer
+  labelled free to use commercially (`commercialUse` is false on it), and the
+  install screen lists each voice with its licence as its makers state it:
+
+  | Voice | Id | From | Licence, as its makers state it | Size |
+  |---|---|---|---|---|
+  | Alan | `en_GB-alan-medium` | rhasspy/piper-voices | "All Rights Reserved", Mycroft AI (the voice's own LICENSE file in the Mimic 3 collection) | 60.3 MiB |
+  | Cori | `en_GB-cori-high` | rhasspy/piper-voices | public domain (LibriVox recordings) | 108.9 MiB |
+  | Jarvis | `en_GB-jarvis-high` | jgkawell/jarvis, its maker's own repository; kept under the app's id, not its makers' file name | a fan-made imitation of a film character's voice, tagged MIT by its maker, which cannot cover the voice | 108.9 MiB |
+  | Ryan | `en_US-ryan-high` | rhasspy/piper-voices | CC BY-NC-SA 4.0, non-commercial | 115.2 MiB |
+  | Amy | `en_US-amy-medium` | rhasspy/piper-voices | none stated: the model card says "See URL" and points at the Mimic 3 collection, which is CC BY-SA 4.0 overall but does not list her | 60.3 MiB |
+
+  Only Cori is plainly free to use in anything; whether to ship the others in a
+  paid app is the owner's decision, made on 2026-10-25 and flagged to them then.
+  Dropping one is deleting its entry in `piperVoices` (`toolCatalog.ts`); nothing
+  else changes. Alan is the default (`defaultVoiceId` in `piperSpeech.ts`, the
+  same as the interface's `defaultVoice`): it is named, because the ranking
+  (quality, male first, British first) would put Jarvis ahead of it.
+- A copy that already has Piper and a voice - every 0.1.7 - is brought up to all
+  five: the tool lists each voice file that is not on disk, whether or not Piper
+  already speaks. A voice a person put there themselves stays, and does not stand
+  in for the five. `ToolStatus.missingBytes` says what is still to fetch for a tool
+  that works, and Settings offers it ("400 MB more to add").
+- Verified 2026-10-25 on this PC through the app's own installer: only the two
+  missing Jarvis files were fetched (109 MiB), they matched their pinned SHA-256,
+  Piper then listed five voices with Alan as the default, and Jarvis spoke a
+  sentence (22,050 Hz, 16-bit, 3.9 s, speech and pauses by the numbers). The audio
+  was measured, not listened to.
 - Verified 2026-10-24 on this PC, through the API's own install route, into empty
   scratch folders with no `ffmpeg` on PATH. All six files downloaded in 20 s and
   matched their pinned size and SHA-256. The operations check then reported the

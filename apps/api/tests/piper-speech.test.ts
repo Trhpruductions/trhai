@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const {
+  defaultVoiceId,
   deliveryFor,
   describeVoiceFile,
   expressionScale,
@@ -198,6 +199,45 @@ test("a configured voice that is not installed does not silently swap", async ()
     // It falls back, but to the ranked default — the point is that it never
     // reports the requested voice as though it had been used.
     assert.equal(status.available === true ? status.voice.id : "", "en_GB-cori-high");
+  });
+});
+
+// ---- The default, with every voice installed ------------------------------
+
+const allFive = ["en_GB-alan-medium", "en_GB-cori-high", "en_GB-jarvis-high", "en_US-ryan-high", "en_US-amy-medium"];
+
+test("Jarvis is a male voice, which is what the ranking goes by", () => {
+  assert.equal(describeVoiceFile("en_GB-jarvis-high.onnx")?.gender, "male");
+  assert.equal(describeVoiceFile("en_GB-jarvis-high.onnx")?.name, "Jarvis");
+});
+
+test("with all five voices installed the app's own default speaks, though the ranking would put Jarvis first", async () => {
+  await withInstall(fakeInstall({ binary: true, models: allFive }), () => {
+    // The ranking is only a guess at what sounds best: high quality, then male, then British.
+    // Jarvis is all three, so a default left to it would be a voice the app never chose.
+    assert.equal(installedVoices()[0]?.id, "en_GB-jarvis-high");
+    assert.equal(defaultVoiceId, "en_GB-alan-medium");
+    const status = piperStatus();
+    assert.equal(status.available === true ? status.voice.id : "", defaultVoiceId);
+    // The picker still lists all five, best first.
+    assert.deepEqual(installedVoices().map((voice) => voice.id), [
+      "en_GB-jarvis-high", "en_US-ryan-high", "en_GB-cori-high", "en_GB-alan-medium", "en_US-amy-medium"
+    ]);
+  });
+});
+
+test("without the default voice installed, the best-ranked one speaks", async () => {
+  await withInstall(fakeInstall({ binary: true, models: ["en_GB-cori-high", "en_US-amy-medium"] }), () => {
+    const status = piperStatus();
+    assert.equal(status.available === true ? status.voice.id : "", "en_GB-cori-high");
+  });
+});
+
+test("a voice picked in the settings still beats the default", async () => {
+  await withInstall(fakeInstall({ binary: true, models: allFive }), () => {
+    process.env.VEXORA_PIPER_VOICE = "en_GB-jarvis-high";
+    const status = piperStatus();
+    assert.equal(status.available === true ? status.voice.id : "", "en_GB-jarvis-high");
   });
 });
 
