@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { encodedCommand, helperPowerShell, plainUpdateError, relaunchScript, updateSupport } from "../src/updateState.js";
+import { encodedCommand, helperLaunches, helperPowerShell, plainUpdateError, relaunchScript, updateSupport } from "../src/updateState.js";
 
 // Which copies update themselves, and how a failure is said.
 
@@ -69,6 +69,20 @@ test("after an update the helper waits for the app and the installer, then start
 test("the helper's script goes to PowerShell whole, encoded, line breaks and all", () => {
   const script = "Note 'one'\nNote 'two'";
   assert.equal(Buffer.from(encodedCommand(script), "base64").toString("utf16le"), script);
+});
+
+test("the helper is started through cmd's start first, the headless console host second, and each carries the same PowerShell", () => {
+  const powershell = helperPowerShell("QQBCAEMA");
+  const [first, second, ...rest] = helperLaunches(powershell);
+  assert.equal(rest.length, 0);
+  // `start` with an empty title (it would take the first quoted argument for one), minimised, then PowerShell as it is.
+  assert.equal(first.file, "cmd.exe");
+  assert.deepEqual(first.args.slice(0, 5), ["/d", "/c", "start", "\"\"", "/min"]);
+  assert.deepEqual(first.args.slice(5), powershell);
+  assert.equal(second.file, "conhost.exe");
+  assert.deepEqual(second.args, ["--headless", ...powershell]);
+  // The encoded script is plain base64, which cmd's command line passes through untouched.
+  assert.match(powershell[powershell.length - 1], /^[A-Za-z0-9+/=]+$/);
 });
 
 test("the helper's PowerShell asks nothing, loads nothing, shows nothing", () => {

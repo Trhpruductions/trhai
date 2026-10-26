@@ -110,3 +110,25 @@ export function encodedCommand(script: string): string {
 export function helperPowerShell(encoded: string): string[] {
   return ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-EncodedCommand", encoded];
 }
+
+export type HelperLaunch = { file: string; args: string[] };
+
+/**
+ * The ways to start the helper, in the order to try them: the next is tried when
+ * one cannot be started at all.
+ *
+ * `cmd /c start` first. It gives PowerShell a console of its own - minimised, and
+ * PowerShell hides itself as it begins - and it is the way that ran on every PC
+ * it was tried on. Windows' console host in headless mode was first, because it
+ * shows nothing, but on a current build of Windows 11 it starts, returns at once
+ * and never runs the script: found by watching an update install on an installed
+ * copy, which left no restart log (the installer's own restart saved that run).
+ * It stays as the second way, where it is known to work. PowerShell started
+ * detached on its own has no console and exits before running a line.
+ */
+export function helperLaunches(powershell: string[]): HelperLaunch[] {
+  return [
+    { file: "cmd.exe", args: ["/d", "/c", "start", "\"\"", "/min", ...powershell] },
+    { file: "conhost.exe", args: ["--headless", ...powershell] }
+  ];
+}
