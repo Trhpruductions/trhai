@@ -25,3 +25,34 @@ export function tinyPdf(lines: string[]): Buffer {
     + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${table}\n%%EOF\n`;
   return Buffer.from(out, "latin1");
 }
+
+/**
+ * A small, valid PDF with a page for each entry of `pages`, each holding its lines of text: what printing a
+ * presentation gives, a page to a slide, for tests that need the reader here to count pages and read each one.
+ */
+export function pagedPdf(pages: string[][]): Buffer {
+  const escape = (text: string) => text.replace(/[()\\]/g, (mark) => `\\${mark}`);
+  // Object 1 is the catalog, 2 the page tree and 3 the font; each page is two objects after those, its page and its text.
+  const objects: string[] = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids [${pages.map((_, index) => `${4 + index * 2} 0 R`).join(" ")}] /Count ${pages.length} >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+  ];
+  pages.forEach((lines, index) => {
+    // The text starts near the top of the page, which is 540 points tall: further up and it is off the page and not read.
+    const content = ["BT", "/F1 12 Tf", "14 TL", "72 500 Td", ...lines.map((line) => `(${escape(line)}) Tj T*`), "ET"].join("\n");
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Contents ${5 + index * 2} 0 R /Resources << /Font << /F1 3 0 R >> >> >>`);
+    objects.push(`<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`);
+  });
+  let out = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objects.forEach((body, index) => {
+    offsets.push(Buffer.byteLength(out));
+    out += `${index + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const table = Buffer.byteLength(out);
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+    + offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")
+    + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${table}\n%%EOF\n`;
+  return Buffer.from(out, "latin1");
+}

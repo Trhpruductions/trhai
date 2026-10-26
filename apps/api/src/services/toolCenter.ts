@@ -65,6 +65,7 @@ export const toolCatalogue: Record<string, CatalogueEntry> = {
   write_document: { area: "Documents", title: "Write a document", summary: "Saves notes or a draft as a new document in your knowledge base." },
   make_document: { area: "Documents", title: "Make a Word or PDF file", summary: "Makes a Word document, PDF, web page, Markdown or text file from what you ask for, and saves it where you can open, print or send it." },
   make_spreadsheet: { area: "Documents", title: "Make an Excel file", summary: "Makes an Excel workbook or a CSV file from your data, with working formulas for the totals, and saves it where you can open it in Excel." },
+  make_presentation: { area: "Documents", title: "Make a PowerPoint file", summary: "Makes a presentation from an outline - a PowerPoint file, a PDF of its slides, or both - with speaker notes if you ask for them, and saves it where you can open it in PowerPoint." },
   update_document: { area: "Documents", title: "Update a document", summary: "Adds to or changes a document already in your knowledge base." },
   delete_document: { area: "Documents", title: "Delete a document", summary: "Deletes a document from your knowledge base." },
   list_files: { area: "Files", title: "List files", summary: "Lists what is in a folder." },
@@ -149,6 +150,12 @@ function readinessOf(name: string, probe: ToolProbe): ToolReadiness {
       : ready("Makes Word, PDF, web page, Markdown and text files on this PC, with no account.");
   }
   if (name === "make_spreadsheet") return ready("Makes Excel and CSV files on this PC, with no account; formulas are worked out and written beside their answers.");
+  if (name === "make_presentation") {
+    // The PowerPoint file is written directly; only the PDF of its slides needs the window that prints it.
+    return probe.pdfPrinter === false
+      ? ready("Makes PowerPoint files. A PDF of the slides needs TRH AI's own window to print it, and it is not here.")
+      : ready("Makes PowerPoint files, and PDFs of their slides, on this PC, with no account.");
+  }
   if (name === "send_text") {
     if (probe.phoneLink !== "linked") {
       return { state: "needs-setup", note: probe.phoneLink === "not-linked" ? "Link your phone in Phone Link to send texts." : "Needs Phone Link, from the Microsoft Store." };

@@ -212,7 +212,7 @@ function textsOf(blocks: Block[], prose = false): string[] {
 }
 
 /** What a reader compares: letters and numbers only, folded, so a space or a bullet drawn differently is not a difference. */
-const folded = (text: string): string => text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+export const folded = (text: string): string => text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 
 /**
  * The first and last words of a document, as short strings that must turn up in any file made from it. Taken from

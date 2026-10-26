@@ -4,6 +4,7 @@
 //
 //   ok       writes every page as a small PDF and every frame as a small file
 //   readable writes every page as a real one-page PDF holding the page's own text, as a print of it would
+//   slides   writes every page as a real PDF with a page for each slide on it, holding that slide's own text, as a print of a presentation would
 //   garbage  writes something that is not a PDF
 //   partial  writes only the first page
 //   crash    says something on stderr and exits with code 3
@@ -50,6 +51,35 @@ function tinyPdf(lines) {
   return Buffer.from(out, "latin1");
 }
 
+/** A valid PDF with a page for each entry of `pages`, each holding its lines (the same as pagedPdf in pdf.ts). */
+function pagedPdf(pages) {
+  const escape = (text) => text.replace(/[()\\]/g, (mark) => `\\${mark}`);
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids [${pages.map((_, index) => `${4 + index * 2} 0 R`).join(" ")}] /Count ${pages.length} >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+  ];
+  pages.forEach((lines, index) => {
+    const content = ["BT", "/F1 12 Tf", "14 TL", "72 500 Td", ...lines.map((line) => `(${escape(line)}) Tj T*`), "ET"].join("\n");
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Contents ${5 + index * 2} 0 R /Resources << /Font << /F1 3 0 R >> >> >>`);
+    objects.push(`<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`);
+  });
+  let out = "%PDF-1.4\n";
+  const offsets = [];
+  objects.forEach((body, index) => {
+    offsets.push(Buffer.byteLength(out));
+    out += `${index + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const table = Buffer.byteLength(out);
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+    + offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")
+    + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${table}\n%%EOF\n`;
+  return Buffer.from(out, "latin1");
+}
+
+/** The text of each slide on a presentation's page, a line to each tag. */
+const slidesOf = (html) => [...html.matchAll(/<section class="slide[^"]*">([\s\S]*?)<\/section>/g)].map((match) => textOf(match[1]));
+
 if (mode === "crash") {
   process.stderr.write("the window process crashed\n");
   process.exit(3);
@@ -64,7 +94,7 @@ if (mode === "crash") {
     if (mode === "partial" && position > 0) continue;
     writeFileSync(
       pdf.outputPath,
-      mode === "garbage" ? "this is not a pdf" : mode === "readable" ? tinyPdf(textOf(html)) : `%PDF-1.4\n% a page ${pdf.index}\n%%EOF\n`
+      mode === "garbage" ? "this is not a pdf" : mode === "readable" ? tinyPdf(textOf(html)) : mode === "slides" ? pagedPdf(slidesOf(html)) : `%PDF-1.4\n% a page ${pdf.index}\n%%EOF\n`
     );
     results.push({ index: pdf.index, ok: true });
   }

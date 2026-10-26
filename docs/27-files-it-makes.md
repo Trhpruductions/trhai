@@ -148,6 +148,71 @@ The same reader gives the assistant the cells of any `.xlsx` it is given (a head
 rows tab-separated, a formula after its answer), so `read_file`, summarising, the knowledge base and the
 Files preview all read a spreadsheet; `write_file` refuses an `.xlsx` and says to use `make_spreadsheet`.
 
+## Presentations - `make_presentation`
+
+A PowerPoint file (`.pptx`), a PDF of its slides, or both, from an outline the assistant writes. Ask for one the
+way you would ask a person: "make me a PowerPoint about composting", "I need a pitch deck for investors", "turn these
+notes into slides". The tool is offered when slides, a slide deck, a presentation, PowerPoint or a pptx is named with
+something being made or wanted (`wantsAPresentationMade`); "deck" alone is not a trigger, since it is as often a deck
+of cards, and a question about a presentation needs no file.
+
+### What the outline can hold
+
+The assistant writes the whole deck as Markdown (`deckData.ts`): a `#` heading is the deck's title (the title slide,
+with up to three lines under it as its subtitle) and every `##` heading starts a slide. A `#` heading with a list, a
+table, code or a lot of text under it is read as a slide instead, so a deck written with `#` for every slide still
+works. Under a heading go bullets (three levels), numbered steps (from the number they start at), a checklist (its
+boxes, no bullets), a table, a quote, code and plain paragraphs, with **bold**, *italic*, ~~strike~~, `code` and
+links; rules and page breaks between slides are ignored and a heading below the second level is bold text.
+
+**Speaker's notes**: a paragraph that begins `Notes:` or `Speaker notes:` (or a `Notes` heading) starts them, and
+they run to the next slide. They go in the file's notes and are not on the slide or in the PDF. A sentence that begins
+`Note:` is left on the slide.
+
+### Fitting what is on a slide
+
+Text that runs off the bottom of a slide is the commonest way for a made deck to look made by a machine, so the
+PowerPoint file, the PDF and the splitting of a slide all measure the same way (`slideMetrics.ts`): how many letters of
+Calibri go on a line at a size (0.43 em a letter, a little over the 0.40 measured on printed slides), and how tall that
+makes what is there. Body text is set at the largest of 28, 24 and 20 points that leaves it all in the box, titles
+smaller the longer they are. What does not fit at 20 points is split into slides of its own, "Plan" and "Plan (2)": a list
+between its items, a table between its rows with its header on each, code between its lines, the notes staying with the
+first. A paragraph is never cut. A deck can be up to 200 slides, from up to 200,000 letters.
+
+### The files
+
+The `.pptx` is written by hand like the Word and Excel files (`pptxWriter.ts`): a master with two layouts (a dark title
+slide and a slide with a title and a body), a theme, and the title and body placed in the layouts' own placeholders, so
+PowerPoint's outline view and a screen reader see titles and bullets. Bullets and numbering are the program's, tables are
+tables, links are links, and 16:9. Tables stay where they were in the outline: what comes before the last one is above
+it and what comes after is below. With notes there is a notes master and a notes page for each slide that has them.
+
+The PDF is printed by the same window as a document's, a page to a slide, drawn from the same slides, sizes and
+colours (`deckHtml.ts`), so it and the PowerPoint file look like each other.
+
+Named for the title, in the `documents` folder or where the user says, never replacing a file, exactly as for documents.
+
+### Checked before it is reported
+
+The PowerPoint file is read back **slide by slide, every word of each slide and of its notes compared with what was
+meant**, not only its first and last: a slide that reads back different is named with the words around the difference,
+and one that cannot be read at all is removed. The PDF is checked for a page for every slide and for the start of every
+line of running text (a table's cells are left out of that, since a PDF reader may weave them together). A file that
+opens but differs is kept, with a note to open it and look before relying on it, and is not called checked.
+
+### Reading presentations
+
+`read_file`, summarising, the knowledge base and the Files preview read a deck as "Slide 1", the slide's lines, and its
+speaker's notes after it (`readSlides` in `documentText.ts`, which finds a slide's notes through its own
+relationships). A line break written the way PowerPoint writes one, with run properties inside, is read as a line break:
+it was being dropped, which ran two lines into one word.
+
+### Limits
+
+No pictures, charts, transitions or animations, and one look. The file was read and re-saved with python-pptx while
+building it - every placeholder, table and notes page - but has not been opened in Microsoft PowerPoint itself, which
+is not installed on this PC.
+
 ## Opening what it made
 
 A reply that made a file shows it as a card with **Open** (in the program it belongs
@@ -175,6 +240,12 @@ in view, and shows the words of a PDF, Word or PowerPoint file in its preview.
 
 ## Tests
 
+For presentations: `deck-data.test.ts` (which heading is the title, what a slide holds, notes, splitting), `slide-metrics.test.ts` (the
+measures, at their exact boundaries), `pptx.test.ts` (the package: types, relationships, layouts, placeholders, lists, tables, notes, and
+read back), `deck-html.test.ts` (the page the PDF is printed from, and that nothing in it can run or load), `presentation-maker.test.ts`
+(names, formats, and every way a file can be wrong without being called right), `make-presentation-tool.test.ts`; and in `document-text.test.ts`
+the slide, line-break and notes reading. The PDF tests print through a stand-in that writes a page for each slide (`fakeRenderer.mjs`, mode `slides`).
+The deck was also read and re-saved with python-pptx while building it, and printed with the real Electron and looked at.
 For spreadsheets: `formulas.test.ts` (reading, refusing and working out formulas), `sheet-data.test.ts` (what a cell is, CSV, tables, JSON),
 `xlsx.test.ts` (the workbook's parts, and a workbook of the kind Excel saves read back), `spreadsheet-maker.test.ts`, `make-spreadsheet-tool.test.ts`.
 The workbook was also read with openpyxl while building it: values, formulas and their answers, formats, bold shaded headers, frozen panes,

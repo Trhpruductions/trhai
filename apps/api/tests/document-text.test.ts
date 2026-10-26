@@ -18,7 +18,7 @@ process.env.ASSIST_CONVERSATION_FILE = path.join(dataDir, "conversations.json");
 process.env.ASSIST_TASKS_FILE = path.join(dataDir, "tasks.json");
 process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 
-const { docxText, documentKind, extractDocumentText, htmlText, readZip, slideText, maxDocumentBytes } =
+const { docxText, documentKind, extractDocumentText, htmlText, notesText, readSlides, readZip, slideText, maxDocumentBytes } =
   await import("../src/services/documentText.js");
 const { chunkDocument, maxPassageChars, splitLongPassage } = await import("../src/services/knowledgeStore.js");
 const { runTool } = await import("../src/services/agentTools.js");
@@ -123,6 +123,71 @@ test("slides read in their own order, and HTML reads as text", () => {
   assert.equal(slideText("<a:p><a:r><a:t>Q3 &amp; Q4</a:t></a:r></a:p><a:p><a:r><a:t>Growth</a:t></a:r></a:p>"), "Q3 & Q4\nGrowth");
   assert.equal(htmlText("<html><style>p{}</style><body><h1>Title</h1><p>One &amp; two<br>three</p><script>x()</script></body></html>"),
     "Title\n\nOne & two\nthree");
+});
+
+test("a line break inside a paragraph is read as a line break, written either way", () => {
+  const run = (text: string) => `<a:r><a:t>${text}</a:t></a:r>`;
+  // PowerPoint writes it with a run-properties element inside; other programs write it empty.
+  assert.equal(slideText(`<a:p>${run("one")}<a:br><a:rPr lang="en-US" dirty="0"/></a:br>${run("two")}</a:p>`), "one\ntwo");
+  assert.equal(slideText(`<a:p>${run("one")}<a:br/>${run("two")}</a:p>`), "one\ntwo");
+  assert.equal(slideText(`<a:p>${run("one")}<a:br lang="en-US"/>${run("two")}</a:p>`), "one\ntwo");
+  assert.equal(slideText(`<a:p>${run("a")}<a:br><a:rPr/></a:br>${run("b")}<a:br><a:rPr/></a:br>${run("c")}</a:p><a:p>${run("d")}</a:p>`), "a\nb\nc\nd");
+  assert.equal(slideText(`<a:tbl><a:tr><a:tc><a:txBody><a:p>${run("cell")}</a:p></a:txBody></a:tc></a:tr></a:tbl>`), "cell", "a table is not a break");
+});
+
+const shape = (ph: string, content: string) => `<p:sp><p:nvSpPr><p:cNvPr id="2" name="x"/><p:cNvSpPr/><p:nvPr><p:ph ${ph}/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>${content}</p:txBody></p:sp>`;
+const paragraph = (text: string) => `<a:p><a:r><a:t>${text}</a:t></a:r></a:p>`;
+
+test("the notes on a notes page are what is in its notes placeholder, and not the picture of the slide or its number", () => {
+  const page = `<p:notes><p:cSld><p:spTree>${shape('type="sldImg" idx="2"', "")}`
+    + `${shape('type="body" sz="quarter" idx="3"', paragraph("First &amp; foremost") + paragraph("Second"))}`
+    + `${shape('type="sldNum" sz="quarter" idx="5"', '<a:p><a:fld id="{x}" type="slidenum"><a:t>7</a:t></a:fld></a:p>')}</p:spTree></p:cSld></p:notes>`;
+  assert.equal(notesText(page), "First & foremost\nSecond");
+  assert.equal(notesText(`<p:notes>${shape('type="sldNum"', paragraph("7"))}</p:notes>`), "", "a page with only a number has no notes");
+  assert.equal(notesText("<p:notes/>"), "");
+});
+
+function deckWithNotes(): Buffer {
+  const slide = (text: string) => `<p:sld><p:cSld><p:spTree>${shape('type="title"', paragraph(text))}</p:spTree></p:cSld></p:sld>`;
+  const notes = (text: string) => `<p:notes><p:cSld><p:spTree>${shape('type="body" idx="1"', paragraph(text))}</p:spTree></p:cSld></p:notes>`;
+  const rels = (...entries: string[]) => `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${entries.join("")}</Relationships>`;
+  const kind = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+  return zip({
+    "ppt/slides/slide1.xml": slide("One"),
+    "ppt/slides/slide2.xml": slide("Two"),
+    "ppt/slides/slide3.xml": slide("Three"),
+    "ppt/slides/slide4.xml": slide("Four"),
+    "ppt/slides/_rels/slide1.xml.rels": rels(`<Relationship Id="rId1" Type="${kind}/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`),
+    "ppt/slides/_rels/slide2.xml.rels": rels(`<Relationship Id="rId1" Type="${kind}/slideLayout" Target="../slideLayouts/slideLayout2.xml"/>`, `<Relationship Id="rId2" Type="${kind}/notesSlide" Target="../notesSlides/notesSlide7.xml"/>`),
+    "ppt/slides/_rels/slide3.xml.rels": rels(`<Relationship Target="/ppt/notesSlides/notesSlide9.xml" Id="rId5" Type="${kind}/notesSlide"/>`),
+    "ppt/slides/_rels/slide4.xml.rels": rels(`<Relationship Id="rId2" Type="${kind}/notesSlide" Target="../notesSlides/missing.xml"/>`),
+    "ppt/notesSlides/notesSlide7.xml": notes("Notes for two"),
+    "ppt/notesSlides/notesSlide9.xml": notes("Notes for three"),
+    "ppt/notesSlides/notesSlide1.xml": notes("Nothing links here, so these are nobody's")
+  });
+}
+
+test("the speaker's notes of a slide are found through the slide's own relationships, whatever the notes page is called", () => {
+  assert.deepEqual(readSlides(deckWithNotes()), [
+    { number: 1, text: "One", notes: "" },
+    { number: 2, text: "Two", notes: "Notes for two" },
+    { number: 3, text: "Three", notes: "Notes for three" },
+    { number: 4, text: "Four", notes: "" }
+  ]);
+});
+
+test("a presentation is read slide by slide with its speaker's notes after each, and nothing added where there are none", async () => {
+  const read = await extractDocumentText(deckWithNotes(), "deck.pptx");
+  assert.equal(read.ok && read.text, "Slide 1\nOne\n\nSlide 2\nTwo\nSpeaker notes:\nNotes for two\n\nSlide 3\nThree\nSpeaker notes:\nNotes for three\n\nSlide 4\nFour");
+  assert.equal(read.ok && read.pages, 4);
+  // A slide that is only notes is still read.
+  const onlyNotes = zip({
+    "ppt/slides/slide1.xml": "<p:sld><p:cSld><p:spTree/></p:cSld></p:sld>",
+    "ppt/slides/_rels/slide1.xml.rels": `<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide1.xml"/></Relationships>`,
+    "ppt/notesSlides/notesSlide1.xml": `<p:notes><p:cSld><p:spTree>${shape('type="body"', paragraph("Only a note"))}</p:spTree></p:cSld></p:notes>`
+  });
+  const note = await extractDocumentText(onlyNotes, "n.pptx");
+  assert.equal(note.ok && note.text, "Slide 1\nSpeaker notes:\nOnly a note");
 });
 
 test("the zip reader handles stored and deflated entries alike", () => {
