@@ -220,6 +220,19 @@ from the button). The window cannot be closed; if the download fails it says
 why, with *Try again* and *Not now* (the update is still installed when the app
 quits, as any downloaded one is).
 
+The restart comes by itself **once per version**. The window notes the version in
+the app's own storage (`trhai.update.install-tried.v1`) the moment a restart is
+asked for - by the countdown or by *Restart now* - before the installer has run.
+A copy that comes back still on the old version has an installer that did not
+take (blocked, out of space, closed early), and restarting into it again every
+two minutes would be a loop with no way out, since the window cannot be closed
+while the countdown runs. So the second time it says the install did not finish
+and asks: *Try again* gives one more automatic restart, *Not now* puts the window
+away and leaves the update card, which installs it by hand. A copy that installs
+normally never sees this: it comes back on the version the release names, and
+nothing is offered. The next required version restarts by itself once, as this
+one did.
+
 What it cannot do: **force a copy whose own version does not know the line.** A
 0.1.7 copy cannot, so 0.1.8 itself reaches it as an ordinary update, with
 *Later*, or by hand (the installer is also copied to `D:\TRHAI-Installer` for
