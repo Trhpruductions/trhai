@@ -37,6 +37,19 @@ export function isRequiredReleaseText(text: string): boolean {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.1.8",
+    date: "2026-10-26",
+    title: "Five voices, models that answer what you ask, and an update that finishes its own install",
+    notes: [
+      "Five voices to choose from, all installed for you: Alan, Amy, Cori, Ryan and the Jarvis voice. Settings, Engine and models, lists each one's licence beside it, because they are not all the same: only Cori is free to use in anything.",
+      "New models that answer what they are asked: Qwen2.5 Coder 7B or Qwen3 4B Instruct to talk with, and Qwen3 VL 8B or 4B to read pictures, screenshots and documents, whichever your PC can run. They are the original models with their refusals taken out, and they still use TRH AI's tools. The earlier models stay in Settings, Engine and models, for anyone who wants them.",
+      "TRH AI's own checks before it changes anything on your PC, the machine-access switch and the confirmations, are not part of a model and are unchanged.",
+      "An update now installs what it brings. A little after TRH AI opens following this update, it downloads the new models, voices and tools by itself, shows at the top of every screen how far it has got, and carries on after an interruption. Every file is checked against what its makers published, and the AI engine is restarted only when you are not waiting on a reply. It downloads about 11 GB on a PC that runs the larger models and about 6 GB on a smaller one, and says so if the drive does not have room.",
+      "A new PC is offered both models and all of the tools, ticked, at the first run.",
+      "From this version on, a release can be marked required: TRH AI then downloads it by itself and restarts into it, instead of only offering it."
+    ]
+  },
+  {
     version: "0.1.7",
     date: "2026-10-25",
     title: "Make a music video from a song",
