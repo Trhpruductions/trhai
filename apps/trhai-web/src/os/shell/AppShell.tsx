@@ -17,6 +17,7 @@ import { RequiredSetupBanner } from "../../components/RequiredSetupBanner";
 import { RequiredUpdate } from "../../components/RequiredUpdate";
 import { useNav } from "../state/nav";
 import { useAssistantState, useVoice } from "../state/assistant";
+import { looksLikeSong } from "../../lib/songAttach";
 import { views, viewById, type ViewId } from "../views";
 
 // The operating environment's frame: navigation down the side, status across
@@ -56,7 +57,7 @@ const loaders: Record<ViewId, ReturnType<typeof dynamic>> = {
 
 export function AppShell() {
   const { view, go, slim, setSlim, paletteOpen, setPaletteOpen, noticesOpen, setNoticesOpen } = useNav();
-  const { core, attentive, addImages, busy, stop } = useAssistantState();
+  const { core, attentive, addFiles, busy, stop } = useAssistantState();
   const { toggleMic } = useVoice();
   const workspace = useRef<HTMLElement>(null);
   // Home's core, once it is on screen: the backdrop puts the art's globe under it.
@@ -127,15 +128,18 @@ export function AppShell() {
             id="os-workspace"
             tabIndex={-1}
             aria-label={viewById(view).label}
-            // An image dropped anywhere on a workspace goes with the next message.
+            // An image dropped anywhere on a workspace goes with the next message; a song
+            // opens the music video maker with it. A file with no type yet (some song
+            // formats have none registered) is let in: only its name tells what it is.
             onDragOver={(event) => {
-              if ([...event.dataTransfer.items].some((item) => item.kind === "file" && item.type.startsWith("image/"))) event.preventDefault();
+              if ([...event.dataTransfer.items].some((item) => item.kind === "file" && (item.type === "" || item.type.startsWith("image/") || item.type.startsWith("audio/")))) event.preventDefault();
             }}
             onDrop={(event) => {
-              const files = [...event.dataTransfer.files].filter((file) => file.type.startsWith("image/"));
+              // A song dropped on the maker's own box was taken there already: not twice.
+              const files = [...event.dataTransfer.files].filter((file) => file.type.startsWith("image/") || (!event.defaultPrevented && looksLikeSong(file)));
               if (files.length === 0) return;
               event.preventDefault();
-              void addImages(files);
+              void addFiles(files);
             }}
           >
             {content}

@@ -98,6 +98,11 @@ sound, and that the last stretch decodes. A video that fails the check is not ke
 - **Music video** in the sidebar (Work): drop a song, optionally paste the lyrics,
   pick a look and a size, "Try 20 seconds" or "Make the video". Progress shows
   as it goes; leaving the screen is fine, and the app says when it is done.
+- **From the chat**: the paperclip takes a song as well as a picture, and a song
+  dropped anywhere in the app does the same. Either opens the Music video screen
+  with the song already loaded (a song is not a message attachment: the chat has
+  no use for one). A file that is neither a picture nor a song is named and left
+  alone, and one song is taken at a time.
 - **Ask the assistant**: "make a music video from songs/neon.mp3". The assistant
   starts it and says it has *started*, not that it is made; `music_video_status`
   tells it how it is getting on.
