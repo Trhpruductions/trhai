@@ -66,6 +66,7 @@ export const toolCatalogue: Record<string, CatalogueEntry> = {
   make_document: { area: "Documents", title: "Make a Word or PDF file", summary: "Makes a Word document, PDF, web page, Markdown or text file from what you ask for, and saves it where you can open, print or send it." },
   make_spreadsheet: { area: "Documents", title: "Make an Excel file", summary: "Makes an Excel workbook or a CSV file from your data, with working formulas for the totals, and saves it where you can open it in Excel." },
   make_presentation: { area: "Documents", title: "Make a PowerPoint file", summary: "Makes a presentation from an outline - a PowerPoint file, a PDF of its slides, or both - with speaker notes if you ask for them, and saves it where you can open it in PowerPoint." },
+  convert_media: { area: "Files", title: "Convert audio and video", summary: "Changes a song, a recording or a video into another format (MP3, WAV, M4A, FLAC, Ogg, Opus, MP4), pulls the sound out of a video, or cuts it down to a part. Saves a new file and leaves the original alone." },
   update_document: { area: "Documents", title: "Update a document", summary: "Adds to or changes a document already in your knowledge base." },
   delete_document: { area: "Documents", title: "Delete a document", summary: "Deletes a document from your knowledge base." },
   list_files: { area: "Files", title: "List files", summary: "Lists what is in a folder." },
@@ -142,6 +143,11 @@ function readinessOf(name: string, probe: ToolProbe): ToolReadiness {
   if (name === "make_music_video") {
     if (!probe.ffmpeg) return { state: "needs-setup", note: "Needs ffmpeg installed - it draws and encodes the video." };
     return ready("Drawn and encoded with ffmpeg on this PC's processor, with no account. Times the lyrics to the singing when Listening is installed.");
+  }
+  if (name === "convert_media") {
+    return probe.ffmpeg
+      ? ready("Converted with ffmpeg on this PC, with no account. Reads what it made back and checks its length and sound.")
+      : { state: "needs-setup", note: "Needs ffmpeg installed - it changes one kind of file into another." };
   }
   if (name === "make_document") {
     // Word, web page, Markdown and text files are written directly; only a PDF needs the window that prints it.
