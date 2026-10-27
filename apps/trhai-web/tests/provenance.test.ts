@@ -138,6 +138,8 @@ test("the line under a reply in Chat says how it was produced", () => {
   assert.equal(replyProvenance("generated", "ollama/vexora:latest"), "Written by vexora");
   assert.equal(replyProvenance("answer", "memory"), "Quoted from your saved notes");
   assert.equal(replyProvenance("plan", "general-core-v1"), "Answered on this PC");
+  // A page opened in the person's browser, or a service's search for what they asked to play.
+  assert.equal(replyProvenance("open", "memory"), "Opened on this PC");
   assert.equal(replyProvenance(undefined, undefined), null);
 });
 

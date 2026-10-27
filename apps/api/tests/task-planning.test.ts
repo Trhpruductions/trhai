@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildTaskPlan, detectTaskType, extractSubject } from "../src/services/taskPlanning.js";
+import { asksForAPlan, buildTaskPlan, detectTaskType, extractSubject } from "../src/services/taskPlanning.js";
 
 test("extracts the subject phrase as the user wrote it", () => {
   assert.equal(extractSubject("Build a revenue reporting dashboard"), "the revenue reporting dashboard");
@@ -150,4 +150,14 @@ test("falls back gracefully when there is no usable subject", () => {
   assert.ok(plan.steps.length > 0);
   assert.ok(plan.steps.every((step) => step.trim().length > 0));
   assert.doesNotMatch(plan.steps[0], /\s{2,}/);
+});
+
+test("a request for a plan is told from a request to do or answer something", () => {
+  // The generic four-step plan is a fair reply to the first and a template standing in for an answer to the second.
+  for (const asked of ["plan my week", "give me an outline for the talk", "what are the steps to set up the server", "a checklist for moving house", "how should I approach the migration", "break this down for me", "a roadmap for the app"]) {
+    assert.equal(asksForAPlan(asked), true, asked);
+  }
+  for (const asked of ["open spotify.com, and stream all the songs from the band Shadows of Ruin", "Explain what a REST API is.", "reorganise my desk photos", "what time is it", "write a haiku about rain"]) {
+    assert.equal(asksForAPlan(asked), false, asked);
+  }
 });

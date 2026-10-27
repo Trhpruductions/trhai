@@ -91,6 +91,7 @@ export function replyProvenance(strategy: string | undefined, model: string | un
     case "calendar": case "conversion": case "arithmetic": case "reading": return "Worked out on this PC";
     case "message": return "Prepared on this PC - nothing is sent without your yes";
     case "schedule": return "Saved on this PC";
+    case "open": return "Opened on this PC";
     case "stopped": return "Stopped";
     case "failed": return "Not answered";
     case "error": return null;
