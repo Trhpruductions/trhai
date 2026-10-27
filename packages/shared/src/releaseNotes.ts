@@ -37,6 +37,16 @@ export function isRequiredReleaseText(text: string): boolean {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.1.9",
+    date: "2026-10-26",
+    title: "Open a site or some music by asking, and a straight answer when no model can reply",
+    notes: [
+      "Ask TRH AI to open a website, or to play something on Spotify, YouTube, SoundCloud, Apple Music or another music site, and it opens the page, or that site's search for what you asked for, in your browser. It cannot press play for you, because it has no way into your accounts: you choose the track and press Play.",
+      "When TRH AI cannot answer because no AI model is running, or none could take the request, it now says so and why, with a Try again button, instead of showing four generic planning steps as if they were an answer.",
+      "A required update restarts TRH AI by itself once. If the installer did not take and the old version comes back, it no longer restarts again every two minutes: it says the install did not finish, and lets you try again or install it by hand."
+    ]
+  },
+  {
     version: "0.1.8",
     date: "2026-10-26",
     title: "Five voices, models that answer what you ask, and an update that finishes its own install",
