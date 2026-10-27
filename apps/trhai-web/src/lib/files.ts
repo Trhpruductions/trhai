@@ -86,7 +86,7 @@ export function madeFilesFrom(value: unknown): string[] {
 }
 
 /** A line of a reply as the assistant's file tools write it: "- documents/Report.docx (Word document)", "- documents/Report.pdf (PDF, 2 pages)". */
-const madeFileLine = /^\s*[-*]\s+(\S.*?) \((?:Word document|PDF|web page|Markdown file|text file|Excel workbook|CSV file|PowerPoint presentation)(?:, \d+ (?:pages?|sheets?|slides?))?\)\s*$/;
+const madeFileLine = /^\s*[-*]\s+(\S.*?) \((?:Word document|PDF|web page|Markdown file|text file|Excel workbook|CSV file|PowerPoint presentation|(?:MP3|WAV|M4A|FLAC|Ogg|Opus) audio|MP4 video)(?:, (?:\d+ (?:pages?|sheets?|slides?)|\d+:\d{2}(?::\d{2})?))?\)\s*$/;
 
 /**
  * The files an earlier reply made, read from its text: a conversation opened

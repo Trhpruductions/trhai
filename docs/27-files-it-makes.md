@@ -213,6 +213,40 @@ No pictures, charts, transitions or animations, and one look. The file was read 
 building it - every placeholder, table and notes page - but has not been opened in Microsoft PowerPoint itself, which
 is not installed on this PC.
 
+## Converting audio and video - `convert_media`
+
+Changes a song, a recording or a video a person already has into another format, pulls the sound out of a video, or cuts it
+to a part, with ffmpeg on this PC (the one Settings, Engine and models installs, or any on the PC's path). It makes a **new**
+file and never replaces one; the original is not touched.
+
+- **Asked for like this:** "convert song.wav to mp3", "extract the audio from clip.mp4", "trim intro.mp3 to the first 30
+  seconds", "save this video as mp4". `wantsMediaConverted` (in `actionIntent.ts`) decides: a verb that changes a file
+  with a media file named or a format to make it into. A music video made from a song is `make_music_video`'s, and a
+  request for one never offers this tool; "make a video about cats" and "convert the report to pdf" do not either. The
+  request classifier sees no action verb in "extract the audio from clip.mp4 as an mp3" and takes it for a statement, which only
+  asks and is refused every tool that writes; a request to convert is let keep them. And it withholds the two video-making tools,
+  which a file name like `clip.mp4` would otherwise bring in.
+- **Formats:** MP3, WAV, M4A (AAC), FLAC, Ogg (Vorbis), Opus, and MP4 (H.264 and AAC). `quality` is small, normal or high (a
+  bitrate for MP3, M4A and Opus, a quality level for Ogg, a CRF for MP4; WAV and FLAC are lossless). `start` and `end` take
+  seconds or minutes:seconds. From: `.mp3 .wav .m4a .aac .flac .ogg .opus .wma .aiff .aif .mp4 .m4v .mov .mkv .webm .avi .mpg
+  .mpeg .3gp .wmv`. A video becomes an MP4 only from a file with a picture (cover art in a song is not one); an MP4's width and
+  height are made even on the way, which the encoder needs.
+- **Where it goes:** where the user said (`folder`, with the same words and rules as the document tools), otherwise **beside the
+  original** when that folder may be written in, otherwise the documents folder. The path given is the file in the workspace
+  when there is one; a name for one of this PC's own folders ("Downloads/song.mp3") is understood only when there is no such
+  file, so a workspace folder called `music` is the workspace's. Outside the workspace needs machine access, and an unattended
+  run stays inside it. Files are named for the title or the original and never replace one (`Song.mp3`, `Song (2).mp3`).
+- **Checked before it is reported:** ffmpeg is asked what is in the file it wrote (sound, and a picture for a video; how long it
+  is) and then plays all of it - a video its last five seconds, where a cut-short file shows - through to nowhere. A file that
+  cannot be read back, has no sound, or does not play through is removed and said. One whose length is not what was meant
+  (beyond 3%, and at least 0.6 s) is kept with a note to open it and look, and is not called checked.
+- **Safe to run:** ffmpeg is run with its arguments as a list, never through a shell, and only on local files
+  (`-protocol_whitelist file`), so a name that looks like an address or a `concat:` is a file name. A conversion that takes
+  more than 10 minutes (20 for a video) is stopped and nothing is kept.
+- **Limits:** no batch (one file a request), no subtitles, no changing a video's size, and no GPU. It has been run for real with
+  every format above and with an odd-sized film; it has not been tried on a PC with only the ffmpeg the app installs (that build
+  was not on this one).
+
 ## Opening what it made
 
 A reply that made a file shows it as a card with **Open** (in the program it belongs
@@ -240,6 +274,10 @@ in view, and shows the words of a PDF, Word or PowerPoint file in its preview.
 
 ## Tests
 
+For converting audio and video: `media-converter.test.ts` (formats and times read, the exact ffmpeg arguments, what ffmpeg says about a file read,
+every way a conversion can go wrong against a stand-in for ffmpeg, and real conversions with the real ffmpeg - skipped where there is none),
+`wants-media-converted.test.ts` (which requests it is offered to) and `convert-media-tool.test.ts` (offered and withheld, refusals, where files go,
+and through the chat loop); and in `files.test.ts` the result lines the screen reads.
 For presentations: `deck-data.test.ts` (which heading is the title, what a slide holds, notes, splitting), `slide-metrics.test.ts` (the
 measures, at their exact boundaries), `pptx.test.ts` (the package: types, relationships, layouts, placeholders, lists, tables, notes, and
 read back), `deck-html.test.ts` (the page the PDF is printed from, and that nothing in it can run or load), `presentation-maker.test.ts`

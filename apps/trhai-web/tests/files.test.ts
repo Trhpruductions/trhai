@@ -106,6 +106,23 @@ test("a conversation opened again finds its files in the reply's own lines, and 
   assert.deepEqual(madeFilesInText(""), []);
 });
 
+test("the lines the conversion tool writes are read as made files, with the length of a song or a film", () => {
+  const reply = [
+    "Made MP3 audio from neon.wav, read back and checked (4.6 MB). It is saved here:",
+    "- songs/neon.mp3 (MP3 audio, 3:12)",
+    "- songs/talk.mp4 (MP4 video, 1:02:03)",
+    "- converted/take.flac (FLAC audio, 0:03)",
+    "- converted/take.ogg (Ogg audio)",
+    "- converted/take.opus (Opus audio, 0:41)",
+    "The original is untouched."
+  ].join("\n");
+  assert.deepEqual(madeFilesInText(reply), ["songs/neon.mp3", "songs/talk.mp4", "converted/take.flac", "converted/take.ogg", "converted/take.opus"]);
+  assert.deepEqual(madeFilesInText("- songs/odd.mp3 (MP3 audio, soon)"), [], "a length that is not one");
+  assert.deepEqual(madeFilesInText("- songs/odd.mp3 (MP3 audio, 3:7)"), [], "seconds are two digits");
+  assert.deepEqual(madeFilesInText("- C:\\Music\\x.mp3 (MP3 audio, 3:12)"), [], "outside the workspace is not offered");
+  assert.deepEqual(madeFilesInText("- songs/x.mp3 (Spotify audio, 3:12)"), [], "only the kinds the tool writes");
+});
+
 test("a workbook's text is cut into its sheets, each with its rows and cells, and a heading is only a heading after a blank line", () => {
   const text = [
     "Sheet: Costs", "Item\tCost\tShare", "Rent\t$1,200\t60%", "Total\t2000 [=SUM(B2:B3)]\t100%", "",

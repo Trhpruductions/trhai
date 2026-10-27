@@ -101,6 +101,8 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   make_spreadsheet: 2,
   // The same again: new PowerPoint and PDF files, never replacing one.
   make_presentation: 2,
+  // New audio and video files from one the user named, never replacing a file and never touching the original.
+  convert_media: 2,
   write_file: 2,
   // Targeted rather than wholesale, so if anything it is the safer of the two:
   // it changes the text it was given and cannot silently drop the rest of a file.

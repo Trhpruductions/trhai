@@ -527,6 +527,32 @@ export function wantsAPresentationMade(message: string): boolean {
   return presentationNamed.test(text) && (makingAFile.test(text) || creatingOne.test(text));
 }
 
+const mediaFileNamed = /[\w)\]-]\.(?:mp3|wav|m4a|aac|flac|ogg|opus|wma|aiff?|mp4|m4v|mov|mkv|webm|avi|mpe?g|3gp|wmv)\b/i;
+const mediaFormatWord = "(?:mp3|wav|wave|m4a|aac|flac|ogg|opus|mp4)";
+const conversionVerbs = /\b(?:convert|transcode|re-?encode|trim|crop|cut|shorten|compress|shrink|resample|extract|rip|strip)\b/i;
+/** Up to `max` characters of the same sentence: not across a full stop, but across the dot in a file name ("neon.flac"). */
+const withinTheSentence = (max: number) => `(?:[^.?!\\n]|\\.(?=\\w)){0,${max}}`;
+const makingIntoAFormat = new RegExp(`\\b(?:convert|transcode|re-?encode|turn|change|make|save|export|encode|put|render|give|get|need|want)\\b${withinTheSentence(60)}\\b(?:into|to|as)\\s+(?:an?\\s+|the\\s+)?\\.?${mediaFormatWord}\\b`, "i");
+const pullingOutTheSound = new RegExp(`\\b(?:extract|rip|pull|get|take|strip|save|grab)\\b${withinTheSentence(30)}\\b(?:audio|sound|soundtrack)\\b${withinTheSentence(30)}\\b(?:from|out of|of)\\b`, "i");
+const aboutAMusicVideo = new RegExp(`\\b(?:music|lyric)\\s+videos?\\b|\\bvisuali[sz]er\\b|\\bkaraoke\\b|\\bvideo\\b${withinTheSentence(20)}\\b(?:of|for|from|with)\\b${withinTheSentence(20)}\\b(?:song|track|album)\\b`, "i");
+
+/**
+ * Whether a request asks for an audio or video file to be converted, trimmed or
+ * stripped of its picture - "convert song.wav to mp3", "extract the audio from
+ * clip.mp4", "trim intro.mp3 to the first 30 seconds" - so convert_media is
+ * worth offering.
+ *
+ * It takes a file named, or a format to make it into, with a verb that changes
+ * one: "make a video about cats" names neither, and a music video made from a
+ * song is make_music_video's, whatever formats the request mentions.
+ */
+export function wantsMediaConverted(message: string): boolean {
+  const text = message ?? "";
+  if (aboutAMusicVideo.test(text)) return false;
+  if (pullingOutTheSound.test(text) || makingIntoAFormat.test(text)) return true;
+  return conversionVerbs.test(text) && mediaFileNamed.test(text);
+}
+
 /**
  * Whether a request is about this computer or its software at all, so the
  * shell is worth offering.

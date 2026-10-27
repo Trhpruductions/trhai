@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { normalizeSpelling } from "./spelling.js";
 import { matchMemories, type FactMatch } from "./factWording.js";
@@ -16,6 +16,7 @@ import { describeMusicVideos, listMusicVideos, parseMusicVideoRequest, whyNotMus
 import { musicVideoStatus, startMusicVideo } from "./musicVideoJob.js";
 import { describeMadeDocument, documentsFolder, makeDocument, parseDocumentFormats } from "./documentMaker.js";
 import { describeMadePresentation, makePresentation, parsePresentationFormats } from "./presentationMaker.js";
+import { convertMedia, describeMadeMedia, mediaFormatList, parseClock, parseMediaFormat, parseQuality } from "./mediaConverter.js";
 import { describeMadeSpreadsheet, makeSpreadsheet, parseSpreadsheetFormats } from "./spreadsheetMaker.js";
 import { expandKnownFolder } from "./knownFolders.js";
 import { noteMadeFiles } from "./madeFiles.js";
@@ -848,6 +849,38 @@ export const toolDefinitions: ToolDefinition[] = [
       }
     }
   },
+  {
+    type: "function",
+    function: {
+      name: "convert_media",
+      description:
+        "Change an AUDIO or VIDEO FILE the user already has into another format, pull the sound out of a video, or cut it "
+        + "down to a part - and save the result as a NEW file. Use this when the user asks to convert, extract the audio "
+        + "from, trim, shorten or compress a song, a recording or a video file. source is the file's path (in the "
+        + "workspace, or Desktop, Downloads or Music on this PC, or a full path - those need machine access). to is the "
+        + "format: mp3, wav, m4a, flac, ogg, opus or mp4. For only a part of it, give start and end, as seconds or "
+        + "minutes:seconds (1:30). quality is small, normal (the default) or high. It never replaces a file, leaves the "
+        + "original as it was, reads what it made back and checks its length and its sound, and says where the new file is "
+        + "- give the user that. It cannot make a music video (that is make_music_video) and does nothing with documents "
+        + "or pictures.",
+      parameters: {
+        type: "object",
+        properties: {
+          source: { type: "string", description: "The path of the audio or video file to convert." },
+          to: { type: "string", description: `The format to make: ${mediaFormatList.join(", ")}.` },
+          start: { type: "string", description: "Only to keep part of it: where the part begins, in seconds or minutes:seconds. Left out, from the start." },
+          end: { type: "string", description: "Only to keep part of it: where the part ends. Left out, to the end." },
+          quality: { type: "string", description: "small, normal or high. Left out, normal." },
+          title: { type: "string", description: "What to call the new file. If left out, the original's name is used." },
+          folder: {
+            type: "string",
+            description: "Only if the user said where: a folder in the workspace, or Desktop, Downloads or Documents on this PC, or a full path (these need machine access). Left out, the new file goes beside the original."
+          }
+        },
+        required: ["source", "to"]
+      }
+    }
+  },
   // The app has a scheduler. The assistant could not reach it.
   //
   // Asked "remind me every day at 9am to check the build", it called no tool
@@ -1192,7 +1225,7 @@ const scaffoldingTools = new Set(["build_app", "plan_app"]);
  * the port" is an ordinary thing to ask.
  */
 const machineChangingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "plan_app", "run_command", "run_script", "run_app"
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "plan_app", "run_command", "run_script", "run_app"
 ]);
 
 /**
@@ -1252,7 +1285,7 @@ const dateTools = new Set(["days_between", "shift_date"]);
  * A question does not write files, documents or apps, though.
  */
 const writingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "plan_app",
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "plan_app",
   "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule"
 ]);
 
@@ -1291,6 +1324,8 @@ const fileMakingTools = new Set(["make_document"]);
 const spreadsheetTools = new Set(["make_spreadsheet"]);
 /** Offered only when the request asks for a presentation to be made; see wantsAPresentationMade. */
 const presentationTools = new Set(["make_presentation"]);
+/** Offered only when the request asks to convert, trim or pull the sound out of an audio or video file; see wantsMediaConverted. */
+const mediaTools = new Set(["convert_media"]);
 /**
  * The knowledge-base writers, withheld from a request that only reads unless
  * it asks for something to be kept. machineChangingTools already stops a read
@@ -1341,7 +1376,7 @@ export function availableTools(
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
     schedules?: boolean; video?: boolean; musicVideo?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
     messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean; fileMaking?: boolean; spreadsheets?: boolean;
-    presentations?: boolean;
+    presentations?: boolean; media?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1370,6 +1405,7 @@ export function availableTools(
   const allowFileMaking = options.fileMaking ?? true;
   const allowSpreadsheets = options.spreadsheets ?? true;
   const allowPresentations = options.presentations ?? true;
+  const allowMedia = options.media ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1411,6 +1447,8 @@ export function availableTools(
     if (!allowSpreadsheets && spreadsheetTools.has(name)) return false;
     // Only when the request asks for a presentation; see wantsAPresentationMade.
     if (!allowPresentations && presentationTools.has(name)) return false;
+    // Only when the request asks to convert or trim an audio or video file; see wantsMediaConverted.
+    if (!allowMedia && mediaTools.has(name)) return false;
     return true;
   }).sort((a, b) => (offerOrder.get(a.function.name) ?? 0) - (offerOrder.get(b.function.name) ?? 0));
 }
@@ -3241,6 +3279,64 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
 
       noteMadeFiles(context.sessionId, made.files.map((file) => shownPath(file.path)).filter((shown) => !path.isAbsolute(shown)));
       return { ok: true, content: describeMadePresentation(made, shownPath), path: shownPath(made.files[0].path) };
+    }
+
+    case "convert_media": {
+      const source = requireString(call.arguments.source);
+      if (!source) return { ok: false, content: "convert_media needs the path of the audio or video file to convert, in source. Nothing was made." };
+      const to = parseMediaFormat(call.arguments.to ?? call.arguments.format);
+      if (!to.ok) return { ok: false, content: `${to.reason} Nothing was made.` };
+      const start = parseClock(call.arguments.start, "start");
+      if (!start.ok) return { ok: false, content: `${start.reason} Nothing was made.` };
+      const end = parseClock(call.arguments.end, "end");
+      if (!end.ok) return { ok: false, content: `${end.reason} Nothing was made.` };
+
+      // Read like any other file: in the workspace, or anywhere once machine access is on; an unattended run stays in the workspace.
+      // The path as given comes first, so that "music/loop.wav" in the workspace is that file and not the Music folder on this
+      // PC; a name for one of this PC's own folders ("Downloads/song.mp3") is understood only when there is no such file.
+      const readAccess = (candidate: string) => resolveForAccess(candidate, {
+        granted: commandsArmed() && !context.unattended,
+        intent: "read",
+        insideWorkspace: resolveInWorkspace
+      });
+      let readable = readAccess(source);
+      if (!(readable.ok && existsSync(readable.path))) {
+        const inAKnownFolder = expandKnownFolder(source);
+        if (inAKnownFolder) readable = readAccess(inAKnownFolder);
+      }
+      if (!readable.ok) return { ok: false, content: `${readable.reason} Nothing was made.` };
+
+      // Where it goes: where the user said, or else beside the original when that folder may be written in, or else the documents folder.
+      let directory: string;
+      let title: string | null = null;
+      if (requireString(call.arguments.folder)) {
+        const target = madeFileTarget(call.arguments, context, mediaFormatList.join("|"));
+        if (!target.ok) return { ok: false, content: `${target.reason} Nothing was made.` };
+        directory = target.directory;
+        title = target.title;
+      } else {
+        const beside = resolveForAccess(path.dirname(readable.path), {
+          granted: commandsArmed() && !context.unattended,
+          intent: "write",
+          insideWorkspace: resolveInWorkspace
+        });
+        if (beside.ok) {
+          directory = beside.path;
+        } else {
+          const fallback = madeFileTarget({}, context, mediaFormatList.join("|"));
+          if (!fallback.ok) return { ok: false, content: `${fallback.reason} Nothing was made.` };
+          directory = fallback.directory;
+        }
+      }
+
+      const made = await convertMedia(
+        { source: readable.path, to: to.format, start: start.seconds, end: end.seconds, quality: parseQuality(call.arguments.quality), title: requireString(call.arguments.title) ?? title ?? undefined },
+        directory
+      );
+      if (!made.ok) return { ok: false, content: describeMadeMedia(made) };
+
+      noteMadeFiles(context.sessionId, [shownPath(made.file.path)].filter((shown) => !path.isAbsolute(shown)));
+      return { ok: true, content: describeMadeMedia(made, shownPath), path: shownPath(made.file.path) };
     }
 
     case "edit_file": {
