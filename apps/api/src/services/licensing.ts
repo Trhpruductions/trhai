@@ -14,6 +14,10 @@
 //
 // State kept here, protected at rest like every other data file: when the
 // trial began on this PC and the key that was activated, if any.
+//
+// This file answers "what does this PC hold": a trial, a key, what the key
+// says. It does not decide what anyone may do with that - entitlements.ts
+// holds the rules and access.ts applies them to a request.
 
 import { createPublicKey, randomUUID, verify as verifySignature, type KeyObject } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -26,6 +30,9 @@ import { runtimeDir } from "./modelEngine.js";
 export type Plan = "personal" | "pro" | "team";
 export const plans: Plan[] = ["personal", "pro", "team"];
 
+/** What a key can make its holder besides licensed: the people who run TRH AI. */
+export type KeyRole = "owner" | "admin";
+
 export type LicensePayload = {
   v: 1;
   /** Unique per issued key, so one can be named in support or revoked by a later version. */
@@ -34,6 +41,14 @@ export type LicensePayload = {
   /** Who it was issued to; shown in the app, matched loosely (case does not matter). */
   email: string;
   issuedAt: string;
+  /**
+   * Makes the account with this key's email the owner or an administrator of the
+   * copy it is entered into. The role is in the signed text, so it cannot be
+   * written in afterwards; and it does not expire, so a key that carries one has
+   * no `expiresAt` (isPayload refuses one that does). Keys made before roles
+   * existed have none and are ordinary licenses.
+   */
+  role?: KeyRole;
   /** ISO date; absent or null means it does not expire. */
   expiresAt?: string | null;
   /** How many PCs it is meant for. Informational: enforcement would need a server, which this app does not have. */
@@ -138,6 +153,10 @@ function isPayload(value: unknown): value is LicensePayload {
   const p = value as Partial<LicensePayload> | null;
   return Boolean(p) && p?.v === 1 && typeof p.id === "string" && typeof p.email === "string"
     && typeof p.issuedAt === "string" && plans.includes(p.plan as Plan)
+    && (p.role === undefined || p.role === "owner" || p.role === "admin")
+    // Owners and administrators are exempt for good: an expiry on their key
+    // would be a way to take the exemption away that the policy forbids.
+    && (p.role === undefined || !p.expiresAt)
     && (p.expiresAt === undefined || p.expiresAt === null || typeof p.expiresAt === "string")
     && (p.seats === undefined || (typeof p.seats === "number" && p.seats > 0));
 }
@@ -325,30 +344,5 @@ export function resetLicensingForTests(): void {
   loaded = null;
 }
 
-type GateRequest = { method: string };
-type GateResponse = { status: (code: number) => { json: (body: unknown) => unknown } };
-
-/**
- * Express middleware for the routes that do the work (and so are what is
- * paid for). Reads stay open so a locked app still shows what it holds; what
- * is refused is making it do more. 402 is the status made for this.
- */
-export function paywallGate(req: GateRequest, res: GateResponse, next: () => void): void {
-  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
-    next();
-    return;
-  }
-  const status = licenseStatus();
-  if (!status.locked) {
-    next();
-    return;
-  }
-  res.status(402).json({
-    code: "PAYMENT_REQUIRED",
-    message: status.state === "license_expired"
-      ? "Your TRH AI license has expired. Renew it, or enter a new key, in Settings."
-      : `Your ${trialDays}-day trial of TRH AI has ended. Enter a license key in Settings to keep going.`,
-    license: status,
-    traceId: "trace-local"
-  });
-}
+// What a request is allowed to do - the gate in front of the routes that do the
+// work - is decided by access.ts, from these facts and the account asking.

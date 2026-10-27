@@ -16,7 +16,7 @@ process.env.TRHAI_TRIAL_MARKER = path.join(licenseDir, "elsewhere", "trial-start
 delete process.env.TRHAI_PAYWALL;
 
 const {
-  activateLicense, formatLicenseKey, licenseStatus, newLicenseId, parseLicenseKey, paywallGate, removeLicense,
+  activateLicense, formatLicenseKey, licenseStatus, newLicenseId, parseLicenseKey, removeLicense,
   resetLicensingForTests, trialDays
 } = await import("../src/services/licensing.js");
 const { writeProtectedJsonFile } = await import("../src/services/protectedJson.js");
@@ -29,11 +29,6 @@ function issue(overrides: Partial<LicensePayload> = {}): string {
     v: 1, id: newLicenseId(), plan: "pro", email: "owner@example.com", issuedAt: new Date().toISOString(), ...overrides
   };
   return formatLicenseKey(payload, sign(null, Buffer.from(JSON.stringify(payload), "utf8"), privateKey));
-}
-
-function fakeResponse() {
-  const sent: { code?: number; body?: unknown } = {};
-  return { sent, res: { status: (code: number) => ({ json: (body: unknown) => { sent.code = code; sent.body = body; } }) } };
 }
 
 test("a fresh PC is on trial for the full period, and is locked the moment it ends", () => {
@@ -122,42 +117,32 @@ test("removing the key goes back to the trial, with the same clock", () => {
   assert.equal(after.trialStartedAt, before.trialStartedAt);
 });
 
-test("the gate lets reads through, lets a trial or license work, and answers 402 once locked", () => {
+// The gate that answers 402 when the trial or license has run out is tested in
+// access.test.ts, with the rest of who-may-do-what.
+
+test("a key can carry a role, but only without an expiry, and an unknown role is refused", () => {
   resetLicensingForTests();
-  removeLicense();
-  let passed = 0;
-  const next = () => { passed += 1; };
+  for (const role of ["owner", "admin"] as const) {
+    const ok = parseLicenseKey(issue({ role }));
+    assert.ok(ok.ok, role);
+    assert.equal((ok as { payload: { role?: string } }).payload.role, role);
+  }
+  const soon = new Date(Date.now() + 5 * day).toISOString();
+  assert.equal(parseLicenseKey(issue({ role: "admin", expiresAt: soon })).ok, false, "a role that could lapse is not a role");
+  assert.equal(parseLicenseKey(issue({ role: "owner", expiresAt: soon })).ok, false);
+  assert.equal(parseLicenseKey(issue({ role: "superuser" as never })).ok, false);
+  assert.ok(parseLicenseKey(issue({ expiresAt: soon })).ok, "an ordinary key may still expire");
+});
 
-  const open = fakeResponse();
-  paywallGate({ method: "POST" }, open.res, next);
-  assert.equal(passed, 1, "on trial, work goes through");
-
-  // Lock it by pretending the trial began long ago.
-  resetLicensingForTests();
-  writeProtectedJsonFile(process.env.TRHAI_LICENSE_FILE as string, { trialStartedAt: new Date(Date.now() - (trialDays + 1) * day).toISOString() });
-  resetLicensingForTests();
-
-  const read = fakeResponse();
-  paywallGate({ method: "GET" }, read.res, next);
-  assert.equal(passed, 2, "reads stay open when locked");
-
-  const locked = fakeResponse();
-  paywallGate({ method: "POST" }, locked.res, next);
-  assert.equal(passed, 2);
-  assert.equal(locked.sent.code, 402);
-  assert.equal((locked.sent.body as { code: string }).code, "PAYMENT_REQUIRED");
-  assert.match((locked.sent.body as { message: string }).message, /trial/);
-
-  process.env.TRHAI_PAYWALL = "off";
-  const disabled = fakeResponse();
-  paywallGate({ method: "POST" }, disabled.res, next);
-  assert.equal(passed, 3, "TRHAI_PAYWALL=off never locks");
-  delete process.env.TRHAI_PAYWALL;
-
-  activateLicense(issue());
-  const licensed = fakeResponse();
-  paywallGate({ method: "POST" }, licensed.res, next);
-  assert.equal(passed, 4, "a key unlocks it again");
+test("a role added to a signed key by hand no longer checks out", () => {
+  const key = issue();
+  const [head, signature] = key.slice("TRHAI-".length).split(".");
+  const payload = JSON.parse(Buffer.from(head, "base64url").toString("utf8")) as Record<string, unknown>;
+  payload.role = "owner";
+  const forged = `TRHAI-${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}.${signature}`;
+  const parsed = parseLicenseKey(forged);
+  assert.equal(parsed.ok, false);
+  assert.match((parsed as { error: string }).error, /signature/);
 });
 
 test("the Buy button only ever points at an https page", () => {
