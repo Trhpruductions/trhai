@@ -17,6 +17,8 @@ import {
   acceptedImageTypes, defaultImageQuestion, maxAttachments, prepareImage, refuseImage, type Attachment
 } from "../../lib/imageAttach";
 import { canShareScreen, shareScreen } from "../../lib/screenShare";
+import { uploadSong } from "../../lib/musicVideo";
+import { acceptedSongTypes, handSongOver, refuseSong, sortGiven, strayNote } from "../../lib/songAttach";
 import { apiPost } from "../../lib/api";
 import { whyNotListen } from "../../lib/speechInput";
 import { readActiveAgent } from "../../lib/agents";
@@ -64,6 +66,8 @@ type AssistantApi = {
   /** Send the draft (or the given words) with any attachments. */
   ask: (text: string) => void;
   addImages: (files: File[]) => Promise<void>;
+  /** Whatever was picked or dropped: pictures go with the next message, a song opens the music video maker. */
+  addFiles: (files: File[]) => Promise<void>;
   /** Share the screen into the next message's attachments. */
   attachScreen: () => void;
   removeAttachment: (id: string) => void;
@@ -219,6 +223,42 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       setAttachNote("That image could not be read.");
     }
   }, [attachments.length]);
+
+  /**
+   * Whatever was picked or dropped. Pictures go with the next message. A song goes
+   * to the music video maker - the chat has no use for one itself, and ignoring it
+   * without a word was the bug: it is loaded into the workspace and the maker opens
+   * with it ready. Anything else is said so, once.
+   */
+  const addFiles = useCallback(async (files: File[]) => {
+    const { images, songs, other } = sortGiven(files);
+    if (images.length > 0) await addImages(images);
+    const song = songs[0];
+    if (song) {
+      const refused = refuseSong(song);
+      if (refused) {
+        setAttachNote(refused);
+        return;
+      }
+      setAttachNote(`Loading ${song.name} for the music video maker...`);
+      const loaded = await uploadSong(song);
+      if (!loaded.ok) {
+        setAttachNote(loaded.reason);
+        return;
+      }
+      setAttachNote(null);
+      handSongOver({ name: song.name, bytes: loaded.data.bytes, path: loaded.data.path });
+      if (songs.length > 1) {
+        notify({
+          level: "info", title: "One song at a time", source: "MUSIC VIDEO",
+          body: `${song.name} is open in the music video maker. Add the others one after another.`
+        });
+      }
+      go("music");
+      return;
+    }
+    if (images.length === 0) setAttachNote(strayNote(other));
+  }, [addImages, notify, go]);
 
   /** The screen, for the next message; null when it was not shared, with the reason shown. */
   const captureScreen = useCallback(async (): Promise<Attachment[] | null> => {
@@ -453,11 +493,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   const assistant = useMemo<AssistantApi>(() => ({
     messages, status, restored, busy, core, label, send, stop, clear, regenerate,
-    draft, setDraft, attachments, attachNote, sharing, screenShareable, ask, addImages, attachScreen,
+    draft, setDraft, attachments, attachNote, sharing, screenShareable, ask, addImages, addFiles, attachScreen,
     removeAttachment, openImagePicker, attentive, setAttentive, lastAsked, lastReply, replyFromThisRun,
     dismissedReplyId, dismissReply: setDismissedReplyId, agent, setAgent, executionEvents
   }), [messages, status, restored, busy, core, label, send, stop, clear, regenerate, draft, attachments, attachNote, sharing,
-    screenShareable, ask, addImages, attachScreen, removeAttachment, openImagePicker, attentive, lastAsked, lastReply,
+    screenShareable, ask, addImages, addFiles, attachScreen, removeAttachment, openImagePicker, attentive, lastAsked, lastReply,
     replyFromThisRun, dismissedReplyId, agent, executionEvents]);
 
   const conversationsApi = useMemo<ConversationsApi>(() => ({
@@ -500,13 +540,13 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
               <input
                 ref={imagePicker}
                 type="file"
-                accept={acceptedImageTypes}
+                accept={`${acceptedImageTypes},${acceptedSongTypes}`}
                 multiple
                 hidden
                 onChange={(event) => {
                   const files = [...(event.target.files ?? [])];
                   event.target.value = "";
-                  void addImages(files);
+                  void addFiles(files);
                 }}
               />
             </ActivityContext.Provider>

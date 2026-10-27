@@ -5,6 +5,7 @@ import {
   formatClock, formatSize, getLibrary, getStatus, guessTitle, hasExtension, lyricsNote, mediaUrl, previewSeconds, remainingText, requestFrom,
   stageWords, startVideo, stopVideo, uploadSong, whyNot, type Job, type LibraryEntry, type Ready, type Result
 } from "../../lib/musicVideo";
+import { onSongHandedOver, songExtensions, takeHandedSong } from "../../lib/songAttach";
 import { Icon } from "../ui/Icon";
 import { ViewFrame } from "../ui/ViewFrame";
 import { useNav } from "../state/nav";
@@ -16,8 +17,6 @@ import "./views.css";
 // the workspace's music-videos folder. While one is being made the screen only
 // watches: the work is done by the local service, which carries on if this
 // screen is closed and tells the rest of the app when it is done.
-
-const defaultTypes = [".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff"];
 
 type Shown = {
   video: string;
@@ -110,7 +109,7 @@ export function MusicVideoView() {
 
   const choose = useCallback(async (file: File | undefined) => {
     if (!file) return;
-    const types = ready?.extensions ?? defaultTypes;
+    const types = ready?.extensions ?? songExtensions;
     if (!hasExtension(file.name, types)) {
       setProblem(`That is not a song file this can read. It can read ${types.join(", ")}.`);
       return;
@@ -127,6 +126,24 @@ export function MusicVideoView() {
     setTitle("");
     setArtist("");
   }, [ready]);
+
+  // A song given to the chat (its paperclip, or dropped on any screen) arrives here already
+  // loaded: taken when this screen opens, or - when it is already open - the moment it is handed over.
+  const adoptHanded = useCallback(() => {
+    const handed = takeHandedSong();
+    if (!handed) return;
+    setProblem(null);
+    setSong({ name: handed.name, bytes: handed.bytes, path: handed.path });
+    setReplace(null);
+    setTitle("");
+    setArtist("");
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a song waiting from the chat, unknowable until this screen opens
+    adoptHanded();
+    return onSongHandedOver(adoptHanded);
+  }, [adoptHanded]);
 
   const onDrop = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
@@ -192,7 +209,7 @@ export function MusicVideoView() {
             >
               <input
                 type="file"
-                accept={`audio/*,${(ready?.extensions ?? defaultTypes).join(",")}`}
+                accept={`audio/*,${(ready?.extensions ?? songExtensions).join(",")}`}
                 disabled={running}
                 onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ""; }}
               />

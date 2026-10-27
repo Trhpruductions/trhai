@@ -158,7 +158,7 @@ export function CommandPalette() {
         id: "act-speak", group: "Actions", title: voice.speech.enabled ? "Stop reading replies aloud" : "Read replies aloud",
         icon: voice.speech.enabled ? "speakerOff" : "speaker", run: close(() => voice.speech.setEnabled(!voice.speech.enabled))
       },
-      { id: "act-image", group: "Actions", title: "Attach an image to the next message", icon: "image", run: close(() => assistant.openImagePicker()) },
+      { id: "act-image", group: "Actions", title: "Attach an image, or a song for a music video", icon: "image", run: close(() => assistant.openImagePicker()) },
       ...(assistant.screenShareable ? [{ id: "act-screen", group: "Actions" as const, title: "Share the screen with the next message", icon: "screen" as IconName, run: close(() => assistant.attachScreen()) }] : []),
       ...(assistant.busy ? [{ id: "act-stop", group: "Actions" as const, title: "Stop the current reply", icon: "stop" as IconName, keys: "Esc", run: close(() => assistant.stop()) }] : []),
       { id: "act-slim", group: "Actions", title: slim ? "Expand the sidebar" : "Collapse the sidebar", icon: slim ? "chevronRight" : "chevronLeft", keys: "Ctrl B", run: close(() => setSlim(!slim)) },

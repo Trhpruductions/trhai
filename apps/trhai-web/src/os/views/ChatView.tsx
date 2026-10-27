@@ -232,7 +232,7 @@ export function ChatView() {
           {fresh ? (
             <div className="os-empty os-chat-empty">
               <strong>{restored ? "Start a conversation" : "Loading the conversation…"}</strong>
-              <p>Ask anything in the command bar below - type, speak, or attach an image. Replies are written on this PC.</p>
+              <p>Ask anything in the command bar below - type, speak, attach an image, or drop in a song to make a music video. Replies are written on this PC.</p>
               {restored ? (
                 <div className="os-starters">
                   {starters.map((starter) => (

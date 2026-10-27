@@ -56,7 +56,7 @@ export function CommandBar() {
       id: "speak", label: "/speak", hint: voice.speech.enabled ? "Stop reading replies aloud" : "Read replies aloud",
       icon: voice.speech.enabled ? "speakerOff" : "speaker", run: () => voice.speech.setEnabled(!voice.speech.enabled)
     },
-    { id: "image", label: "/image", hint: "Attach an image", icon: "image", run: () => assistant.openImagePicker() },
+    { id: "image", label: "/image", hint: "Attach an image, or a song for a music video", icon: "image", run: () => assistant.openImagePicker() },
     { id: "screen", label: "/screen", hint: "Share the screen with the next message", icon: "screen", run: () => assistant.attachScreen() },
     { id: "palette", label: "/commands", hint: "Open the command palette", icon: "command", run: () => setPaletteOpen(true) }
   ], [go, voice, assistant, setPaletteOpen]);
@@ -143,7 +143,7 @@ export function CommandBar() {
             </button>
             {plusOpen ? (
               <div className="os-menu os-plus-menu" role="menu" onClick={() => setPlusOpen(false)}>
-                <button type="button" role="menuitem" onClick={() => assistant.openImagePicker()}><Icon name="image" size={16} />Attach an image</button>
+                <button type="button" role="menuitem" onClick={() => assistant.openImagePicker()}><Icon name="image" size={16} />Attach an image or a song</button>
                 <button type="button" role="menuitem" disabled={!assistant.screenShareable} onClick={() => assistant.attachScreen()}>
                   <Icon name="screen" size={16} />Share the screen
                 </button>
@@ -175,7 +175,7 @@ export function CommandBar() {
           />
 
           <MicButton />
-          <button type="button" className="os-btn os-btn-ghost os-btn-icon os-attach" aria-label="Attach an image" data-tip="Attach an image" data-tip-pos="below" onClick={() => assistant.openImagePicker()}>
+          <button type="button" className="os-btn os-btn-ghost os-btn-icon os-attach" aria-label="Attach an image or a song" data-tip="Attach an image or a song" data-tip-pos="below" onClick={() => assistant.openImagePicker()}>
             <Icon name="clip" size={18} />
           </button>
           {busy ? (
