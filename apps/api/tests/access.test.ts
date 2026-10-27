@@ -686,6 +686,16 @@ test("accounts made before roles existed read as active, unverified, ordinary - 
 
   accounts.reloadAccountsFromDisk();
   assert.ok(accounts.login({ email: "old@example.com", password }).ok, "the new layout reads back");
+
+  // The old version runs again and writes its own layout; the next upgrade must not
+  // replace the copy with that - the copy is the oldest file there was, kept as it was.
+  writeProtectedJsonFile(accountsFile, {
+    ...legacy,
+    accounts: [...legacy.accounts, { id: randomUUID(), email: "older@example.com", displayName: "older", createdAt: "2026-02-01T00:00:00.000Z", salt: seedSalt, hash: seedHash }]
+  });
+  accounts.reloadAccountsFromDisk();
+  assert.ok(accounts.login({ email: "older@example.com", password }).ok);
+  assert.deepEqual(readFileSync(copy), original, "never replaced by a later copy of the old layout");
 });
 
 test("a second account cannot be made with the same email in another case", () => {
