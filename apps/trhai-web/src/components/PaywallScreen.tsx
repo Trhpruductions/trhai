@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import { Icon } from "../os/ui/Icon";
 import { describeLicense, licenseEvent, readLicense, type LicenseStatus } from "../lib/license";
+import { useEntitlements } from "../hooks/useEntitlements";
+import { describeAccess } from "../lib/access";
 import { BuyButton, LicenseKeyForm } from "./BillingPanel";
+import { useAccount } from "./AppGate";
 import "./paywall.css";
 
 // What stands in front of the app once the trial or the license has run out.
@@ -18,6 +21,8 @@ import "./paywall.css";
 // app, not a nag.
 
 export function PaywallScreen() {
+  const { account } = useAccount();
+  const entitlements = useEntitlements(account?.id ?? null);
   const [status, setStatus] = useState<LicenseStatus | null>(null);
   const [hidden, setHidden] = useState(false);
 
@@ -45,7 +50,31 @@ export function PaywallScreen() {
     };
   }, []);
 
-  if (!status || !status.locked || hidden) return null;
+  // The owner and the administrators are never shown a payment wall: the service lets them
+  // through whatever the trial or the license says, so the screen must not stand in front of
+  // them either. On a copy that holds its own accounts, the account's own lapse decides, not
+  // the trial of the PC it runs on.
+  const exempt = entitlements?.exempt === true;
+  const locked = entitlements?.authority ? entitlements.lockReason !== null && !exempt : status?.locked === true && !exempt;
+  if (!status || !locked || hidden) return null;
+
+  // On a copy that holds its own accounts it is the account's access that has run out, not this
+  // PC's license: say that, and leave out the PC's trial dates and its license box.
+  if (entitlements?.authority) {
+    return (
+      <div className="paywall-scrim" role="presentation">
+        <section className="paywall" role="dialog" aria-modal="true" aria-labelledby="paywall-title">
+          <span className="os-label">Access ended</span>
+          <h2 id="paywall-title">{entitlements.lockReason === "trial_ended" ? "Your free trial of TRH AI has ended." : "Your access to TRH AI has run out."}</h2>
+          <p className="paywall-lead">{describeAccess(entitlements)}</p>
+          <p>Ask whoever runs this copy of TRH AI to extend your access. Everything already here is still yours to read.</p>
+          <div className="os-view-actions">
+            <button type="button" className="os-btn os-btn-ghost" onClick={() => setHidden(true)}>Not now</button>
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   const expiredLicense = status.state === "license_expired";
   return (

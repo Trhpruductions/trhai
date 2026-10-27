@@ -103,6 +103,11 @@ node scripts/licensing/issue.mjs --email buyer@example.com --plan pro
 Every key issued is also recorded in `issued-licenses.jsonl` next to the
 private key.
 
+To make many at once - keys to hand out - use `issue-batch.mjs` (one file, no
+dependencies, so it can be copied to the PC that holds the private key). For
+owner and administrator keys (`--role`), and for how roles work, see
+`28-accounts-and-access.md`.
+
 ### The owner's own PCs
 
 Set `TRHAI_PAYWALL=off` in that PC's `.env`, or issue yourself a key.

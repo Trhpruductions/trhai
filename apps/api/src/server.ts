@@ -63,7 +63,10 @@ import { checkAvailability, generate, pinnedModel, readLocalModelConfig } from "
 import { pickAuthorModel } from "./services/appAuthor.js";
 import { readPreferences, updatePreferences } from "./services/preferences.js";
 import { getBuildInfo } from "./services/buildInfo.js";
-import { activateLicense, licenseStatus, paywallGate, removeLicense } from "./services/licensing.js";
+import { activateLicense, licenseStatus, removeLicense } from "./services/licensing.js";
+import { effectiveRole, featureGate, mayUse, resolvePrincipal } from "./services/access.js";
+import { featureCatalogue, featureIds } from "./services/entitlements.js";
+import { registerAccessRoutes } from "./accessRoutes.js";
 import { checkForUpdates } from "./services/updates.js";
 import { engineFetch } from "./services/engineFetch.js";
 import { cancelSetup, removeModel, startSetup } from "./services/modelSetup.js";
@@ -561,10 +564,13 @@ export function createApp(options: AppOptions = {}) {
 
   // The paywall. Reads stay open everywhere; what a lapsed trial or license
   // refuses is the work: talking to the assistant, building and running apps,
-  // commands, schedules and tasks. See services/licensing.ts for the shape of
-  // a key and why the app itself never touches a payment provider.
-  for (const gated of ["/v1/assist", "/v1/apps", "/v1/commands", "/v1/schedules", "/v1/tasks", "/v1/agent-tasks", "/v1/flow", "/v1/vision", "/v1/music-video"]) {
-    app.use(gated, paywallGate);
+  // commands, schedules and tasks. Every route a plan can switch on or off is
+  // listed once, in the feature catalogue (services/entitlements.ts), and gated
+  // here from that list - so a feature cannot have a gate without being in the
+  // catalogue, nor be in it without one. See services/licensing.ts for the shape
+  // of a key and why the app itself never touches a payment provider.
+  for (const feature of featureIds) {
+    for (const prefix of featureCatalogue[feature].routes) app.use(prefix, featureGate(feature));
   }
 
   app.get("/v1/license", (_req, res) => {
@@ -583,6 +589,9 @@ export function createApp(options: AppOptions = {}) {
   app.delete("/v1/license", (_req, res) => {
     res.json({ data: removeLicense(), traceId: "trace-local" });
   });
+
+  // What the caller may do, and the owner's and administrators' account tools.
+  registerAccessRoutes(app);
 
   // First-run setup: the model engine and the models, downloaded and verified
   // by the app (services/modelSetup.ts). Not behind the paywall: a PC has to
@@ -956,6 +965,12 @@ export function createApp(options: AppOptions = {}) {
 
     const result = login(req.body ?? {});
     if (!result.ok) {
+      // A suspended account's owner did give the right password, so this is not
+      // a guess: it is not counted toward a lockout, and it says what is wrong.
+      if (result.suspended) {
+        res.status(403).json({ code: "ACCOUNT_SUSPENDED", message: result.error, traceId: "trace-local" });
+        return;
+      }
       recordFailure(ipKey, loginIpRule);
       recordFailure(perEmailKey, loginEmailRule);
       // 401 with a deliberately vague message; see accounts.ts.
@@ -1020,7 +1035,9 @@ export function createApp(options: AppOptions = {}) {
       res.status(401).json({ code: "UNAUTHORIZED", message: "Not signed in", traceId: "trace-local" });
       return;
     }
-    res.json({ data: { account }, traceId: "trace-local" });
+    // The role comes from the server's own records, so a screen can decide what
+    // to show - but only the routes themselves decide what is allowed.
+    res.json({ data: { account, role: effectiveRole(account) }, traceId: "trace-local" });
   });
 
   // E4-S2 memory controls. Scoped to the signed-in account when there is one,
@@ -1283,7 +1300,7 @@ export function createApp(options: AppOptions = {}) {
       res.status(415).json({ message: "Send this as JSON." });
       return;
     }
-    if (licenseStatus().locked) {
+    if (!mayUse(resolvePrincipal(req), "assistant").allowed) {
       res.status(202).json({ data: { state: "skipped", reason: "The trial has ended.", at: new Date().toISOString() }, traceId: "trace-local" });
       return;
     }

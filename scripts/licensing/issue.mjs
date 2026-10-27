@@ -1,10 +1,17 @@
 // Issues a TRH AI license key. Owner only; needs the private key from keygen.
 //
 //   node scripts/licensing/issue.mjs --email someone@example.com --plan pro [--expires 2027-10-13] [--seats 1] [--key path\to\private.pem]
+//   node scripts/licensing/issue.mjs --email someone@example.com --role admin
 //
 // Prints the key, which is what the buyer is sent. Each run also appends a
 // line to issued-licenses.jsonl beside the private key, so the owner has a
 // record of what was issued to whom without any server.
+//
+// --role owner|admin makes the account with that email an owner or an
+// administrator of the copy the key is entered into: they use everything, and
+// no trial, plan or payment can lock them out. Such a key never expires (so
+// --expires is refused with it) and defaults to the team plan. Give one only to
+// people who should run TRH AI; an owner key above all stays with the owner.
 
 import { createPrivateKey, randomUUID, sign } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
@@ -17,7 +24,8 @@ const option = (name) => {
   return index >= 0 ? args[index + 1] : undefined;
 };
 const email = option("email");
-const plan = option("plan") ?? "personal";
+const role = option("role");
+const plan = option("plan") ?? (role ? "team" : "personal");
 const expires = option("expires");
 const seats = option("seats");
 const keyFile = option("key") ?? path.join(os.homedir(), ".trhai-license", "trhai-license-private.pem");
@@ -30,8 +38,16 @@ if (!["personal", "pro", "team"].includes(plan)) {
   console.error("--plan must be personal, pro or team");
   process.exit(1);
 }
+if (role !== undefined && !["owner", "admin"].includes(role)) {
+  console.error("--role must be owner or admin");
+  process.exit(1);
+}
 if (expires && !/^\d{4}-\d{2}-\d{2}$/.test(expires)) {
   console.error("--expires must be YYYY-MM-DD");
+  process.exit(1);
+}
+if (role && expires) {
+  console.error("an owner or administrator key never expires: leave --expires out");
   process.exit(1);
 }
 
@@ -41,6 +57,7 @@ const payload = {
   plan,
   email: email.trim().toLowerCase(),
   issuedAt: new Date().toISOString(),
+  ...(role ? { role } : {}),
   ...(expires ? { expiresAt: new Date(`${expires}T23:59:59Z`).toISOString() } : {}),
   ...(seats ? { seats: Number(seats) } : {})
 };

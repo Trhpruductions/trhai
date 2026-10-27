@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { defaultPersonality, type PersonalityId } from "@ascend/shared";
 import { AccountPanel } from "../../components/AccountPanel";
+import { AccessPanel } from "../../components/AccessPanel";
+import { AdminPanel } from "../../components/AdminPanel";
 import { BillingPanel } from "../../components/BillingPanel";
 import { UpdatesPanel } from "../../components/UpdatesPanel";
 import { SetupPanel } from "../../components/SetupPanel";
@@ -12,6 +14,8 @@ import { PersonalityPicker } from "../../components/PersonalityPicker";
 import { AgentPicker } from "../../components/AgentPicker";
 import { useAccount } from "../../components/AppGate";
 import { apiGet } from "../../lib/api";
+import { mayManagePeople } from "../../lib/access";
+import { useEntitlements } from "../../hooks/useEntitlements";
 import { formatBytes } from "../../lib/files";
 import { readStoredPersonality, writeStoredPersonality } from "../../lib/personality";
 import { filterSections, isSectionId, sections, type SectionId } from "../../lib/settings";
@@ -232,9 +236,14 @@ export function SettingsView() {
     return () => window.removeEventListener("hashchange", read);
   }, []);
 
-  const shown = filterSections(query);
+  // Who may look after accounts is read from the service, which refuses anyone else
+  // whatever the screen shows: this only decides whether the section is offered.
+  const entitlements = useEntitlements(account.account?.id ?? null);
+  const canManagePeople = mayManagePeople(entitlements);
+  const shown = filterSections(query).filter((entry) => entry.id !== "people" || canManagePeople);
+  const shownSection: SectionId = section === "people" && !canManagePeople ? "account" : section;
   const open = (id: SectionId) => go("settings", id === "account" ? null : id);
-  const current = sections.find((entry) => entry.id === section) ?? sections[0];
+  const current = sections.find((entry) => entry.id === shownSection) ?? sections[0];
 
   return (
     <ViewFrame id="settings">
@@ -248,7 +257,7 @@ export function SettingsView() {
           <ul>
             {shown.map((entry) => (
               <li key={entry.id}>
-                <button type="button" className={entry.id === section ? "on" : ""} aria-current={entry.id === section ? "page" : undefined} onClick={() => open(entry.id)}>
+                <button type="button" className={entry.id === shownSection ? "on" : ""} aria-current={entry.id === shownSection ? "page" : undefined} onClick={() => open(entry.id)}>
                   <strong>{entry.label}</strong>
                   <span>{entry.summary}</span>
                 </button>
@@ -261,7 +270,9 @@ export function SettingsView() {
         <div className="os-settings-body" aria-label={current.label}>
           <h3 className="os-settings-heading">{current.label}</h3>
           {section === "account" ? <AccountPanel account={account.account} onSignOut={() => void account.signOut()} onSignIn={account.openSignIn} /> : null}
-          {section === "billing" ? <BillingPanel /> : null}
+          {/* On a copy that holds its own accounts the plan belongs to the account, not to this PC's trial and license box. */}
+          {section === "billing" ? <>{entitlements?.authority ? null : <BillingPanel />}<AccessPanel /></> : null}
+          {shownSection === "people" ? <AdminPanel /> : null}
           {section === "updates" ? <UpdatesPanel /> : null}
           {section === "models" ? (
             <section className="os-panel">

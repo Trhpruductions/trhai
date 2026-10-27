@@ -1,0 +1,65 @@
+/* What the person may use, and (for the owner and administrators) the accounts
+   and the record of changes. Built on the OS tokens in os.css. */
+
+.access-who { display: flex; flex-wrap: wrap; gap: var(--os-2); margin-bottom: var(--os-3); }
+
+.access-features,
+.access-users,
+.access-audit {
+  list-style: none;
+  margin: var(--os-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--os-2);
+}
+
+.access-features li {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: var(--os-3);
+  align-items: start;
+  padding: var(--os-2) var(--os-3);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+}
+.access-features li.on svg { color: var(--os-ok); }
+.access-features li.off svg { color: var(--os-warn); }
+.access-features li div { display: grid; gap: 2px; }
+.access-features li strong { font-size: var(--os-fs-sm); color: var(--os-text); }
+.access-features li span { font-size: var(--os-fs-xs); color: var(--os-text-3); }
+
+.access-users li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--os-2) var(--os-3);
+  align-items: center;
+  padding: var(--os-3);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+}
+.access-user-main { display: grid; gap: 2px; min-width: 0; }
+.access-user-main strong { overflow: hidden; text-overflow: ellipsis; font-size: var(--os-fs-sm); color: var(--os-text); }
+.access-user-tags { display: flex; gap: var(--os-2); justify-content: flex-end; flex-wrap: wrap; }
+.access-user-actions { grid-column: 1 / -1; display: flex; gap: var(--os-2); flex-wrap: wrap; }
+.access-user-actions:empty { display: none; }
+
+.access-audit li {
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  gap: var(--os-3);
+  font-size: var(--os-fs-sm);
+  color: var(--os-text-2);
+  padding: var(--os-1, 4px) 0;
+  border-bottom: 1px solid var(--os-line);
+}
+.access-audit li:last-child { border-bottom: 0; }
+
+.access-note { margin: var(--os-3) 0 0; font-size: var(--os-fs-sm); }
+.access-note.ok { color: var(--os-ok); }
+.access-note.bad { color: var(--os-danger); }
+
+@media (max-width: 640px) {
+  .access-users li { grid-template-columns: 1fr; }
+  .access-user-tags { justify-content: flex-start; }
+  .access-audit li { grid-template-columns: 1fr; gap: 2px; }
+}
