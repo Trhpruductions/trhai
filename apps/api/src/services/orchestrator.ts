@@ -20,7 +20,9 @@ import { enterStage } from "./reasoningStage.js";
 import { isContinuationRequest, looksLikeScheduleRequest } from "./requestAnalysis.js";
 import { asksAboutTheScreen, planProject } from "@ascend/shared";
 import { asksForAReading, asksForWordsInTheReply, classifyIntent, wantsASummary, wantsToStopAnApp, wantsWebSearch } from "./actionIntent.js";
-import { detectTaskType } from "./taskPlanning.js";
+import { asksForAPlan, detectTaskType } from "./taskPlanning.js";
+import { describeOpened, parseOpenRequest } from "./openSiteRequest.js";
+import { openInBrowser, type OpenResult } from "./openInBrowser.js";
 import { getResumableTask, recordTask, updateTask } from "./taskStore.js";
 import { archiveIfInterrupted, recordFinishedTask, runTrackedTask, stepsSince } from "./taskHistory.js";
 import {
@@ -126,6 +128,8 @@ export type OrchestratorInput = {
   readTelemetry?: typeof readTelemetry;
   /** Fetches a page as it is served; the real fetch when absent. Injected for tests. See resolveSavePage. */
   fetchPageAsServed?: (url: string) => Promise<RawFetchOutcome>;
+  /** Opens a web address in the person's browser; the real launcher when absent. Injected for tests. See resolveOpenSite. */
+  openUrl?: (url: string) => Promise<OpenResult>;
   /**
    * The model the user picked for this conversation. The usual choice if it
    * names none, or names one that is no longer installed (see modelCatalog).
@@ -349,6 +353,12 @@ export async function runAssistantOrchestrator(
   // and the reply said it held the page; see resolveSavePage.
   const savingPage = await resolveSavePage(input, approving, effectiveMessage);
   if (savingPage) return savingPage;
+
+  // "open spotify.com, and stream all the songs from the band X" - the page, or the service's search,
+  // opened in the person's browser. With no model that sentence came back as a four-step plan, and
+  // with one it depended on the model reaching for a shell command; see resolveOpenSite.
+  const openingSite = await resolveOpenSite(input, approving, effectiveMessage);
+  if (openingSite) return openingSite;
 
   // "save a document called X with the text Y" is a list operation, not a
   // reasoning one: a title and a body, straight into the store. Left to the
@@ -715,6 +725,27 @@ export async function runAssistantOrchestrator(
       };
     }
 
+    // The composer's generic plan is a reply to a request for a plan, and to nothing else. With no
+    // model able to take a request that is not one - "open spotify.com, and stream all the songs from
+    // the band X", "explain what a REST API is" - it was shown anyway, as though it were the answer,
+    // under a status bar that said Online (that chip says the API is up, not that a model is). Say
+    // what happened instead, with the reason the model could not take it, and make no plan in its
+    // place. "Unavailable" is also every installed model having come back with nothing at all.
+    if (!attempt.ok && attempt.kind === "unavailable" && isPlan && modelReply.planTaskType === "generic" && !asksForAPlan(effectiveMessage)) {
+      const again = /\binstall\b/i.test(attempt.reason) ? "" : " Try again in a moment; the model may still be starting.";
+      const text = `I couldn't answer that just now. ${attempt.reason} Nothing was changed, and I did not make a plan in its place.${again}`;
+      return {
+        model: "memory",
+        assistantMessage: text,
+        inputTokens: modelReply.inputTokens,
+        outputTokens: estimateTokens(text),
+        strategy: "failed",
+        toolsUsed: [],
+        groundedOn: [],
+        groundedOnHistory: 0
+      };
+    }
+
     if (generated) {
       // A message held for approval is shown as itself, word for word, and
       // the model's own account of it is set aside: a model asked to repeat a
@@ -986,6 +1017,35 @@ async function resolveSavePage(
 }
 
 /** A reply written here, by neither a model nor the composer. */
+/**
+ * A request to open a page, or to play something on a service, done here: the address is built from
+ * the words (see openSiteRequest.ts), opened in the person's browser, and the reply says what was
+ * opened. No model is asked, so it works when none is running.
+ *
+ * Only when the person is there to see a window open: a schedule firing on a timer does not open
+ * one. And only for a message that names the place outright; anything that merely resembles a
+ * request goes on to the rest of the app. The reply is honest about the limit: playing is the
+ * person's button to press, since this has no way into their account on any service.
+ */
+async function resolveOpenSite(
+  input: OrchestratorInput,
+  approving: PendingConfirmation | null,
+  effectiveMessage: string
+): Promise<OrchestratorResult | null> {
+  if (approving || input.unattended) return null;
+  const request = parseOpenRequest(effectiveMessage);
+  if (!request) return null;
+  const opened = await (input.openUrl ?? openInBrowser)(request.url);
+  if (!opened.ok) {
+    return deterministicResult(
+      effectiveMessage,
+      `I couldn't open ${request.label}: ${opened.reason} The address is ${request.url}`,
+      "failed"
+    );
+  }
+  return deterministicResult(effectiveMessage, describeOpened(request), "open");
+}
+
 function deterministicResult(
   request: string,
   text: string,

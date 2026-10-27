@@ -44,3 +44,9 @@ process.env.LOCALAPPDATA = mkdtempSync(path.join(tmpdir(), "trhai-test-localappd
 // CI sees. Tests that restore this variable after their stand-in put this
 // value back, not the real engine's address.
 process.env.TRHAI_ENGINE_URL = "http://127.0.0.1:9";
+
+// And the same for the browser. "Open spotify.com" opens a window on whatever PC runs the suite,
+// and a test that forgot to hand over a stand-in would do it for real. With this set the real
+// launcher refuses, says so, and opens nothing; the launcher's own tests give it a stand-in
+// process and an environment of their own.
+process.env.TRHAI_OPEN_BROWSER = "off";

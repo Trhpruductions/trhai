@@ -60,6 +60,17 @@ export function detectTaskType(message: string): TaskType {
   return "generic";
 }
 
+/**
+ * Whether the message asks for a plan, as opposed to asking for something to be done or answered.
+ *
+ * The generic four-step plan ("Clarify the end state for ...") is a fair reply to the first and a
+ * template standing in for an answer to the second: "open spotify.com" and "explain what a REST API
+ * is" both got it when no model could take them.
+ */
+export function asksForAPlan(message: string): boolean {
+  return /\b(plan|outline|roadmap|checklist|steps?|strategy|approach|break\s+(?:it|this|that)\s+down)\b/i.test(message);
+}
+
 const maxSubjectWords = 12;
 /** Below this a clause is too short to stand in for the request. */
 const minSubjectWords = 2;

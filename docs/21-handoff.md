@@ -190,6 +190,34 @@ turn still is.
   says "It is 1:35 PM." and "Today is Thursday, October 15, 2026." in the PC's own way of
   writing a date, with strategy `calendar`. "What time is it in Tokyo" and "what day is
   it, and what is 2+2" still go to the model whole.
+- **A request to open a page, or to play something on a service, is done off the model.**
+  "Open spotify.com, and stream all the songs from the band Shadows of Ruin" came back, on a
+  PC whose model did not take it, as the composer's four-step plan ("Clarify the end state for
+  open spotify.com ..."). `parseOpenRequest` (`openSiteRequest.ts`, tried in the orchestrator
+  after the saved-page lookup) reads a message that names the place outright: a domain with a web
+  ending ("open github.com", "go to https://www.example.com:8080/a"), or a service's search
+  ("play Shadows of Ruin on Spotify", "go to youtube.com and play some metal"). It builds the
+  address itself from what was typed, so nothing a page or a model says can send the browser
+  elsewhere, and `openInBrowser.ts` hands it to the system as one argument, never through a shell,
+  and only if it is http or https. The reply is honest about the limit: playing is the person's
+  button to press, because this has no way into their account on any service (and no key, by
+  design), so it says "I can't press play for you" and opens the service's search. Not read as a
+  request: "open the door", "open notes.txt" (an ending that is also a file extension - py, sh,
+  md, pl, rs, zip - is not a web ending), "open spotify" (that could be the app), "play it on
+  spotify" (names nothing), a question about a site. A schedule firing on a timer opens no window.
+  Strategy `open`, labelled "Opened on this PC". `TRHAI_OPEN_BROWSER=off` makes the launcher
+  refuse; the test setup sets it, so a test that forgets its stand-in cannot open a browser.
+- **When no model can take a request, that is said; the generic plan is only for a request for a
+  plan.** The composer's "Clarify the end state for ..." plan was the reply whenever the model
+  attempt was "unavailable" - no engine, no model installed, or every installed model coming back
+  with an empty reply - and the chat showed it as an answer ("Answered on this PC") under a status
+  bar that says Online, which only means the API is up. For the generic plan (`planTaskType`
+  "generic") on a message that does not ask for a plan (`asksForAPlan`), the reply is now strategy
+  `failed` ("Not answered", with Retry): "I couldn't answer that just now. No local model: ...
+  Nothing was changed, and I did not make a plan in its place. Try again in a moment; the model
+  may still be starting." It carries the reason the attempt gave, and leaves out "try again" when
+  the reason is that no model is installed. A request that asks for a plan, and one with a plan of
+  its own kind (fix, migrate, test, ...), still gets its plan.
 - **A tool that replaces a whole document is a tool that loses it.** Asked to
   add one line to a note, the model did not read the note and sent a body it
   made up; the user's text was gone. `update_document` now takes `append`, or

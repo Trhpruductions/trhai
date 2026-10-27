@@ -25,11 +25,22 @@ function standIns(text: string): string[] {
   return names;
 }
 
+/**
+ * Stand-ins that only the orchestrator's own routes use, and what would show that has stopped being true.
+ * The loop is not given one of these because nothing in it could reach the real thing: the check below
+ * fails the moment an agent tool does, and then the stand-in has to be forwarded and its entry removed.
+ */
+const orchestratorOnly: Record<string, RegExp> = {
+  // resolveOpenSite opens the page the person named. No agent tool opens a page (reading one is fetch_url,
+  // a shell command is run_command), so there is no path from the loop to the real browser.
+  openUrl: /openInBrowser|openUrl|FileProtocolHandler|rundll32/
+};
+
 /** The stand-ins the agent loop's context is not given. */
 function notForwarded(text: string): string[] {
   const start = text.indexOf("await runAgent(");
   const call = text.slice(start, text.indexOf("request: input.userMessage", start));
-  return standIns(text).filter((name) => !call.includes(`input.${name}`));
+  return standIns(text).filter((name) => !(name in orchestratorOnly) && !call.includes(`input.${name}`));
 }
 
 test("the stand-ins are found where they are declared", () => {
@@ -46,6 +57,15 @@ test("every machine stand-in reaches the agent loop", () => {
     [],
     "these stand-ins reach the orchestrator but not the agent loop, so a test injecting them still reads the real machine from inside the loop"
   );
+});
+
+test("a stand-in the loop is not given is one no agent tool uses", () => {
+  const loop = ["agentTools.ts", "agentLoop.ts"].map((file) => readFileSync(new URL(`../src/services/${file}`, import.meta.url), "utf8")).join("\n");
+  const declared = standIns(source);
+  for (const [name, usedBy] of Object.entries(orchestratorOnly)) {
+    assert.ok(declared.includes(name), `${name} is no longer a stand-in: remove it from orchestratorOnly`);
+    assert.doesNotMatch(loop, usedBy, `${name}'s real thing is reached from inside the agent loop now: forward the stand-in to runAgent and remove it from orchestratorOnly`);
+  }
 });
 
 test("the check would catch the omission it was written for", () => {
