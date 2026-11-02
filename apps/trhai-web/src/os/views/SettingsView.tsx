@@ -12,6 +12,10 @@ import { MessagingPanel } from "../../components/MessagingPanel";
 import { VoicePicker } from "../../components/VoicePicker";
 import { PersonalityPicker } from "../../components/PersonalityPicker";
 import { AgentPicker } from "../../components/AgentPicker";
+import { PrivacyPanel } from "../../components/PrivacyPanel";
+import { LegalPanel } from "../../components/LegalPanel";
+import { LegalLink } from "../../components/LegalDialog";
+import { isLegalDocId, type LegalDocId } from "@ascend/shared";
 import { useAccount } from "../../components/AppGate";
 import { apiGet } from "../../lib/api";
 import { mayManagePeople } from "../../lib/access";
@@ -32,6 +36,7 @@ import { useNotify } from "../state/notify";
 import { useSystem } from "../state/system";
 import { detailFromHash } from "../views";
 import "./views.css";
+import { optionalStorage } from "../../lib/storageConsent";
 
 // Settings as an app: the sections down the side, one open beside them, its
 // place in the address (#settings/voice) so a link or the command palette can
@@ -50,7 +55,7 @@ function BackgroundPanel() {
   const [mode, setMode] = useState<BackdropMode>(defaultBackdrop);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- a stored preference, unknowable on the server
-    setMode(readStoredBackdrop(window.localStorage));
+    setMode(readStoredBackdrop(optionalStorage()));
   }, []);
   const current = backgrounds.find((option) => option.id === mode) ?? backgrounds[0];
   return (
@@ -62,7 +67,7 @@ function BackgroundPanel() {
             <button key={option.id} type="button" role="radio" aria-checked={mode === option.id} className={mode === option.id ? "on" : ""}
               onClick={() => {
                 setMode(option.id);
-                writeStoredBackdrop(window.localStorage, option.id);
+                writeStoredBackdrop(optionalStorage(), option.id);
                 document.documentElement.setAttribute("data-backdrop", option.id);
               }}>
               {option.label}
@@ -169,7 +174,9 @@ function DataPanel() {
             <button type="button" className="os-btn os-btn-sm" onClick={() => go("memory")}><Icon name="pin" size={13} />Memories</button>
             <button type="button" className="os-btn os-btn-sm" onClick={() => go("chat")}><Icon name="message" size={13} />Conversations</button>
             <button type="button" className="os-btn os-btn-sm" onClick={() => go("tasks")}><Icon name="check" size={13} />Finished work</button>
+            <button type="button" className="os-btn os-btn-sm os-btn-primary" onClick={() => go("settings", "privacy")}>Copy or erase my data</button>
           </div>
+          <p className="os-faint os-small">What is kept, what leaves this PC and for how long: the <LegalLink id="privacy" />.</p>
         </div>
       </section>
     </>
@@ -217,19 +224,23 @@ export function SettingsView() {
   const [personalityId, setPersonalityId] = useState<PersonalityId>(defaultPersonality);
   const [accent, setAccent] = useState<Accent>(defaultAccent);
   const [section, setSection] = useState<SectionId>("account");
+  // What is open within a section: for Legal, which text ("#settings/legal/privacy").
+  const [subsection, setSubsection] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- stored preferences, unknowable on the server
-    setPersonalityId(readStoredPersonality(window.localStorage));
-    setAccent(readStoredAccent(window.localStorage));
+    setPersonalityId(readStoredPersonality(optionalStorage()));
+    setAccent(readStoredAccent(optionalStorage()));
   }, []);
 
   // The open section is whatever the address says.
   useEffect(() => {
     const read = () => {
       const detail = detailFromHash(window.location.hash);
-      setSection(isSectionId(detail) ? detail : "account");
+      const [head, ...rest] = (detail ?? "").split("/");
+      setSection(isSectionId(head) ? head : "account");
+      setSubsection(rest.length ? rest.join("/") : null);
     };
     read();
     window.addEventListener("hashchange", read);
@@ -257,7 +268,7 @@ export function SettingsView() {
           <ul>
             {shown.map((entry) => (
               <li key={entry.id}>
-                <button type="button" className={entry.id === shownSection ? "on" : ""} aria-current={entry.id === shownSection ? "page" : undefined} onClick={() => open(entry.id)}>
+                <button type="button" className={entry.id === shownSection ? "on" : ""} aria-current={entry.id === shownSection ? "page" : undefined} aria-label={entry.label} onClick={() => open(entry.id)}>
                   <strong>{entry.label}</strong>
                   <span>{entry.summary}</span>
                 </button>
@@ -271,7 +282,13 @@ export function SettingsView() {
           <h3 className="os-settings-heading">{current.label}</h3>
           {section === "account" ? <AccountPanel account={account.account} onSignOut={() => void account.signOut()} onSignIn={account.openSignIn} /> : null}
           {/* On a copy that holds its own accounts the plan belongs to the account, not to this PC's trial and license box. */}
-          {section === "billing" ? <>{entitlements?.authority ? null : <BillingPanel />}<AccessPanel /></> : null}
+          {section === "billing" ? (
+            <>
+              {entitlements?.authority ? null : <BillingPanel />}
+              <AccessPanel />
+              <p className="os-faint os-small">Before you buy: the <LegalLink id="refunds" /> and the <LegalLink id="terms" />. Paying happens on a checkout page in your browser; TRH AI never handles the card.</p>
+            </>
+          ) : null}
           {shownSection === "people" ? <AdminPanel /> : null}
           {section === "updates" ? <UpdatesPanel /> : null}
           {section === "models" ? (
@@ -286,16 +303,16 @@ export function SettingsView() {
                 accent={accent}
                 onAccentChange={(next) => {
                   setAccent(next);
-                  writeStoredAccent(window.localStorage, next);
+                  writeStoredAccent(optionalStorage(), next);
                   document.documentElement.setAttribute("data-accent", next);
                 }}
                 active={personalityId}
                 onChange={(id) => {
                   setPersonalityId(id);
-                  writeStoredPersonality(window.localStorage, id);
+                  writeStoredPersonality(optionalStorage(), id);
                 }}
               />
-              <AgentPicker active={agent} onChange={(id) => setAgent(chooseAgent(window.localStorage, id))} />
+              <AgentPicker active={agent} onChange={(id) => setAgent(chooseAgent(optionalStorage(), id))} />
               <p className="os-faint os-small">Each conversation can use its own model - pick it in Chat, beside the conversation.</p>
             </>
           ) : null}
@@ -307,6 +324,8 @@ export function SettingsView() {
           {section === "messaging" ? <MessagingPanel /> : null}
           {section === "notifications" ? <NotificationsPanel /> : null}
           {section === "data" ? <DataPanel /> : null}
+          {section === "privacy" ? <PrivacyPanel /> : null}
+          {section === "legal" ? <LegalPanel docId={isLegalDocId(subsection) ? subsection : null} onOpen={(id: LegalDocId | null) => go("settings", id ? `legal/${id}` : "legal")} /> : null}
           {section === "about" ? <AboutPanel /> : null}
         </div>
       </div>

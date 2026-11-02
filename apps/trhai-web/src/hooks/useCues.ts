@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { optionalStorage } from "../lib/storageConsent";
 
 // Sound cues for real events.
 //
@@ -44,7 +45,7 @@ const cues: Record<Cue, { notes: number[]; duration: number; gain: number; type:
 
 function readStored(): boolean {
   try {
-    return window.localStorage.getItem(storageKey) === "on";
+    return optionalStorage().getItem(storageKey) === "on";
   } catch {
     // localStorage throws in a private window with storage blocked. Silence is
     // the safe default when the preference cannot be read.
@@ -65,7 +66,7 @@ export function useCues() {
     setEnabled((on) => {
       const next = !on;
       try {
-        window.localStorage.setItem(storageKey, next ? "on" : "off");
+        optionalStorage().setItem(storageKey, next ? "on" : "off");
       } catch {
         // Not being able to remember the choice is not a reason to ignore it
         // for this session.

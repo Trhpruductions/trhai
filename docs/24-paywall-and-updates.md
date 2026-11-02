@@ -147,8 +147,12 @@ newest release and the notes of recent versions.
 - The **notes** ship inside the app, in `packages/shared/src/releaseNotes.ts`,
   so What's new works offline.
 - The **newest version** comes from this repo's latest GitHub release. It is
-  one unauthenticated request every six hours with no key, and nothing about
-  the user is sent. `TRHAI_UPDATE_CHECK=off` stops it.
+  one unauthenticated request every six hours with no key; GitHub sees the
+  PC's internet address and a `TRH-AI/<version>` user agent, nothing about the
+  user. `TRHAI_UPDATE_CHECK=off` stops the API's check. **It does not stop the
+  desktop shell's own updater** (electron-updater, `apps/desktop/src/updater.ts`),
+  which reads only the real process environment, never `.env`; to stop both, set
+  the variable in the environment the app is started from.
   `TRHAI_UPDATE_FEED_URL` points it at a different feed in the same format.
 
 ### Making a release

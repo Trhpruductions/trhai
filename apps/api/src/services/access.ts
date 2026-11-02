@@ -171,6 +171,12 @@ export function refusalFor(decision: Extract<Decision, { allowed: false }>, feat
 /**
  * The gate in front of the routes that do the work. Reads stay open, so a locked
  * app still shows what it holds; what is refused is making it do more.
+ *
+ * Removing is not doing more. A trial or license that has run out locks making
+ * new things; it never stands between a person and deleting what they made - a
+ * memory, a conversation, a to-do - because the right to take your own data off
+ * this PC does not lapse with a payment. (A person who is not signed in where
+ * signing in is required, or whose account is suspended, is still refused.)
  */
 export function featureGate(feature: FeatureId) {
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -180,7 +186,7 @@ export function featureGate(feature: FeatureId) {
     }
     const principal = resolvePrincipal(req);
     const decision = mayUse(principal, feature);
-    if (decision.allowed) {
+    if (decision.allowed || (req.method === "DELETE" && decision.reason in lockMessages)) {
       res.locals.principal = principal;
       next();
       return;

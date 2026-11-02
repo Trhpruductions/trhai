@@ -82,6 +82,19 @@ export const maxOutputBytes = 20_000;
  * invisible: the prompt would describe one directory and commands would run in
  * another.
  */
+/**
+ * A command as the log may say it: the program that was started and how long the line was.
+ * The line itself can hold a secret - a token in a header, a password in an argument, a path
+ * that names a person - and the log is a file nobody tends.
+ */
+export function commandForLog(command: string): string {
+  const line = command.trim();
+  // A program in quotes may have spaces in its path ("C:\Program Files\...").
+  const program = /^"([^"]+)"/.exec(line)?.[1] ?? /^\S+/.exec(line)?.[0] ?? "";
+  const name = program.split(/[\\/]/).pop()?.replace(/\.(exe|cmd|bat|ps1)$/i, "") ?? "";
+  return `${name || "(command)"} (${command.length} characters)`;
+}
+
 export function commandWorkingDirectory(): string {
   return homedir() || process.cwd();
 }
@@ -436,7 +449,8 @@ export async function runCommand(
       observe("trhai_command_duration", run.durationMs);
       history.unshift(run);
       if (history.length > maxHistory) history.length = maxHistory;
-      console.warn(`[command] ${command} -> exit ${exitCode ?? "killed"} in ${run.durationMs}ms`);
+      // The program and the length, not the line: a command can carry a password, a token or a path.
+      console.warn(`[command] ${commandForLog(command)} -> exit ${exitCode ?? "killed"} in ${run.durationMs}ms`);
       resolve(run);
     };
 

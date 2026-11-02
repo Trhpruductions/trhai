@@ -1,0 +1,445 @@
+/* The legal texts, the dialog that shows them over the sign-in screen, and the privacy screens.
+   Colours come from the app's own tokens (globals.css) so a text reads the same under every accent. */
+
+.legal-doc {
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.65;
+  max-width: 46rem;
+}
+
+.legal-title {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  letter-spacing: 0.02em;
+  margin: 0 0 0.35rem;
+  color: var(--text);
+}
+
+.legal-meta {
+  margin: 0 0 0.9rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.legal-summary {
+  margin: 0 0 1.1rem;
+  font-size: 1.02rem;
+}
+
+.legal-toc {
+  margin: 0 0 1.4rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+}
+
+.legal-toc ol {
+  margin: 0;
+  padding-left: 1.3rem;
+  columns: 2 16rem;
+  column-gap: 2rem;
+}
+
+.legal-toc li {
+  break-inside: avoid;
+  margin: 0.15rem 0;
+}
+
+.legal-section {
+  margin: 0 0 1.5rem;
+  scroll-margin-top: 1rem;
+}
+
+.legal-section h3 {
+  font-size: 1.05rem;
+  margin: 0 0 0.5rem;
+  color: var(--accent-strong);
+  scroll-margin-top: 1rem;
+}
+
+.legal-section h3:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.legal-doc p,
+.legal-doc ul,
+.legal-doc ol {
+  margin: 0 0 0.8rem;
+}
+
+.legal-doc li {
+  margin: 0.25rem 0;
+}
+
+.legal-doc ul,
+.legal-doc ol {
+  padding-left: 1.4rem;
+}
+
+.legal-link {
+  color: var(--accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.legal-link:hover {
+  color: var(--text);
+}
+
+.legal-toc a {
+  color: var(--accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.legal-link:focus-visible,
+.legal-toc a:focus-visible,
+.legal-table-wrap:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.legal-code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  padding: 0.05em 0.35em;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  border: 1px solid var(--line-subtle);
+  overflow-wrap: anywhere;
+}
+
+/* A fact still to be supplied: unmistakable, in words, not colour alone. */
+.legal-open {
+  background: var(--warn-quiet);
+  color: var(--warn);
+  border: 1px dashed var(--warn);
+  border-radius: var(--radius-sm);
+  padding: 0 0.3em;
+  font-weight: 600;
+}
+
+.legal-note {
+  margin: 0 0 0.9rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--accent-quiet);
+}
+
+.legal-note.review {
+  border-color: var(--warn);
+  background: var(--warn-quiet);
+}
+
+.legal-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 1rem;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+}
+
+.legal-table-wrap table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 34rem;
+  font-size: 0.88rem;
+}
+
+.legal-table-wrap caption {
+  text-align: left;
+  padding: 0.55rem 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.legal-table-wrap th,
+.legal-table-wrap td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.5rem 0.8rem;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.legal-table-wrap thead th {
+  color: var(--text-muted);
+  font-weight: 600;
+  background: var(--bg-1);
+}
+
+.legal-table-wrap tbody th {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The banner above a text that has not been read by a lawyer yet. */
+.legal-draft {
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-md);
+  background: var(--warn-quiet);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+/* ---- The dialog that opens a text over the sign-in screen and the paywall. ---- */
+
+.legal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  /* Flex, not grid: a grid row grows to the text's full height and centres the dialog far below the window. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(2, 4, 8, 0.78);
+}
+
+.legal-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(54rem, 100%);
+  max-height: min(46rem, calc(100vh - 2rem));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+}
+
+.legal-dialog:focus {
+  outline: none;
+}
+
+.legal-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.legal-dialog-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.legal-dialog-tabs button,
+.legal-dialog-close {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+  min-height: 2rem;
+}
+
+.legal-dialog-tabs button[aria-current="page"] {
+  background: var(--accent-quiet);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.legal-dialog-tabs button:hover,
+.legal-dialog-close:hover {
+  border-color: var(--line-strong);
+}
+
+.legal-dialog-tabs button:focus-visible,
+.legal-dialog-close:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.legal-dialog-body {
+  overflow-y: auto;
+  padding: 1rem 1.25rem 1.5rem;
+}
+
+@media (max-width: 40rem) {
+  .legal-toc ol {
+    columns: 1;
+  }
+
+  .legal-dialog {
+    max-height: calc(100vh - 2rem);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .legal-doc {
+    scroll-behavior: smooth;
+  }
+}
+
+/* A link in running text that opens one of the texts. A button, because it changes nothing in the address. */
+.legal-inline-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.legal-inline-link:hover {
+  color: var(--text);
+}
+
+.legal-inline-link:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ---- The question about remembered choices, asked once. ---- */
+
+.storage-consent {
+  position: fixed;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  z-index: 80;
+  display: grid;
+  gap: 0.8rem;
+  width: min(44rem, calc(100vw - 2rem));
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.storage-consent-title {
+  margin: 0 0 0.3rem;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+}
+
+.storage-consent-text p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.storage-consent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* ---- The privacy screen's own controls. ---- */
+
+.privacy-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+  cursor: pointer;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.privacy-check input {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.2rem;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+.privacy-check input:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.privacy-check input:disabled + span {
+  color: var(--text-muted);
+}
+
+.privacy-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.privacy-lines li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+}
+
+.privacy-steps {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.privacy-steps li.failed {
+  color: var(--warn);
+}
+
+.privacy-kept {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.3rem;
+  color: var(--text-muted);
+}
+
+.privacy-field {
+  display: grid;
+  gap: 0.3rem;
+  max-width: 24rem;
+}
+
+.privacy-field span {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.privacy-field input {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.6rem;
+  min-height: 2.4rem;
+}
+
+.privacy-field input:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 1px;
+}
+
+@media (max-width: 40rem) {
+  .storage-consent {
+    bottom: 1rem;
+  }
+}

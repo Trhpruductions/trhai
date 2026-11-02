@@ -1,6 +1,7 @@
 "use client";
 
 import { AppGate } from "../components/AppGate";
+import { LegalProvider } from "../components/LegalDialog";
 import { TrhaiOS } from "../os/TrhaiOS";
 
 /**
@@ -10,8 +11,10 @@ import { TrhaiOS } from "../os/TrhaiOS";
  */
 export default function Page() {
   return (
-    <AppGate>
-      <TrhaiOS />
-    </AppGate>
+    <LegalProvider>
+      <AppGate>
+        <TrhaiOS />
+      </AppGate>
+    </LegalProvider>
   );
 }

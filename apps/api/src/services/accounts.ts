@@ -1,9 +1,9 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
 import type { AccountStatus, Role } from "./entitlements.js";
-import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
+import { assertProtectedJsonWritable, parseProtectedJson, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
 // Accounts for the assistant.
 //
@@ -25,11 +25,36 @@ export type Account = {
   lastLoginAt: string | null;
 };
 
+/**
+ * What a person agreed to, and when.
+ *
+ * "terms" and "privacy" are the two texts shown when an account is made; "age" is the
+ * confirmation that the person is at least the minimum age. Each record names the
+ * version of the text that was shown, so the words agreed to can be found again.
+ */
+export type ConsentKind = "terms" | "privacy" | "age";
+
+export type ConsentRecord = {
+  kind: ConsentKind;
+  /** The version of the text that was shown (a date); for "age", the minimum age that was confirmed. */
+  version: string;
+  acceptedAt: string;
+  /** Where it was given: making the account, the settings screen, or the prompt shown when a text changed. */
+  via: "registration" | "settings" | "prompt";
+  /**
+   * Set when an optional consent is taken back. The Terms and the Privacy Policy are
+   * not taken back this way: ending them is deleting the account.
+   */
+  withdrawnAt: string | null;
+};
+
 type StoredAccount = Pick<Account, "id" | "email" | "displayName" | "createdAt"> & {
   /** Accounts written before these existed have none of them: each reads as its default. */
   status?: AccountStatus;
   emailVerifiedAt?: string | null;
   lastLoginAt?: string | null;
+  /** Every consent the person has given, oldest first. Accounts made before they were recorded have none. */
+  consents?: ConsentRecord[];
   /**
    * The role this service has recorded for the account. Whether it counts at all
    * depends on where the service runs (access.ts): on someone's own PC a role
@@ -274,6 +299,8 @@ export function registerAccount(input: {
   email?: unknown;
   password?: unknown;
   displayName?: unknown;
+  /** What the person agreed to when making the account; the route checks it, this keeps it with the account. */
+  consents?: ConsentRecord[];
 }): RegisterResult {
   loadFromDisk();
 
@@ -301,6 +328,7 @@ export function registerAccount(input: {
     emailVerifiedAt: null,
     // Registering signs the person in, so this is their first sign-in too.
     lastLoginAt: new Date().toISOString(),
+    ...(input.consents?.length ? { consents: input.consents.map((record) => ({ ...record })) } : {}),
     salt,
     hash: hashPassword(password, salt)
   };
@@ -630,6 +658,87 @@ export function assignOwner(id: unknown, options: { transfer?: boolean } = {}): 
   account.role = "owner";
   saveToDisk();
   return { ok: true, account: publicView(account) };
+}
+
+// ----------------------------------------------------- consent, and leaving
+//
+// What a person agreed to, kept with their account, and the one way an account
+// ends for good. Whether a request may do either is decided by the caller
+// (privacy.ts): the person's own password is what lets an account be erased.
+
+/** Every consent an account has given, oldest first. None for an account made before they were recorded. */
+export function consentsOf(accountId: unknown): ConsentRecord[] {
+  loadFromDisk();
+  const account = typeof accountId === "string" ? accountsById.get(accountId) : undefined;
+  return (account?.consents ?? []).map((record) => ({ ...record }));
+}
+
+/** Keeps consents the person has just given, after the ones already there. Null when there is no such account. */
+export function recordConsents(accountId: unknown, records: ConsentRecord[]): ConsentRecord[] | null {
+  loadFromDisk();
+  const account = typeof accountId === "string" ? accountsById.get(accountId) : undefined;
+  if (!account) return null;
+  account.consents = [...(account.consents ?? []), ...records.map((record) => ({ ...record }))];
+  saveToDisk();
+  return account.consents.map((record) => ({ ...record }));
+}
+
+/** Whether this is the password of that account. For asking again before something that cannot be undone. */
+export function passwordMatches(accountId: unknown, password: unknown): boolean {
+  loadFromDisk();
+  const account = typeof accountId === "string" ? accountsById.get(accountId) : undefined;
+  if (!account || typeof password !== "string" || !password) return false;
+  return verifyPassword(password, account.salt, account.hash);
+}
+
+/**
+ * Removes an account: its email and name, password hash, recovery codes, consent
+ * records and every session. Not a suspension, not a flag - the record is gone, and
+ * so is the address that identified it. False when there was no such account.
+ */
+export function eraseAccountRecord(accountId: unknown): boolean {
+  loadFromDisk();
+  const account = typeof accountId === "string" ? accountsById.get(accountId) : undefined;
+  if (!account) return false;
+  accountsById.delete(account.id);
+  accountIdByEmail.delete(account.email);
+  dropSessions(account.id);
+  saveToDisk();
+  return true;
+}
+
+/**
+ * Takes one account out of a copy of the accounts file - the copy this service keeps
+ * from before an upgrade - so erasing an account leaves it in no backup either.
+ * "removed": the copy held the account and no longer does. "absent": there was
+ * nothing to take out. "unreadable": the copy could not be read (another key, damage),
+ * so it was left exactly as it was and the caller says so.
+ */
+export function scrubAccountFromFile(file: string, accountId: string): "removed" | "absent" | "unreadable" {
+  if (!existsSync(file)) return "absent";
+  try {
+    // Parsed without readProtectedJsonFile: a copy that cannot be opened must not mark its path as
+    // data that failed to authenticate, which is a warning about the live files.
+    const parsed = parseProtectedJson(readFileSync(file, "utf8")) as { accounts?: StoredAccount[]; tokens?: StoredToken[] };
+    const accounts = Array.isArray(parsed.accounts) ? parsed.accounts : [];
+    if (!accounts.some((entry) => entry?.id === accountId)) return "absent";
+    const next = {
+      ...parsed,
+      accounts: accounts.filter((entry) => entry?.id !== accountId),
+      tokens: (Array.isArray(parsed.tokens) ? parsed.tokens : []).filter((entry) => entry?.userId !== accountId)
+    };
+    const temp = `${file}.tmp`;
+    writeProtectedJsonFile(temp, next);
+    renameSync(temp, file);
+    return "removed";
+  } catch {
+    return "unreadable";
+  }
+}
+
+/** The copies of the accounts file this service keeps besides the file itself, for erasing an account from them too. */
+export function accountsBackupCopies(): string[] {
+  return [`${accountsFilePath}.before-roles`];
 }
 
 /** Bearer token from an Authorization header, if present. */

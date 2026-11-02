@@ -1,4 +1,5 @@
 import test from "node:test";
+import { consents } from "./helpers/consents.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -134,7 +135,7 @@ test("repeated bad logins are eventually refused with 429", async () => {
     await fetch(`${server.baseUrl}/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "target@example.com", password: "correct horse battery" })
+      body: JSON.stringify({ email: "target@example.com", password: "correct horse battery", consents })
     });
 
     const statuses: number[] = [];
@@ -179,7 +180,7 @@ test("throttling does not reveal whether an account exists", async () => {
     await fetch(`${server.baseUrl}/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "real@example.com", password: "correct horse battery" })
+      body: JSON.stringify({ email: "real@example.com", password: "correct horse battery", consents })
     });
 
     const known: number[] = [];
@@ -210,7 +211,7 @@ test("a correct password still works after some failures", async () => {
     await fetch(`${server.baseUrl}/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "mistype@example.com", password: "correct horse battery" })
+      body: JSON.stringify({ email: "mistype@example.com", password: "correct horse battery", consents })
     });
 
     // A user mistyping twice must not be locked out.

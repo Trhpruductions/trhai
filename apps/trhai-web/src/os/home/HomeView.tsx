@@ -9,6 +9,7 @@ import {
   type HomeLayout, type WidgetId, type WidgetPlacement, type Zone
 } from "./layout";
 import "./home.css";
+import { optionalStorage } from "../../lib/storageConsent";
 
 // Home: the command center. The core in the middle; widgets either side that
 // you can rearrange, pin, expand or hide (Customize), remembered on this PC.
@@ -77,7 +78,7 @@ export function HomeView() {
   // The saved arrangement, read after mount - storage is not there on the server.
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem(storageKey);
+      const stored = optionalStorage().getItem(storageKey);
       // eslint-disable-next-line react-hooks/set-state-in-effect -- a stored preference, unknowable on the server
       if (stored) setLayout(normalizeLayout(JSON.parse(stored)));
     } catch {
@@ -89,7 +90,7 @@ export function HomeView() {
     setLayout((prior) => {
       const next = change(prior);
       try {
-        window.localStorage.setItem(storageKey, JSON.stringify(next));
+        optionalStorage().setItem(storageKey, JSON.stringify(next));
       } catch {
         // Not remembered, still applied.
       }

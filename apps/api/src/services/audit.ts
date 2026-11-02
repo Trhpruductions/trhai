@@ -26,6 +26,7 @@ export type AuditAction =
   | "account.reactivated"
   | "account.sessions_revoked"
   | "account.password_reset_issued"
+  | "account.erased"
   | "role.admin_granted"
   | "role.admin_revoked"
   | "role.owner_assigned"
@@ -151,6 +152,58 @@ export function verifyAuditChain(): ChainCheck {
     previous = hash;
   }
   return { ok: true, count: entries.length };
+}
+
+/** What stands where an erased person's email address was. */
+export const erasedAddress = "(erased)";
+
+export type RedactResult = { ok: true; redacted: number } | { ok: false; reason: string };
+
+/**
+ * Takes a person's email address out of the record, for erasing their account.
+ *
+ * The record is append-only and each entry is bound to the one before it, so this
+ * is the one edit it allows, and it is allowed only on a record that is whole: a
+ * chain that already fails is left alone, because re-binding it would hide the
+ * failure. Entries keep who did what, to which account id, and when; only the
+ * address goes. The chain is then bound again from the first entry, and the
+ * redaction is written into the record as an entry of its own, so an edit made
+ * for a reason shows as that edit and not as a quiet one.
+ */
+export function redactAuditSubject(accountId: string, at: Date = new Date()): RedactResult {
+  load();
+  const check = verifyAuditChain();
+  if (!check.ok) return { ok: false, reason: `the record fails its own check at entry ${check.brokenAtSeq}, so it was not edited` };
+  let redacted = 0;
+  for (const entry of entries) {
+    let touched = false;
+    if (entry.actor.kind === "account" && entry.actor.id === accountId && entry.actor.email !== erasedAddress) {
+      entry.actor = { ...entry.actor, email: erasedAddress };
+      touched = true;
+    }
+    if (entry.target && entry.target.id === accountId && entry.target.email !== erasedAddress) {
+      entry.target = { ...entry.target, email: erasedAddress };
+      touched = true;
+    }
+    if (touched) redacted += 1;
+  }
+  // Bound again from the start even when nothing changed: the result is then the same chain.
+  let previous = anchorHash;
+  for (const entry of entries) {
+    entry.prevHash = previous;
+    const { hash: _previousHash, ...body } = entry;
+    entry.hash = hashOf(body);
+    previous = entry.hash;
+  }
+  save();
+  recordAudit({
+    actor: { kind: "system", name: "account erasure" },
+    action: "account.erased",
+    target: { id: accountId, email: erasedAddress },
+    detail: redacted === 0 ? "erased at the person's request; no earlier entry named the address"
+      : `erased at the person's request; the email address was taken out of ${redacted} earlier entr${redacted === 1 ? "y" : "ies"}`
+  }, at);
+  return { ok: true, redacted };
 }
 
 /** Test seam. */

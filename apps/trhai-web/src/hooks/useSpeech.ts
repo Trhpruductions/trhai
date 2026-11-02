@@ -6,6 +6,7 @@ import { speakableFrom } from "../lib/speech";
 import {
   defaultVoice, readStoredVoice, writeStoredVoice, type VoiceChoice
 } from "../lib/voicePreference";
+import { optionalStorage } from "../lib/storageConsent";
 
 // Voice, local by construction.
 //
@@ -78,17 +79,17 @@ export function useSpeech() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the stored preference lives in localStorage
-    setVoiceState(readStoredVoice(window.localStorage));
+    setVoiceState(readStoredVoice(optionalStorage()));
   }, []);
 
   const setVoice = useCallback((next: VoiceChoice) => {
     setVoiceState(next);
-    writeStoredVoice(window.localStorage, next);
+    writeStoredVoice(optionalStorage(), next);
   }, []);
 
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem(enabledKey);
+      const stored = optionalStorage().getItem(enabledKey);
       // eslint-disable-next-line react-hooks/set-state-in-effect -- the stored preference lives in localStorage
       if (stored !== null) setEnabledState(stored === "true");
     } catch {
@@ -218,7 +219,7 @@ export function useSpeech() {
         // Reports the voice that will actually be used: the chosen one when it
         // is genuinely installed, the service's own default otherwise, because
         // that is what the fallback will produce.
-        const wanted = readStoredVoice(window.localStorage).voiceId;
+        const wanted = readStoredVoice(optionalStorage()).voiceId;
         const installed = Array.isArray(data.voices)
           ? data.voices.some((entry: { id?: unknown }) => entry?.id === wanted)
           : false;
@@ -269,7 +270,7 @@ export function useSpeech() {
 
   const setEnabled = useCallback((next: boolean) => {
     setEnabledState(next);
-    try { window.localStorage.setItem(enabledKey, String(next)); } catch { /* not worth failing over */ }
+    try { optionalStorage().setItem(enabledKey, String(next)); } catch { /* not worth failing over */ }
     if (!next) stop();
   }, [stop]);
 

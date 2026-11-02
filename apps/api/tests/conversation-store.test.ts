@@ -1,4 +1,5 @@
 import test from "node:test";
+import { consents } from "./helpers/consents.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -162,7 +163,7 @@ test("a conversation follows the account to a fresh browser", async () => {
     const registered = await (await fetch(`${server.baseUrl}/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "convo@example.com", password: "correct horse battery" })
+      body: JSON.stringify({ email: "convo@example.com", password: "correct horse battery", consents })
     })).json() as any;
     const token = registered.data.token;
 

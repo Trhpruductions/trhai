@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How TRH AI uses AI - TRH AI</title>
+<style>
+  :root { color-scheme: light dark; --ink: #1b2430; --paper: #ffffff; --line: #d9e0ea; --accent: #0b6bcb; --mark: #fff3c4; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e6edf7; --paper: #0b1220; --line: #27344a; --accent: #7fc4ff; --mark: #4d3b00; } }
+  body { margin: 0; font: 16px/1.6 system-ui, "Segoe UI", sans-serif; color: var(--ink); background: var(--paper); }
+  .wrap { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  nav.texts { display: flex; flex-wrap: wrap; gap: .4rem 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--line); margin-bottom: 1.5rem; }
+  nav.texts a[aria-current] { font-weight: 700; text-decoration: none; }
+  a { color: var(--accent); } a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  h1 { font-size: 1.8rem; line-height: 1.2; } h2 { font-size: 1.25rem; margin-top: 2rem; }
+  .meta, .summary { color: inherit; } .meta { opacity: .75; }
+  aside.note { border-left: 4px solid var(--accent); padding: .6rem .9rem; margin: 1rem 0; background: rgba(127,127,127,.08); }
+  aside.note.review { border-color: #c77d00; }
+  .draft { border: 1px solid #c77d00; padding: .7rem .9rem; border-radius: 6px; background: var(--mark); color: #1b2430; }
+  mark.open { background: var(--mark); color: inherit; padding: 0 .3em; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  caption { text-align: left; font-weight: 600; padding: .4rem 0; }
+  th, td { text-align: left; vertical-align: top; padding: .5rem .6rem; border-top: 1px solid var(--line); }
+  thead th { border-bottom: 2px solid var(--line); }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; }
+  .foot { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); font-size: .9rem; opacity: .8; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="texts" aria-label="Legal texts">
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Service</a>
+      <a href="refunds.html">Refund Policy</a>
+      <a href="storage.html">Cookies and storage</a>
+      <a href="ai.html" aria-current="page">How it uses AI</a>
+      <a href="business.html">Business information</a>
+      <a href="services.html">Services and licences</a>
+    </nav>
+    <main>
+      <p class="draft" role="note">This text was written from what TRH AI does and has not yet been reviewed by a lawyer. Items marked to be supplied are facts the business has still to fill in. Nothing here is made up to fill a gap.</p>
+<h1>How TRH AI uses AI</h1>
+<p class="meta">Version 2026-11-01. In effect from 2026-11-01.</p>
+<p class="summary">Where the AI runs, what leaves your PC, what the AI can get wrong, and which parts are still early.</p>
+<nav aria-label="On this page"><ol><li><a href="#ai-where">Where the AI runs</a></li><li><a href="#ai-leaves">What can leave your PC when you use the assistant</a></li><li><a href="#ai-wrong">What the AI can get wrong</a></li><li><a href="#ai-advice">It is not advice</a></li><li><a href="#ai-acts">When it acts for you</a></li><li><a href="#ai-early">Parts that are still early</a></li><li><a href="#ai-licenses">Models and voices have their own licenses</a></li><li><a href="#ai-yours">What stays your responsibility</a></li></ol></nav>
+<section aria-labelledby="ai-where">
+<h2 id="ai-where">Where the AI runs</h2>
+<p>The AI that writes TRH AI&#39;s answers is a language model that runs on your own PC, in an engine that TRH AI starts and stops itself (llama.cpp). The model files are stored on your PC. Speech is made and recognised on your PC too (Piper and whisper.cpp).</p>
+<p>What you type to the assistant, the files it reads and the answers it writes are not sent to TRH Development or to any AI company&#39;s service. There is no account with an AI provider and no key for one.</p>
+<aside class="note info"><strong>In short.</strong> The one thing that is not local is what you ask it to fetch from the internet. The list below is every case.</aside>
+</section>
+<section aria-labelledby="ai-leaves">
+<h2 id="ai-leaves">What can leave your PC when you use the assistant</h2>
+<ul><li><strong>A web search</strong>, when you ask TRH AI to search the web. The words searched are sent to DuckDuckGo, which sees them and your internet address.</li><li><strong>Reading a web page</strong>, when you ask it to read one. The address you gave is requested from that site, which sees your internet address.</li><li><strong>An email or a text link</strong>, when you ask it to send one. An email goes through the account you connected, to your email provider&#39;s server. A text opens Windows Phone Link; nothing is sent by TRH AI.</li><li><strong>Opening a website or a music service</strong>, when you ask. Your browser opens the page; TRH AI cannot press play or sign in for you.</li><li><strong>Downloads you start</strong>: the engine, models, voices and tools come from GitHub, Hugging Face and similar sites. They are requests for a file; no conversation goes with them.</li></ul>
+<p>The <a href="privacy.html">Privacy Policy</a> and <a href="services.html">Services TRH AI can contact</a> give the details, including the background check for updates.</p>
+</section>
+<section aria-labelledby="ai-wrong">
+<h2 id="ai-wrong">What the AI can get wrong</h2>
+<p>A language model predicts likely words. It does not look facts up, and it cannot tell when it is wrong. Expect it to:</p>
+<ul><li>state something false with confidence, or invent names, numbers, quotations and links;</li><li>be out of date: a model knows only what it was trained on, up to a date well before today;</li><li>misread a file or a question, or leave something out, and answer differently when asked twice;</li><li>write code or commands that do not work, or that do more than you meant;</li><li>be weaker on a small model or a slow PC. Which models are installed, and how large they are, changes how good the answers are.</li></ul>
+<p>TRH AI is built to say so when something it tried did not work, and not to claim work that did not happen. That makes mistakes easier to catch. It does not make the AI right. Check what matters.</p>
+</section>
+<section aria-labelledby="ai-advice">
+<h2 id="ai-advice">It is not advice</h2>
+<p>Nothing the AI says is medical, legal, financial, tax, safety or other professional advice, and it is no substitute for a qualified person who knows your situation. Do not delay getting help, or act against advice you have been given, because of something it said.</p>
+</section>
+<section aria-labelledby="ai-acts">
+<h2 id="ai-acts">When it acts for you</h2>
+<p>The assistant can do things as well as say them: make and edit files, build small apps, set schedules and reminders, make documents, spreadsheets, presentations and videos, and run commands. These changes are real.</p>
+<ul><li><strong>Machine access is on by default in this version.</strong> While it is on, the assistant can read and write files anywhere your Windows account can, and run commands as you, when you ask it to. While it is off, it works only inside its own <strong>workspace folder</strong> and cannot run commands. Switch it off or on at any time in <strong>Tools</strong>; the Code screen shows every command it has run.</li><li>Because it reads text from files, documents and web pages, text in any of them can try to steer it. Keep machine access off when you are working with material you do not trust.</li><li>Work that runs while you are away, such as a schedule, never runs commands and stays inside the workspace folder.</li><li>Other devices on your network cannot reach TRH AI unless you turn on network access, and then each needs the access key shown in the app.</li><li>A change you did not mean to ask for can still happen. Keep copies of files you cannot afford to lose.</li></ul>
+<aside class="note review"><strong>For legal review.</strong> Machine access is on by default in the code today, although docs/15 and docs/25 said it was off. Whether it should start off is a decision for the owner (it affects every new user); this text says what the code does. If the default changes, change this section with it.</aside>
+</section>
+<section aria-labelledby="ai-early">
+<h2 id="ai-early">Parts that are still early</h2>
+<p>TRH AI is early software: its version numbers begin with 0, and it has been used on few PCs. Treat every feature as early. Some are earlier than others:</p>
+<ul><li><strong>Hands-free voice.</strong> Speech recognition and speech were tried end to end with recorded speech made on the same PC. Real microphones, speakers and background noise in real rooms have had little testing.</li><li><strong>Documents it makes</strong> (Word, Excel and PowerPoint files). They are written by TRH AI itself and read back to check them, and were checked with open-source readers. They have not been opened in Microsoft Office. Open one and look before you send it.</li><li><strong>Video and music-video making.</strong> Slow on a PC without a graphics card, and the result depends on the PC&#39;s video tools.</li></ul>
+<aside class="note review"><strong>For legal review.</strong> This list is taken from the project&#39;s own notes as they stood on 2026-11-01. The owner should confirm it, and add or remove features, before release.</aside>
+</section>
+<section aria-labelledby="ai-licenses">
+<h2 id="ai-licenses">Models and voices have their own licenses</h2>
+<p>The models and voices TRH AI can run are made by other companies and communities. Some may be used for any purpose; some only for non-commercial use; a few have no stated license. <strong>Settings, Engine and models</strong> shows the license of each. You are responsible for using a model or voice within its license, especially if you use TRH AI for work.</p>
+</section>
+<section aria-labelledby="ai-yours">
+<h2 id="ai-yours">What stays your responsibility</h2>
+<ul><li>What you ask the AI to do, and whether you have the right to do it.</li><li>Checking its work before you use, publish or rely on it, and saying so where the law or a rule requires you to say something was made with AI.</li><li>Not putting into it information you are not allowed to share, including other people&#39;s private information. It stays on your PC, but anyone who uses your PC or account can read it.</li></ul>
+<p>Report a mistake or a concern to <mark class="open">[To be supplied: support email address]</mark>.</p>
+</section>
+    </main>
+    <p class="foot">Generated from TRH AI's own text registry by scripts/legal/export-legal.mjs. The same text is shown inside the app under Settings, Legal.</p>
+  </div>
+</body>
+</html>
