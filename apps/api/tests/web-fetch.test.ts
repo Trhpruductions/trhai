@@ -7,8 +7,7 @@ import {
   extractReadableText,
   fetchWebPage,
   isPrivateOrLoopbackAddress,
-  maxExtractedCharacters
-} from "../src/services/webFetch.js";
+  maxExtractedCharacters, fetchRawPage, pinnedFetch } from "../src/services/webFetch.js";
 
 // The one tool that reaches outside the machine, so it is the one tool that
 // needs to prove it cannot be pointed at this machine, or at this machine's
@@ -277,7 +276,7 @@ test("a page that never answers is refused rather than hanging the caller", { ti
   try {
     const result = await fetchWebPage(`${baseUrl}/`, fetch, lookupAs("93.184.216.34"));
     assert.equal(result.ok, false);
-    if (!result.ok) assert.match(result.reason, /did not respond/i);
+    if (!result.ok) assert.match(result.reason, /did not finish/i);
   } finally {
     server.close();
   }
@@ -305,6 +304,69 @@ test("very long pages are truncated with a marker, not silently cut", async () =
       assert.match(result.text, /…$/);
     }
   } finally {
+    server.close();
+  }
+});
+
+test("carrier-NAT, benchmarking, documentation, multicast and reserved IPv4 ranges are not places on the internet", () => {
+  for (const ip of ["100.64.0.1", "100.127.255.255", "198.18.0.1", "198.19.255.255", "192.0.0.1", "192.0.2.1", "198.51.100.1", "203.0.113.1", "224.0.0.1", "239.255.255.255", "240.0.0.1", "255.255.255.255", "256.1.1.1"]) {
+    assert.equal(isPrivateOrLoopbackAddress(ip), true, ip);
+  }
+  for (const ip of ["100.63.255.255", "100.128.0.1", "198.17.255.255", "198.20.0.0", "192.0.3.1", "223.255.255.255"]) {
+    assert.equal(isPrivateOrLoopbackAddress(ip), false, ip);
+  }
+});
+
+test("IPv6 forms that carry a private IPv4 address inside them, site-local and multicast are recognised; public ones pass", () => {
+  for (const ip of ["fec0::1", "febf::1", "ff02::1", "::ffff:7f00:1", "::ffff:0:127.0.0.1", "64:ff9b::7f00:1", "64:ff9b::127.0.0.1", "2002:7f00:1::", "2002:a00:1::1", "2001:0:4136:e378:8000:63bf:80ff:fffe", "[::1]", "fe80::1%eth0", "not-an-address", ""]) {
+    assert.equal(isPrivateOrLoopbackAddress(ip), true, ip);
+  }
+  for (const ip of ["2606:4700:4700::1111", "2a00:1450:4001:81d::200e", "::ffff:8.8.8.8", "64:ff9b::808:808", "2002:808:808::", "2001:0:4136:e378:8000:63bf:f7f7:f7f7"]) {
+    assert.equal(isPrivateOrLoopbackAddress(ip), false, ip);
+  }
+});
+
+test("a name with several addresses is refused if any one of them is private", async () => {
+  const twoFaced = (async () => [{ address: "93.184.216.34", family: 4 }, { address: "10.0.0.5", family: 4 }]) as unknown as typeof import("node:dns/promises").lookup;
+  const result = await fetchWebPage("https://example.com/", fetch, twoFaced);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /own network/);
+});
+
+test("the connection goes to the address that was checked, not to whatever the name says a moment later", async () => {
+  let hostSeen = "";
+  const { server, baseUrl } = await localServer((req, res) => {
+    hostSeen = req.headers.host ?? "";
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end("<html><body>pinned</body></html>");
+  });
+  try {
+    const port = new URL(baseUrl).port;
+    // A name that resolves to nothing at all: only a connection made to the pinned address can reach the server.
+    const pinned = pinnedFetch([{ address: "127.0.0.1", family: 4 }]);
+    const response = await pinned(`http://pinned-name.invalid:${port}/`, { method: "GET", redirect: "manual" });
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "<html><body>pinned</body></html>");
+    assert.equal(hostSeen, `pinned-name.invalid:${port}`, "the name stays in the Host header");
+  } finally {
+    server.close();
+  }
+});
+
+test("a page that answers its headers and then never finishes is given up on at the time limit", async () => {
+  const { server, baseUrl } = await localServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.write("<html><body>the start of a page that never ends");
+    // and nothing more, ever
+  });
+  try {
+    const started = Date.now();
+    const result = await fetchRawPage(`${baseUrl}/`, fetch, lookupAs("93.184.216.34"), { timeoutMs: 300 });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.reason, /did not finish within 0[.]3s/);
+    assert.ok(Date.now() - started < 5000, "it did not wait for the server");
+  } finally {
+    server.closeAllConnections();
     server.close();
   }
 });

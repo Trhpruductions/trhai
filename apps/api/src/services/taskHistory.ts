@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
+import { evictableKey } from "./storeEviction.js";
 import { listEvents, type ExecutionEvent } from "./executionLog.js";
 import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 import { recordPersistFailure, recordPersistSuccess } from "./persistenceHealth.js";
@@ -196,8 +197,9 @@ export function recordFinishedTask(
   // one evicted when there are too many is the one used least recently.
   historyByKey.delete(key);
   historyByKey.set(key, [record, ...list.filter((entry) => entry.id !== task.id)].slice(0, maxFinishedPerSession));
+  // The least recently used anonymous key goes; an account's never does (storeEviction.ts).
   while (historyByKey.size > maxTrackedHistorySessions) {
-    const oldest = historyByKey.keys().next().value;
+    const oldest = evictableKey(historyByKey.keys());
     if (oldest === undefined) break;
     historyByKey.delete(oldest);
   }

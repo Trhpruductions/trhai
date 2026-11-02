@@ -185,12 +185,6 @@ export function saveEmailAccount(input: unknown, now = new Date()): { ok: true; 
   const address = typeof body.address === "string" ? body.address.trim() : "";
   if (!looksLikeEmailAddress(address)) return { ok: false, message: "Enter the email address to send from." };
 
-  const typedPassword = typeof body.password === "string" ? body.password : "";
-  const keepsPassword = !typedPassword && account?.address.toLowerCase() === address.toLowerCase();
-  const password = keepsPassword ? account!.password : typedPassword;
-  if (!password) return { ok: false, message: "Enter the app password for this account." };
-  if (password.length > 512) return { ok: false, message: "That password is too long." };
-
   const provider = providerFor(address);
   const host = typeof body.host === "string" && body.host.trim() ? body.host.trim().toLowerCase() : provider?.host ?? "";
   if (!host) return { ok: false, message: "This provider is not one TRH AI knows. Enter its SMTP server (for example smtp.example.com) and port." };
@@ -206,6 +200,23 @@ export function saveEmailAccount(input: unknown, now = new Date()): { ok: true; 
   const fromName = typeof body.fromName === "string" && body.fromName.trim()
     ? body.fromName.trim().replace(/[\r\n"<>]/g, "").slice(0, 80)
     : undefined;
+
+  // The saved password is kept only for the same account on the same server. A
+  // different host, port or sign-in name is a different server, and the saved
+  // password must not be sent there on the strength of an unchanged address:
+  // whoever can reach this route could otherwise point the account at a server
+  // of their own and have the password delivered to it by the next test send.
+  const typedPassword = typeof body.password === "string" ? body.password : "";
+  const storedUsername = account?.username ?? "";
+  const nextUsername = username && username.toLowerCase() !== address.toLowerCase() ? username : "";
+  const sameAccount = account !== null && account.address.toLowerCase() === address.toLowerCase();
+  const sameServer = sameAccount && account!.host === host && account!.port === port && storedUsername === nextUsername;
+  if (!typedPassword && sameAccount && !sameServer) {
+    return { ok: false, message: "The server for this account changed: enter the app password again." };
+  }
+  const password = !typedPassword && sameServer ? account!.password : typedPassword;
+  if (!password) return { ok: false, message: "Enter the app password for this account." };
+  if (password.length > 512) return { ok: false, message: "That password is too long." };
 
   account = {
     address,

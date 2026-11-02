@@ -18,7 +18,7 @@ process.env.ASSIST_CONVERSATION_FILE = path.join(dataDir, "conversations.json");
 process.env.ASSIST_TASKS_FILE = path.join(dataDir, "tasks.json");
 process.env.ASCEND_PREFERENCES_FILE = path.join(dataDir, "preferences.json");
 
-const { docxText, documentKind, extractDocumentText, htmlText, notesText, readSlides, readZip, slideText, maxDocumentBytes } =
+const { docxText, documentKind, extractDocumentText, htmlText, notesText, readSlides, readZip, slideText, maxDocumentBytes, maxZipEntries } =
   await import("../src/services/documentText.js");
 const { chunkDocument, maxPassageChars, splitLongPassage } = await import("../src/services/knowledgeStore.js");
 const { runTool } = await import("../src/services/agentTools.js");
@@ -321,4 +321,17 @@ test("a file sent to the import route becomes a knowledge document", async () =>
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("a part that unpacks to more than a document can hold is refused before it is unpacked in full, and so is an archive of too many parts", () => {
+  // Seventy megabytes of nothing packs into a few kilobytes: the shape of a zip bomb.
+  const bomb = zip({ "word/document.xml": "x".repeat(70 * 1024 * 1024) });
+  assert.ok(bomb.length < 200 * 1024, "the bomb itself is small");
+  const part = readZip(bomb).get("word/document.xml");
+  assert.ok(part);
+  assert.throws(() => part(), /too large once unpacked/);
+
+  const names: Record<string, string> = {};
+  for (let index = 0; index <= maxZipEntries; index += 1) names[`part${index}.xml`] = "<a/>";
+  assert.throws(() => readZip(zip(names)), /more parts than a document can/);
 });

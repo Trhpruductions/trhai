@@ -4,6 +4,7 @@ import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
 import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 import { recordPersistFailure, recordPersistSuccess } from "./persistenceHealth.js";
+import { evictableKey } from "./storeEviction.js";
 
 // Conversation storage, keyed the same way as memory: `user:<id>` when signed in,
 // the anonymous session id otherwise. That is what makes a conversation follow an
@@ -238,8 +239,9 @@ function keep(key: string, list: StoredConversation[]): void {
   }
   conversationsByKey.delete(key);
   if (list.length) conversationsByKey.set(key, list);
+  // The oldest anonymous key goes; an account's never does (storeEviction.ts).
   while (conversationsByKey.size > maxTrackedConversations) {
-    const oldest = conversationsByKey.keys().next().value;
+    const oldest = evictableKey(conversationsByKey.keys());
     if (oldest === undefined) return;
     conversationsByKey.delete(oldest);
   }

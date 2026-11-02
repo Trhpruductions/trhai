@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { increment, observe } from "./metrics.js";
+import { childEnvironment } from "./childEnv.js";
 import { dataFile } from "./dataDirectory.js";
 import { readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 
@@ -419,7 +420,8 @@ export async function runCommand(
     let timedOut = false;
     let settled = false;
 
-    const child = spawn(shell, args, { cwd, windowsHide: true });
+    // The service's own secrets stay out of a command's environment (childEnv.ts).
+    const child = spawn(shell, args, { cwd, windowsHide: true, env: childEnvironment() });
 
     const timer = setTimeout(() => {
       timedOut = true;

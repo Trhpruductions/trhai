@@ -12,7 +12,8 @@ const { createApp } = await import("../src/server.js");
 
 function ask(port: number, host: string, method = "GET", path = "/health"): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
-    const req = request({ host: "127.0.0.1", port, method, path, headers: { Host: host, Origin: `http://${host}` } }, (res) => {
+    // No Origin: a page's own requests are refused by it before the Host is looked at (requestOrigin.ts); this is about the Host alone.
+    const req = request({ host: "127.0.0.1", port, method, path, headers: { Host: host } }, (res) => {
       let body = "";
       res.on("data", (chunk) => { body += chunk; });
       res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));

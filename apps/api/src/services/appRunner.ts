@@ -15,6 +15,7 @@ import { existsSync, statSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { workspaceRoot } from "./workspace.js";
+import { childEnvironment } from "./childEnv.js";
 
 /**
  * Loaded into every app this starts, with `node --require`: a listen() with no
@@ -255,7 +256,8 @@ export async function startApp(project: string): Promise<StartResult> {
 
   const child = spawn(process.execPath, ["--require", loopbackPreload, found.entry], {
     cwd: found.dir,
-    env: { ...process.env, PORT: String(port), SMOKE_PORT: String(port) },
+    // The service's own secrets stay out of a program the model wrote (childEnv.ts).
+    env: { ...childEnvironment(), PORT: String(port), SMOKE_PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
     // Its own process group off Windows, so killTree reaches anything it
     // spawns; windowsHide keeps a console from flashing up.

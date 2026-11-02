@@ -9,6 +9,15 @@
 import { allAgents, agentById, byRoom, recentSteps, residents, rooms, type Agent, type ExecutionEvent } from "@ascend/shared";
 import { listAllEvents } from "./executionLog.js";
 
+// Everyone can read the world, and it crosses every session: so a step is shown by what
+// kind of thing it was and when, never by its words. A command's label is the command
+// line itself, which can carry a password or a path; a write's is a file name. The
+// results (detail, artifact) never leave the session they belong to.
+function shownStep(event: ExecutionEvent & { detail?: string; artifact?: string }): ExecutionEvent {
+  const label = event.kind === "command" ? "Ran a command" : event.label.length > 80 ? `${event.label.slice(0, 79)}…` : event.label;
+  return { id: event.id, kind: event.kind, label, status: event.status, startedAt: event.startedAt };
+}
+
 let lastAgent: { id: string | null; at: string } | null = null;
 
 /** Called for every turn: the agent it named, or none. */
@@ -22,7 +31,7 @@ export function resetWorldState(): void {
 
 export function readWorld(now: Date = new Date()) {
   const active: Agent | null = lastAgent?.id ? agentById(lastAgent.id) ?? null : null;
-  const events = listAllEvents(80) as ExecutionEvent[];
+  const events = (listAllEvents(80) as ExecutionEvent[]).map(shownStep);
   const all = residents(allAgents(), active, events);
   return {
     at: now.toISOString(),
