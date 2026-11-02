@@ -54,23 +54,31 @@ files are the person's own). Available signed in or not, and when the trial has 
 
 ## Security
 
-From the read-only audit of 2026-11-01. Fixed in this change: the access log and command
+From the read-only audit of 2026-11-01. Fixed in the legal and privacy change (#145): the access log and command
 log (finding F9), deletion behind the paywall (F6), no account deletion or export (F8).
-Still open, in order of weight; each is a small change with its own test, intended for a
-follow-up change rather than mixed into this one:
+Fixed in the security follow-up change, each with its own test; `25-security.md` ("The
+second review") says what changed and why it mattered:
+
+| Finding | What | Fix |
+|---|---|---|
+| F2 | On a shared copy (`TRHAI_AUTHORITY=on`), reads and many writes had no sign-in check. | `requireSignInOnSharedCopy` and `requireOwnerForCopyChangesOnSharedCopy` (`access.ts`): everything but what signing in needs answers only a signed-in account, and the license, the email account, installs, the network check, the shared preferences and opening a file on the host are the owner's. With `ASCEND_NETWORK_ACCESS=on` another device still has to carry the access key, as before; that key is the owner's own, so no sign-in is asked of it. |
+| F3 | Non-GET requests were not refused by Origin, so a page on another loopback port could trigger arm/disarm, downloads, the SMTP test, blind fetches. | `requestOrigin.ts`: a request whose `Origin` is not the app's, or marked `Sec-Fetch-Site: cross-site`, is refused (403) before anything else runs, whatever its method; the two web-fetch routes also refuse to be embedded. |
+| F4 | The saved SMTP password was reused when the host changed, and the test route logs in to that host. | `emailAccount.ts`: the password is reused only for the same address on the same host, port and sign-in name. |
+| F5 | `/v1/world` returned the newest steps of every session with command text. | `worldState.ts`: a step shows its kind, status and time; a command's label is "Ran a command"; details and artifacts stay in their session. |
+| F10 | `.docx` reading had no decompression cap (a 695 KB file inflated to 200 MB). | `documentText.ts`: a part unpacks to at most 64 MB, and an archive has at most 4,096 parts. |
+| F11 | The web-fetch address check resolved DNS once and missed some private ranges; the body read had no deadline. | `webFetch.ts`: every address of a name is checked, more ranges count as private, the connection is pinned to a checked address and never resolves the name again, and the time limit runs to the last byte. |
+| F14 | No Content-Security-Policy or Referrer-Policy on the interface. | `next.config.ts`: every page carries a policy that allows this PC's addresses only (`localhost` and `127.0.0.1`; a policy cannot name `::1`, and nothing addresses it), forbids being framed, and `Referrer-Policy: no-referrer`, `X-Content-Type-Options`, `X-Frame-Options` and `Permissions-Policy` beside it. The token stays in web storage: the service reads it from the `Authorization` header alone and sets no cookie, so nothing rides along with a request the page did not make. |
+| F17 | Stores kept 500 keys and dropped the oldest; many guest ids could push out a real account's data. | `storeEviction.ts`: the oldest anonymous key goes; an account's never does. |
+| F20 | Child processes inherited the whole environment. | `childEnv.ts`: TRH AI's own keys are left out of a command's or an app's environment. |
+| F22 | 500 errors returned raw messages. | `errorReply.ts`: one sentence to the caller; the message goes to the service's log. |
+| - | ffmpeg read uploaded songs with every protocol allowed (not in the audit's list). | `musicVideo.ts`: `-protocol_whitelist file,pipe` on every run. |
+
+Still open:
 
 | Finding | What | Decision or fix |
 |---|---|---|
 | F1 | Machine access is on by default; `fetch_url` and `web_search` run without confirmation, so text in a page or file can steer the assistant. Docs 15 and 25 said off; corrected. | Owner's decision whether a new install should start off. The texts say what the code does today. |
-| F2 | On a shared copy (`TRHAI_AUTHORITY=on`) or with network access on, reads and many writes have no sign-in check. | A sign-in gate for those modes. |
-| F3 | Non-GET requests are not refused by Origin, so a page on another loopback port could trigger arm/disarm, downloads, SMTP test, blind fetches. | Refuse a cross-site Origin or `Sec-Fetch-Site: cross-site`. |
-| F4 | The saved SMTP password is reused when the host changes, and the test route logs in to that host. | Require the password again when host, port or user change. |
-| F5 | `/v1/world` returns the newest steps of every session with command text. | Return counts, or the caller's own. |
-| F10 | `.docx` reading has no decompression cap (a 695 KB file inflated to 200 MB). | `maxOutputLength` and an entry cap. |
-| F11 | The web-fetch address check resolves DNS once and misses some private ranges; the body read has no deadline. | Resolve every address, extend the list, keep the timer to the end. |
-| F14 | No Content-Security-Policy or Referrer-Policy on the interface; the token sits in web storage. | Headers in `next.config.ts`. |
-| F17 | Stores keep 500 keys and drop the oldest; many guest ids could push out a real account's data. | Evict anonymous keys only. |
-| F20, F21, F22 | Child processes inherit the whole environment; the engine key is on a command line; 500 errors return raw messages. | Scrub the environment; pass the key by environment; a generic 5xx message. |
+| F21 | The engine key is on the engine's command line and in the file beside its process id. | Left for a later change: a second copy of the app on this PC finds the running engine and its key through that file, so moving the key off the command line is a new hand-over between copies. Both are readable only by a program running on this PC. |
 
 Verified good and safe to cite: loopback-only listening with a Host allowlist, CORS limited
 to the web port, helmet, scrypt passwords with timing-safe checks, hashed session tokens with

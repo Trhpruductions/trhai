@@ -70,3 +70,18 @@ test("the world answers with every room and every agent, each once", () => {
   assert.equal(new Set(ids).size, ids.length);
   assert.equal(world.byRoom.flatMap((entry) => entry.residents).length, ids.length);
 });
+
+test("the world shows what kind of step ran and when, never a command's words or a step's result", () => {
+  noteAgentUse("programmer");
+  const id = beginEvent("s1", "command", "curl -u admin:hunter2 https://internal.example/report");
+  endEvent("s1", id, "ok", "C:/Users/sam/secret-output.txt");
+  beginEvent("s2", "write", "Writing " + "a".repeat(200) + ".txt");
+  const world = readWorld();
+  const text = JSON.stringify(world);
+  assert.ok(!text.includes("hunter2"), "the command line is not in the world");
+  assert.ok(!text.includes("secret-output"), "nor the step's result");
+  assert.equal(world.steps.find((step) => step.event.kind === "command")?.event.label, "Ran a command");
+  const long = world.steps.find((step) => step.event.kind === "write")?.event.label ?? "";
+  assert.ok(long.length <= 80 && long.endsWith("…"), "a long label is cut short");
+  assert.equal(world.residents[0].doing, "Writing " + "a".repeat(71) + "…");
+});

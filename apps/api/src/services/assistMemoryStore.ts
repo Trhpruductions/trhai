@@ -4,6 +4,7 @@ import { extractMemoryCandidates, suppressDuplicateMemories, type MemoryCandidat
 import { statesFact, subjectOf } from "./factWording.js";
 import { dataFile } from "./dataDirectory.js";
 import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
+import { evictableKey } from "./storeEviction.js";
 
 // Memory for the `/v1/assist` endpoint.
 //
@@ -217,8 +218,9 @@ export function getMemoryAudit(sessionKey?: string, limit = 50): MemoryAuditEntr
 }
 
 function evictOldestSessionIfNeeded(): void {
+  // The oldest anonymous key goes; an account's never does (storeEviction.ts).
   while (memoriesBySession.size > maxTrackedSessions) {
-    const oldestKey = memoriesBySession.keys().next().value;
+    const oldestKey = evictableKey(memoriesBySession.keys());
     if (oldestKey === undefined) {
       return;
     }

@@ -257,3 +257,67 @@ export function entitlementView(principal: Principal, at: Date = new Date()) {
     permissions: permissionList.filter((permission) => hasPermission(principal.role, permission))
   };
 }
+
+// --------------------------------------------------- a copy other people share
+
+/**
+ * What anyone may reach on a copy that other people sign in to (authorityMode): what
+ * the sign-in screen and the paywall need before there is an account to speak of, and
+ * the sign-in itself. Everything else on such a copy is somebody's data or the copy's
+ * own settings, and is answered only to a signed-in account. On a person's own PC
+ * nothing changes: there, everyone at the keyboard is the one person it belongs to.
+ */
+const openOnSharedCopy = ["/health", "/v1/build-info", "/v1/auth/", "/v1/entitlements", "/v1/plans", "/v1/capabilities", "/v1/assist/model", "/v1/updates"];
+
+function underAny(path: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((prefix) => path === prefix || path === prefix.replace(/\/$/, "") || path.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`));
+}
+
+/** On a shared copy, a sign-in for every route but the ones a sign-in needs. */
+export function requireSignInOnSharedCopy() {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!authorityMode() || req.method === "OPTIONS" || underAny(req.path, openOnSharedCopy)) {
+      next();
+      return;
+    }
+    // The paywall reads the PC's license to know what to say; the key itself is changed by the owner only (below).
+    if (req.path === "/v1/license" && req.method === "GET") {
+      next();
+      return;
+    }
+    const principal = resolvePrincipal(req);
+    if (!principal.signedIn) {
+      res.status(401).json({ code: "UNAUTHORIZED", message: "Sign in to use this copy of TRH AI.", traceId: "trace-local" });
+      return;
+    }
+    if (principal.status === "suspended" && principal.role !== "owner") {
+      res.status(403).json({ code: "ACCOUNT_SUSPENDED", message: "This account is suspended. Ask whoever runs this copy of TRH AI.", traceId: "trace-local" });
+      return;
+    }
+    res.locals.principal = principal;
+    next();
+  };
+}
+
+/**
+ * The routes that change the copy itself rather than do the work a plan covers: its
+ * license, the email account it sends from (and its password), what is installed and
+ * loaded, the network check, the preferences everyone shares, and opening a file on the
+ * host PC. On a shared copy those are the owner's (settings.manage); on a person's own PC
+ * they are, as ever, the person's. The features themselves - the assistant, commands,
+ * schedules, the flow, apps - stay what the plan and the role say (entitlements.ts), so
+ * an administrator still uses everything in the product.
+ */
+const managedOnSharedCopy = ["/v1/license", "/v1/messaging", "/v1/setup", "/v1/system/models", "/v1/network", "/v1/preferences", "/v1/files/open"];
+
+/** On a shared copy, a change to the copy itself needs the owner. */
+export function requireOwnerForCopyChangesOnSharedCopy() {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const reads = req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS";
+    if (!authorityMode() || reads || !underAny(req.path, managedOnSharedCopy)) {
+      next();
+      return;
+    }
+    requirePermission("settings.manage")(req, res, next);
+  };
+}

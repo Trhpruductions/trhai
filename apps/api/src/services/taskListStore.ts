@@ -3,6 +3,7 @@ import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
 import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 import { recordPersistFailure, recordPersistSuccess } from "./persistenceHealth.js";
+import { evictableKey } from "./storeEviction.js";
 
 // A to-do list for `/v1/tasks` — TRHAI's "Tasks" screen, not to be confused
 // with taskStore.ts's StoredTask, which is a different thing under a
@@ -120,10 +121,11 @@ export function addTask(
   const next = [...existing, task].slice(-maxTasksPerSession);
   tasksBySession.set(sessionKey, next);
 
-  // Insertion-ordered map: dropping the first key evicts the least recent session.
-  if (tasksBySession.size > maxTrackedTaskSessions) {
-    const oldest = tasksBySession.keys().next().value;
-    if (oldest !== undefined) tasksBySession.delete(oldest);
+  // Insertion-ordered map: the least recent anonymous session goes; an account's never does (storeEviction.ts).
+  while (tasksBySession.size > maxTrackedTaskSessions) {
+    const oldest = evictableKey(tasksBySession.keys());
+    if (oldest === undefined) break;
+    tasksBySession.delete(oldest);
   }
 
   saveToDisk();

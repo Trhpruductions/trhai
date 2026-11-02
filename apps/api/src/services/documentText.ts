@@ -1,4 +1,9 @@
 import { inflateRawSync } from "node:zlib";
+
+/** A document's parts unpack to at most this: far past any Office file, and short of a zip bomb. */
+export const maxInflatedBytes = 64 * 1024 * 1024;
+/** More parts than any Office file has; a directory of millions of names is its own kind of bomb. */
+export const maxZipEntries = 4096;
 import path from "node:path";
 
 // The text inside a document file: PDF, Word, PowerPoint, or plain text.
@@ -54,6 +59,7 @@ export function readZip(bytes: Buffer): Map<string, () => Buffer> {
   const count = bytes.readUInt16LE(end + 10);
   let at = bytes.readUInt32LE(end + 16);
   if (at === 0xffffffff || count === 0xffff) throw new Error("archives this large (zip64) are not supported");
+  if (count > maxZipEntries) throw new Error("the archive has more parts than a document can");
 
   const entries = new Map<string, () => Buffer>();
   for (let index = 0; index < count; index += 1) {
@@ -74,7 +80,14 @@ export function readZip(bytes: Buffer): Map<string, () => Buffer> {
       const start = localHeader + 30 + bytes.readUInt16LE(localHeader + 26) + bytes.readUInt16LE(localHeader + 28);
       const data = bytes.subarray(start, start + compressedSize);
       if (method === 0) return Buffer.from(data);
-      if (method === 8) return inflateRawSync(data);
+      if (method === 8) {
+        try {
+          return inflateRawSync(data, { maxOutputLength: maxInflatedBytes });
+        } catch (error) {
+          if ((error as { code?: string }).code === "ERR_BUFFER_TOO_LARGE") throw new Error("a part of the document is too large once unpacked");
+          throw error;
+        }
+      }
       throw new Error(`the archive uses a compression method (${method}) Office files do not`);
     });
   }

@@ -147,6 +147,9 @@ import { lockedProtectedFiles } from "./services/protectedJson.js";
 import { dataInventory } from "./services/dataInventory.js";
 import { normalizeSessionId, resolveMemoryKey } from "./services/sessionKey.js";
 import { accessLogFormat, pathOnly } from "./services/accessLog.js";
+import { refuseCrossSite } from "./services/requestOrigin.js";
+import { requireOwnerForCopyChangesOnSharedCopy, requireSignInOnSharedCopy } from "./services/access.js";
+import { errorReply } from "./services/errorReply.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
@@ -493,6 +496,8 @@ export function createApp(options: AppOptions = {}) {
     }
     res.status(421).json({ code: "WRONG_HOST", message: "This service only answers requests addressed to this PC.", traceId: "trace-local" });
   });
+  // A page that is not the app may not make this service do anything: see requestOrigin.ts.
+  app.use(refuseCrossSite(process.env.CORS_ORIGIN));
   app.use(helmet());
   // Defaults to this machine's own origins rather than "*". The API listens on
   // localhost, but that does not stop a page on any site the user visits from
@@ -522,6 +527,10 @@ export function createApp(options: AppOptions = {}) {
   // The route and the outcome, never the query: see accessLog.ts.
   morgan.token("path", (req) => pathOnly(req));
   app.use(morgan(accessLogFormat));
+  // On a copy other people sign in to: a sign-in for anything that is somebody's, and the
+  // owner for anything that is the copy's. On a person's own PC these let everything through.
+  app.use(requireSignInOnSharedCopy());
+  app.use(requireOwnerForCopyChangesOnSharedCopy());
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", service: "ascend-api" });
@@ -2398,16 +2407,10 @@ export function createApp(options: AppOptions = {}) {
       next(error);
       return;
     }
-    // body-parser's errors carry both; Express 5's router marks a malformed
-    // URL parameter with `status` alone, which read as a 500 here. A code that
-    // is not a client or server error is no status to answer with.
-    const given = error.statusCode ?? error.status;
-    const statusCode = typeof given === "number" && Number.isInteger(given) && given >= 400 && given < 600 ? given : 500;
-    res.status(statusCode).json({
-      code: statusCode >= 500 ? "INTERNAL_ERROR" : "REQUEST_ERROR",
-      message: error.message,
-      traceId: "trace-local"
-    });
+    // A failure inside the service is said in one sentence; its words go to the log (errorReply.ts).
+    const reply = errorReply(error);
+    if (reply.status >= 500) console.error(`[api] ${reply.status} on ${_req.method} ${_req.path}:`, error);
+    res.status(reply.status).json({ code: reply.code, message: reply.message, traceId: "trace-local" });
   });
 
   app.use((req, res) => {

@@ -171,7 +171,8 @@ function collect(program: string, args: string[], options: { cwd?: string; signa
     if (options.signal.aborted) { resolve({ code: null, stdout: Buffer.alloc(0), stderr: "", aborted: true }); return; }
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(program, args, { cwd: options.cwd, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      // Files and pipes only: a song file cannot make ffmpeg open an address or read another file by name.
+      child = spawn(program, ["-protocol_whitelist", "file,pipe", ...args], { cwd: options.cwd, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     } catch (error) {
       resolve({ code: null, stdout: Buffer.alloc(0), stderr: error instanceof Error ? error.message : String(error), aborted: false });
       return;
@@ -319,7 +320,7 @@ async function runRender(program: string, args: string[], cwd: string, levels: U
   if (signal.aborted) return { ok: false, reason: "Cancelled.", cancelled: true };
   let child: ReturnType<typeof spawn>;
   try {
-    child = spawn(program, args, { cwd, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+    child = spawn(program, ["-protocol_whitelist", "file,pipe", ...args], { cwd, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
   } catch (error) {
     return { ok: false, reason: `ffmpeg could not be started: ${error instanceof Error ? error.message : String(error)}` };
   }

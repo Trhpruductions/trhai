@@ -506,3 +506,20 @@ test("no drops the message, and 'send it' sends one", async () => {
     assert.equal(opened.length, 1);
   });
 });
+
+test("the saved app password is reused only for the same account on the same server; a changed server asks for it again", () => {
+  resetEmailAccountForTests();
+  assert.ok(saveEmailAccount({ address: "ada@gmail.com", password: "abcd efgh ijkl mnop" }).ok);
+  const moved = saveEmailAccount({ address: "ada@gmail.com", host: "smtp.elsewhere.example", port: 587 });
+  assert.equal(moved.ok, false);
+  if (!moved.ok) assert.match(moved.message, /server for this account changed/);
+  assert.equal(readEmailAccount()?.host, "smtp.gmail.com", "the account was left as it was");
+  const renamed = saveEmailAccount({ address: "ada@gmail.com", username: "someone-else" });
+  assert.equal(renamed.ok, false, "a different sign-in name is a different account on the server");
+  const withPassword = saveEmailAccount({ address: "ada@gmail.com", host: "smtp.elsewhere.example", port: 587, password: "new one" });
+  assert.equal(withPassword.ok, true);
+  assert.equal(readEmailAccount()?.host, "smtp.elsewhere.example");
+  assert.equal(readEmailAccount()?.password, "new one");
+  assert.ok(saveEmailAccount({ address: "ada@gmail.com", host: "smtp.elsewhere.example", port: 587, fromName: "Ada" }).ok, "the same server keeps the password");
+  assert.equal(readEmailAccount()?.password, "new one");
+});

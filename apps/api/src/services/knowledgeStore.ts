@@ -4,6 +4,7 @@ import type { ScorableMemory } from "./memoryRelevance.js";
 import { dataFile } from "./dataDirectory.js";
 import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 import { recordPersistFailure, recordPersistSuccess } from "./persistenceHealth.js";
+import { evictableKey } from "./storeEviction.js";
 
 // Knowledge base for `/v1/assist`.
 //
@@ -213,10 +214,11 @@ export function addDocument(
   const next = [...existing, document].slice(-maxDocumentsPerSession);
   documentsBySession.set(sessionKey, next);
 
-  // Insertion-ordered map: dropping the first key evicts the least recent session.
-  if (documentsBySession.size > maxTrackedKnowledgeSessions) {
-    const oldest = documentsBySession.keys().next().value;
-    if (oldest !== undefined) documentsBySession.delete(oldest);
+  // Insertion-ordered map: the least recent anonymous session goes; an account's never does (storeEviction.ts).
+  while (documentsBySession.size > maxTrackedKnowledgeSessions) {
+    const oldest = evictableKey(documentsBySession.keys());
+    if (oldest === undefined) break;
+    documentsBySession.delete(oldest);
   }
 
   saveToDisk();
