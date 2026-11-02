@@ -57,6 +57,15 @@ export function getFlow(): Flow | null {
   return flow ? { ...flow, nodes: flow.nodes.map((node) => ({ ...node })) } : null;
 }
 
+/** Removes the saved flow, for good. True when there was one. For erasing a person's data (privacy.ts). */
+export function clearFlow(): boolean {
+  loadFromDisk();
+  if (!flow) return false;
+  flow = null;
+  saveToDisk();
+  return true;
+}
+
 /** Store a flow, or null to clear it. Returns what was stored. */
 export function saveFlow(candidate: unknown): Flow | null {
   loadFromDisk();

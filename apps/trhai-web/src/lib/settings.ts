@@ -1,7 +1,7 @@
 // The Settings app's sections, and what a search of them keeps. Pure, so it
 // is testable without a screen.
 
-export type SectionId = "account" | "billing" | "people" | "updates" | "models" | "assistant" | "voice" | "appearance" | "messaging" | "notifications" | "data" | "about";
+export type SectionId = "account" | "billing" | "people" | "updates" | "models" | "assistant" | "voice" | "appearance" | "messaging" | "notifications" | "data" | "privacy" | "legal" | "about";
 
 export type Section = { id: SectionId; label: string; summary: string; keywords: string };
 
@@ -18,6 +18,8 @@ export const sections: Section[] = [
   { id: "messaging", label: "Texts and email", summary: "Your email account and Phone Link.", keywords: "email smtp texts sms phone link mail" },
   { id: "notifications", label: "Notifications", summary: "Desktop notifications for reminders and schedules.", keywords: "notifications reminders desktop alerts" },
   { id: "data", label: "Data and privacy", summary: "Where your data is kept, and how.", keywords: "data privacy encryption encrypted storage files backup folder key" },
+  { id: "privacy", label: "Privacy and consent", summary: "What you agreed to, a copy of your data, and erasing it.", keywords: "privacy consent agree terms policy export copy download delete erase remove account gdpr cookies storage remember choices" },
+  { id: "legal", label: "Legal", summary: "The Terms, the Privacy Policy, refunds, and who makes TRH AI.", keywords: "legal terms service privacy policy refund refunds cookies business information company contact licence license ai disclaimer" },
   { id: "about", label: "About", summary: "Versions and build.", keywords: "about version build commit" }
 ];
 

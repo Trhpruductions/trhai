@@ -15,6 +15,8 @@ import { SetupScreen } from "../../components/SetupScreen";
 import { MusicVideoWatcher } from "../../components/MusicVideoWatcher";
 import { RequiredSetupBanner } from "../../components/RequiredSetupBanner";
 import { RequiredUpdate } from "../../components/RequiredUpdate";
+import { StorageConsentBanner } from "../../components/StorageConsentBanner";
+import { ConsentPrompt } from "../../components/ConsentPrompt";
 import { useNav } from "../state/nav";
 import { useAssistantState, useVoice } from "../state/assistant";
 import { looksLikeSong } from "../../lib/songAttach";
@@ -111,7 +113,9 @@ export function AppShell() {
     // What an update installs by itself (new models, voices and tools), and how far it has got.
     requiredSetup: <RequiredSetupBanner />,
     // A release marked required: downloaded by itself and installed, over everything.
-    requiredUpdate: <RequiredUpdate />
+    requiredUpdate: <RequiredUpdate />,
+    // The one question about remembered choices, and the texts to agree to again when one has changed.
+    storageConsent: <StorageConsentBanner />, consent: <ConsentPrompt />
   }), []);
 
   return (
@@ -153,6 +157,8 @@ export function AppShell() {
         {chrome.updates}
         {chrome.requiredUpdate}
         {chrome.paywall}
+        {chrome.consent}
+        {chrome.storageConsent}
         {chrome.musicWatcher}
       </div>
     </BackdropAnchorProvider>

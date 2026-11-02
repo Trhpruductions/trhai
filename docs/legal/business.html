@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Business information - TRH AI</title>
+<style>
+  :root { color-scheme: light dark; --ink: #1b2430; --paper: #ffffff; --line: #d9e0ea; --accent: #0b6bcb; --mark: #fff3c4; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e6edf7; --paper: #0b1220; --line: #27344a; --accent: #7fc4ff; --mark: #4d3b00; } }
+  body { margin: 0; font: 16px/1.6 system-ui, "Segoe UI", sans-serif; color: var(--ink); background: var(--paper); }
+  .wrap { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  nav.texts { display: flex; flex-wrap: wrap; gap: .4rem 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--line); margin-bottom: 1.5rem; }
+  nav.texts a[aria-current] { font-weight: 700; text-decoration: none; }
+  a { color: var(--accent); } a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  h1 { font-size: 1.8rem; line-height: 1.2; } h2 { font-size: 1.25rem; margin-top: 2rem; }
+  .meta, .summary { color: inherit; } .meta { opacity: .75; }
+  aside.note { border-left: 4px solid var(--accent); padding: .6rem .9rem; margin: 1rem 0; background: rgba(127,127,127,.08); }
+  aside.note.review { border-color: #c77d00; }
+  .draft { border: 1px solid #c77d00; padding: .7rem .9rem; border-radius: 6px; background: var(--mark); color: #1b2430; }
+  mark.open { background: var(--mark); color: inherit; padding: 0 .3em; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  caption { text-align: left; font-weight: 600; padding: .4rem 0; }
+  th, td { text-align: left; vertical-align: top; padding: .5rem .6rem; border-top: 1px solid var(--line); }
+  thead th { border-bottom: 2px solid var(--line); }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; }
+  .foot { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); font-size: .9rem; opacity: .8; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="texts" aria-label="Legal texts">
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Service</a>
+      <a href="refunds.html">Refund Policy</a>
+      <a href="storage.html">Cookies and storage</a>
+      <a href="ai.html">How it uses AI</a>
+      <a href="business.html" aria-current="page">Business information</a>
+      <a href="services.html">Services and licences</a>
+    </nav>
+    <main>
+      <p class="draft" role="note">This text was written from what TRH AI does and has not yet been reviewed by a lawyer. Items marked to be supplied are facts the business has still to fill in. Nothing here is made up to fill a gap.</p>
+<h1>Business information</h1>
+<p class="meta">In effect from 2026-11-01.</p>
+<p class="summary">Who makes and operates TRH AI, how to reach them, and where the software comes from.</p>
+<nav aria-label="On this page"><ol><li><a href="#business-who">Who makes and operates TRH AI</a></li><li><a href="#business-contact">How to reach us</a></li><li><a href="#business-software">Where the software and its updates come from</a></li><li><a href="#business-payments">Payments and licenses</a></li></ol></nav>
+<section aria-labelledby="business-who">
+<h2 id="business-who">Who makes and operates TRH AI</h2>
+<p>TRH AI is made and operated by <strong>TRH Development</strong>.</p>
+<table><caption>Business details</caption><thead><tr><th scope="col">Detail</th><th scope="col">Value</th></tr></thead><tbody><tr><th scope="row">Name it trades under</th><td>TRH Development</td></tr><tr><th scope="row">Legal entity</th><td><mark class="open">[To be supplied: legal entity name]</mark></td></tr><tr><th scope="row">Registration number</th><td><mark class="open">[To be supplied: company registration number, or a statement that there is none]</mark></td></tr><tr><th scope="row">Postal address</th><td><mark class="open">[To be supplied: business postal address]</mark></td></tr><tr><th scope="row">Country or state where the business is established</th><td><mark class="open">[To be supplied: country or state where the business is established]</mark></td></tr></tbody></table>
+<aside class="note review"><strong>For legal review.</strong> Every detail above must be filled in by the business with information it can prove (a registration certificate, a lease or a registered agent&#39;s address) before this page is published. None of it is guessed here.</aside>
+</section>
+<section aria-labelledby="business-contact">
+<h2 id="business-contact">How to reach us</h2>
+<table><caption>Where to write</caption><thead><tr><th scope="col">For</th><th scope="col">Contact</th></tr></thead><tbody><tr><th scope="row">The official website</th><td><mark class="open">[To be supplied: official website address]</mark></td></tr><tr><th scope="row">Help using TRH AI</th><td><mark class="open">[To be supplied: support email address]</mark></td></tr><tr><th scope="row">Privacy questions and requests</th><td><mark class="open">[To be supplied: privacy contact email address]</mark></td></tr><tr><th scope="row">Business enquiries</th><td><mark class="open">[To be supplied: business contact email address]</mark></td></tr></tbody></table>
+<p>Information that TRH AI keeps on your own PC needs no one&#39;s help to see or remove: <strong>Settings, Privacy and consent</strong> copies it into a file and erases it. Write to the privacy address above about information that TRH Development itself holds, such as the record of a license it issued to you.</p>
+</section>
+<section aria-labelledby="business-software">
+<h2 id="business-software">Where the software and its updates come from</h2>
+<p>Official installers of TRH AI are published as releases at <strong>https://github.com/Trhpruductions/trhai/releases</strong>, together with a list of their SHA-256 checksums (<code>SHA256SUMS.txt</code>). The app looks for newer versions at that address and nowhere else. Treat an installer from any other place as unofficial.</p>
+<p>The installer is not yet signed with a code-signing certificate, so Windows SmartScreen may warn the first time you run it. Compare the checksum of what you downloaded with the published list if you want to be sure it is the file that was released.</p>
+</section>
+<section aria-labelledby="business-payments">
+<h2 id="business-payments">Payments and licenses</h2>
+<p>License keys are issued by TRH Development. Where a license is paid for, payment is taken in your browser on a checkout page run by <mark class="open">[To be supplied: payment provider that takes payment on the checkout page, if there is one]</mark>. TRH AI itself has no payment screen and never sees a card or bank number. See the <a href="refunds.html">Refund Policy</a> for refunds and the <a href="terms.html">Terms of Service</a> for what a license allows.</p>
+</section>
+    </main>
+    <p class="foot">Generated from TRH AI's own text registry by scripts/legal/export-legal.mjs. The same text is shown inside the app under Settings, Legal.</p>
+  </div>
+</body>
+</html>

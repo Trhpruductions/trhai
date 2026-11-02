@@ -7,6 +7,7 @@ import { useEntitlements } from "../hooks/useEntitlements";
 import { describeAccess } from "../lib/access";
 import { BuyButton, LicenseKeyForm } from "./BillingPanel";
 import { useAccount } from "./AppGate";
+import { LegalLink } from "./LegalDialog";
 import "./paywall.css";
 
 // What stands in front of the app once the trial or the license has run out.
@@ -97,6 +98,7 @@ export function PaywallScreen() {
           <button type="button" className="os-btn os-btn-ghost" onClick={() => setHidden(true)}>Not now</button>
         </div>
         <LicenseKeyForm autoFocus onActivated={() => setHidden(false)} />
+        <p className="paywall-legal">Before you buy: the <LegalLink id="refunds" /> and the <LegalLink id="terms" />. What is kept and what leaves this PC: the <LegalLink id="privacy" />.</p>
       </section>
     </div>
   );

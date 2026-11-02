@@ -540,6 +540,30 @@ export function forgetAllMemories(sessionKey: string): number {
 }
 
 /**
+ * Everything kept for a key, removed for good: its memories, the note of what it
+ * asked to forget (a deleted memory's words stay in that note so they are not
+ * quoted back out of the transcript - erasing the person ends that too), and the
+ * record of what was done to its memories. For erasing a person's data
+ * (privacy.ts). How many of each there were.
+ */
+export function eraseSessionMemory(sessionKey: string): { memories: number; forgotten: number; audit: number } {
+  loadFromDisk();
+  const memories = memoriesBySession.get(sessionKey)?.length ?? 0;
+  const forgotten = forgottenBySession.get(sessionKey)?.length ?? 0;
+  let audit = 0;
+  for (let index = auditLog.length - 1; index >= 0; index -= 1) {
+    if (auditLog[index].sessionKey === sessionKey) {
+      auditLog.splice(index, 1);
+      audit += 1;
+    }
+  }
+  const held = memoriesBySession.delete(sessionKey);
+  const noted = forgottenBySession.delete(sessionKey);
+  if (held || noted || audit > 0) saveToDisk();
+  return { memories, forgotten, audit };
+}
+
+/**
  * Test seam. Marks state as loaded so a reset is not immediately undone by a
  * lazy read of the file it was meant to clear.
  */

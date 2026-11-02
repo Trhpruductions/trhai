@@ -1,4 +1,5 @@
 import test from "node:test";
+import { consents } from "./helpers/consents.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -278,7 +279,7 @@ test("a signed-in user's task, history and steps are read under their account, n
   process.env.TRHAI_ENGINE_URL = model.baseUrl;
   const server = await startTestServer();
   try {
-    const registered = await call(server.baseUrl, "POST", "/v1/auth/register", { body: { email: "tasks@example.com", password: "correct horse battery" } });
+    const registered = await call(server.baseUrl, "POST", "/v1/auth/register", { body: { email: "tasks@example.com", password: "correct horse battery", consents } });
     const token: string = registered.body.data.token;
     const accountKey = `user:${registered.body.data.account.id}`;
 

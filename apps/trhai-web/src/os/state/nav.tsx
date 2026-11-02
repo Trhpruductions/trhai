@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { detailFromHash, hashFor, viewFromHash, type ViewId } from "../views";
+import { optionalStorage } from "../../lib/storageConsent";
 
 // Where the user is in TRH AI, and the shell's own open/closed state.
 //
@@ -38,7 +39,7 @@ export function NavProvider({ children }: { children: ReactNode }) {
     read();
     try {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- a stored preference, unknowable on the server
-      setSlimState(window.localStorage.getItem(slimKey) === "1");
+      setSlimState(optionalStorage().getItem(slimKey) === "1");
     } catch {
       // Storage can be unavailable; the full sidebar is the default anyway.
     }
@@ -60,7 +61,7 @@ export function NavProvider({ children }: { children: ReactNode }) {
   const setSlim = useCallback((next: boolean) => {
     setSlimState(next);
     try {
-      window.localStorage.setItem(slimKey, next ? "1" : "0");
+      optionalStorage().setItem(slimKey, next ? "1" : "0");
     } catch {
       // Not remembered, still applied.
     }

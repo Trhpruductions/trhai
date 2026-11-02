@@ -470,6 +470,18 @@ export function clearConversation(key: string, conversationId?: string): number 
   return count;
 }
 
+/**
+ * Every conversation a key has, removed for good, and how many there were.
+ * For erasing a person's data (privacy.ts): not an archive, not a flag.
+ */
+export function eraseConversations(key: string): number {
+  const count = listFor(key).length;
+  if (count === 0) return 0;
+  conversationsByKey.delete(key);
+  saveToDisk();
+  return count;
+}
+
 /** Test seam. */
 export function resetConversations(): void {
   loaded = true;

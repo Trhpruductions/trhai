@@ -67,6 +67,8 @@ import { activateLicense, licenseStatus, removeLicense } from "./services/licens
 import { effectiveRole, featureGate, mayUse, resolvePrincipal } from "./services/access.js";
 import { featureCatalogue, featureIds } from "./services/entitlements.js";
 import { registerAccessRoutes } from "./accessRoutes.js";
+import { registerPrivacyRoutes } from "./privacyRoutes.js";
+import { registrationConsents } from "./services/privacy.js";
 import { checkForUpdates } from "./services/updates.js";
 import { engineFetch } from "./services/engineFetch.js";
 import { cancelSetup, removeModel, startSetup } from "./services/modelSetup.js";
@@ -143,44 +145,13 @@ import { accessKey, accessKeyHeader, guardOtherDevices, isLoopback } from "./ser
 import { persistenceFailures } from "./services/persistenceHealth.js";
 import { lockedProtectedFiles } from "./services/protectedJson.js";
 import { dataInventory } from "./services/dataInventory.js";
+import { normalizeSessionId, resolveMemoryKey } from "./services/sessionKey.js";
+import { accessLogFormat, pathOnly } from "./services/accessLog.js";
 
 type AssistRouteMode = "general" | "build" | "code" | "debug" | "research" | "plan" | "coding" | "business" | "creator";
 
-const maxSessionIdLength = 100;
 /** Candidates handed to the composer for relevance scoring. */
 const memoryCandidateLimit = 25;
-
-/** Client-supplied session ids are untrusted; reject anything unusable. */
-function normalizeSessionId(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > maxSessionIdLength) {
-    return null;
-  }
-  // `user:` is the signed-in namespace (resolveMemoryKey). Accepted raw, it let
-  // a caller with no token name an account's key and read its memories,
-  // conversations and to-dos; it is reached only through a sign-in.
-  if (/^user:/i.test(trimmed)) {
-    return null;
-  }
-  return trimmed;
-}
-
-/**
- * The key memory is filed under.
- *
- * A signed-in user owns their memory, so it follows them to any browser. Signed
- * out, the anonymous session id still works — requiring an account just to try
- * the assistant would be worse than the problem it solves. The `user:` prefix
- * keeps the two namespaces from ever colliding.
- */
-function resolveMemoryKey(req: express.Request, sessionId: string | null): string | null {
-  const account = accountForToken(bearerToken(req.headers.authorization));
-  if (account) return `user:${account.id}`;
-  return sessionId;
-}
 
 /** A schedule as the screens see it: its words, and whether it is running now. */
 function scheduleView(schedule: Schedule) {
@@ -548,7 +519,9 @@ export function createApp(options: AppOptions = {}) {
   const chatJson = express.json({ limit: "40mb" });
   app.use((req, res, next) =>
     (req.path === "/v1/assist" || req.path === "/v1/assist/stream" ? chatJson : smallJson)(req, res, next));
-  app.use(morgan("tiny"));
+  // The route and the outcome, never the query: see accessLog.ts.
+  morgan.token("path", (req) => pathOnly(req));
+  app.use(morgan(accessLogFormat));
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", service: "ascend-api" });
@@ -592,6 +565,7 @@ export function createApp(options: AppOptions = {}) {
 
   // What the caller may do, and the owner's and administrators' account tools.
   registerAccessRoutes(app);
+  registerPrivacyRoutes(app);
 
   // First-run setup: the model engine and the models, downloaded and verified
   // by the app (services/modelSetup.ts). Not behind the paywall: a PC has to
@@ -892,7 +866,15 @@ export function createApp(options: AppOptions = {}) {
       return;
     }
 
-    const result = registerAccount(req.body ?? {});
+    // What the person agreed to is checked before anything is made, and is kept with the
+    // account: the texts they were shown, by version, and when.
+    const consents = registrationConsents(req.body?.consents);
+    if (!consents.ok) {
+      res.status(consents.status).json({ code: consents.code, message: consents.message, traceId: "trace-local" });
+      return;
+    }
+
+    const result = registerAccount({ ...(req.body ?? {}), consents: consents.records });
     if (!result.ok) {
       // Counted so the endpoint cannot be used to enumerate or spam accounts.
       recordFailure(ipKey, registerIpRule);

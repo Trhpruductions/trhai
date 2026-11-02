@@ -6,6 +6,7 @@ import { applyAgentDisclaimer, applyResponseStyle } from "@ascend/shared";
 import { readStoredPersonality } from "../lib/personality";
 import { readActiveAgent } from "../lib/agents";
 import { madeFilesFrom } from "../lib/files";
+import { optionalStorage } from "../lib/storageConsent";
 
 // Conversation state, talking to the real local orchestrator — the same
 // service the rest of this monorepo already built, tested, and runs against
@@ -89,7 +90,7 @@ function isContextUse(value: unknown): value is { promptTokens: number; windowTo
 
 function readOpenConversation(): string | null {
   try {
-    const value = window.localStorage.getItem(conversationKey);
+    const value = optionalStorage().getItem(conversationKey);
     return isConversationId(value) ? value : null;
   } catch {
     return null;
@@ -98,8 +99,8 @@ function readOpenConversation(): string | null {
 
 function rememberOpenConversation(id: string | null): void {
   try {
-    if (id) window.localStorage.setItem(conversationKey, id);
-    else window.localStorage.removeItem(conversationKey);
+    if (id) optionalStorage().setItem(conversationKey, id);
+    else optionalStorage().removeItem(conversationKey);
   } catch {
     // Not remembered across a reload; everything else still works.
   }
@@ -344,7 +345,7 @@ export function useAssistant() {
           ...(regenerating ? { regenerate: true } : {}),
           // The conversation's own model; the API uses the usual one without it.
           ...(modelRef.current ? { model: modelRef.current } : {}),
-          agentId: readActiveAgent(window.localStorage)?.id,
+          agentId: readActiveAgent(optionalStorage())?.id,
           // Shown to the vision model on the API; never stored there.
           ...(images.length > 0 ? { images } : {})
         }),
@@ -455,8 +456,8 @@ export function useAssistant() {
         // agent says "Not a substitute for care" of itself, and its replies
         // never did.
         text: applyAgentDisclaimer(
-          applyResponseStyle(answered, readStoredPersonality(window.localStorage)),
-          readActiveAgent(window.localStorage)
+          applyResponseStyle(answered, readStoredPersonality(optionalStorage())),
+          readActiveAgent(optionalStorage())
         ),
         at: Date.now(),
         strategy: data.strategy as string | undefined,

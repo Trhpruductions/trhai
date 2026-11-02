@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { tidyLogs } from "./logRetention.js";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
 import { constants as fsConstants, existsSync, mkdirSync, openSync, statSync, statfsSync } from "node:fs";
@@ -871,6 +872,8 @@ async function ensurePackagedServices() {
  * a reason behind.
  */
 function spawnNodeService(label: string, script: string, args: string[], env: NodeJS.ProcessEnv, cwd: string) {
+  // Before the service opens its log: one that has grown too large is moved aside, and a month-old one is deleted.
+  tidyLogs(path.join(app.getPath("userData"), "logs"));
   const child = spawn(process.execPath, [script, ...args], {
     cwd,
     stdio: ["ignore", serviceLog(label), serviceLog(label)],

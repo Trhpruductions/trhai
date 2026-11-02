@@ -26,6 +26,7 @@ import type { Agent } from "@ascend/shared";
 import { useNotify } from "./notify";
 import { useNav } from "./nav";
 import { useSystem } from "./system";
+import { optionalStorage } from "../../lib/storageConsent";
 
 // The conversation, the composer and the voice - everything that was the old
 // page's own state, moved here so every workspace shares one of each.
@@ -204,7 +205,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- browser capabilities and stored choices, unknowable on the server
     setScreenShareable(canShareScreen());
-    setAgent(readActiveAgent(window.localStorage));
+    setAgent(readActiveAgent(optionalStorage()));
   }, []);
 
   const addImages = useCallback(async (files: File[]) => {

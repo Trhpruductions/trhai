@@ -1,4 +1,5 @@
 import test from "node:test";
+import { consents } from "./helpers/consents.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -169,7 +170,8 @@ test("memory follows the account, not the browser session", async () => {
   try {
     const registered = await post(server.baseUrl, "/v1/auth/register", {
       email: "owner@example.com",
-      password: "correct horse battery"
+      password: "correct horse battery",
+      consents
     });
     assert.equal(registered.status, 201);
     const token = registered.body.data.token;
@@ -202,10 +204,10 @@ test("one account cannot read another account's memory", async () => {
 
   try {
     const alice = (await post(server.baseUrl, "/v1/auth/register", {
-      email: "alice@example.com", password: "correct horse battery"
+      email: "alice@example.com", password: "correct horse battery", consents
     })).body.data.token;
     const bob = (await post(server.baseUrl, "/v1/auth/register", {
-      email: "bob@example.com", password: "correct horse battery"
+      email: "bob@example.com", password: "correct horse battery", consents
     })).body.data.token;
 
     await post(server.baseUrl, "/v1/assist", {
@@ -235,7 +237,7 @@ test("signing in does not expose memory saved anonymously under the same session
     });
 
     const token = (await post(server.baseUrl, "/v1/auth/register", {
-      email: "fresh@example.com", password: "correct horse battery"
+      email: "fresh@example.com", password: "correct horse battery", consents
     })).body.data.token;
 
     const signedIn = await post(server.baseUrl, "/v1/assist", {
@@ -257,7 +259,7 @@ test("auth endpoints report the signed-in account and reject bad credentials", a
 
   try {
     const registered = await post(server.baseUrl, "/v1/auth/register", {
-      email: "me@example.com", password: "correct horse battery", displayName: "Me"
+      email: "me@example.com", password: "correct horse battery", displayName: "Me", consents
     });
     const token = registered.body.data.token;
 
@@ -291,7 +293,7 @@ test("a revoked token stops working", async () => {
 
   try {
     const token = (await post(server.baseUrl, "/v1/auth/register", {
-      email: "revoke@example.com", password: "correct horse battery"
+      email: "revoke@example.com", password: "correct horse battery", consents
     })).body.data.token;
 
     await post(server.baseUrl, "/v1/auth/logout", {}, token);

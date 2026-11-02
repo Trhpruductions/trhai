@@ -14,6 +14,9 @@ export * from "./markdown.js";
 export * from "./videoScript.js";
 export * from "./screenRequest.js";
 export * from "./releaseNotes.js";
+export * from "./legalFacts.js";
+export * from "./legal/model.js";
+export * from "./legal/index.js";
 
 export type AssistantMode = "general" | "coding" | "business" | "creator";
 

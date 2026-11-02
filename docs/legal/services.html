@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Services TRH AI can contact, and the software it is made of - TRH AI</title>
+<style>
+  :root { color-scheme: light dark; --ink: #1b2430; --paper: #ffffff; --line: #d9e0ea; --accent: #0b6bcb; --mark: #fff3c4; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e6edf7; --paper: #0b1220; --line: #27344a; --accent: #7fc4ff; --mark: #4d3b00; } }
+  body { margin: 0; font: 16px/1.6 system-ui, "Segoe UI", sans-serif; color: var(--ink); background: var(--paper); }
+  .wrap { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  nav.texts { display: flex; flex-wrap: wrap; gap: .4rem 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--line); margin-bottom: 1.5rem; }
+  nav.texts a[aria-current] { font-weight: 700; text-decoration: none; }
+  a { color: var(--accent); } a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  h1 { font-size: 1.8rem; line-height: 1.2; } h2 { font-size: 1.25rem; margin-top: 2rem; }
+  .meta, .summary { color: inherit; } .meta { opacity: .75; }
+  aside.note { border-left: 4px solid var(--accent); padding: .6rem .9rem; margin: 1rem 0; background: rgba(127,127,127,.08); }
+  aside.note.review { border-color: #c77d00; }
+  .draft { border: 1px solid #c77d00; padding: .7rem .9rem; border-radius: 6px; background: var(--mark); color: #1b2430; }
+  mark.open { background: var(--mark); color: inherit; padding: 0 .3em; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  caption { text-align: left; font-weight: 600; padding: .4rem 0; }
+  th, td { text-align: left; vertical-align: top; padding: .5rem .6rem; border-top: 1px solid var(--line); }
+  thead th { border-bottom: 2px solid var(--line); }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; }
+  .foot { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); font-size: .9rem; opacity: .8; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="texts" aria-label="Legal texts">
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Service</a>
+      <a href="refunds.html">Refund Policy</a>
+      <a href="storage.html">Cookies and storage</a>
+      <a href="ai.html">How it uses AI</a>
+      <a href="business.html">Business information</a>
+      <a href="services.html" aria-current="page">Services and licences</a>
+    </nav>
+    <main>
+      <p class="draft" role="note">This text was written from what TRH AI does and has not yet been reviewed by a lawyer. Items marked to be supplied are facts the business has still to fill in. Nothing here is made up to fill a gap.</p>
+<h1>Services TRH AI can contact, and the software it is made of</h1>
+<p class="meta">In effect from 2026-11-01.</p>
+<p class="summary">Every outside service TRH AI can send a request to, and every program, model and voice it uses, with their licences.</p>
+<nav aria-label="On this page"><ol><li><a href="#services-services">1. Services it can contact</a></li><li><a href="#services-shipped">2. Software that ships with TRH AI</a></li><li><a href="#services-downloaded">3. Software it downloads</a></li><li><a href="#services-voices">4. Voices</a></li><li><a href="#services-models">5. AI models</a></li><li><a href="#services-brand">6. TRH AI&#39;s own name and pictures</a></li></ol></nav>
+<section aria-labelledby="services-services">
+<h2 id="services-services">1. Services it can contact</h2>
+<p>TRH AI has no server of its own. These are the only companies&#39; services it sends requests to, and each one&#39;s own privacy policy says what that company does with a request. The <a href="privacy.html">Privacy Policy</a> says exactly what each request carries and how to stop it.</p>
+<table><caption>Outside services</caption><thead><tr><th scope="col">Service</th><th scope="col">Used for</th><th scope="col">Their privacy policy</th></tr></thead><tbody><tr><th scope="row">GitHub (GitHub, Inc.)</th><td>Finding out whether a newer version exists; downloading updates, the engine (llama.cpp), Piper, whisper.cpp and the ffmpeg build.</td><td>https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement</td></tr><tr><th scope="row">Hugging Face (Hugging Face, Inc.)</th><td>Downloading models and voices you choose to install.</td><td>https://huggingface.co/privacy</td></tr><tr><th scope="row">DuckDuckGo (Duck Duck Go, Inc.)</th><td>Web searches you ask for, and the Network screen&#39;s Check now button.</td><td>https://duckduckgo.com/privacy</td></tr><tr><th scope="row">Any website you ask it to read</th><td>Reading a page as text when you give its address.</td><td>That site&#39;s own.</td></tr><tr><th scope="row">Your email provider</th><td>Sending an email you asked for, through the account you connected.</td><td>Your provider&#39;s own.</td></tr><tr><th scope="row">The checkout page (<mark class="open">[To be supplied: payment provider that takes payment on the checkout page, if there is one]</mark>)</th><td>Paying for a license, in your browser, outside the app.</td><td><mark class="open">[To be supplied: that provider&#39;s privacy policy address]</mark></td></tr></tbody></table>
+<p>TRH AI does not use any advertising, analytics, crash-reporting or tracking service, and loads no fonts, scripts or images from other companies&#39; servers.</p>
+<aside class="note review"><strong>For legal review.</strong> The app&#39;s window is built on Chromium (through Electron). Chromium has built-in features of its own, such as spell-check dictionaries, that can contact Google&#39;s servers; the project has not yet measured whether this build does. Confirm by watching the app&#39;s network traffic, and switch the feature off or list it here.</aside>
+</section>
+<section aria-labelledby="services-shipped">
+<h2 id="services-shipped">2. Software that ships with TRH AI</h2>
+<p>The installer contains the app and the open-source libraries it is built with. Their licence texts are inside the installed program, and the most important are:</p>
+<table><caption>Shipped software</caption><thead><tr><th scope="col">Software</th><th scope="col">What it does here</th><th scope="col">Licence</th></tr></thead><tbody><tr><th scope="row">Electron and Chromium</th><td>The app&#39;s window.</td><td>MIT (Electron); BSD and others (Chromium), listed in LICENSES.chromium.html inside the app</td></tr><tr><th scope="row">Node.js (inside Electron)</th><td>Runs the local service.</td><td>MIT</td></tr><tr><th scope="row">Express, helmet, cors, morgan</th><td>The local service that the window talks to.</td><td>MIT</td></tr><tr><th scope="row">Nodemailer</th><td>Sends email through the account you connect.</td><td>MIT-0</td></tr><tr><th scope="row">unpdf</th><td>Reads the text of PDF files.</td><td>MIT</td></tr><tr><th scope="row">Next.js, React</th><td>The screens.</td><td>MIT</td></tr><tr><th scope="row">sharp (image library used by Next.js)</th><td>Present in the installed files; TRH AI does not use it to process your images.</td><td>Apache 2.0; its Windows binary also carries LGPL 3.0 parts</td></tr><tr><th scope="row">Geist, Geist Mono, Orbitron and Oxanium fonts</th><td>The app&#39;s lettering, stored with the app.</td><td>SIL Open Font License 1.1</td></tr></tbody></table>
+<aside class="note review"><strong>For legal review.</strong> A single third-party notices file for the installer (every library with its licence text) does not exist yet and should be added before public release; the LGPL parts of sharp and the project&#39;s own LICENSE file (the repository has none) need a lawyer&#39;s word.</aside>
+</section>
+<section aria-labelledby="services-downloaded">
+<h2 id="services-downloaded">3. Software it downloads</h2>
+<p>These are fetched from GitHub and Hugging Face when you install them in <strong>Settings, Engine and models</strong>, or by TRH AI itself for the parts it needs to start working. Each file is checked against a fixed size and checksum before it is used. They run on your PC and are not part of the installer.</p>
+<table><caption>Downloaded programs</caption><thead><tr><th scope="col">Program</th><th scope="col">What it does here</th><th scope="col">Licence</th></tr></thead><tbody><tr><th scope="row">llama.cpp (llama-server)</th><td>Runs the AI model.</td><td>MIT</td></tr><tr><th scope="row">NVIDIA CUDA runtime (only with an NVIDIA graphics card)</th><td>Lets the engine use the graphics card.</td><td>NVIDIA&#39;s own licence</td></tr><tr><th scope="row">Piper</th><td>Turns text into speech.</td><td>MIT; it includes eSpeak NG, which is GPL 3</td></tr><tr><th scope="row">whisper.cpp and the Whisper base.en model</th><td>Turns speech into text.</td><td>MIT</td></tr><tr><th scope="row">ffmpeg (Windows build by gyan.dev)</th><td>Makes and converts audio and video.</td><td>GPL 3</td></tr></tbody></table>
+<aside class="note review"><strong>For legal review.</strong> The install records in the app name a licence for Piper, whisper.cpp and ffmpeg but not yet for llama.cpp, the CUDA runtime or eSpeak NG; the licences above for those three are as their makers publish them and should be added to the records. Distributing a GPL program by having the app download it is a question for a lawyer.</aside>
+</section>
+<section aria-labelledby="services-voices">
+<h2 id="services-voices">4. Voices</h2>
+<p>Each voice is a separate file with its own licence, as its makers state it. The install screen shows the same words beside each voice.</p>
+<table><caption>Voices</caption><thead><tr><th scope="col">Voice</th><th scope="col">Licence, as its makers state it</th><th scope="col">Commercial use</th></tr></thead><tbody><tr><th scope="row">Alan (en_GB-alan-medium)</th><td>All rights reserved (Mycroft AI)</td><td>Not cleared</td></tr><tr><th scope="row">Cori (en_GB-cori-high)</th><td>Public domain (LibriVox recordings)</td><td>Yes</td></tr><tr><th scope="row">Jarvis (en_GB-jarvis-high)</th><td>Fan-made imitation of a film character (tagged MIT, not cleared)</td><td>Not cleared</td></tr><tr><th scope="row">Ryan (en_US-ryan-high)</th><td>CC BY-NC-SA 4.0 (non-commercial)</td><td>No</td></tr><tr><th scope="row">Amy (en_US-amy-medium)</th><td>No licence stated (Mimic 3 collection)</td><td>Not cleared</td></tr></tbody></table>
+<aside class="note review"><strong>For legal review.</strong> Only Cori is plainly free for any use. The owner chose on 2026-10-25 to install all five, with Alan as the default voice. Whether a paid product may ship Alan, Jarvis, Ryan and Amy is a decision for the owner with a lawyer; dropping a voice is one line in the install records.</aside>
+</section>
+<section aria-labelledby="services-models">
+<h2 id="services-models">5. AI models</h2>
+<p>The models are made by Alibaba&#39;s Qwen team and, for the no-refusals versions, by other people who changed them so they do not refuse. Each is downloaded from its publisher on Hugging Face. The install screen shows each licence.</p>
+<table><caption>Models</caption><thead><tr><th scope="col">Model</th><th scope="col">Licence</th><th scope="col">Commercial use</th></tr></thead><tbody><tr><th scope="row">Qwen2.5 Coder 7B (no refusals)</th><td>Apache 2.0</td><td>Yes</td></tr><tr><th scope="row">Qwen3 4B Instruct (no refusals)</th><td>Apache 2.0</td><td>Yes</td></tr><tr><th scope="row">Qwen3 VL 8B (pictures, no refusals)</th><td>Apache 2.0</td><td>Yes</td></tr><tr><th scope="row">Qwen3 VL 4B (pictures, no refusals)</th><td>Apache 2.0</td><td>Yes</td></tr><tr><th scope="row">Qwen3 4B Instruct</th><td>Apache 2.0</td><td>Yes</td></tr><tr><th scope="row">Qwen2.5 Coder 7B</th><td>Apache 2.0</td><td>Yes</td></tr><tr><th scope="row">Qwen3 8B</th><td>Apache 2.0</td><td>Yes</td></tr><tr><th scope="row">Qwen2.5 VL 7B (pictures)</th><td>Apache 2.0</td><td>Yes</td></tr><tr><th scope="row">Qwen2.5 3B</th><td>Qwen Research License (non-commercial)</td><td>No</td></tr><tr><th scope="row">Qwen2.5 VL 3B (pictures)</th><td>Qwen Research License (non-commercial)</td><td>No</td></tr></tbody></table>
+<p>A model&#39;s licence is the model&#39;s, not TRH AI&#39;s. If you use TRH AI for work, use a model whose licence allows it; the two research-licence models are offered for personal use only and say so on the install screen.</p>
+<aside class="note review"><strong>For legal review.</strong> The no-refusals models are third parties&#39; edits of Qwen&#39;s models, offered as the recommended defaults. Their publishers&#39; repositories state Apache 2.0; one source repository could not be reached when checked. A lawyer should confirm that recommending them in a paid product is acceptable.</aside>
+</section>
+<section aria-labelledby="services-brand">
+<h2 id="services-brand">6. TRH AI&#39;s own name and pictures</h2>
+<p>The name TRH AI, its lettering and its screens belong to TRH Development. The background picture and the app&#39;s icon were made with an image-generating AI, and the icon still shows the product&#39;s earlier name, Ascend AI.</p>
+<aside class="note review"><strong>For legal review.</strong> The two brand images carry metadata naming OpenAI&#39;s image model as their maker. Who owns an AI-generated picture, and whether it can be a trademark, varies by country; the owner should decide whether to keep them, and should replace the icon so that it names TRH AI.</aside>
+</section>
+    </main>
+    <p class="foot">Generated from TRH AI's own text registry by scripts/legal/export-legal.mjs. The same text is shown inside the app under Settings, Legal.</p>
+  </div>
+</body>
+</html>

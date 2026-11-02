@@ -7,6 +7,8 @@ import { apiBaseUrl } from "../lib/api";
 import {
   authRequest, looksLikeEmail, minPasswordLength, passwordStrength, type AuthFailure, type StoredAuth
 } from "../lib/auth";
+import { registrationConsentBody, registrationTicks, tickWording, type ConsentTick } from "../lib/privacy";
+import { useLegal } from "./LegalDialog";
 
 // Signing in, for real, against the accounts the API already keeps.
 //
@@ -18,9 +20,12 @@ import {
 // is always there, and the app works the same way either way.
 
 type Mode = "signin" | "register" | "recover" | "codes";
-type Field = "name" | "email" | "password" | "confirm" | "code";
+type Field = "name" | "email" | "password" | "confirm" | "code" | "consent";
 
 const exitMs = 460;
+
+/** The two texts a box names, by their full titles. */
+const textTitles = { terms: "Terms of Service", privacy: "Privacy Policy" } as const;
 
 const icons: Record<string, ReactNode> = {
   mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></>,
@@ -60,6 +65,9 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
   const [confirm, setConfirm] = useState("");
   const [code, setCode] = useState("");
   const [remember, setRemember] = useState(true);
+  // The texts agreed to before an account is made; each box on its own, and none ticked for the person.
+  const [ticked, setTicked] = useState<Partial<Record<ConsentTick, boolean>>>({});
+  const { openLegal } = useLegal();
   const [reveal, setReveal] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -133,6 +141,7 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
       if (confirm !== password) found.confirm = "The two passwords do not match.";
     }
     if (mode === "recover" && code.replace(/[^0-9a-z]/gi, "").length < 12) found.code = "A recovery code has 12 letters and numbers.";
+    if (mode === "register" && !registrationConsentBody(ticked)) found.consent = "Tick each box to agree. An account cannot be made without it.";
     setInvalid(found);
     if (Object.keys(found).length > 0) {
       setProblem(null);
@@ -152,7 +161,7 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
     const result = mode === "signin"
       ? await authRequest(apiBaseUrl, "login", { email, password })
       : mode === "register"
-        ? await authRequest(apiBaseUrl, "register", { email, password, displayName: name.trim() || undefined })
+        ? await authRequest(apiBaseUrl, "register", { email, password, displayName: name.trim() || undefined, consents: registrationConsentBody(ticked) })
         : await authRequest(apiBaseUrl, "recover", { email, code, newPassword: password });
 
     setBusy(false);
@@ -255,7 +264,7 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
   const capsNote = capsLock ? <span className="gate-caps" role="status"><Icon name="alert" />Caps Lock is on</span> : null;
 
   const heading = {
-    signin: { eyebrow: "SECURE SIGN IN", title: "Welcome back", sub: "Sign in and your memory, documents and conversations come with you." },
+    signin: { eyebrow: "SIGN IN", title: "Welcome back", sub: "Sign in and your memory, documents and conversations come with you." },
     register: { eyebrow: "NEW ACCOUNT", title: "Create your account", sub: "Kept on this machine and encrypted. No email is ever sent, and the account never leaves this PC." },
     recover: { eyebrow: "ACCOUNT RECOVERY", title: "Use a recovery code", sub: "Each code works once. Using one sets a new password and signs out everywhere else." },
     codes: { eyebrow: "SAVE THESE NOW", title: "Your recovery codes", sub: "If you forget your password, one of these gets you back in. They will not be shown again." }
@@ -402,6 +411,30 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
               {mode !== "signin" ? field("confirm", "Confirm password", "lock",
                 passwordInput("confirm", confirm, setConfirm, "Type it again", "new-password")) : null}
 
+              {mode === "register" ? (
+                <fieldset className="gate-consent" aria-describedby={invalid.consent ? `${ids}-consent-error` : undefined}>
+                  <legend className="gate-label">Before your account is made</legend>
+                  {registrationTicks().map((tick) => {
+                    const words = tickWording(tick);
+                    return (
+                      // The link to the text is a button, and a button must not sit inside a label: the box gets its
+                      // whole sentence as its name, the words before the link are its visible label, and the link stands beside them.
+                      <div key={tick} className="gate-check">
+                        <input id={`${ids}-consent-${tick}`} type="checkbox" checked={ticked[tick] === true} disabled={busy}
+                          aria-label={`${words.before}${words.link ? textTitles[words.link] : ""}${words.after}`}
+                          onChange={(event) => { setTicked((prior) => ({ ...prior, [tick]: event.target.checked })); edited("consent"); }} />
+                        <span>
+                          <label htmlFor={`${ids}-consent-${tick}`}>{words.before}</label>
+                          {words.link ? <button type="button" className="gate-link" onClick={() => openLegal(words.link as "terms" | "privacy")}>{textTitles[words.link]}</button> : null}
+                          {words.after}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {invalid.consent ? <p className="gate-field-error" id={`${ids}-consent-error`} role="alert">{invalid.consent}</p> : null}
+                </fieldset>
+              ) : null}
+
               <div className="gate-row">
                 <label className="gate-check">
                   <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} disabled={busy} />
@@ -428,6 +461,12 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
           )}
 
           <div className="gate-fine"><Icon name="lock" />Stored encrypted on this machine · Your account never leaves it</div>
+          <nav className="gate-legal" aria-label="Legal texts">
+            <button type="button" className="gate-link" onClick={() => openLegal("terms")}>Terms of Service</button>
+            <button type="button" className="gate-link" onClick={() => openLegal("privacy")}>Privacy Policy</button>
+            <button type="button" className="gate-link" onClick={() => openLegal("ai")}>How TRH AI uses AI</button>
+            <button type="button" className="gate-link" onClick={() => openLegal("business")}>Who makes it</button>
+          </nav>
         </section>
         </div>
         </div>

@@ -83,6 +83,7 @@ export function Sidebar() {
                     type="button"
                     className={`os-nav-item${active ? " active" : ""}${phoneBar.includes(item.id) ? "" : " os-nav-extra"}`}
                     aria-current={active ? "page" : undefined}
+                    aria-label={item.label}
                     onClick={() => go(item.id)}
                     {...(slim ? { "data-tip": item.label } : {})}
                   >

@@ -38,8 +38,12 @@ entry to.
 
 ## The boundary that is actually enforced
 
-**It is off by default.** Not a setting to find and disable — off, until you
-press the button on the front screen.
+**It is on by default, since 2026-10.** This section was written when it started
+off and was switched on for a task at a time. `machineAccessDefault` in
+`commandRunner.ts` now reads on unless `TRHAI_MACHINE_ACCESS=off` is set; the
+switch in Tools still means what it says, and off stays off across restarts.
+Whether a new install should start off again is the owner's decision, flagged in
+`29-legal-privacy-compliance.md`; the legal texts say what the code does today.
 
 **While off, the model cannot see it.** `run_command` is withheld from the
 tool list entirely rather than offered and refused. A model that can see a

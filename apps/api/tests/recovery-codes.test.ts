@@ -1,4 +1,5 @@
 import test from "node:test";
+import { consents } from "./helpers/consents.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -206,7 +207,7 @@ test("registration returns codes over the API and recovery works end to end", as
     const registered = await (await fetch(`${server.baseUrl}/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "api@example.com", password: original })
+      body: JSON.stringify({ email: "api@example.com", password: original, consents })
     })).json() as any;
 
     assert.equal(registered.data.recoveryCodes.length, recoveryCodeCount);
@@ -240,7 +241,7 @@ test("recovery attempts are throttled", async () => {
     await fetch(`${server.baseUrl}/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "brute@example.com", password: original })
+      body: JSON.stringify({ email: "brute@example.com", password: original, consents })
     });
 
     const statuses: number[] = [];

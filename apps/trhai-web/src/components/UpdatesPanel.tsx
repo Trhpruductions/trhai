@@ -71,7 +71,7 @@ export function UpdatesPanel() {
 
             <p className="os-faint os-small">
               {check.checkedAt ? `Last checked ${new Date(check.checkedAt).toLocaleString()}. ` : ""}
-              TRH AI asks its public release page for the newest version every few hours; nothing about you is sent.
+              TRH AI asks its public release page on GitHub for the newest version every few hours. GitHub sees this PC&rsquo;s internet address and TRH AI&rsquo;s version number; nothing about you or your data is sent.
             </p>
 
             <h4 className="updates-heading">Release notes</h4>

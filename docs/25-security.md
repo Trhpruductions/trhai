@@ -69,4 +69,12 @@ page can read nothing from it.
   (`%LOCALAPPDATA%\TRHAI\trial-started`) does. Both need a server to change,
   which the no-cloud rule rules out.
 - **Commands.** `run_command` runs what the PC has, behind the machine-access
-  switch; that switch is the control.
+  switch; that switch is the control. **The switch is on by default** (see
+  `15-machine-control.md`, and `machineAccessDefault` in `commandRunner.ts`);
+  earlier text here that said otherwise was out of date.
+- **The access log kept the whole address** of every request - with it, a guest's
+  session id, search words, page addresses and file names - and was never pruned.
+  Since 2026-11 it logs the route and the outcome only (`accessLog.ts`), command
+  lines are logged as the program and the length (`commandForLog`), and the
+  desktop shell moves a log aside at 2 MB and deletes one untouched for 30 days
+  (`logRetention.ts`).
