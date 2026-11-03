@@ -549,8 +549,35 @@ const aboutAMusicVideo = new RegExp(`\\b(?:music|lyric)\\s+videos?\\b|\\bvisuali
 export function wantsMediaConverted(message: string): boolean {
   const text = message ?? "";
   if (aboutAMusicVideo.test(text)) return false;
+  // "Convert this story to an mp3" is words to read out (speak_to_file), not a file to convert.
+  if (!mediaFileNamed.test(text) && somethingToSay.test(text)) return false;
   if (pullingOutTheSound.test(text) || makingIntoAFormat.test(text)) return true;
   return conversionVerbs.test(text) && mediaFileNamed.test(text);
+}
+
+const speechFileFormat = "(?:mp3|wav|m4a|flac|ogg|opus)";
+const makingWord = /\b(?:make|create|generate|produce|record|need|want|save|export|get|give|do)\b/i;
+const sayingVerbs = /\b(?:read|say|speak|narrate|voice|record|dictate)\b/i;
+const intoAnAudioFile = new RegExp(`\\b(?:into|to|as|in)\\s+(?:an?\\s+|the\\s+)?(?:(?:audio|sound|voice|speech)\\s+(?:file|recording|clip)s?|speech|audio|${speechFileFormat})\\b`, "i");
+const somethingToSay = /\b(?:this|the|my|that|these|following|above|below|it)\b[^.?!\n]{0,40}\b(?:text|words?|story|script|poem|article|essay|message|note|document|paragraphs?|speech|reply|answer|summary|transcript|lines?)\b/i;
+const anAudioVersion = /\b(?:make|create|generate|produce|record)\s+(?:me\s+)?(?:an?\s+)?(?:audio|voice|speech|spoken)\s*(?:file|recording|clip|version)?\s+(?:of|from|for|with|reading|saying)\b/i;
+
+/**
+ * Whether a request asks for text to be read out into an audio file - "read this to an mp3", "make an audio file of this
+ * story in the Jarvis voice", "turn this into speech and save it as a wav", a voiceover or an audiobook - so speak_to_file
+ * is worth offering.
+ *
+ * A file is the point: "read this aloud" is what the screen already does with a reply. And an audio file named
+ * ("convert song.wav to mp3") is something to convert, not text to say.
+ */
+export function wantsSpeechFile(message: string): boolean {
+  const text = message ?? "";
+  if (mediaFileNamed.test(text)) return false;
+  if (/\btext[- ]to[- ]speech\b|\btts\b/i.test(text) && makingWord.test(text) && /\b(?:file|mp3|wav|m4a|flac|ogg|opus|audio|recording)\b/i.test(text)) return true;
+  if (/\b(?:voice-?over|narration|audiobook|audio\s+book)\b/i.test(text) && /\b(?:make|create|generate|produce|record|need|want)\b/i.test(text)) return true;
+  if (anAudioVersion.test(text)) return true;
+  if (intoAnAudioFile.test(text) && (sayingVerbs.test(text) || (/\b(?:turn|convert|make|put|save|export)\b/i.test(text) && somethingToSay.test(text)))) return true;
+  return false;
 }
 
 /**

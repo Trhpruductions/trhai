@@ -247,6 +247,33 @@ file and never replaces one; the original is not touched.
   every format above and with an odd-sized film; it has not been tried on a PC with only the ffmpeg the app installs (that build
   was not on this one).
 
+## Reading text into an audio file - `speak_to_file`
+
+Reads text aloud into a new audio file in one of the voices installed on this PC (Settings, Voice: Jarvis, Alan, Amy, Ryan,
+Cori), with Piper, on the processor, with no account. MP3, WAV, M4A, FLAC, Ogg or Opus.
+
+- **Asked for like this:** "read this to an mp3: ...", "make an audio file of this story in the Jarvis voice", "turn this text into
+  speech and save it as a wav", "I need a voiceover for this script". `wantsSpeechFile` decides. A file is the point:
+  "read this aloud" is what the screen already does with a reply, and an audio file that is named ("convert song.wav to mp3") is the
+  converter's. The two are told apart in both directions, so neither is offered to a request for the other.
+- **The text:** the model writes the whole text to be heard. It is refused with the reason if it has a note in brackets in it
+  ("[insert the rest here]", which a voice would read out), a marker of a shortened view, or is more than 12,000 letters (about
+  thirteen minutes). It is cleaned the way a reply is before it is spoken (no asterisks or link addresses; a list is read item by
+  item), cut at paragraphs, then sentences, then commas into pieces of at most 1,500 letters, spoken a piece at a time, and joined
+  with a breath between pieces and a longer pause between paragraphs.
+- **The voice:** by name, id or the start of either. A voice that is not installed is said, with the ones that are - never swapped
+  for another without a word - and a vague one ("en_GB") asks which. `rate` is 0.5 to 2, 1 being the voice's own pace, applied
+  inside the voice so the pitch does not move.
+- **Where it goes:** the documents folder, or where the user said, with the same words and rules as the other file tools. Named for
+  the title or the first six words, never replacing a file.
+- **Checked before it is reported:** a WAV is written and read back: is it a WAV, is it as long as the pieces and pauses add up
+  to, and is there any sound in it. A voice that made silence is a failure and nothing is written. Any other format is made from the
+  WAV by the converter, which reads its own file back. A reading far shorter or longer than its text could be is kept with a note to
+  listen to it, and is not called checked. A file that is not what was made is removed.
+- **Limits:** one voice to a file, English voices only (those installed), no SSML or pronunciation control, no reading a document
+  by name (the model reads it and passes the text). It has been run for real with the installed voices and the real ffmpeg; an MP3 or
+  other format needs ffmpeg, and without it a WAV is made and another format is refused in words.
+
 ## Opening what it made
 
 A reply that made a file shows it as a card with **Open** (in the program it belongs
@@ -274,6 +301,10 @@ in view, and shows the words of a PDF, Word or PowerPoint file in its preview.
 
 ## Tests
 
+For reading text into audio: `speech-file-maker.test.ts` (cutting the text, choosing a voice, WAV files, every way it can go wrong against
+stand-ins for the voice and the converter, and real speech with the installed voices and the real ffmpeg - skipped where there are none),
+`wants-speech-file.test.ts` (which requests it is offered to, and that the converter and the voice are never offered for each other's) and
+`speak-to-file-tool.test.ts` (offered and withheld, refusals, where files go, and through the chat loop).
 For converting audio and video: `media-converter.test.ts` (formats and times read, the exact ffmpeg arguments, what ffmpeg says about a file read,
 every way a conversion can go wrong against a stand-in for ffmpeg, and real conversions with the real ffmpeg - skipped where there is none),
 `wants-media-converted.test.ts` (which requests it is offered to) and `convert-media-tool.test.ts` (offered and withheld, refusals, where files go,

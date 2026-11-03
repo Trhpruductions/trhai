@@ -17,6 +17,7 @@ import { musicVideoStatus, startMusicVideo } from "./musicVideoJob.js";
 import { describeMadeDocument, documentsFolder, makeDocument, parseDocumentFormats } from "./documentMaker.js";
 import { describeMadePresentation, makePresentation, parsePresentationFormats } from "./presentationMaker.js";
 import { convertMedia, describeMadeMedia, mediaFormatList, parseClock, parseMediaFormat, parseQuality } from "./mediaConverter.js";
+import { bracketedNoteIn, describeMadeSpeech, makeSpeechFile, speechFormats, type SpeechFormat } from "./speechFileMaker.js";
 import { describeMadeSpreadsheet, makeSpreadsheet, parseSpreadsheetFormats } from "./spreadsheetMaker.js";
 import { expandKnownFolder } from "./knownFolders.js";
 import { noteMadeFiles } from "./madeFiles.js";
@@ -881,6 +882,37 @@ export const toolDefinitions: ToolDefinition[] = [
       }
     }
   },
+  {
+    type: "function",
+    function: {
+      name: "speak_to_file",
+      description:
+        "Read TEXT aloud into a new AUDIO FILE - an MP3, WAV, M4A, FLAC, Ogg or Opus - in one of the voices on this PC, "
+        + "and save it. Use this when the user asks for text read out into an audio file, a voiceover, narration, or an "
+        + "audio version of something; replies are already read aloud on screen when the user has that on, so this is only "
+        + "for a FILE. Write the WHOLE text to be heard yourself in text, as the words to be spoken - no headings about "
+        + "it, no notes to the user, nothing in [brackets] - up to about 12,000 letters. voice is one of the voices "
+        + "installed here, by name (as in Settings, Voice); left out, the usual one. rate is 0.5 to 2, 1 being the voice's "
+        + "own pace. It makes a new file every time and never replaces one, reads it back and checks its length and that "
+        + "there is sound in it, and says where the file is - give the user that. For a song or a recording that already "
+        + "exists, use convert_media.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "All of the text to be spoken, written out in full." },
+          voice: { type: "string", description: "Only if the user named one: the voice's name, such as Jarvis. Left out, the usual voice." },
+          format: { type: "string", description: `${speechFormats.join(", ")}. Left out, mp3 when ffmpeg is installed, otherwise wav.` },
+          rate: { type: "number", description: "Speaking speed from 0.5 to 2; 1 is the voice's own. Left out, 1." },
+          title: { type: "string", description: "What to call the file. If left out, the first words of the text are used." },
+          folder: {
+            type: "string",
+            description: "Only if the user said where: a folder in the workspace, or Desktop, Downloads or Documents on this PC, or a full path (these need machine access)."
+          }
+        },
+        required: ["text"]
+      }
+    }
+  },
   // The app has a scheduler. The assistant could not reach it.
   //
   // Asked "remind me every day at 9am to check the build", it called no tool
@@ -1225,7 +1257,7 @@ const scaffoldingTools = new Set(["build_app", "plan_app"]);
  * the port" is an ordinary thing to ask.
  */
 const machineChangingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "plan_app", "run_command", "run_script", "run_app"
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "speak_to_file", "plan_app", "run_command", "run_script", "run_app"
 ]);
 
 /**
@@ -1285,7 +1317,7 @@ const dateTools = new Set(["days_between", "shift_date"]);
  * A question does not write files, documents or apps, though.
  */
 const writingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "plan_app",
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "speak_to_file", "plan_app",
   "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule"
 ]);
 
@@ -1326,6 +1358,8 @@ const spreadsheetTools = new Set(["make_spreadsheet"]);
 const presentationTools = new Set(["make_presentation"]);
 /** Offered only when the request asks to convert, trim or pull the sound out of an audio or video file; see wantsMediaConverted. */
 const mediaTools = new Set(["convert_media"]);
+/** Offered only when the request asks for text to be read out into an audio file; see wantsSpeechFile. */
+const speechFileTools = new Set(["speak_to_file"]);
 /**
  * The knowledge-base writers, withheld from a request that only reads unless
  * it asks for something to be kept. machineChangingTools already stops a read
@@ -1376,7 +1410,7 @@ export function availableTools(
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
     schedules?: boolean; video?: boolean; musicVideo?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
     messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean; fileMaking?: boolean; spreadsheets?: boolean;
-    presentations?: boolean; media?: boolean;
+    presentations?: boolean; media?: boolean; speech?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1406,6 +1440,7 @@ export function availableTools(
   const allowSpreadsheets = options.spreadsheets ?? true;
   const allowPresentations = options.presentations ?? true;
   const allowMedia = options.media ?? true;
+  const allowSpeech = options.speech ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1449,6 +1484,8 @@ export function availableTools(
     if (!allowPresentations && presentationTools.has(name)) return false;
     // Only when the request asks to convert or trim an audio or video file; see wantsMediaConverted.
     if (!allowMedia && mediaTools.has(name)) return false;
+    // Only when the request asks for text to be read out into an audio file; see wantsSpeechFile.
+    if (!allowSpeech && speechFileTools.has(name)) return false;
     return true;
   }).sort((a, b) => (offerOrder.get(a.function.name) ?? 0) - (offerOrder.get(b.function.name) ?? 0));
 }
@@ -3337,6 +3374,42 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
 
       noteMadeFiles(context.sessionId, [shownPath(made.file.path)].filter((shown) => !path.isAbsolute(shown)));
       return { ok: true, content: describeMadeMedia(made, shownPath), path: shownPath(made.file.path) };
+    }
+
+    case "speak_to_file": {
+      const text = typeof call.arguments.text === "string" ? call.arguments.text : null;
+      if (!text?.trim()) return { ok: false, content: "speak_to_file needs the whole text to be read out, written in text. Nothing was made." };
+      const placeholder = placeholderIn("speech.txt", text);
+      if (placeholder) return { ok: false, content: `${placeholder} Nothing was made.` };
+      const shortened = elisionIn(text);
+      if (shortened) return { ok: false, content: `This has ${shortened} in it, so it is not the whole text. Write every word out. Nothing was made.` };
+      const bracketed = bracketedNoteIn(text);
+      if (bracketed) return { ok: false, content: `This has ${bracketed} in it, which would be spoken aloud as words. Write the words themselves. Nothing was made.` };
+
+      const target = madeFileTarget(call.arguments, context, speechFormats.join("|"));
+      if (!target.ok) return { ok: false, content: `${target.reason} Nothing was made.` };
+      let format: SpeechFormat | undefined;
+      if (target.format !== undefined && target.format !== null && target.format !== "") {
+        const parsed = parseMediaFormat(target.format);
+        if (!parsed.ok || !(speechFormats as readonly string[]).includes(parsed.format)) {
+          return { ok: false, content: `Speech can be made as ${speechFormats.join(", ")}. Nothing was made.` };
+        }
+        format = parsed.format as SpeechFormat;
+      }
+      const rate = typeof call.arguments.rate === "number" ? call.arguments.rate
+        : typeof call.arguments.rate === "string" && call.arguments.rate.trim() ? Number(call.arguments.rate) : undefined;
+      if (rate !== undefined && !(Number.isFinite(rate) && rate >= 0.5 && rate <= 2)) {
+        return { ok: false, content: "rate must be from 0.5 to 2, 1 being the voice's own pace. Nothing was made." };
+      }
+
+      const made = await makeSpeechFile(
+        { text, voice: requireString(call.arguments.voice) ?? undefined, format, rate, title: requireString(call.arguments.title) ?? target.title ?? undefined },
+        target.directory
+      );
+      if (!made.ok) return { ok: false, content: describeMadeSpeech(made) };
+
+      noteMadeFiles(context.sessionId, [shownPath(made.file.path)].filter((shown) => !path.isAbsolute(shown)));
+      return { ok: true, content: describeMadeSpeech(made, shownPath), path: shownPath(made.file.path) };
     }
 
     case "edit_file": {
