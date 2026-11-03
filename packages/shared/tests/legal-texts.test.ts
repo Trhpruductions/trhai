@@ -23,7 +23,7 @@ const fingerprints: Record<string, string> = {
   "privacy@2026-11-01": "f606035ec079a01b",
   "terms@2026-11-01": "a530f5dc055d6b67",
   "refunds@2026-11-01": "2f456abbf38cbf37",
-  "storage@2026-11-01": "7e32e3e81af145fd",
+  "storage@2026-11-02": "7271483490607e74",
   "ai@2026-11-01": "3704b3d9ee920e55"
 };
 

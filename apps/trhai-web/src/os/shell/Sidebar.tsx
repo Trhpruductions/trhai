@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { Icon } from "../ui/Icon";
 import { useNav } from "../state/nav";
 import { useSystem } from "../state/system";
@@ -23,7 +24,8 @@ export function Sidebar() {
   const { lastReply, replyFromThisRun, core } = useAssistantState();
   const { failing } = useHealth();
   const [moreOpen, setMoreOpen] = useState(false);
-  const sheet = useRef<HTMLDivElement>(null);
+  // The sheet is a dialog: the keyboard stays in it, Escape closes it, and the page behind is inert.
+  const sheet = useDialogFocus<HTMLDivElement>(moreOpen, () => setMoreOpen(false));
 
   // A reply that landed while you were elsewhere marks Chat until you look.
   const [seenReplyId, setSeenReplyId] = useState<string | null>(null);
@@ -37,7 +39,7 @@ export function Sidebar() {
     if (!moreOpen) return;
     const current = sheet.current?.querySelector<HTMLButtonElement>("[aria-current=page]") ?? sheet.current?.querySelector<HTMLButtonElement>("button");
     current?.focus();
-  }, [moreOpen]);
+  }, [moreOpen, sheet]);
 
   const openTodos = tasks?.filter((task) => !task.done).length ?? 0;
   const badges: Partial<Record<ViewId, { count?: number; tone: "accent" | "warn" | "danger" }>> = {
@@ -143,7 +145,6 @@ export function Sidebar() {
             role="dialog"
             aria-label="All workspaces"
             onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => { if (event.key === "Escape") setMoreOpen(false); }}
           >
             {views.map((item) => {
               const badge = badges[item.id];

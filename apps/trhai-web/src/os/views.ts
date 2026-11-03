@@ -121,3 +121,8 @@ export function detailFromHash(hash: string): string | null {
 export function hashFor(view: ViewId, detail?: string | null): string {
   return detail ? `${view}/${encodeURIComponent(detail)}` : view;
 }
+
+/** The browser tab's title for a view: the workspace first, the product alone on Home. */
+export function viewTitle(id: ViewId): string {
+  return id === "home" ? "TRH AI" : `${viewById(id).label} · TRH AI`;
+}

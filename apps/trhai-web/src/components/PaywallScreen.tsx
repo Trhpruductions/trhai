@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useDialogFocus } from "../hooks/useDialogFocus";
 import { Icon } from "../os/ui/Icon";
 import { describeLicense, licenseEvent, readLicense, type LicenseStatus } from "../lib/license";
 import { useEntitlements } from "../hooks/useEntitlements";
@@ -57,6 +58,8 @@ export function PaywallScreen() {
   // the trial of the PC it runs on.
   const exempt = entitlements?.exempt === true;
   const locked = entitlements?.authority ? entitlements.lockReason !== null && !exempt : status?.locked === true && !exempt;
+  // Escape is "Not now", as the button is; a refused request brings the screen back as before.
+  const dialog = useDialogFocus<HTMLElement>(status !== null && locked && !hidden, () => setHidden(true));
   if (!status || !locked || hidden) return null;
 
   // On a copy that holds its own accounts it is the account's access that has run out, not this
@@ -64,7 +67,7 @@ export function PaywallScreen() {
   if (entitlements?.authority) {
     return (
       <div className="paywall-scrim" role="presentation">
-        <section className="paywall" role="dialog" aria-modal="true" aria-labelledby="paywall-title">
+        <section ref={dialog} className="paywall" role="dialog" aria-modal="true" aria-labelledby="paywall-title">
           <span className="os-label">Access ended</span>
           <h2 id="paywall-title">{entitlements.lockReason === "trial_ended" ? "Your free trial of TRH AI has ended." : "Your access to TRH AI has run out."}</h2>
           <p className="paywall-lead">{describeAccess(entitlements)}</p>
@@ -80,7 +83,7 @@ export function PaywallScreen() {
   const expiredLicense = status.state === "license_expired";
   return (
     <div className="paywall-scrim" role="presentation">
-      <section className="paywall" role="dialog" aria-modal="true" aria-labelledby="paywall-title">
+      <section ref={dialog} className="paywall" role="dialog" aria-modal="true" aria-labelledby="paywall-title">
         <span className="os-label">{expiredLicense ? "License expired" : "Trial ended"}</span>
         <h2 id="paywall-title">{expiredLicense ? "Your TRH AI license has run out." : "Your free trial of TRH AI has ended."}</h2>
         <p className="paywall-lead">{describeLicense(status)}</p>

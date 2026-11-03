@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Keyboard
 import { Icon, type IconName } from "../ui/Icon";
 import { useAssistantState, useLevels, useVoice } from "../state/assistant";
 import { useNav } from "../state/nav";
+import { useMenuKeys } from "../../hooks/useMenuKeys";
+import { singleKeyShortcutOn } from "../../lib/shortcuts";
 import { views } from "../views";
 
 // One command bar for the whole system: ask a question, give an order, speak,
@@ -19,12 +21,16 @@ export function CommandBar() {
   const { go, setPaletteOpen } = useNav();
   const field = useRef<HTMLTextAreaElement>(null);
   const [plusOpen, setPlusOpen] = useState(false);
+  const plusMenu = useMenuKeys<HTMLDivElement>(plusOpen, () => setPlusOpen(false));
   const [selected, setSelected] = useState(0);
 
-  // "/" focuses the bar from anywhere that is not already a text field.
+  // "/" focuses the bar from anywhere that is not already a text field - unless it was
+  // turned off under Settings, Keyboard (shortcuts.ts: a single printable key is a hazard
+  // for anyone whose speech recognition or hands produce stray keys).
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (!singleKeyShortcutOn()) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
       event.preventDefault();
@@ -118,7 +124,7 @@ export function CommandBar() {
             {attachments.map((attachment) => (
               <figure key={attachment.id} className="os-attachment">
                 {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL, not an optimisable asset */}
-                <img src={attachment.previewUrl} alt={attachment.name} />
+                <img src={attachment.previewUrl} alt={`Attached: ${attachment.name}`} />
                 <button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => assistant.removeAttachment(attachment.id)}>
                   <Icon name="close" size={12} />
                 </button>
@@ -142,7 +148,7 @@ export function CommandBar() {
               <Icon name="plus" size={18} />
             </button>
             {plusOpen ? (
-              <div className="os-menu os-plus-menu" role="menu" onClick={() => setPlusOpen(false)}>
+              <div ref={plusMenu} className="os-menu os-plus-menu" role="menu" onClick={() => setPlusOpen(false)}>
                 <button type="button" role="menuitem" onClick={() => assistant.openImagePicker()}><Icon name="image" size={16} />Attach an image or a song</button>
                 <button type="button" role="menuitem" disabled={!assistant.screenShareable} onClick={() => assistant.attachScreen()}>
                   <Icon name="screen" size={16} />Share the screen

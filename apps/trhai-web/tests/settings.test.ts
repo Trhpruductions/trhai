@@ -20,6 +20,7 @@ test("a search finds a setting by what people call it, not only by its section's
   assert.deepEqual(filterSections("buy").map((section) => section.id), ["billing"]);
   assert.deepEqual(filterSections("release notes").map((section) => section.id), ["updates"]);
   assert.deepEqual(filterSections("gguf").map((section) => section.id), ["models"]);
+  assert.deepEqual(filterSections("shortcuts").map((section) => section.id), ["keyboard"]);
   assert.equal(filterSections("").length, sections.length);
   assert.deepEqual(filterSections("nothing like this"), []);
 });

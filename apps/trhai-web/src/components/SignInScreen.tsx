@@ -329,6 +329,7 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
                 <button type="button" className="gate-ghost" onClick={() => void copyCodes()}>
                   <Icon name={copied ? "check" : "copy"} />{copied ? "Copied" : "Copy all"}
                 </button>
+                <span className="sr-only" role="status">{copied ? "The recovery codes are on the clipboard." : ""}</span>
                 <button type="button" className="gate-ghost" onClick={downloadCodes}>
                   <Icon name="download" />Download .txt
                 </button>

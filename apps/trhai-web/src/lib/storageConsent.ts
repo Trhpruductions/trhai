@@ -25,6 +25,8 @@ export const essentialStorageKeys = [
   "trhai.setup.dismissed.v1",
   "trhai.setup.tools-offered.v1",
   "trhai.rendering.dismissed.v1",
+  // The single-key shortcut switch (shortcuts.ts): an instruction, kept whatever was answered below.
+  "trhai.keys.single.v1",
   storageConsentKey
 ] as const;
 

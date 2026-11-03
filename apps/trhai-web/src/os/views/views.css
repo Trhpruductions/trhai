@@ -171,7 +171,7 @@ select.os-input { color-scheme: dark; }
 /* --------------------------------------------------------------- browser */
 
 .os-browser-bar { display: flex; align-items: center; gap: 4px; padding: 6px; }
-.os-browser-input { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--os-2); height: 36px; padding: 0 var(--os-3); border-radius: var(--os-r-md); border: 1px solid var(--os-line-2); background: rgba(5, 9, 18, 0.7); color: var(--os-text-3); }
+.os-browser-input { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--os-2); height: 36px; padding: 0 var(--os-3); border-radius: var(--os-r-md); border: 1px solid var(--os-line-field); background: rgba(5, 9, 18, 0.7); color: var(--os-text-3); }
 .os-browser-input:focus-within { border-color: var(--os-accent-line); box-shadow: 0 0 0 3px var(--os-accent-soft); }
 .os-browser-input input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--os-text); font: var(--os-fs-sm)/1 var(--os-font-body); outline: none; }
 .os-browser-pad { padding: var(--os-4); margin: 0; }
@@ -417,7 +417,7 @@ select.os-input { color-scheme: dark; }
   margin-left: 4px;
   padding: 0;
   border-radius: var(--os-r-pill);
-  border: 1px solid var(--os-line-3);
+  border: 1px solid var(--os-line-field);
   background: rgba(5, 9, 18, 0.7);
   cursor: pointer;
   transition: background var(--os-fast) var(--os-ease), border-color var(--os-fast) var(--os-ease);
@@ -566,7 +566,7 @@ select.os-input { color-scheme: dark; }
   height: 34px;
   padding: 0 4px 0 var(--os-3);
   border-radius: var(--os-r-md);
-  border: 1px solid var(--os-line-2);
+  border: 1px solid var(--os-line-field);
   background: rgba(5, 9, 18, 0.6);
   color: var(--os-text-3);
 }

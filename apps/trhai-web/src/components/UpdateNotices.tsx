@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useDialogFocus } from "../hooks/useDialogFocus";
 import { Icon } from "../os/ui/Icon";
 import {
   dismissUpdate, markVersionSeen, noticeToShow, readDismissedUpdate, readSeenVersion, readUpdates,
@@ -24,15 +25,12 @@ function store(): Storage | null {
 }
 
 export function WhatsNewDialog({ note, onClose }: { note: ReleaseNote; onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Modal: the keyboard stays in it, Escape is "Got it", and the page behind is inert until then.
+  const dialog = useDialogFocus<HTMLElement>(true, onClose);
 
   return (
     <div className="paywall-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="paywall whatsnew" role="dialog" aria-modal="true" aria-labelledby="whatsnew-title">
+      <section ref={dialog} className="paywall whatsnew" role="dialog" aria-modal="true" aria-labelledby="whatsnew-title">
         <span className="os-label">What&rsquo;s new in v{note.version}</span>
         <h2 id="whatsnew-title">{note.title}</h2>
         <ul className="whatsnew-list">

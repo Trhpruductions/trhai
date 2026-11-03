@@ -7,7 +7,7 @@ business supplies in `packages/shared/src/legalFacts.ts`. Rebuild the shared pac
 - [Privacy Policy](privacy.md) ([page](privacy.html)) - version 2026-11-01
 - [Terms of Service](terms.md) ([page](terms.html)) - version 2026-11-01
 - [Refund Policy](refunds.md) ([page](refunds.html)) - version 2026-11-01
-- [Cookies and browser storage](storage.md) ([page](storage.html)) - version 2026-11-01
+- [Cookies and browser storage](storage.md) ([page](storage.html)) - version 2026-11-02
 - [How TRH AI uses AI](ai.md) ([page](ai.html)) - version 2026-11-01
 - [Business information](business.md) ([page](business.html))
 - [Services TRH AI can contact, and the software it is made of](services.md) ([page](services.html))
