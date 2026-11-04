@@ -28,6 +28,7 @@ export type Telemetry = {
 export type Identity = { username: string; hostname: string; platform: string };
 export type ScheduleView = {
   id: string; name?: string; enabled: boolean; cadenceLabel?: string; actionLabel?: string;
+  cadence?: { kind: "daily" | "interval" | "once"; at?: string };
   nextDueAt?: string; lastRunAt?: string | null; lastStatus?: string | null; lastDetail?: string | null; createdAt?: string;
   /** Running in the API right now. */
   running?: boolean;

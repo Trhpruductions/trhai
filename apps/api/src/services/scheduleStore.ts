@@ -24,7 +24,14 @@ export type Cadence =
    * every day, as they always did.
    */
   | { kind: "daily"; minuteOfDay: number; weekdaysOnly?: boolean }
-  | { kind: "interval"; minutes: number };
+  | { kind: "interval"; minutes: number }
+  /**
+   * Once, at a date and time - "remind me at three to call the bank". `at` is the
+   * instant, as ISO. After it has fired, or was missed, the schedule is switched off
+   * and stays on the list, so it is seen to have happened; it cannot be turned on
+   * again once its moment has passed.
+   */
+  | { kind: "once"; at: string };
 
 export type ScheduleRunStatus = "ok" | "failed" | "missed" | "interrupted";
 
@@ -116,11 +123,19 @@ const startedDetail = "Started. If this is still showing, the run did not finish
  */
 export const dailyGraceMs = 10 * 60 * 1000;
 
+/**
+ * How late a one-time schedule may fire and still be worth firing: two hours.
+ * "Call the bank at three" at a quarter past is still the reminder; the next
+ * morning it is a reproach. Past that it is recorded as missed - and the
+ * schedule is over either way.
+ */
+export const onceGraceMs = 2 * 60 * 60 * 1000;
+
 const minutesPerDay = 24 * 60;
 
 export function isCadence(value: unknown): value is Cadence {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as { kind?: unknown; minuteOfDay?: unknown; minutes?: unknown; weekdaysOnly?: unknown };
+  const candidate = value as { kind?: unknown; minuteOfDay?: unknown; minutes?: unknown; weekdaysOnly?: unknown; at?: unknown };
   if (candidate.kind === "daily") {
     return typeof candidate.minuteOfDay === "number"
       && Number.isInteger(candidate.minuteOfDay)
@@ -136,22 +151,38 @@ export function isCadence(value: unknown): value is Cadence {
       && candidate.minutes >= 1
       && candidate.minutes <= minutesPerDay;
   }
+  if (candidate.kind === "once") {
+    // A real instant. Whether it has passed is addSchedule's question, not the shape's.
+    return typeof candidate.at === "string" && !Number.isNaN(Date.parse(candidate.at));
+  }
   return false;
 }
 
-/** "Every day at 9:00 AM", "Every 30 minutes" — the words the interface shows. */
+const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "3:00 PM" - the clock the interface shows. */
+function clockWords(hours24: number, minutes: number): string {
+  const suffix = hours24 < 12 ? "AM" : "PM";
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+  return `${hours12}:${String(minutes).padStart(2, "0")} ${suffix}`;
+}
+
+/** "Wed 4 Nov 2026 at 3:00 PM", in local time. */
+export function calendarWords(date: Date): string {
+  return `${dayNames[date.getDay()]} ${date.getDate()} ${monthNames[date.getMonth()]} ${date.getFullYear()} at ${clockWords(date.getHours(), date.getMinutes())}`;
+}
+
+/** "Every day at 9:00 AM", "Every 30 minutes", "Once, on Wed 4 Nov 2026 at 3:00 PM" — the words the interface shows. */
 export function describeCadence(cadence: Cadence): string {
+  if (cadence.kind === "once") return `Once, on ${calendarWords(new Date(cadence.at))}`;
   if (cadence.kind === "interval") {
     if (cadence.minutes === 60) return "Every hour";
     if (cadence.minutes % 60 === 0) return `Every ${cadence.minutes / 60} hours`;
     return `Every ${cadence.minutes} minute${cadence.minutes === 1 ? "" : "s"}`;
   }
 
-  const hours24 = Math.floor(cadence.minuteOfDay / 60);
-  const minutes = cadence.minuteOfDay % 60;
-  const suffix = hours24 < 12 ? "AM" : "PM";
-  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
-  const when = `${hours12}:${String(minutes).padStart(2, "0")} ${suffix}`;
+  const when = clockWords(Math.floor(cadence.minuteOfDay / 60), cadence.minuteOfDay % 60);
   return cadence.weekdaysOnly ? `Every weekday at ${when}` : `Every day at ${when}`;
 }
 
@@ -162,6 +193,9 @@ export function describeCadence(cadence: Cadence): string {
  * return the moment that just fired and loop.
  */
 export function nextDueAfter(cadence: Cadence, from: Date): Date {
+  // Once: its own moment, whenever that is. After it has fired the schedule is off
+  // (claimRun, recordRun), so it is never asked for a next time.
+  if (cadence.kind === "once") return new Date(cadence.at);
   if (cadence.kind === "interval") {
     return new Date(from.getTime() + cadence.minutes * 60_000);
   }
@@ -200,6 +234,9 @@ export function dueVerdict(schedule: Schedule, now: Date): DueVerdict {
   if (Number.isNaN(due) || now.getTime() < due) return "waiting";
 
   if (schedule.cadence.kind === "daily" && now.getTime() - due > dailyGraceMs) {
+    return "missed";
+  }
+  if (schedule.cadence.kind === "once" && now.getTime() - due > onceGraceMs) {
     return "missed";
   }
   return "run";
@@ -337,6 +374,9 @@ export function addSchedule(
       : null;
 
   if (!name || !action || !isCadence(input.cadence)) return null;
+  // A one-time schedule for a moment that has passed would fire at once, or be missed at
+  // once; neither is what was asked for.
+  if (input.cadence.kind === "once" && new Date(input.cadence.at).getTime() <= (input.now ?? new Date()).getTime()) return null;
   if (schedules.length >= maxSchedules) return null;
 
   const prompt = action.kind === "ask" ? action.prompt.slice(0, maxPromptLength)
@@ -366,6 +406,8 @@ export function setScheduleEnabled(id: string, enabled: boolean, now = new Date(
   const target = schedules.find((entry) => entry.id === id);
   if (!target) return null;
 
+  // A one-time schedule whose moment has passed is over: it cannot be turned on again.
+  if (enabled && target.cadence.kind === "once" && new Date(target.cadence.at).getTime() <= now.getTime()) return { ...target };
   target.enabled = enabled;
   // Re-enabling starts the clock again from now rather than firing instantly
   // for a due time that passed while it was off.
@@ -423,6 +465,8 @@ export function claimRun(id: string, now = new Date()): Schedule | null {
   target.lastStatus = "interrupted";
   target.lastDetail = startedDetail;
   target.nextDueAt = nextDueAfter(target.cadence, now).toISOString();
+  // A one-time schedule has had its one time: off from here, kept on the list so it is seen to have happened.
+  if (target.cadence.kind === "once") target.enabled = false;
   // Logged as interrupted for the same reason: recordRun turns it into the
   // real outcome, and a run that never reports back stays saying so.
   logRun(id, { at: now.toISOString(), status: "interrupted", detail: startedDetail });
@@ -462,6 +506,7 @@ export function recordRun(
   target.lastStatus = status;
   target.lastDetail = detail.trim().slice(0, maxDetailLength) || null;
   target.nextDueAt = nextDueAfter(target.cadence, now).toISOString();
+  if (target.cadence.kind === "once") target.enabled = false;
   saveToDisk();
   return { ...target };
 }
