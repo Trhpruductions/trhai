@@ -488,6 +488,31 @@ the words to show without asking a model; the time of day comes from the user's 
 where they said it, as for a daily one. The Tasks screen's form has a "Once" option with a
 date and time, and shows a fired one as "Ran once". Tests: `schedule-once.test.ts`.
 
+## The to-do list from the chat (2026-11-03)
+
+The Home screen has said "ask TRH AI to add a task" since the Tasks list existed, and
+nothing answered it: the list had its routes (`/v1/tasks`) and its screen, and the assistant
+had no tool for it, so the request got a reply and no task. Four tools now (`todoTools.ts`,
+handlers in `agentTools.ts`):
+
+- `list_tasks` - numbered, the done ones ticked. The number is the place in the whole
+  list, so it holds when one is ticked off.
+- `add_task` - one task, or several one per line, each one short line in the user's words.
+  One already open on the list is said, not added twice (and said as a success, so the
+  model does not reword it until one gets past, as the schedule tool taught).
+- `complete_task` - by number or by words; exact words first, then the one task that
+  contains them. Several that match are handed back to choose between, never guessed.
+  `done: false` opens a task again.
+- `remove_task` - for good; level 3, so it asks first.
+
+Offered when the request is about the list (`wantsTodo` in `actionIntent.ts`: "add milk
+to my list", "remind me to call the bank", "what's left to do?", "tick off the dentist"),
+and not for a task app, the Task Manager, the system's scheduled tasks or a question about
+what a to-do list is. A reminder with a repeat in it is a schedule, not a task. Scoped to
+the session or account exactly as the screen is (`todoAccessFor` in the server's tool
+context; without a session each tool says there is no list). Tests: `todo-tools.test.ts`,
+`wants-todo.test.ts`.
+
 ## How to verify anything you change
 
 ```

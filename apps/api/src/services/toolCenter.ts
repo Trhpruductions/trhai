@@ -26,7 +26,7 @@ import { findVisionModel, visionModelName } from "./vision.js";
 // them, rather than repeated on every tool.
 
 export type ToolArea =
-  | "Memory" | "Documents" | "Files" | "Apps" | "Web" | "Schedules" | "Time and maths" | "Media" | "Messages" | "This PC";
+  | "Memory" | "Documents" | "Files" | "Apps" | "Web" | "Schedules" | "Tasks" | "Time and maths" | "Media" | "Messages" | "This PC";
 
 export type ToolReadiness = {
   state: "ready" | "off" | "needs-setup";
@@ -84,6 +84,10 @@ export const toolCatalogue: Record<string, CatalogueEntry> = {
   fetch_url: { area: "Web", title: "Read a web page", summary: "Reads the text of a web page." },
   list_schedules: { area: "Schedules", title: "List schedules", summary: "Lists what is scheduled, how often it runs and whether it is on." },
   add_schedule: { area: "Schedules", title: "Add a schedule", summary: "Sets up a question or a reminder to run every day, or every so many minutes." },
+  list_tasks: { area: "Tasks", title: "List tasks", summary: "Reads the to-do list on the Tasks screen: what is open and what is done." },
+  add_task: { area: "Tasks", title: "Add a task", summary: "Adds a task, or several, to the to-do list, in your words." },
+  complete_task: { area: "Tasks", title: "Tick a task off", summary: "Marks a task on the list done, or opens it again." },
+  remove_task: { area: "Tasks", title: "Remove a task", summary: "Takes a task off the list for good. Asks first." },
   calculate: { area: "Time and maths", title: "Calculate", summary: "Works out arithmetic exactly, rather than guessing." },
   current_datetime: { area: "Time and maths", title: "Date and time", summary: "Reads today's date and the time on this PC." },
   days_between: { area: "Time and maths", title: "Days between", summary: "Counts the days between two dates." },
@@ -181,6 +185,9 @@ function readinessOf(name: string, probe: ToolProbe): ToolReadiness {
     return ready(probe.emailAccount
       ? `Sends from ${probe.emailAccount}.`
       : "Opens your mail app. Add your account in Settings to send directly.");
+  }
+  if (name === "list_tasks" || name === "add_task" || name === "complete_task" || name === "remove_task") {
+    return ready("Kept on this PC with your conversations, as the Tasks screen keeps them.");
   }
   if (name === "web_search" || name === "fetch_url") return ready("Needs the internet.");
   return ready();

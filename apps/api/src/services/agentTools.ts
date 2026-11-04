@@ -60,6 +60,8 @@ import {
   addSchedule, calendarWords, describeAction, describeCadence, listSchedules, type Cadence
 } from "./scheduleStore.js";
 import { parseOnceTime } from "./onceTime.js";
+import type { TaskItem } from "./taskListStore.js";
+import { describeTasks, findTask, maxTaskLength, sameTask, type TaskScope, type TodoAccess } from "./todoTools.js";
 
 // What the assistant can actually do.
 //
@@ -156,6 +158,12 @@ export type ToolContext = {
   deleteDocument?: (id: string) => boolean;
   /** Pins or unpins a memory by id. Returns false when nothing changed. */
   pinMemory?: (id: string, pinned: boolean) => boolean;
+  /**
+   * The Tasks screen's list - the to-dos the person wrote down - scoped to them the way the
+   * screen is. Omitted without a session, and the tools say there is no list rather than
+   * pretend to keep one.
+   */
+  todo?: TodoAccess;
   /**
    * Earlier turns of this conversation, oldest first.
    *
@@ -963,6 +971,76 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "list_tasks",
+      description:
+        "The user's own to-do list, the one on the Tasks screen: every task, numbered, with the done ones ticked. "
+        + "Use it when the user asks what is on their list, what they have to do, or what is done - and before "
+        + "complete_task or remove_task when you do not know a task's number or exact words. Not the assistant's "
+        + "own running work, and not the schedules.",
+      parameters: {
+        type: "object",
+        properties: {
+          which: { type: "string", description: "open (what is left), done, or all (the default)." }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_task",
+      description:
+        "Add one or more tasks to the user's own to-do list, the one on the Tasks screen. Use it when the user asks "
+        + "to add, note or write down something to do, or asks to be reminded of something with no repeat in it - "
+        + "\"remind me to call the bank\" is a task; \"every day at 9\" is add_schedule. Each task is its own short line "
+        + "in the user's words, never a paragraph. It says what was added; tell the user that.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "The task, as one short line - or several tasks, one per line." }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "complete_task",
+      description:
+        "Tick a task off the user's to-do list as done - or, with done false, open it again. Name the task by its number "
+        + "in the list (from list_tasks) or by its words; when several match it says which, so ask the user. Use it when "
+        + "the user says they did, finished or completed something on their list.",
+      parameters: {
+        type: "object",
+        properties: {
+          task: { type: "string", description: "The task's number in the list, or its words." },
+          done: { type: "boolean", description: "true to tick it off (the default), false to open it again." }
+        },
+        required: ["task"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "remove_task",
+      description:
+        "Take a task off the user's to-do list for good. Only when the user asks for it to be removed, deleted or "
+        + "cleared - finishing a task is complete_task. Name it by its number in the list or by its words.",
+      parameters: {
+        type: "object",
+        properties: {
+          task: { type: "string", description: "The task's number in the list, or its words." }
+        },
+        required: ["task"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "current_datetime",
       description:
         "The current date and time on the user's machine. Use this for anything involving today, "
@@ -1326,7 +1404,8 @@ const dateTools = new Set(["days_between", "shift_date"]);
  */
 const writingTools = new Set([
   "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "speak_to_file", "plan_app",
-  "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule"
+  "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule",
+  "add_task", "complete_task", "remove_task"
 ]);
 
 /**
@@ -1349,6 +1428,8 @@ const memoryWritingTools = new Set(["remember"]);
 const clockTools = new Set(["shift_time"]);
 /** Offered only when the request is about something recurring; see mentionsScheduling. */
 const scheduleTools = new Set(["add_schedule"]);
+/** Offered only when the request is about the user's own to-do list; see wantsTodo. */
+const taskTools = new Set(["list_tasks", "add_task", "complete_task", "remove_task"]);
 /** Offered only when the request is about a video; see mentionsVideo. */
 const videoTools = new Set(["make_video"]);
 /** Offered only when the request is about a music video; see mentionsMusicVideo. Then make_video is withheld: it makes narrated slides, not a video of a song. */
@@ -1418,7 +1499,7 @@ export function availableTools(
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
     schedules?: boolean; video?: boolean; musicVideo?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
     messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean; fileMaking?: boolean; spreadsheets?: boolean;
-    presentations?: boolean; media?: boolean; speech?: boolean;
+    presentations?: boolean; media?: boolean; speech?: boolean; tasks?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1435,6 +1516,7 @@ export function availableTools(
   const allowFileWrites = options.files ?? true;
   const allowMemory = options.memory ?? true;
   const allowSchedules = options.schedules ?? true;
+  const allowTasks = options.tasks ?? true;
   const allowVideo = options.video ?? true;
   const allowMusicVideo = options.musicVideo ?? true;
   const allowDocumentWrites = options.documents ?? true;
@@ -1465,6 +1547,8 @@ export function availableTools(
     if (!allowWrites && writingTools.has(name)) return false;
     if (!allowMemory && memoryWritingTools.has(name)) return false;
     if (!allowSchedules && scheduleTools.has(name)) return false;
+    // The to-do list only when the request is about it; see wantsTodo.
+    if (!allowTasks && taskTools.has(name)) return false;
     if (!allowVideo && videoTools.has(name)) return false;
     if (!allowMusicVideo && musicVideoTools.has(name)) return false;
     // Asked for a music video, the narrated-slides tool is not the one wanted.
@@ -3517,6 +3601,76 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
       return { ok: true, content: lines.join("\n") };
     }
 
+    case "list_tasks": {
+      if (!context.todo) return { ok: false, content: "There is no task list here, so nothing could be listed." };
+      const which = requireString(call.arguments.which)?.toLowerCase();
+      const scope: TaskScope = which === "open" || which === "done" ? which : "all";
+      return { ok: true, content: describeTasks(context.todo.list(), scope) };
+    }
+    case "add_task": {
+      if (!context.todo) return { ok: false, content: "There is no task list here, so nothing was added." };
+      const several = Array.isArray(call.arguments.titles)
+        ? call.arguments.titles.filter((entry): entry is string => typeof entry === "string")
+        : [];
+      // One task, or several one per line; a list marker at the start of a line is not part of the task.
+      const typed = (requireString(call.arguments.title) ?? "").split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, ""));
+      const titles = [...several, ...typed].map((title) => title.trim()).filter(Boolean);
+      if (titles.length === 0) return { ok: false, content: "add_task needs the task in words, as title. Nothing was added." };
+      const tooLong = titles.find((title) => title.length > maxTaskLength);
+      if (tooLong) {
+        return { ok: false, content: `A task is one short line, at most ${maxTaskLength} letters; "${tooLong.slice(0, 40)}…" is longer. Nothing was added.` };
+      }
+      const existing = context.todo.list();
+      const added: TaskItem[] = [];
+      const already: string[] = [];
+      for (const title of titles) {
+        if ([...existing, ...added].some((task) => !task.done && sameTask(task.title, title))) {
+          already.push(title);
+          continue;
+        }
+        const task = context.todo.add(title);
+        if (task) added.push(task);
+      }
+      const lines: string[] = [];
+      if (added.length === 1) lines.push(`Added to your tasks: ${added[0].title}`);
+      else if (added.length > 1) lines.push(`Added ${added.length} tasks:\n${added.map((task) => `- ${task.title}`).join("\n")}`);
+      // Already there is a success with nothing left to do, not a refusal: refused, the
+      // model rewords the task until one gets past (the schedule tool learnt the same).
+      if (already.length > 0) lines.push(`Already on the list: ${already.join("; ")}`);
+      return { ok: true, content: lines.join("\n") };
+    }
+    case "complete_task":
+    case "remove_task": {
+      const removing = call.name === "remove_task";
+      if (!context.todo) return { ok: false, content: `There is no task list here, so nothing was ${removing ? "removed" : "changed"}.` };
+      const reference = requireString(call.arguments.task);
+      if (!reference) return { ok: false, content: `${call.name} needs the task's number in the list or its words. Nothing was changed.` };
+      const tasks = context.todo.list();
+      const found = findTask(tasks, reference);
+      if (found.kind === "none") {
+        return {
+          ok: false,
+          content: tasks.length === 0
+            ? "The task list is empty, so there is nothing to change."
+            : `No task matches "${reference}". The list:\n${describeTasks(tasks)}`
+        };
+      }
+      if (found.kind === "several") {
+        const choices = found.matches.map((match) => `${match.number}. ${match.task.title}`).join("\n");
+        return { ok: false, content: `"${reference}" could mean any of these - ask which, and name it by its number:\n${choices}` };
+      }
+      if (removing) {
+        return context.todo.remove(found.task.id)
+          ? { ok: true, content: `Removed from your tasks: ${found.task.title}` }
+          : { ok: false, content: "The task could not be removed, so it is still on the list." };
+      }
+      const done = call.arguments.done !== false && call.arguments.done !== "false";
+      if (found.task.done === done) return { ok: true, content: `${done ? "Already done" : "Already open"}: ${found.task.title}` };
+      const updated = context.todo.setDone(found.task.id, done);
+      return updated
+        ? { ok: true, content: `${done ? "Done" : "Open again"}: ${updated.title}` }
+        : { ok: false, content: "The task could not be changed, so it is as it was." };
+    }
     case "add_schedule": {
       const name = requireString(call.arguments.name);
       const reminder = requireString(call.arguments.reminder);

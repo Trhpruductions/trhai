@@ -76,6 +76,7 @@ import { setupStatusWithRequired, startRequiredSetup } from "./services/required
 import { getSystemCapabilities, toolsByLevel } from "./services/systemCapabilities.js";
 import { describeTools, probeTools } from "./services/toolCenter.js";
 import { addTask, listTasks, removeTask, setTaskDone } from "./services/taskListStore.js";
+import { todoAccessFor } from "./services/todoTools.js";
 import {
   clearPendingConfirmation,
   describePendingAction,
@@ -263,6 +264,8 @@ function buildAssistInput(
       ? (fact: string) => recordSingleMemory(sessionId, fact).status
       : undefined,
     forgetMemory: sessionId ? (id: string) => forgetMemory(sessionId, id) : undefined,
+    // The Tasks screen's list, for the to-do tools; nothing to reach without a session.
+    todo: sessionId ? todoAccessFor(sessionId) : undefined,
     forgottenFacts: sessionId ? listForgottenFacts(sessionId) : [],
     listMemories: sessionId ? () => listSessionMemories(sessionId) : undefined,
     forgetAllMemories: sessionId ? () => forgetAllMemories(sessionId) : undefined,
@@ -748,6 +751,8 @@ export function createApp(options: AppOptions = {}) {
           ? (fact: string) => recordSingleMemory(sessionId, fact).status
           : undefined,
         forgetMemory: sessionId ? (id: string) => forgetMemory(sessionId, id) : undefined,
+        // The Tasks screen's list, for the to-do tools; nothing to reach without a session.
+        todo: sessionId ? todoAccessFor(sessionId) : undefined,
         forgottenFacts: sessionId ? listForgottenFacts(sessionId) : [],
         listMemories: sessionId ? () => listSessionMemories(sessionId) : undefined,
         forgetAllMemories: sessionId ? () => forgetAllMemories(sessionId) : undefined,

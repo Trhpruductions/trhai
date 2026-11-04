@@ -1147,3 +1147,32 @@ function targetFor(kind: ActionKind, original: string, text: string, hasFileTarg
       return text.replace(/^(?:build|make|create|generate|write)\s+(?:me\s+)?(?:an?\s+)?/, "").trim().length > 3;
   }
 }
+
+// ------------------------------------------------------------------------- the to-do list
+
+/** The senses of "task" that are not the Tasks screen's list: a program, the system's, the assistant's own. */
+const notTheList = /\b(?:task\s*(?:manager|scheduler|bar|tracker|trackers|app|apps|application|applications|runner|queue|board)|scheduled\s+tasks?|background\s+tasks?|agent\s+tasks?|running\s+tasks?|cron\s+tasks?)\b/i;
+/** A question about what a thing is, which names the list without being about the user's. */
+const asksWhatItIs = /\b(?:explain|define|what\s+(?:is|are)\s+(?:a|an|the\s+difference)|meaning\s+of|how\s+(?:do|should|can)\s+(?:i|you|one|people)\s+(?:prioriti[sz]e|manage|organi[sz]e))\b/i;
+const listWords = /\b(?:to-?dos?|to-?do\s+list|task\s+list|tasks?|checklist|chores?|errands?|my\s+list|things\s+to\s+do|something\s+to\s+do|to\s+do\s+list|(?:have|need|got)\s+to\s+do|left\s+to\s+do)\b/i;
+const listVerbs = /\b(?:add|adding|put|note|jot|write\s+down|writing\s+down|show|see|read|what|which|anything|display|view|mark|tick|cross|check\s+off|finish|finished|done|complete|completed|remove|delete|clear|drop|take\s+off|cancel|scratch|left|remaining|open|pending|outstanding|got)\b/i;
+const reminderToDoSomething = /\b(?:remind\s+me\s+to|don'?t\s+let\s+me\s+forget\s+to|i\s+need\s+to\s+remember\s+to|note\s+to\s+self)\b/i;
+const repeating = /\b(?:every|each|daily|weekly|hourly|nightly|monthly|weekdays?|recurring|repeat\w*)\b/i;
+const tickingOff = /\b(?:mark|tick|cross|check)\b[^.?!\n]{0,40}\b(?:as\s+done|done|off|complete|completed|finished)\b/i;
+const sayingItIsDone = /\bi(?:'ve|\s+have)?\s+(?:done|finished|completed)\b[^.?!\n]{0,60}\b(?:task|that|it|the|my)\b/i;
+
+/**
+ * Whether a request is about the user's own to-do list - the one on the Tasks screen - so the
+ * task tools are worth offering: adding to it, reading it, ticking something off, taking
+ * something off. A reminder with no repeat in it ("remind me to call the bank") is a task; one
+ * with a cadence ("every day at 9") is a schedule, which mentionsScheduling covers. A task app,
+ * the Task Manager, the system's scheduled tasks and the assistant's own work are not the list,
+ * and neither is a question about what a to-do list is.
+ */
+export function wantsTodo(message: string): boolean {
+  const text = message ?? "";
+  if (notTheList.test(text) || asksWhatItIs.test(text)) return false;
+  if (reminderToDoSomething.test(text) && !repeating.test(text)) return true;
+  if (tickingOff.test(text) || sayingItIsDone.test(text)) return true;
+  return listWords.test(text) && listVerbs.test(text);
+}
