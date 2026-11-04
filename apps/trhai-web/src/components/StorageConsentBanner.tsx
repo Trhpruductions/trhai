@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { legalVersions } from "@ascend/shared";
 import { useNav } from "../os/state/nav";
 import { useLegal } from "./LegalDialog";
@@ -28,6 +28,22 @@ export function StorageConsentBanner() {
     return () => window.removeEventListener(storageConsentEvent, read);
   }, []);
 
+  // The banner floats over the bottom of the window; the workspace keeps that much room free
+  // at its end while it is up, so nothing is left underneath it (the Sign out button was).
+  const banner = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = banner.current;
+    if (answered !== false || !element) return;
+    const apply = () => document.documentElement.style.setProperty("--os-banner-space", `${Math.ceil(element.getBoundingClientRect().height) + 24}px`);
+    apply();
+    const watcher = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(apply);
+    watcher?.observe(element);
+    return () => {
+      watcher?.disconnect();
+      document.documentElement.style.removeProperty("--os-banner-space");
+    };
+  }, [answered]);
+
   if (answered !== false) return null;
 
   const answer = (decision: "all" | "essential") => {
@@ -37,7 +53,7 @@ export function StorageConsentBanner() {
   };
 
   return (
-    <aside className="storage-consent" aria-labelledby="storage-consent-title">
+    <aside ref={banner} className="storage-consent" aria-labelledby="storage-consent-title">
       <div className="storage-consent-text">
         <h2 id="storage-consent-title" className="storage-consent-title">Remember your choices?</h2>
         <p>

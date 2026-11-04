@@ -749,6 +749,26 @@ export async function runAssistantOrchestrator(
       };
     }
 
+    // A question that nothing saved answers, with no model to put it to, was answered "I don't
+    // have anything saved that answers that yet" - true, and not the reason: the model is the
+    // thing missing, and the reply read as if the assistant only ever answers from notes.
+    // Say what happened, with the reason the model could not take it, and keep the offer to
+    // remember what the person tells it.
+    if (!attempt.ok && attempt.kind === "unavailable" && modelReply.strategy === "no-answer") {
+      const again = /\binstall\b/i.test(attempt.reason) ? "" : " Try again in a moment; the model may still be starting.";
+      const text = `I couldn't answer that just now. ${attempt.reason} Nothing saved on this PC answers it either - tell me and I'll keep it.${again}`;
+      return {
+        model: "memory",
+        assistantMessage: text,
+        inputTokens: modelReply.inputTokens,
+        outputTokens: estimateTokens(text),
+        strategy: "failed",
+        toolsUsed: [],
+        groundedOn: [],
+        groundedOnHistory: 0
+      };
+    }
+
     if (generated) {
       // A message held for approval is shown as itself, word for word, and
       // the model's own account of it is set aside: a model asked to repeat a

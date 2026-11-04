@@ -225,7 +225,7 @@ export function SignInScreen({ onSignedIn, onGuest, initialMode = "signin" }: {
     <div className="gate-field">
       <div className="gate-field-head">
         <label className="gate-label" htmlFor={`${ids}-${key}`}>
-          {label}{extra?.optional ? <span className="gate-optional">optional</span> : null}
+          {label}{extra?.optional ? <>{" "}<span className="gate-optional">optional</span></> : null}
         </label>
         {extra?.aside}
       </div>

@@ -309,7 +309,7 @@ export function FilesView() {
       id="files"
       actions={root ? (
         <>
-          <span className="os-chip os-mono" title="The workspace folder on this PC">{root}</span>
+          <span className="os-chip os-mono os-chip-path" title="The workspace folder on this PC">{root}</span>
           <FileActions path={path} folder />
         </>
       ) : null}
