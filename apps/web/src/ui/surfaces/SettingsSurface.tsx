@@ -6,12 +6,7 @@ import { webEnv } from "../../env";
 import { useSpeech } from "../../state/useSpeech";
 import { describeVoice } from "../../neuralSpeech";
 
-// Settings: how the assistant sounds, and what it is obliged to say.
-//
-// The safety constraints are shown as part of each profile rather than buried
-// in a footnote. Three of these always append a professional-advice
-// disclaimer, and that is enforced in the response path — it is a property of
-// the profile, so it belongs where the profile is chosen.
+// Settings: how the assistant sounds. A profile adds no words to a reply.
 
 type ApiBuildInfo = {
   apiVersion: string;
@@ -294,9 +289,6 @@ export function SettingsSurface({ context }: { context: SurfaceContext }) {
                 {selected ? <span className="chip chip-live">Active</span> : null}
               </div>
               <p className="muted personality-desc">{profile.summary}</p>
-              {profile.responseStyle.mandatoryDisclaimer ? (
-                <span className="chip chip-warn personality-note">Always adds a professional-advice disclaimer</span>
-              ) : null}
             </button>
           );
         })}

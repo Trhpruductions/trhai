@@ -27,28 +27,6 @@
   color: var(--text-faint);
 }
 
-/* The disclaimer is the one thing here with a consequence attached, so it is
-   marked rather than left as another line of grey text. */
-.persona-disclaimer {
-  margin: 0;
-  padding: 7px 9px;
-  border-left: 2px solid var(--warn, #ffb347);
-  border-radius: 4px;
-  background: rgba(255, 179, 71, 0.07);
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--text-faint);
-}
-
-.persona-disclaimer-label {
-  display: block;
-  margin-bottom: 3px;
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--warn, #ffb347);
-}
-
 /* The accent swatches. Colours are literal here rather than tokens: each dot
    has to show the accent it selects, not the accent currently applied. */
 .accent-row {

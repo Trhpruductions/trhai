@@ -277,8 +277,14 @@ nothing else changed: the same families, chat templates and Apache 2.0 licence.
   tools' own limits (permission levels, confirmations, the machine-access switch,
   the workspace sandbox) are about what the assistant may do to a PC, are not
   part of a model, and were not touched. The only wording of the app's own that
-  reads as a guard rail is the professional-advice note on the Medical, Legal and
-  Cyber-security personalities, which is a separate decision (left in place).
+  read as a guard rail was the professional-advice note the Medical, Legal and
+  Cyber-security personalities added to every reply, with the same note and a
+  "not a substitute" line on the Lawyer, Doctor and Financial advisor agents.
+  The owner had those taken out on 2026-11-05 (`personalities.ts` and
+  `marketplace.ts` in `packages/shared`): the assistant answers what it is
+  asked, and an agent's description says what the role does. That answers are
+  not professional advice is still said in the Terms of Service and in "How TRH
+  AI uses AI", which are unchanged.
 - The 7B coder's source repository (huihui-ai/Qwen2.5-Coder-7B-Instruct-
   abliterated) answered 401 on 2026-10-25; the quantised file is in a public
   repository and is pinned by hash.

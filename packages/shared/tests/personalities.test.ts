@@ -2,10 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   allPersonalities,
-  applyResponseStyle,
   defaultPersonality,
   orderWidgets,
-  personalityById,
   personalityFields,
   resolvePersonality
 } from "../src/personalities.js";
@@ -44,42 +42,15 @@ test("a personality carries no capability, scope, or permission field", () => {
   }
 });
 
-test("regulated personalities carry a disclaimer that cannot be switched off", () => {
-  for (const id of ["medical", "legal", "cyber-security"] as const) {
-    const style = personalityById(id).responseStyle;
-    assert.ok(
-      style.mandatoryDisclaimer && style.mandatoryDisclaimer.length > 40,
-      `${id} must carry a substantive disclaimer`
-    );
+test("a personality adds no words to a reply, and none says it holds back", () => {
+  // Until 2026-11-05 the medical, legal and security personalities appended a caveat to every
+  // answer ("This is general information, not medical advice..."). The owner decided the
+  // assistant answers what it is asked without one. This keeps one from coming back by the side
+  // door: a new field on the style, or a summary that says what the personality will not do.
+  for (const entry of allPersonalities()) {
+    assert.deepEqual(Object.keys(entry.responseStyle).sort(), ["formality", "maxSentences", "requiresCitations"], entry.id);
+    assert.doesNotMatch(entry.summary, /substitute|advice|disclaimer|consult|qualified/i, entry.id);
   }
-
-  // Medical and legal must disclaim advice specifically, not just hedge.
-  assert.match(personalityById("medical").responseStyle.mandatoryDisclaimer!, /not medical advice/i);
-  assert.match(personalityById("legal").responseStyle.mandatoryDisclaimer!, /not legal advice/i);
-});
-
-test("the disclaimer is appended to a reply", () => {
-  const reply = applyResponseStyle("Take two of these and rest.", "medical");
-
-  assert.match(reply, /Take two of these and rest\./);
-  assert.match(reply, /not medical advice/i);
-});
-
-test("the disclaimer is never duplicated", () => {
-  const once = applyResponseStyle("Some guidance.", "legal");
-  const twice = applyResponseStyle(once, "legal");
-
-  assert.equal(once, twice);
-});
-
-test("an unregulated personality adds nothing to the reply", () => {
-  assert.equal(applyResponseStyle("  Done.  ", "developer"), "Done.");
-});
-
-test("an empty reply still carries the disclaimer rather than dangling whitespace", () => {
-  const reply = applyResponseStyle("   ", "medical");
-
-  assert.equal(reply, personalityById("medical").responseStyle.mandatoryDisclaimer);
 });
 
 test("an unknown stored personality falls back instead of throwing", () => {
@@ -117,41 +88,4 @@ test("each personality offers real suggestions and a core palette", () => {
     );
     assert.ok(entry.voice.rate > 0.5 && entry.voice.rate < 1.5, `${entry.id} voice rate is unusable`);
   }
-});
-
-test("every personality that declares a mandatory disclaimer actually appends it", () => {
-  // This is the check that would have caught the disclaimer going missing.
-  // applyResponseStyle existed, was tested, and was called from nowhere in the
-  // app — so choosing Medical gave a personality whose own summary says "Never
-  // a substitute for care" and replies that never once said so.
-  const withDisclaimer = allPersonalities().filter((p) => p.responseStyle.mandatoryDisclaimer);
-  assert.ok(withDisclaimer.length > 0, "no personality declares a disclaimer any more");
-
-  for (const personality of withDisclaimer) {
-    const disclaimer = personality.responseStyle.mandatoryDisclaimer as string;
-    const styled = applyResponseStyle("Take two aspirin.", personality.id);
-
-    assert.ok(
-      styled.includes(disclaimer),
-      `${personality.label} declares a mandatory disclaimer that its replies do not carry`
-    );
-    // The answer itself survives; the disclaimer is added, not substituted.
-    assert.ok(styled.includes("Take two aspirin."));
-  }
-});
-
-test("a disclaimer is not repeated when the reply already carries it", () => {
-  const medical = allPersonalities().find((p) => p.responseStyle.mandatoryDisclaimer);
-  assert.ok(medical);
-  const disclaimer = medical.responseStyle.mandatoryDisclaimer as string;
-
-  const once = applyResponseStyle(`Some guidance.\n\n${disclaimer}`, medical.id);
-  const occurrences = once.split(disclaimer).length - 1;
-  assert.equal(occurrences, 1, "the disclaimer was appended a second time");
-});
-
-test("a personality with no disclaimer leaves the reply alone", () => {
-  const plain = allPersonalities().find((p) => !p.responseStyle.mandatoryDisclaimer);
-  assert.ok(plain);
-  assert.equal(applyResponseStyle("Just the answer.", plain.id), "Just the answer.");
 });

@@ -61,10 +61,21 @@ test("an agent named on the request is in the system prompt the model is sent", 
   assert.match(system, /Keep in view: Files, failures, and the smallest change that fixes them\./);
 });
 
-test("an agent's own limits travel with it", async () => {
+test("a role is described by what it does: the model is not told to hold back", async () => {
+  // The Lawyer, the Doctor and the Financial advisor used to tell the model what they would
+  // not do ("Does not recommend investments"), which is an instruction to decline. The owner
+  // decided the assistant answers what it is asked (2026-11-05).
+  for (const [agentId, opening] of [
+    ["financial-advisor", /work as Ledger, a financial advisor\./],
+    ["doctor", /work as Vitals, a doctor\./],
+    ["lawyer", /work as Sterling, a lawyer\./]
+  ] as const) {
+    const { system } = await ask({ agentId });
+    assert.match(system, opening);
+    assert.doesNotMatch(system, /not a substitute|does not recommend|not (?:medical|legal|financial) advice|consult a|qualified/i, agentId);
+  }
   const { system } = await ask({ agentId: "financial-advisor" });
-  assert.match(system, /work as Ledger, a financial advisor\./);
-  assert.match(system, /Organizes numbers and frames tradeoffs\. Does not recommend investments\./);
+  assert.match(system, /Works through money decisions with you: where it goes, what each option costs, and which one the numbers favour\./);
 });
 
 test("no agent, or one the catalogue does not know, sends no persona at all", async () => {

@@ -15,8 +15,14 @@
 // telemetry from this machine. They are labelled as such in the UI, because a
 // "4.8 ★ · 12k installs" that is actually a hardcoded literal is exactly the
 // simulated signal §22 forbids.
-
-import { personalityById } from "./personalities.js";
+//
+// An agent's description is what the model is told the role is (the agent
+// loop's describeAgentLens sends it whole), so it says what the role does and
+// nothing about what it will not. Until 2026-11-05 the Lawyer, the Doctor and
+// the Financial advisor described themselves as "not a substitute" for one and
+// added a caveat to every reply; the owner decided the assistant answers what
+// it is asked. That answers are not professional advice is said where it
+// binds, in the Terms of Service and in "How TRH AI uses AI".
 
 export type AgentVersion = {
   version: string;
@@ -42,21 +48,7 @@ export type Agent = {
   suggestions: string[];
   /** One line describing what the agent keeps in view. */
   focus: string;
-  /**
-   * A caveat every reply carries while this agent is active, for the roles
-   * where an unqualified answer could do real harm.
-   *
-   * The Doctor's own description says "Not a substitute for care", and its
-   * replies never said so: asked what to ask at an appointment about
-   * recurring headaches, the answer had no caveat at all. The Medical and
-   * Legal personalities have carried one since they existed. The wording is
-   * theirs where the role is the same, so the two together say it once.
-   */
-  mandatoryDisclaimer?: string;
 };
-
-const medicalDisclaimer = personalityById("medical").responseStyle.mandatoryDisclaimer;
-const legalDisclaimer = personalityById("legal").responseStyle.mandatoryDisclaimer;
 
 const agents: Agent[] = [
   {
@@ -95,7 +87,7 @@ const agents: Agent[] = [
     name: "Sterling",
     role: "Lawyer",
     avatar: "⚖️",
-    description: "Summarizes documents and surfaces obligations. Not a substitute for counsel.",
+    description: "Reads contracts and other documents, says what they oblige you to, and answers legal questions in plain words.",
     rating: 4.4,
     installs: 5100,
     versions: [
@@ -103,23 +95,21 @@ const agents: Agent[] = [
       { version: "1.0.0", releasedOn: "2026-04-18", notes: "First release." }
     ],
     suggestions: ["Summarize this document's obligations", "What terms deserve a closer look?", "Draft questions for a lawyer"],
-    focus: "Obligations, deadlines, and terms worth a second read.",
-    mandatoryDisclaimer: legalDisclaimer
+    focus: "Obligations, deadlines, and terms worth a second read."
   },
   {
     id: "doctor",
     name: "Vitals",
     role: "Doctor",
     avatar: "🩺",
-    description: "Organizes health notes and appointment prep. Not a substitute for care.",
+    description: "Answers health questions in plain words, organizes health notes, and helps you prepare for appointments.",
     rating: 4.3,
     installs: 4200,
     versions: [
       { version: "1.0.0", releasedOn: "2026-05-20", notes: "First release." }
     ],
     suggestions: ["Organize these notes", "What should I ask at my appointment?", "Explain this in plain language"],
-    focus: "Notes, questions, and appointment preparation.",
-    mandatoryDisclaimer: medicalDisclaimer
+    focus: "Notes, questions, and appointment preparation."
   },
   {
     id: "researcher",
@@ -156,17 +146,14 @@ const agents: Agent[] = [
     name: "Ledger",
     role: "Financial advisor",
     avatar: "📈",
-    description: "Organizes numbers and frames tradeoffs. Does not recommend investments.",
+    description: "Works through money decisions with you: where it goes, what each option costs, and which one the numbers favour.",
     rating: 4.1,
     installs: 3800,
     versions: [
       { version: "1.0.0", releasedOn: "2026-04-05", notes: "First release." }
     ],
     suggestions: ["Lay out the tradeoff", "Summarize where the money goes", "What assumptions drive this?"],
-    focus: "Cash flow, assumptions, and the cost of each option.",
-    mandatoryDisclaimer:
-      "This is general information, not financial advice, and not a recommendation to buy or sell anything. "
-      + "Talk to a qualified financial adviser about your situation."
+    focus: "Cash flow, assumptions, and the cost of each option."
   },
   {
     id: "streamer",
@@ -227,18 +214,6 @@ export function agentById(id: string): Agent | undefined {
 
 export function latestVersion(agent: Agent): AgentVersion {
   return agent.versions[0];
-}
-
-/**
- * The active agent's caveat added to a finished reply, the way a
- * personality's is (see applyResponseStyle): appended when absent, never
- * twice, so the Doctor agent with the Medical personality says it once.
- */
-export function applyAgentDisclaimer(reply: string, agent: Agent | null | undefined): string {
-  const disclaimer = agent?.mandatoryDisclaimer;
-  const trimmed = reply.trim();
-  if (!disclaimer || trimmed.includes(disclaimer)) return trimmed;
-  return trimmed ? `${trimmed}\n\n${disclaimer}` : disclaimer;
 }
 
 export type MarketplaceState = {

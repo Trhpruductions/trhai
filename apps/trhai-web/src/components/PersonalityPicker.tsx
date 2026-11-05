@@ -10,10 +10,7 @@ import "./personality.css";
 //
 // This was on the settings surface, and when the surfaces went it went with
 // them - leaving a stored value that took full effect and nothing anywhere to
-// change it. That mattered more than an ordinary missing preference: three of
-// these personalities declare a mandatory disclaimer that is appended to every
-// reply they produce, so "no way to choose" meant no way to get the disclaimer
-// on medical, legal or security questions.
+// change it.
 //
 // It lives in the console rail rather than the stage. The main screen is the
 // core, the box and the microphone; this is a setting, and settings belong
@@ -46,15 +43,6 @@ export function PersonalityPicker({ active, onChange, accent, onAccentChange }: 
       {/* The personality's own summary, not a description written here, so this
           cannot drift from what the personality actually does. */}
       <p className="persona-summary">{current.summary}</p>
-
-      {/* Shown only when the chosen personality genuinely declares one. It is
-          the real string that gets appended, not a paraphrase of it. */}
-      {current.responseStyle.mandatoryDisclaimer ? (
-        <p className="persona-disclaimer">
-          <span className="persona-disclaimer-label">Every reply carries:</span>
-          {current.responseStyle.mandatoryDisclaimer}
-        </p>
-      ) : null}
 
       {/* The accent, stranded the same way and for the same reason.
           globals.css has carried three alternates besides the default since

@@ -1,12 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyResponseStyle } from "../src/personalities.js";
 import {
   activateAgent,
   activeAgent,
   agentById,
   allAgents,
-  applyAgentDisclaimer,
   emptyMarketplaceState,
   formatInstalls,
   installAgent,
@@ -151,36 +149,21 @@ test("install counts format for display", () => {
   assert.equal(formatInstalls(5000), "5k");
 });
 
-test("agents carrying professional-advice risk say so in their description", () => {
-  // These roles invite questions the app must not answer as an authority.
-  for (const id of ["lawyer", "doctor", "financial-advisor"]) {
-    const agent = agentById(id);
-    assert.ok(agent, `${id} missing`);
-    assert.match(
-      agent.description,
-      /not a substitute|does not recommend/i,
-      `${id} must not present itself as a professional`
+test("an agent says what it does, never what it will not: the model is told the description whole", () => {
+  // The Lawyer, the Doctor and the Financial advisor used to describe themselves as "not a
+  // substitute" for one and add a caveat to every reply. The description is sent to the model
+  // as the role, so those words were an instruction to decline. The owner decided the assistant
+  // answers what it is asked (2026-11-05); this keeps the caveats from coming back.
+  for (const agent of allAgents()) {
+    assert.doesNotMatch(agent.description, /not a substitute|does not|cannot|will not|advice|disclaimer|consult|qualified/i, agent.id);
+    assert.deepEqual(
+      Object.keys(agent).sort(),
+      ["avatar", "description", "focus", "id", "installs", "name", "rating", "role", "suggestions", "versions"],
+      `${agent.id} carries a field the catalogue does not define`
     );
   }
-});
-
-test("those agents' replies carry a caveat, not only their descriptions", () => {
-  // Live: the Doctor agent, asked what to ask at an appointment about
-  // recurring headaches, answered with no caveat at all.
-  for (const id of ["lawyer", "doctor", "financial-advisor"]) {
-    assert.ok(agentById(id)?.mandatoryDisclaimer, `${id} has no caveat`);
-  }
-  const others = allAgents().filter((agent) => !["lawyer", "doctor", "financial-advisor"].includes(agent.id));
-  assert.ok(others.every((agent) => !agent.mandatoryDisclaimer), "a caveat is for the roles that need one");
-
-  const doctor = agentById("doctor");
-  const reply = applyAgentDisclaimer("Ask how often they come back.", doctor);
-  assert.match(reply, /^Ask how often they come back\.\n\nThis is general information, not medical advice/);
-  // Never twice - including when the Medical personality already added the same words.
-  assert.equal(applyAgentDisclaimer(reply, doctor), reply);
-  const withPersonality = applyResponseStyle("Ask how often they come back.", "medical");
-  assert.equal(applyAgentDisclaimer(withPersonality, doctor), withPersonality);
-  // No agent, or one without a caveat, changes nothing.
-  assert.equal(applyAgentDisclaimer("Hello.", null), "Hello.");
-  assert.equal(applyAgentDisclaimer("Hello.", agentById("programmer")), "Hello.");
+  // What the three roles are told they do, in the catalogue's words.
+  assert.match(agentById("lawyer")?.description ?? "", /answers legal questions in plain words/);
+  assert.match(agentById("doctor")?.description ?? "", /Answers health questions in plain words/);
+  assert.match(agentById("financial-advisor")?.description ?? "", /which one the numbers favour/);
 });

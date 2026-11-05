@@ -281,7 +281,7 @@ export function Conversation({ personality, onBuildRequest }: Props) {
   const {
     messages, status, restored, send, clear, sessionId,
     pendingConfirmation, declineConfirmation
-  } = useAssistant(profile.id);
+  } = useAssistant();
   const speech = useSpeech();
   // The last reply spoken, so a re-render never repeats one. Tracked by id
   // rather than by count: clearing the conversation resets the count and
