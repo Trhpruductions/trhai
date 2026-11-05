@@ -22,6 +22,7 @@ import {
 } from "./contradictedClaims.js";
 import { asksAboutMachineState, asksForAReading, asksForCodeInTheReply, asksForWordsInTheReply, asksToStartSomething, drivePath, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsMusicVideo, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, wantsAFileMade, wantsAPresentationMade, wantsASpreadsheetMade, wantsMediaConverted, wantsSpeechFile, wantsTodo, wantsCalendar, wantsTranscript, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
+import { actedOn, actionAskedFor, narrowForAction, notDoneReply } from "./requiredAction.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
@@ -314,7 +315,7 @@ export function wroteWhatWasAsked(args: Record<string, unknown> | undefined, req
  * no way to tell the difference.
  */
 export const systemPrompt = [
-  "You are TRHAI, an assistant that runs entirely on this user's own machine.",
+  "You are TRH AI, an assistant that runs entirely on this user's own machine. That is your name: never say you are Claude, ChatGPT or any other assistant.",
   "Speak to the user as \"you\". Never refer to them as \"the user\".",
   "",
   "There are two kinds of question, and they are answered differently.",
@@ -1541,6 +1542,10 @@ export async function runAgent(
   // Live, it was answered by saving a daily 9am reminder, and on the next try
   // by rendering a nineteen-second video called "Welcome, Whiskers!" into the
   // workspace. It is asking for something, the same as a question is.
+  // A request that plainly asks for one kind of thing to be done; see requiredAction.ts.
+  const actionFamily = actionAskedFor(context.request ?? question);
+  // Whether a call was required of the model this turn: a turn that may not write never offers the tool, and is not held to it.
+  let callWasRequired = false;
   const shape = analyzeRequest(question).shape;
   // "Make that answer one sentence" asks for words, the same as a question
   // does; see reshapesAnEarlierReply.
@@ -1772,7 +1777,7 @@ export async function runAgent(
     const fileWritersHaveWork = wantsToWriteAFile || Boolean(context.impliedFile)
       || intent.action || !asksForWordsInTheReply(question);
 
-    const offeredTools = offerTools
+    const allOffered = offerTools
       // A sum is not a job for the shell. Asked to "convert 5 miles to
       // kilometers" with calculate on offer, the model ran `bc` three times -
       // a POSIX calculator this Windows machine does not have - and answered
@@ -1890,6 +1895,10 @@ export async function runAgent(
             : fileWritersHaveWork
       })
       : [];
+    // Narrowed to what was asked for, and a call required until it has happened; see requiredAction.ts.
+    const narrowed = actionFamily && offerTools ? narrowForAction(allOffered, actionFamily, actedOn(actionFamily, toolsUsed), namesAFilePath(context.request ?? question)) : null;
+    if (narrowed?.forced) callWasRequired = true;
+    const offeredTools = narrowed ? narrowed.tools : allOffered;
     const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));
 
     // Measured before it is sent, and made to fit. Past the window the engine
@@ -1939,7 +1948,8 @@ export async function runAgent(
           // Withheld while disarmed rather than offered and refused: a
           // model that can see run_command will reason about it and try to
           // talk its way into it; one that never sees it cannot.
-          ...(offerTools ? { tools: offeredTools } : {})
+          ...(offerTools ? { tools: offeredTools } : {}),
+          ...(narrowed?.forced ? { tool_choice: "required" } : {})
         }),
         signal: deadline.signal
       });
@@ -2440,6 +2450,23 @@ export async function runAgent(
       // that ended that way was answered with "You did not change anything",
       // and the reply the user got was "I'm sorry, but I can't assist with
       // that."
+      // Asked plainly for something and none of its tools ran: whatever the words say, it was not done.
+      if (actionFamily && callWasRequired && !actedOn(actionFamily, toolsUsed) && !awaitingConfirmation) {
+        if (!correctedMutationClaim) {
+          correctedMutationClaim = true;
+          spendCorrection();
+          messages.push({ role: "user", content: `You did not do that: you called no tool. Call ${actionFamily.tools.join(" or ")} now.` });
+          continue;
+        }
+        return {
+          ok: true,
+          text: notDoneReply,
+          model: typeof response.model === "string" ? response.model : config.model,
+          toolsUsed,
+          actionAudit: auditFor("prose")
+        };
+      }
+
       const couldWrite = !onlyAsks && fileWritersHaveWork;
       const claimedAChange = claimsUnperformedMutation(text, wroteSomething, couldWrite)
         || promisesUnperformedMutation(text, wroteSomething, couldWrite);

@@ -1177,7 +1177,7 @@ function targetFor(kind: ActionKind, original: string, text: string, hasFileTarg
 // ------------------------------------------------------------------------- the to-do list
 
 /** The senses of "task" that are not the Tasks screen's list: a program, the system's, the assistant's own. */
-const notTheList = /\b(?:task\s*(?:manager|scheduler|bar|tracker|trackers|app|apps|application|applications|runner|queue|board)|scheduled\s+tasks?|background\s+tasks?|agent\s+tasks?|running\s+tasks?|cron\s+tasks?)\b/i;
+const notTheList = /\bto-?dos?\s+(?:list\s+)?(?:app|apps|application|applications|website|program|tracker)\b|\b(?:task\s*(?:manager|scheduler|bar|tracker|trackers|app|apps|application|applications|runner|queue|board)|scheduled\s+tasks?|background\s+tasks?|agent\s+tasks?|running\s+tasks?|cron\s+tasks?)\b/i;
 /** A question about what a thing is, which names the list without being about the user's. */
 const asksWhatItIs = /\b(?:explain|define|what\s+(?:is|are)\s+(?:a|an|the\s+difference)|meaning\s+of|how\s+(?:do|should|can)\s+(?:i|you|one|people)\s+(?:prioriti[sz]e|manage|organi[sz]e))\b/i;
 const listWords = /\b(?:to-?dos?|to-?do\s+list|task\s+list|tasks?|checklist|chores?|errands?|my\s+list|things\s+to\s+do|something\s+to\s+do|to\s+do\s+list|(?:have|need|got)\s+to\s+do|left\s+to\s+do)\b/i;
