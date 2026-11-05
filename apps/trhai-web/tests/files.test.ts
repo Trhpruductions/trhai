@@ -98,6 +98,8 @@ test("a conversation opened again finds its files in the reply's own lines, and 
     "documents/Meeting Notes.docx", "documents/Meeting Notes.pdf", "documents/Meeting Notes.html", "documents/Meeting Notes.md", "documents/Meeting Notes.txt",
     "documents/Budget.xlsx", "documents/Budget.csv", "documents/Board Update.pptx", "documents/Board Update.pdf", "documents/Tiny.pptx"
   ]);
+  // A recording written out: the transcript and the subtitles are files a reply can offer to open.
+  assert.deepEqual(madeFilesInText("- documents/Meeting.txt (text file)\n- documents/Clip.srt (SRT subtitles)\n- documents/Clip.vtt (WebVTT subtitles)"), ["documents/Meeting.txt", "documents/Clip.srt", "documents/Clip.vtt"]);
   assert.deepEqual(madeFilesInText("- documents/A.pdf (PDF, 1 page)\r\n* documents/B.docx (Word document)"), ["documents/A.pdf", "documents/B.docx"], "one page, and the other bullet and line end");
   // A file outside the workspace is told by its whole path, and is not offered; nor is a line the tools did not write.
   assert.deepEqual(madeFilesInText("- C:\\Users\\Sam\\Desktop\\Report.docx (Word document)"), []);

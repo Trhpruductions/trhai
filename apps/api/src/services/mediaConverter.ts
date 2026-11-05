@@ -177,7 +177,7 @@ export function parseProbe(stderr: string): Probe {
 export type RunResult = { code: number | null; stderr: string; timedOut: boolean; spawnError?: string };
 export type RunFfmpeg = (args: string[], options: { timeoutMs: number }) => Promise<RunResult>;
 
-const runFfmpeg: RunFfmpeg = (args, { timeoutMs }) => new Promise((resolve) => {
+export const runFfmpeg: RunFfmpeg = (args, { timeoutMs }) => new Promise((resolve) => {
   execFile(ffmpegProgram(), args, { windowsHide: true, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, encoding: "utf8" }, (error, _stdout, stderr) => {
     if (!error) return resolve({ code: 0, stderr: stderr ?? "", timedOut: false });
     const failure = error as NodeJS.ErrnoException & { killed?: boolean };
@@ -187,7 +187,7 @@ const runFfmpeg: RunFfmpeg = (args, { timeoutMs }) => new Promise((resolve) => {
   });
 });
 
-async function inspect(file: string, run: RunFfmpeg): Promise<Probe> {
+export async function inspectMedia(file: string, run: RunFfmpeg): Promise<Probe> {
   // Asked to read a file and make nothing, ffmpeg says what is in it and then exits with an error: that is the answer.
   const result = await run(["-hide_banner", "-protocol_whitelist", "file", "-i", file], { timeoutMs: 30_000 });
   if (result.spawnError) return { ok: false, reason: result.spawnError };
@@ -264,7 +264,7 @@ export async function convertMedia(request: MediaRequest, directory: string, opt
     return { ok: false, reason: `${sourceName} is not an audio or video file this can convert. It reads ${mediaSourceEndings.join(", ")}.` };
   }
 
-  const look = await inspect(request.source, run);
+  const look = await inspectMedia(request.source, run);
   if (!look.ok) return { ok: false, reason: `ffmpeg could not read ${sourceName} (${look.reason.replace(/\.$/, "")}).` };
   const info = mediaFormats[request.to];
   if (info.kind === "audio" && !look.audio) return { ok: false, reason: `${sourceName} has no sound in it to make into ${info.label}.` };
@@ -305,7 +305,7 @@ export async function convertMedia(request: MediaRequest, directory: string, opt
   }
 
   // Read back: what is in it, and all of it played through.
-  const back = await inspect(output, run);
+  const back = await inspectMedia(output, run);
   if (!back.ok) return giveUp(`The ${info.label} was written but ffmpeg could not read it back (${back.reason.replace(/\.$/, "")}), so it was removed.`);
   if (info.kind === "audio" ? !back.audio : !back.video) return giveUp(`The ${info.label} was written with ${info.kind === "audio" ? "no sound" : "no picture"} in it, so it was removed.`);
   const broken = await decodes(output, info.kind === "video", back.seconds, run);

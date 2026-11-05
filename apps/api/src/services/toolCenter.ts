@@ -10,6 +10,7 @@ import { piperStatus } from "./piperSpeech.js";
 import { permissionLabels, permissionLevelOf, requiresConfirmation, type PermissionLevel } from "./toolPermissions.js";
 import { toolUsage, type ToolUsage } from "./toolUsage.js";
 import { findVisionModel, visionModelName } from "./vision.js";
+import { whisperStatus } from "./whisperTranscribe.js";
 
 // Every tool TRH AI has, described for the person using it: what it does in
 // plain words, how much it is allowed to do, whether it can run on this PC
@@ -67,6 +68,7 @@ export const toolCatalogue: Record<string, CatalogueEntry> = {
   make_spreadsheet: { area: "Documents", title: "Make an Excel file", summary: "Makes an Excel workbook or a CSV file from your data, with working formulas for the totals, and saves it where you can open it in Excel." },
   make_presentation: { area: "Documents", title: "Make a PowerPoint file", summary: "Makes a presentation from an outline - a PowerPoint file, a PDF of its slides, or both - with speaker notes if you ask for them, and saves it where you can open it in PowerPoint." },
   convert_media: { area: "Files", title: "Convert audio and video", summary: "Changes a song, a recording or a video into another format (MP3, WAV, M4A, FLAC, Ogg, Opus, MP4), pulls the sound out of a video, or cuts it down to a part. Saves a new file and leaves the original alone." },
+  transcribe_file: { area: "Files", title: "Write out a recording", summary: "Turns the speech in an audio or video file into a text transcript or subtitles (TXT, SRT or VTT), on this PC, and saves it beside the recording." },
   speak_to_file: { area: "Files", title: "Read text into an audio file", summary: "Reads text aloud into an audio file (MP3, WAV, M4A, FLAC, Ogg or Opus) in one of the voices on this PC, such as Jarvis or Alan, and saves it where you can play or send it." },
   update_document: { area: "Documents", title: "Update a document", summary: "Adds to or changes a document already in your knowledge base." },
   delete_document: { area: "Documents", title: "Delete a document", summary: "Deletes a document from your knowledge base." },
@@ -115,6 +117,7 @@ export type ToolProbe = {
   visionModel: string | null;
   ffmpeg: boolean;
   piper: boolean;
+  whisper: boolean;
   phoneLink: "linked" | "not-linked" | "missing";
   /** The phone linked in Phone Link, once the user has said which; optional for older callers. */
   phone?: "iphone" | "android" | null;
@@ -151,6 +154,11 @@ function readinessOf(name: string, probe: ToolProbe): ToolReadiness {
   if (name === "make_music_video") {
     if (!probe.ffmpeg) return { state: "needs-setup", note: "Needs ffmpeg installed - it draws and encodes the video." };
     return ready("Drawn and encoded with ffmpeg on this PC's processor, with no account. Times the lyrics to the singing when Listening is installed.");
+  }
+  if (name === "transcribe_file") {
+    if (!probe.whisper) return { state: "needs-setup", note: "Needs Listening installed - it does the hearing." };
+    if (!probe.ffmpeg) return { state: "needs-setup", note: "Needs ffmpeg installed - it reads the recording." };
+    return ready("Heard with whisper.cpp on this PC's processor, with no account, and nothing leaves the PC. The model installed with TRH AI hears English.");
   }
   if (name === "speak_to_file") {
     if (!probe.piper) return { state: "needs-setup", note: "Needs a Piper voice installed - it does the speaking." };
@@ -258,6 +266,7 @@ export async function probeTools(): Promise<ToolProbe> {
     visionModel: vision.model,
     ffmpeg,
     piper: piperStatus().available,
+    whisper: whisperStatus().available,
     phoneLink: phoneLinkStatus(),
     phone: linkedPhone(),
     emailAccount: readEmailAccount()?.address ?? null,

@@ -580,6 +580,32 @@ export function wantsSpeechFile(message: string): boolean {
   return false;
 }
 
+const transcribing = /\btranscri(?:be|bes|bed|bing|pt|pts|ption|ptions)\b/i;
+const subtitleWords = /\b(?:subtitles?|sub-?titled?|closed\s+captions?|captions?)\b/i;
+const somethingToWatch = /\b(?:video|clip|film|movie|recording|footage|lecture|talk|podcast)\b/i;
+const aRecording = /\b(?:recordings?|voice\s+(?:memo|note|message)s?|audio\s+files?|podcast|interview|lecture|phone\s+call)\b/i;
+const intoWords = /\b(?:into|to|as)\s+(?:plain\s+)?text\b|\b(?:write|type|put)\s+(?:it\s+|that\s+|this\s+)?(?:out|down|up)\b|\bwhat(?:'s|\s+is|\s+was|\s+do|\s+does|\s+did|\s+are|\s+were)\b[^.?!\n]{0,40}\b(?:said|say|says|saying)\b/i;
+const buildingOne = /\b(?:app|application|website|program|script|function|library|api|service|software|tool)\b/i;
+
+/**
+ * Whether a request asks for the speech in a recording to be written out - "transcribe
+ * meeting.mp3", "turn this recording into text", "subtitles for clip.mp4", "what do they say in
+ * interview.m4a" - so transcribe_file is worth offering.
+ *
+ * A file named, or a word for a recording, with a word for writing it out. Not a program that
+ * transcribes ("build me a transcription app"), not a question about what the word means, not a
+ * music video with its lyrics on it, and not a caption for a picture, which has no recording in it.
+ */
+export function wantsTranscript(message: string): boolean {
+  const text = message ?? "";
+  if (aboutAMusicVideo.test(text)) return false;
+  const named = mediaFileNamed.test(text);
+  if (!named && (buildingOne.test(text) || asksWhatItIs.test(text))) return false;
+  if (transcribing.test(text)) return true;
+  if (subtitleWords.test(text) && (named || somethingToWatch.test(text))) return true;
+  return (named || aRecording.test(text)) && intoWords.test(text);
+}
+
 /**
  * Whether a request is about this computer or its software at all, so the
  * shell is worth offering.

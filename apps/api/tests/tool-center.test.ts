@@ -33,7 +33,7 @@ const probe = (overrides: Partial<Probe> = {}): Probe => ({
   model: { available: true, name: "qwen2.5-coder:7b", reason: null },
   visionModel: "qwen2.5vl:3b",
   ffmpeg: true,
-  piper: true,
+  piper: true, whisper: true,
   phoneLink: "linked",
   emailAccount: null,
   ...overrides

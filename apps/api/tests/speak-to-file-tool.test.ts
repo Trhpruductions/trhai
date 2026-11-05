@@ -63,7 +63,7 @@ test("what the model is told says what to write, what is made, and what to say a
 
 test("it is a level-two tool that is ready with a voice, says what is missing without one, and says what ffmpeg adds", () => {
   assert.equal(permissionLevelOf("speak_to_file"), 2);
-  const probe = { machineAccess: { armed: false, until: null }, model: { available: true, name: "m", reason: null }, visionModel: null, ffmpeg: true, piper: true, phoneLink: "linked" as const, emailAccount: null };
+  const probe = { machineAccess: { armed: false, until: null }, model: { available: true, name: "m", reason: null }, visionModel: null, ffmpeg: true, piper: true, whisper: true, phoneLink: "linked" as const, emailAccount: null };
   const ready = describeTools(probe).find((entry) => entry.name === "speak_to_file")!;
   assert.equal(ready.readiness.state, "ready");
   assert.equal(ready.asksFirst, false);
