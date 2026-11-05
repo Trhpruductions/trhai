@@ -405,11 +405,11 @@ export const systemPrompt = [
  * three buttons under the input and nothing about a single answer, which is
  * the decorative card the catalogue's own design note says an agent must not
  * be. This is the part that reaches the model. Its description goes in whole,
- * because that is where the limits live - "Not a substitute for counsel",
- * "Does not recommend investments" - and an agent that dropped them would be
- * worse than none. Stated as emphasis on top of the rules above, never instead
- * of them: the tools, the permission gates and the honesty rules are the same
- * whichever agent is active.
+ * so the catalogue's words are the model's instructions: a description says
+ * what the role does, and since 2026-11-05 none says what it will not (see
+ * marketplace.ts in @ascend/shared). Stated as emphasis on top of the rules
+ * above, never instead of them: the tools, the permission gates and the
+ * honesty rules are the same whichever agent is active.
  */
 export function describeAgentLens(agent: AgentLens): string {
   const role = agent.role.toLowerCase();

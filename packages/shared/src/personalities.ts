@@ -8,9 +8,12 @@
 // capability, scope, or permission field at all, and a test asserts the shape so
 // one cannot be quietly added later.
 //
-// Regulated domains (medical, legal, security) carry a disclaimer that the
-// composer always appends. It is not a stylistic preference and there is no flag
-// to turn it off.
+// A personality adds no words to a reply. Until 2026-11-05 the medical, legal
+// and security ones appended a caveat to every answer ("This is general
+// information, not medical advice..."). The owner decided the assistant answers
+// what it is asked without one, in any personality. That answers are not
+// professional advice is still said, once and where it binds: in the Terms of
+// Service and in "How TRH AI uses AI" (packages/shared/src/legal).
 
 export type PersonalityId =
   | "professional"
@@ -51,11 +54,6 @@ export type ResponseStyle = {
   formality: "high" | "neutral" | "relaxed";
   /** Whether claims drawn from outside the workspace must name their source. */
   requiresCitations: boolean;
-  /**
-   * Appended to every reply in this personality. Present only for domains where
-   * an unqualified answer could cause real harm.
-   */
-  mandatoryDisclaimer?: string;
 };
 
 export type Personality = {
@@ -186,13 +184,7 @@ const personalities: Personality[] = [
       "What would an attacker try first?"
     ],
     widgetPriority: ["network", "cpu", "automations", "recent-files"],
-    responseStyle: {
-      maxSentences: 10,
-      formality: "high",
-      requiresCitations: true,
-      mandatoryDisclaimer:
-        "Security guidance here is general and defensive. Validate it against your own environment and authorization before acting."
-    }
+    responseStyle: { maxSentences: 10, formality: "high", requiresCitations: true }
   },
   {
     id: "gaming",
@@ -211,7 +203,7 @@ const personalities: Personality[] = [
   {
     id: "medical",
     label: "Medical",
-    summary: "Organizes health information carefully. Never a substitute for care.",
+    summary: "Careful and plain about health: what terms mean, what the options are, what to ask.",
     voice: { tone: "calm and careful", cadence: "deliberate", rate: 0.94, pitch: 1 },
     core: { accent: "#7fd8ff", glow: "rgba(127, 216, 255, 0.4)", energy: 0.3 },
     suggestions: [
@@ -220,18 +212,12 @@ const personalities: Personality[] = [
       "Summarize this document in plain language"
     ],
     widgetPriority: ["calendar", "daily-focus", "recent-files", "goals"],
-    responseStyle: {
-      maxSentences: 8,
-      formality: "high",
-      requiresCitations: true,
-      mandatoryDisclaimer:
-        "This is general information, not medical advice, and not a diagnosis. Talk to a qualified clinician about your situation."
-    }
+    responseStyle: { maxSentences: 8, formality: "high", requiresCitations: true }
   },
   {
     id: "legal",
     label: "Legal",
-    summary: "Precise with terms and structure. Never a substitute for counsel.",
+    summary: "Precise with terms, obligations and structure.",
     voice: { tone: "formal and exact", cadence: "deliberate", rate: 0.95, pitch: 0.97 },
     core: { accent: "#d8c9a3", glow: "rgba(216, 201, 163, 0.4)", energy: 0.3 },
     suggestions: [
@@ -240,13 +226,7 @@ const personalities: Personality[] = [
       "Draft questions for a lawyer"
     ],
     widgetPriority: ["recent-files", "calendar", "email", "goals"],
-    responseStyle: {
-      maxSentences: 8,
-      formality: "high",
-      requiresCitations: true,
-      mandatoryDisclaimer:
-        "This is general information, not legal advice, and no attorney-client relationship is created. Consult a licensed lawyer in your jurisdiction."
-    }
+    responseStyle: { maxSentences: 8, formality: "high", requiresCitations: true }
   }
 ];
 
@@ -275,28 +255,6 @@ export function resolvePersonality(value: unknown): PersonalityId {
   return typeof value === "string" && byId.has(value as PersonalityId)
     ? (value as PersonalityId)
     : defaultPersonality;
-}
-
-/**
- * Apply the personality's response-style constraints to a finished reply.
- *
- * The disclaimer is appended when absent and never duplicated, so a reply that
- * already carries it (because the composer included one) stays clean.
- */
-export function applyResponseStyle(reply: string, id: PersonalityId): string {
-  const { responseStyle } = personalityById(id);
-  const disclaimer = responseStyle.mandatoryDisclaimer;
-  const trimmed = reply.trim();
-
-  if (!disclaimer) {
-    return trimmed;
-  }
-
-  if (trimmed.includes(disclaimer)) {
-    return trimmed;
-  }
-
-  return trimmed ? `${trimmed}\n\n${disclaimer}` : disclaimer;
 }
 
 /**
