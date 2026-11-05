@@ -8,6 +8,7 @@ import { pickAuthorModel } from "./appAuthor.js";
 import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
 import { appNamedIn, driveNamedIn, readingsFor, readMachineStatus, runTool, type AgentLens } from "./agentTools.js";
+import type { TodoAccess } from "./todoTools.js";
 import type { readTelemetry } from "./systemTelemetry.js";
 import { workspaceRoot } from "./workspace.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -79,6 +80,8 @@ export type OrchestratorInput = {
   saveMemory?: (fact: string) => "saved" | "duplicate" | "empty";
   /** Removes a saved memory by id, for the "forget" tool. */
   forgetMemory?: (id: string) => boolean;
+  /** The Tasks screen's list, for the to-do tools; absent without a session. */
+  todo?: TodoAccess;
   /** Facts the user asked to forget this session; see ComposerInput.forgottenFacts. */
   forgottenFacts?: string[];
   /** The file "it" means this turn; see resolveFilePronoun. Set by the orchestrator. */
@@ -2185,6 +2188,7 @@ async function answerWithLocalModel(
     })),
     saveMemory: input.saveMemory,
     forgetMemory: input.forgetMemory,
+    todo: input.todo,
     documents: input.documents,
     saveDocument: input.saveDocument,
     updateDocument: input.updateDocument,

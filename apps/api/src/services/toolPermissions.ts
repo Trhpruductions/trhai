@@ -78,6 +78,7 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // the internet like fetch_url, and is bounded the same careful way.
   web_search: 1,
   list_schedules: 1,
+  list_tasks: 1,
   // Reads the machine's own counters - the dashboard's readings - and changes nothing.
   system_status: 1,
   // Reads a document - from the knowledge base, or a file the read rules
@@ -128,11 +129,16 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   // Creating a schedule changes what this machine will do later, unattended.
   // That is a change, not a read - level 2, the same as writing a file.
   add_schedule: 2,
+  // Adding to the to-do list, or ticking something off, changes what is written down: a change, not a read.
+  add_task: 2,
+  complete_task: 2,
 
   // 3 — destroys the only copy of something the user chose to keep, or
   // reaches outside the workspace entirely.
   forget: 3,
   delete_document: 3,
+  // Taking a task off the list for good: the only copy of something the user wrote down.
+  remove_task: 3,
   // The only tool here not bounded by the workspace: it runs as the user and
   // can do anything they can.
   //

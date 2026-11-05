@@ -20,7 +20,7 @@ import {
   correctionFor, inventsAReading, narratesRetrievalOnly, noChangeWasMade, pendingConfirmationNotice,
   promisesUnperformedMutation, stateTheResult
 } from "./contradictedClaims.js";
-import { asksAboutMachineState, asksForAReading, asksForCodeInTheReply, asksForWordsInTheReply, asksToStartSomething, drivePath, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsMusicVideo, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, wantsAFileMade, wantsAPresentationMade, wantsASpreadsheetMade, wantsMediaConverted, wantsSpeechFile, type ActionKind } from "./actionIntent.js";
+import { asksAboutMachineState, asksForAReading, asksForCodeInTheReply, asksForWordsInTheReply, asksToStartSomething, drivePath, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsMusicVideo, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, wantsAFileMade, wantsAPresentationMade, wantsASpreadsheetMade, wantsMediaConverted, wantsSpeechFile, wantsTodo, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -520,6 +520,8 @@ export function wordsCarriedBy(call: { name: string; arguments?: Record<string, 
  * survive the model's retelling — see the note on mutationResults for why.
  */
 const mutatingTools = new Set([
+  // "I added that to your list." said nothing about what; the tool's own line names the task.
+  "add_task", "complete_task", "remove_task",
   "remember", "forget", "write_document", "update_document", "delete_document",
   "pin_memory", "write_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "speak_to_file",
   // "I added the schedule for you." said nothing about when. The tool's
@@ -1792,8 +1794,9 @@ export async function runAgent(
         // listening on port 4000?" - and loses everything that writes.
         //
         // But "extract the audio from clip.mp4 as an mp3" has no verb the classifier knows and is taken for a statement,
-        // which only asks: the tool that does it would be withheld from the very request for it. Likewise "read this to an mp3".
-        writes: !onlyAsks || wantsMediaConverted(question) || wantsSpeechFile(question),
+        // which only asks: the tool that does it would be withheld from the very request for it. Likewise "read this to an mp3",
+        // and "remind me to call the bank", which is a task to add (with a time in it, a one-time schedule; see wantsTodo).
+        writes: !onlyAsks || wantsMediaConverted(question) || wantsSpeechFile(question) || wantsTodo(question),
         memory: asksToRemember(question),
         // A question does not get to scaffold a project. Decided from the
         // request rather than from the reply, because a build has already
@@ -1839,6 +1842,8 @@ export async function runAgent(
         media: wantsMediaConverted(question),
         // Text read out into an audio file; see wantsSpeechFile.
         speech: wantsSpeechFile(question),
+        // The user's own to-do list, when the request is about it; see wantsTodo.
+        tasks: wantsTodo(question),
         // The knowledge base is written only when keeping something is asked
         // for - "save", "note", "document" - or a saved document is named.
         // "Write a two-sentence product description for a water bottle" asks

@@ -3,7 +3,7 @@
 // the list is grouped. Pure, so the wording is testable without a screen.
 
 export type ToolArea =
-  | "Memory" | "Documents" | "Files" | "Apps" | "Web" | "Schedules" | "Time and maths" | "Media" | "Messages" | "This PC";
+  | "Memory" | "Documents" | "Files" | "Apps" | "Web" | "Schedules" | "Tasks" | "Time and maths" | "Media" | "Messages" | "This PC";
 
 export type ToolUsage = {
   uses: number;
@@ -45,7 +45,7 @@ export const levels: Record<ToolEntry["level"], { label: string; meaning: string
   4: { label: "Reaches outside", meaning: "Sends something from you to someone else. Always asks you first.", tone: "danger" }
 };
 
-export const areaOrder: ToolArea[] = ["Memory", "Documents", "Files", "Apps", "Web", "Schedules", "Time and maths", "Media", "Messages", "This PC"];
+export const areaOrder: ToolArea[] = ["Memory", "Documents", "Files", "Apps", "Web", "Schedules", "Tasks", "Time and maths", "Media", "Messages", "This PC"];
 
 /** "Not used yet", or "Used 12 times · last 5m ago" - `ago` turns a time into words. */
 export function usageLine(usage: ToolUsage, ago: (iso: string) => string): string {
