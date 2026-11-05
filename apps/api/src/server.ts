@@ -77,6 +77,8 @@ import { getSystemCapabilities, toolsByLevel } from "./services/systemCapabiliti
 import { describeTools, probeTools } from "./services/toolCenter.js";
 import { addTask, listTasks, removeTask, setTaskDone } from "./services/taskListStore.js";
 import { todoAccessFor } from "./services/todoTools.js";
+import { calendarAccessFor, maxEventNotesLength, maxEventTitleLength, readEventMoment } from "./services/calendarTools.js";
+import { addCalendarEvent, listEvents as listCalendarEvents, removeCalendarEvent } from "./services/calendarStore.js";
 import {
   clearPendingConfirmation,
   describePendingAction,
@@ -266,6 +268,7 @@ function buildAssistInput(
     forgetMemory: sessionId ? (id: string) => forgetMemory(sessionId, id) : undefined,
     // The Tasks screen's list, for the to-do tools; nothing to reach without a session.
     todo: sessionId ? todoAccessFor(sessionId) : undefined,
+    calendar: sessionId ? calendarAccessFor(sessionId) : undefined,
     forgottenFacts: sessionId ? listForgottenFacts(sessionId) : [],
     listMemories: sessionId ? () => listSessionMemories(sessionId) : undefined,
     forgetAllMemories: sessionId ? () => forgetAllMemories(sessionId) : undefined,
@@ -753,6 +756,7 @@ export function createApp(options: AppOptions = {}) {
         forgetMemory: sessionId ? (id: string) => forgetMemory(sessionId, id) : undefined,
         // The Tasks screen's list, for the to-do tools; nothing to reach without a session.
         todo: sessionId ? todoAccessFor(sessionId) : undefined,
+        calendar: sessionId ? calendarAccessFor(sessionId) : undefined,
         forgottenFacts: sessionId ? listForgottenFacts(sessionId) : [],
         listMemories: sessionId ? () => listSessionMemories(sessionId) : undefined,
         forgetAllMemories: sessionId ? () => forgetAllMemories(sessionId) : undefined,
@@ -2290,6 +2294,58 @@ export function createApp(options: AppOptions = {}) {
   // that is one in-flight job per session, resolved on a "continue" follow
   // up; this is a list the user wrote down themselves, and the two never
   // read each other.
+  // The calendar: what a person has on, on a day and usually at a time. Scoped like the to-do
+  // list, and nothing here fires: to be told about an event is a one-time schedule.
+  app.get("/v1/calendar", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId, res, req);
+    if (!sessionId) return;
+
+    res.json({ data: { events: listCalendarEvents(sessionId) }, traceId: "trace-local" });
+  });
+
+  app.post("/v1/calendar", (req, res) => {
+    const sessionId = requireSessionId(req.body?.sessionId, res, req);
+    if (!sessionId) return;
+
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+    const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() : "";
+    const moment = readEventMoment(typeof req.body?.at === "string" ? req.body.at : "");
+    if (!title || title.length > maxEventTitleLength || notes.length > maxEventNotesLength || !moment.ok) {
+      res.status(400).json({
+        code: "INVALID_REQUEST",
+        message: !moment.ok ? moment.reason : `An event needs a title of at most ${maxEventTitleLength} letters, and notes of at most ${maxEventNotesLength}.`,
+        traceId: "trace-local"
+      });
+      return;
+    }
+
+    const event = addCalendarEvent(sessionId, {
+      id: `event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title,
+      startsAt: moment.startsAt,
+      allDay: moment.allDay,
+      ...(notes ? { notes } : {})
+    });
+    if (!event) {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "That could not be put on the calendar.", traceId: "trace-local" });
+      return;
+    }
+
+    res.status(201).json({ data: { event }, traceId: "trace-local" });
+  });
+
+  app.delete("/v1/calendar/:eventId", (req, res) => {
+    const sessionId = requireSessionId(req.query?.sessionId, res, req);
+    if (!sessionId) return;
+
+    if (!removeCalendarEvent(sessionId, req.params.eventId)) {
+      res.status(404).json({ code: "NOT_FOUND", message: "Event not found", traceId: "trace-local" });
+      return;
+    }
+
+    res.status(204).end();
+  });
+
   app.get("/v1/tasks", (req, res) => {
     const sessionId = requireSessionId(req.query?.sessionId, res, req);
     if (!sessionId) return;

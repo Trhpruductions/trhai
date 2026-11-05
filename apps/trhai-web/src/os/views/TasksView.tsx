@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import type { CalendarEvent } from "@ascend/shared";
 import { Markdown } from "../../components/Markdown";
 import type { ExecutionEvent } from "../../hooks/useExecutionEvents";
 import { apiDelete, apiGet, apiPatch, apiPost, sessionId } from "../../lib/api";
 import { whenUsed } from "../../lib/conversationGroups";
 import {
-  between, cadenceFrom, countWork, dueLabel, filterHistory, filterSchedules, filters, finishedWords, formatDuration,
-  formatElapsed, isRunningNow, needsYou, orderSchedules, runWords, taskPhase, taskTitle, taskTypeLabel, toolLabel,
+  between, cadenceFrom, calendarWhen, countWork, dueLabel, filterHistory, filterSchedules, filters, finishedWords, formatDuration,
+  formatElapsed, isRunningNow, needsYou, orderSchedules, runWords, taskPhase, taskTitle, taskTypeLabel, toolLabel, upcomingOnCalendar,
   type AgentTask, type FinishedStatus, type FinishedStep, type FinishedTask, type ScheduleRun, type TaskFilter, type TaskItem
 } from "../../lib/taskCenter";
 import { Icon } from "../ui/Icon";
@@ -20,8 +21,8 @@ import "./views.css";
 
 // Every piece of work in one place: what TRH AI is doing right now, step by
 // step; what is waiting on you; what runs on a schedule, with every run it has
-// made; everything it has finished and how each went; and your own to-do
-// list. All of it is read from the API. Nothing is estimated, and nothing is
+// made; everything it has finished and how each went; your own to-do list;
+// and your calendar. All of it is read from the API. Nothing is estimated, and nothing is
 // called running unless the API is running it.
 
 const finishedTone: Record<FinishedStatus, string> = { succeeded: "ok", failed: "danger", blocked: "warn", interrupted: "warn" };
@@ -498,6 +499,89 @@ function TodoPanel() {
   );
 }
 
+/** What you have on. Read again every half a minute and when the window comes back, because the assistant can change it too. */
+function CalendarPanel() {
+  const { notify } = useNotify();
+  const [events, setEvents] = useState<CalendarEvent[] | null>(null);
+  const [title, setTitle] = useState("");
+  const [at, setAt] = useState("");
+  const now = new Date();
+  const upcoming = upcomingOnCalendar(events ?? [], now);
+  const past = (events?.length ?? 0) - upcoming.length;
+
+  const read = useCallback(async () => {
+    const result = await apiGet<{ events: CalendarEvent[] }>(`/v1/calendar?sessionId=${sid()}`);
+    if (result.ok) setEvents(result.data.events);
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from the API after mount
+    void read();
+    const timer = window.setInterval(() => void read(), 30_000);
+    const onFocus = () => void read();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [read]);
+
+  const add = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!title.trim() || !at) return;
+    const result = await apiPost<{ event: CalendarEvent }>("/v1/calendar", { sessionId: sessionId(), title: title.trim(), at });
+    if (!result.ok) {
+      notify({ level: "error", title: "Could not add that", body: result.reason, source: "TASKS" });
+      return;
+    }
+    setTitle("");
+    setAt("");
+    await read();
+  };
+
+  const remove = async (id: string) => {
+    const result = await apiDelete(`/v1/calendar/${encodeURIComponent(id)}?sessionId=${sid()}`);
+    if (result.ok) setEvents((prior) => prior?.filter((entry) => entry.id !== id) ?? null);
+  };
+
+  return (
+    <section className="os-panel os-todo" aria-label="Your calendar">
+      <header className="os-panel-head">
+        <h3 className="os-panel-title">Your calendar</h3>
+        <span className="os-faint os-small">{events === null ? "-" : `${upcoming.length} coming up${past > 0 ? ` · ${past} past` : ""}`}</span>
+      </header>
+      <div className="os-panel-body os-stack">
+        <form className="os-todo-add os-calendar-add" onSubmit={(event) => void add(event)}>
+          <input className="os-input" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200}
+            placeholder="What is on" aria-label="What is on" />
+          <input className="os-input" type="datetime-local" value={at} onChange={(event) => setAt(event.target.value)} aria-label="When it is" />
+          <button type="submit" className="os-btn os-btn-primary os-btn-icon" aria-label="Add to the calendar" disabled={!title.trim() || !at}>
+            <Icon name="plus" size={16} />
+          </button>
+        </form>
+        {events === null ? <p className="os-faint os-small">Reading the calendar…</p>
+          : upcoming.length === 0 ? <p className="os-faint os-small">Nothing coming up. Add something here, or ask TRH AI to put it on your calendar.</p>
+            : (
+              <ul className="os-todo-list">
+                {upcoming.map((event) => (
+                  <li key={event.id}>
+                    <span className="os-calendar-entry">
+                      <strong>{event.title}</strong>
+                      <span className="os-faint os-small">{calendarWhen(event, now)}{event.notes ? ` · ${event.notes}` : ""}</span>
+                    </span>
+                    <button type="button" className="os-btn os-btn-ghost os-btn-icon os-btn-sm" aria-label={`Remove ${event.title}`}
+                      onClick={() => void remove(event.id)}>
+                      <Icon name="close" size={14} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+      </div>
+    </section>
+  );
+}
+
 export function TasksView() {
   const { agentTasks, schedules, schedulePersistError, refresh } = useSystem();
   const { executionEvents, busy, send } = useAssistantState();
@@ -694,6 +778,7 @@ export function TasksView() {
 
         <aside className="os-tasks-side">
           <TodoPanel />
+          <CalendarPanel />
         </aside>
       </div>
     </ViewFrame>

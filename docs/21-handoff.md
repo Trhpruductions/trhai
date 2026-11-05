@@ -550,6 +550,28 @@ three version numbers (service, interface, desktop app), which is what the packa
 opening a legal text from Settings puts `legal%2Fprivacy` in the address, which works and is
 only ugly.
 
+## The calendar (2026-11-05)
+
+What a person has on, on a day and usually at a time: `calendarStore.ts` behind `/v1/calendar`,
+scoped per session or account like the to-do list, protected at rest like the other stores.
+
+- Three tools (`calendarTools.ts`, handlers in `agentTools.ts`): `list_events` (what is coming
+  up, one day, or all of it), `add_event`, and `remove_event`, which asks first. Numbers are
+  the place in the whole calendar, so reading one day changes none of them. The time of day
+  comes from the user's own words where they said it, as for a schedule; a date alone is all
+  day. A day that has passed is refused, because it is most often a wrong year.
+- Offered when the request is about it (`wantsCalendar`): "put the dentist on my calendar on
+  Friday at 3", "do I have anything on Tuesday?", "when is my next appointment?". Not a calendar
+  app, the word itself, or someone else's calendar (Google, Outlook), which it has no way into.
+- Nothing fires. To be told about an event a person asks for a reminder as well, and that is a
+  one-time schedule.
+- The Tasks screen has a Your calendar panel beside the to-dos, and reads it again every half a
+  minute, because the assistant can change it too. Included in what the privacy screen counts,
+  copies and erases, and in the Privacy Policy's list of what is kept.
+- `packages/shared/src/localCalendar.ts` was already there, used only by the superseded web
+  client, which keeps its events in the browser; this store is separate and they do not meet.
+  Tests: `calendar.test.ts`.
+
 ## How to verify anything you change
 
 ```

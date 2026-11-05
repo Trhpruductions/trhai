@@ -19,6 +19,8 @@ export type CalendarEvent = {
   /** Local wall-clock time, "YYYY-MM-DDTHH:mm". */
   startsAt: string;
   notes?: string;
+  /** It has a day and no time: a birthday, a day off. startsAt is then that day at midnight. */
+  allDay?: boolean;
 };
 
 const localDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;

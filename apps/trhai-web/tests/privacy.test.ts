@@ -42,13 +42,13 @@ test("nothing is agreed to until every box that is shown is ticked, and then the
 });
 
 const held: HeldCounts = {
-  conversations: 1, memories: 12, documents: 0, todos: 3, finishedWork: 40,
+  conversations: 1, memories: 12, documents: 0, todos: 3, calendarEvents: 2, finishedWork: 40,
   thisCopy: { schedules: 2, automationFlow: true, emailAccount: true, license: true }
 };
 
 test("an erasure is described with the real numbers of what it would remove, and only what was ticked", () => {
   assert.deepEqual(describeErasure(held, { ownData: true, wholeCopy: false, license: false, account: false }), [
-    "1 conversation, 12 memories, 0 documents, 3 to-dos and 40 finished tasks kept for you"
+    "1 conversation, 12 memories, 0 documents, 3 to-dos, 2 calendar events and 40 finished tasks kept for you"
   ]);
   assert.deepEqual(describeErasure(held, { ownData: false, wholeCopy: true, license: true, account: true }), [
     "2 schedules, the automation flow, the preferences, the saved email account and its password",
@@ -60,7 +60,7 @@ test("an erasure is described with the real numbers of what it would remove, and
 
 test("without counts an erasure is still described, and parts that do not exist are not claimed", () => {
   assert.deepEqual(describeErasure(null, { ownData: true, wholeCopy: true, license: false, account: false }), [
-    "the conversations, memories, documents, to-dos and finished tasks kept for you",
+    "the conversations, memories, documents, to-dos, calendar events and finished tasks kept for you",
     "the schedules, the automation flow, the preferences and the saved email account"
   ]);
   const bare: HeldCounts = { ...held, thisCopy: { schedules: 1, automationFlow: false, emailAccount: false, license: false } };

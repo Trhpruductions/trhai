@@ -170,7 +170,7 @@ function ExportSection({ signedIn }: { signedIn: boolean }) {
       <div className="os-panel-body os-stack">
         <p className="os-small os-dim">
           One file, in plain words, with everything TRH AI holds for {signedIn ? "your account" : "this browser"}: conversations, memories,
-          documents, to-dos and finished work{signedIn ? ", your account details and what you agreed to" : ""}. It is written on this PC and
+          documents, to-dos, calendar and finished work{signedIn ? ", your account details and what you agreed to" : ""}. It is written on this PC and
           sent nowhere. The file itself lists what it leaves out, and why.
         </p>
         <div>
@@ -252,7 +252,7 @@ function EraseSection({ summary, signedIn, onErased }: { summary: PrivacySummary
         <div>
           <label className="privacy-check">
             <input type="checkbox" checked={scope.ownData} disabled={busy} onChange={() => toggle("ownData")} />
-            <span>My conversations, memories, documents, to-dos and finished work{held ? ` (${held.conversations} conversations, ${held.memories} memories, ${held.documents} documents, ${held.todos} to-dos, ${held.finishedWork} finished)` : ""}</span>
+            <span>My conversations, memories, documents, to-dos, calendar and finished work{held ? ` (${held.conversations} conversations, ${held.memories} memories, ${held.documents} documents, ${held.todos} to-dos, ${held.calendarEvents} calendar events, ${held.finishedWork} finished)` : ""}</span>
           </label>
           {wholeCopyAllowed ? (
             <label className="privacy-check">

@@ -70,7 +70,7 @@ export const featureCatalogue: Readonly<Record<FeatureId, FeatureInfo>> = {
   tasks: {
     label: "Tasks",
     description: "Keep a task list and let the assistant work through tasks in the background.",
-    routes: ["/v1/tasks", "/v1/agent-tasks"]
+    routes: ["/v1/tasks", "/v1/agent-tasks", "/v1/calendar"]
   },
   flow: {
     label: "Automation flow",

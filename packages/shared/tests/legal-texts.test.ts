@@ -20,7 +20,7 @@ import {
  * A fact the owner supplies changes the words too, and so is the same kind of change.
  */
 const fingerprints: Record<string, string> = {
-  "privacy@2026-11-05": "16535ea24b684a9a",
+  "privacy@2026-11-05": "9459bd183d4f414e",
   "terms@2026-11-05": "2b04e7d31fb00bd2",
   "refunds@2026-11-05": "87a80f6f084661e0",
   "storage@2026-11-02": "7271483490607e74",

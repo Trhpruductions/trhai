@@ -9,6 +9,7 @@ import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
 import { appNamedIn, driveNamedIn, readingsFor, readMachineStatus, runTool, type AgentLens } from "./agentTools.js";
 import type { TodoAccess } from "./todoTools.js";
+import type { CalendarAccess } from "./calendarTools.js";
 import type { readTelemetry } from "./systemTelemetry.js";
 import { workspaceRoot } from "./workspace.js";
 import { changesSomething } from "./toolPermissions.js";
@@ -82,6 +83,7 @@ export type OrchestratorInput = {
   forgetMemory?: (id: string) => boolean;
   /** The Tasks screen's list, for the to-do tools; absent without a session. */
   todo?: TodoAccess;
+  calendar?: CalendarAccess;
   /** Facts the user asked to forget this session; see ComposerInput.forgottenFacts. */
   forgottenFacts?: string[];
   /** The file "it" means this turn; see resolveFilePronoun. Set by the orchestrator. */
@@ -2209,6 +2211,7 @@ async function answerWithLocalModel(
     saveMemory: input.saveMemory,
     forgetMemory: input.forgetMemory,
     todo: input.todo,
+    calendar: input.calendar,
     documents: input.documents,
     saveDocument: input.saveDocument,
     updateDocument: input.updateDocument,

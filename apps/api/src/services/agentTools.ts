@@ -60,6 +60,9 @@ import {
   addSchedule, calendarWords, describeAction, describeCadence, listSchedules, type Cadence
 } from "./scheduleStore.js";
 import { parseOnceTime } from "./onceTime.js";
+import {
+  describeEvents, eventWhen, findEvent, maxEventNotesLength, maxEventTitleLength, readEventMoment, type CalendarAccess, type EventScope
+} from "./calendarTools.js";
 import type { TaskItem } from "./taskListStore.js";
 import { describeTasks, findTask, maxTaskLength, sameTask, type TaskScope, type TodoAccess } from "./todoTools.js";
 
@@ -164,6 +167,8 @@ export type ToolContext = {
    * pretend to keep one.
    */
   todo?: TodoAccess;
+  /** The caller's calendar, behind /v1/calendar; absent where there is no session to keep one for. */
+  calendar?: CalendarAccess;
   /**
    * Earlier turns of this conversation, oldest first.
    *
@@ -1041,6 +1046,60 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "list_events",
+      description:
+        "The user's calendar: what they have on, numbered, soonest first. Use it when they ask what is on their calendar, what "
+        + "they have on a day, whether they are free, or when their next appointment is - and before remove_event when you do "
+        + "not know an event's number or words. Not the schedules, and not the to-do list.",
+      parameters: {
+        type: "object",
+        properties: {
+          on: { type: "string", description: "One day to look at, as YYYY-MM-DD, worked out from today's date. Left out, everything coming up." },
+          which: { type: "string", description: "upcoming (the default), or all to include what has passed." }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_event",
+      description:
+        "Put something on the user's calendar: an appointment, a meeting, a birthday, anything they have on, on a day and "
+        + "usually at a time. Use it when they ask to add or put something on their calendar, or to book or note an appointment. "
+        + "It says what was added; tell the user that. An event does not alert anyone: to be reminded as well, they ask for a "
+        + "reminder, which is add_schedule. Something to do with no day is a task (add_task).",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "What it is, as one short line in the user's words." },
+          at: { type: "string", description: "When: YYYY-MM-DD HH:MM in the user's local time, or YYYY-MM-DD for all day, worked out from today's date for \"Friday\" or \"tomorrow\"." },
+          notes: { type: "string", description: "Only if the user gave more detail: where, who with, what to bring." }
+        },
+        required: ["title", "at"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "remove_event",
+      description:
+        "Take an event off the user's calendar, for good. Only when they ask for it to be removed, deleted or cancelled. Name it "
+        + "by its number in the list (from list_events) or by its words; when several match it says which, so ask the user.",
+      parameters: {
+        type: "object",
+        properties: {
+          event: { type: "string", description: "The event's number in the list, or its words." }
+        },
+        required: ["event"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "current_datetime",
       description:
         "The current date and time on the user's machine. Use this for anything involving today, "
@@ -1405,7 +1464,7 @@ const dateTools = new Set(["days_between", "shift_date"]);
 const writingTools = new Set([
   "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "speak_to_file", "plan_app",
   "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule",
-  "add_task", "complete_task", "remove_task"
+  "add_task", "complete_task", "remove_task", "add_event", "remove_event"
 ]);
 
 /**
@@ -1430,6 +1489,8 @@ const clockTools = new Set(["shift_time"]);
 const scheduleTools = new Set(["add_schedule"]);
 /** Offered only when the request is about the user's own to-do list; see wantsTodo. */
 const taskTools = new Set(["list_tasks", "add_task", "complete_task", "remove_task"]);
+/** Offered when the request is about the calendar; see wantsCalendar. */
+const calendarTools = new Set(["list_events", "add_event", "remove_event"]);
 /** Offered only when the request is about a video; see mentionsVideo. */
 const videoTools = new Set(["make_video"]);
 /** Offered only when the request is about a music video; see mentionsMusicVideo. Then make_video is withheld: it makes narrated slides, not a video of a song. */
@@ -1499,7 +1560,7 @@ export function availableTools(
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
     schedules?: boolean; video?: boolean; musicVideo?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
     messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean; fileMaking?: boolean; spreadsheets?: boolean;
-    presentations?: boolean; media?: boolean; speech?: boolean; tasks?: boolean;
+    presentations?: boolean; media?: boolean; speech?: boolean; tasks?: boolean; calendar?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1517,6 +1578,7 @@ export function availableTools(
   const allowMemory = options.memory ?? true;
   const allowSchedules = options.schedules ?? true;
   const allowTasks = options.tasks ?? true;
+  const allowCalendar = options.calendar ?? true;
   const allowVideo = options.video ?? true;
   const allowMusicVideo = options.musicVideo ?? true;
   const allowDocumentWrites = options.documents ?? true;
@@ -1549,6 +1611,7 @@ export function availableTools(
     if (!allowSchedules && scheduleTools.has(name)) return false;
     // The to-do list only when the request is about it; see wantsTodo.
     if (!allowTasks && taskTools.has(name)) return false;
+    if (!allowCalendar && calendarTools.has(name)) return false;
     if (!allowVideo && videoTools.has(name)) return false;
     if (!allowMusicVideo && musicVideoTools.has(name)) return false;
     // Asked for a music video, the narrated-slides tool is not the one wanted.
@@ -3670,6 +3733,76 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
       return updated
         ? { ok: true, content: `${done ? "Done" : "Open again"}: ${updated.title}` }
         : { ok: false, content: "The task could not be changed, so it is as it was." };
+    }
+    case "list_events": {
+      if (!context.calendar) return { ok: false, content: "There is no calendar here, so nothing could be listed." };
+      const now = (context.now ?? (() => new Date()))();
+      const on = requireString(call.arguments.on);
+      let scope: EventScope = requireString(call.arguments.which)?.toLowerCase() === "all" ? "all" : "upcoming";
+      if (on) {
+        const day = readEventMoment(on);
+        if (!day.ok) return { ok: false, content: day.reason };
+        scope = { on: day.startsAt.slice(0, 10) };
+      }
+      return { ok: true, content: describeEvents(context.calendar.list(), now, scope) };
+    }
+    case "add_event": {
+      if (!context.calendar) return { ok: false, content: "There is no calendar here, so nothing was added." };
+      const title = requireString(call.arguments.title);
+      if (!title) return { ok: false, content: "add_event needs what the event is, as title. Nothing was added." };
+      if (title.length > maxEventTitleLength) {
+        return { ok: false, content: `An event's title is one short line, at most ${maxEventTitleLength} letters. Put the rest in notes. Nothing was added.` };
+      }
+      const at = requireString(call.arguments.at);
+      if (!at) return { ok: false, content: "add_event needs when it is, as at: YYYY-MM-DD HH:MM, or YYYY-MM-DD for all day. Nothing was added." };
+      const moment = readEventMoment(at);
+      if (!moment.ok) return { ok: false, content: `${moment.reason} Nothing was added.` };
+      const notes = requireString(call.arguments.notes) ?? undefined;
+      if (notes && notes.length > maxEventNotesLength) return { ok: false, content: `Notes are at most ${maxEventNotesLength} letters. Nothing was added.` };
+
+      // The time of day comes from the user's own words where they said it plainly, as for a schedule.
+      const spoken = context.request ? timeAskedFor(context.request) : null;
+      const startsAt = spoken === null
+        ? moment.startsAt
+        : `${moment.startsAt.slice(0, 10)}T${String(Math.floor(spoken / 60)).padStart(2, "0")}:${String(spoken % 60).padStart(2, "0")}`;
+      const allDay = moment.allDay && spoken === null;
+
+      const now = (context.now ?? (() => new Date()))();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      // Most often a wrong year worked out by the model, and a calendar is for what is on.
+      if (startsAt.slice(0, 10) < today) {
+        return { ok: false, content: `${eventWhen({ startsAt, allDay: true }).replace(", all day", "")} has already passed. Nothing was added.` };
+      }
+      // The same event is not put on twice: said as a success, so the model does not reword it until one gets past.
+      const existing = context.calendar.list().find((event) => event.startsAt === startsAt && event.title.trim().toLowerCase() === title.trim().toLowerCase());
+      if (existing) return { ok: true, content: `Already on your calendar: ${eventWhen(existing)}: ${existing.title}` };
+
+      const added = context.calendar.add({ title, startsAt, notes, allDay });
+      return added
+        ? { ok: true, content: `Added to your calendar: ${eventWhen(added)}: ${added.title}` }
+        : { ok: false, content: "That could not be put on the calendar. Nothing was added." };
+    }
+    case "remove_event": {
+      if (!context.calendar) return { ok: false, content: "There is no calendar here, so nothing was removed." };
+      const reference = requireString(call.arguments.event);
+      if (!reference) return { ok: false, content: "remove_event needs the event's number in the list or its words. Nothing was changed." };
+      const events = context.calendar.list();
+      const found = findEvent(events, reference);
+      if (found.kind === "none") {
+        return {
+          ok: false,
+          content: events.length === 0
+            ? "The calendar is empty, so there is nothing to remove."
+            : `No event matches "${reference}". The calendar:\n${describeEvents(events, (context.now ?? (() => new Date()))(), "all")}`
+        };
+      }
+      if (found.kind === "several") {
+        const choices = found.matches.map((match) => `${match.number}. ${eventWhen(match.event)}: ${match.event.title}`).join("\n");
+        return { ok: false, content: `"${reference}" could mean any of these - ask which, and name it by its number:\n${choices}` };
+      }
+      return context.calendar.remove(found.event.id)
+        ? { ok: true, content: `Removed from your calendar: ${eventWhen(found.event)}: ${found.event.title}` }
+        : { ok: false, content: "The event could not be removed, so it is still on the calendar." };
     }
     case "add_schedule": {
       const name = requireString(call.arguments.name);
