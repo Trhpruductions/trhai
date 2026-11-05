@@ -40,7 +40,7 @@ export function privacyDocument(facts: LegalFacts): LegalDocument {
         blocks: [
           { kind: "p", text: `${operator} makes ${product}; see [Business information](#legal-business) for who that is and how to reach them. For privacy questions and requests: ${privacyContact}.` },
           { kind: "p", text: `Information stored on your PC is in your control. ${operator} does not receive it, so it cannot see it, change it or delete it for you; you do that in the app. The information that ${operator} itself holds is described in section 5.` },
-          { kind: "note", tone: "review", text: "Who counts as the data controller for each kind of information (the person using TRH AI for what is on their own PC; TRH Development for license and support records), and what a business user must do about the people whose information they put into TRH AI, should be confirmed by a lawyer." }
+          { kind: "note", tone: "review", text: "Who counts as the data controller for each kind of information (the person using TRH AI for what is on their own PC; TRH Development for its list of issued keys and for support records), and what a business user must do about the people whose information they put into TRH AI, should be confirmed by a lawyer." }
         ]
       },
       {
@@ -60,7 +60,7 @@ export function privacyDocument(facts: LegalFacts): LegalDocument {
               ["Schedules and the automation flow", "What you have set to run on a timer and the result of each run; the automation flow you saved.", "Until you delete them or erase your data."],
               ["Preferences", "The assistant's personality you chose, and the kind of phone you linked in Phone Link.", "Until you change or erase them."],
               ["An email account, if you connect one", "The address, the mail server, the port and the app password you gave, so the assistant can send email on your behalf when you ask.", "Until you remove it or erase your data."],
-              ["License and trial", "The license key, which contains the email address it was bought with, and the date the free trial began (also kept in a small marker file, so uninstalling does not restart the trial).", "The key until you remove it. The trial date stays: it holds no personal information."],
+              ["A key, if you entered one", "An owner or administrator key, or a license key from before TRH AI became free, which contains the email address it was issued for. A PC that ran an earlier version may also hold the date its free trial began, in the license file and a small marker file; nothing uses it now.", "The key until you remove it. The old trial date stays: it holds no personal information."],
               ["Settings that protect the PC", "Whether machine access is on, and the access key other devices need if you let them in.", "Until you change them."],
               ["Record of changes to accounts", "Only on a copy of TRH AI that other people sign in to: who suspended, reactivated or gave a role to whom, and when.", "Kept in order; up to 10,000 entries. When an account is erased its email address is taken out."],
               ["Record of erasures", "That an erasure was asked for and carried out: its date, what it covered and a random number. No name and no email.", "24 months."],
@@ -98,13 +98,13 @@ export function privacyDocument(facts: LegalFacts): LegalDocument {
         id: "holds",
         heading: `5. What ${operator} holds`,
         blocks: [
-          { kind: "p", text: `The app tells ${operator} nothing. ${operator} holds only what a person gives it in order to get a license, or to ask for help:` },
+          { kind: "p", text: `The app tells ${operator} nothing. ${operator} holds only what a person gives it in order to get a key, or to ask for help:` },
           { kind: "list", items: [
-            "**When a license is issued:** the email address it is for, the plan, the date and a key number, written to a list kept on the owner's own PC. If the license is paid for, the company that takes the payment tells the seller what it needs to deliver the key and keep accounts - typically the buyer's email and whether the payment went through. Card and bank details are for the payment company; TRH AI never sees them. What that company keeps is governed by its own privacy policy.",
+            "**When a key is issued:** the email address it is for, the date and a key number, written to a list kept on the owner's own PC. TRH AI is free, so nobody is asked to pay and no card or bank details are involved.",
             "**When you write for help or about privacy:** your message and your email address.",
-            `**Kept for:** license records for ${fact(facts.salesRecordRetentionYears, "how many years the business keeps the record of a license it issued")} years, as tax and accounting rules may require; messages for as long as it takes to deal with them.`
+            `**Kept for:** the list of issued keys for ${fact(facts.keyRecordRetentionYears, "how many years the business keeps its list of the keys it issued")} years; messages for as long as it takes to deal with them.`
           ] },
-          { kind: "note", tone: "review", text: "How long records of sales must be kept, and the legal basis for holding each of these records, depend on the country the business is established in and must be settled with a lawyer and an accountant." }
+          { kind: "note", tone: "review", text: "How long these records should be kept, and the legal basis for holding each of them, depend on the country the business is established in and must be settled with a lawyer. If any license was sold before TRH AI became free, records of those sales may have to be kept for tax and accounts." }
         ]
       },
       {
@@ -114,7 +114,7 @@ export function privacyDocument(facts: LegalFacts): LegalDocument {
           { kind: "list", items: [
             "To do what you ask: answering, remembering, reading your files and making things for you.",
             "To keep you signed in, and to keep one person's conversations apart from another's on the same PC.",
-            "To check your license and the trial, on your PC, without the internet.",
+            "To check an owner or administrator key, if you entered one, on your PC, without the internet.",
             "To tell you about new versions, and to download what you choose to install.",
             "To look after the software: the logs help find why something failed.",
             "To keep records the law may require, and to answer your requests."
@@ -173,7 +173,7 @@ export function privacyDocument(facts: LegalFacts): LegalDocument {
         id: "children",
         heading: "11. Children",
         blocks: [
-          { kind: "p", text: `${product} is not made for children, and you must be at least ${fact(facts.minimumAge, "minimum age")} to make an account or buy a license. ${operator} does not receive information from the app, so it does not knowingly collect children's information. If a child's information has been put into a copy of TRH AI, a parent or guardian can erase it under **Settings, Privacy and consent**; to ask ${operator} to delete a child's information it holds, write to ${privacyContact}.` },
+          { kind: "p", text: `${product} is not made for children, and you must be at least ${fact(facts.minimumAge, "minimum age")} to use it or make an account. ${operator} does not receive information from the app, so it does not knowingly collect children's information. If a child's information has been put into a copy of TRH AI, a parent or guardian can erase it under **Settings, Privacy and consent**; to ask ${operator} to delete a child's information it holds, write to ${privacyContact}.` },
           { kind: "note", tone: "review", text: "Asking people to confirm their age is not, by itself, compliance with children's privacy laws such as COPPA. The age limit, and what to do if a child's information is held, must be settled with a lawyer. Nothing here claims compliance." }
         ]
       },
@@ -181,7 +181,7 @@ export function privacyDocument(facts: LegalFacts): LegalDocument {
         id: "places",
         heading: "12. Where information goes",
         blocks: [
-          { kind: "p", text: `Information on your PC stays in the country the PC is in. The services in section 4 are run by companies in other countries (mostly the United States), and the request goes there when you use them. Where ${operator} holds license records, they are kept in ${fact(facts.jurisdiction, "country where the business keeps its records")}.` },
+          { kind: "p", text: `Information on your PC stays in the country the PC is in. The services in section 4 are run by companies in other countries (mostly the United States), and the request goes there when you use them. Where ${operator} holds its list of issued keys, it is kept in ${fact(facts.jurisdiction, "country where the business keeps its records")}.` },
           { kind: "note", tone: "review", text: "Whether transfers to those services need safeguards (for example standard contractual clauses) depends on where people using TRH AI live." }
         ]
       },

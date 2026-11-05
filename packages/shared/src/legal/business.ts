@@ -55,7 +55,7 @@ export function businessDocument(facts: LegalFacts): LegalDocument {
           },
           {
             kind: "p",
-            text: "Information that TRH AI keeps on your own PC needs no one's help to see or remove: **Settings, Privacy and consent** copies it into a file and erases it. Write to the privacy address above about information that TRH Development itself holds, such as the record of a license it issued to you."
+            text: "Information that TRH AI keeps on your own PC needs no one's help to see or remove: **Settings, Privacy and consent** copies it into a file and erases it. Write to the privacy address above about information that TRH Development itself holds, such as the record of a key it issued to you."
           }
         ]
       },
@@ -75,11 +75,11 @@ export function businessDocument(facts: LegalFacts): LegalDocument {
       },
       {
         id: "payments",
-        heading: "Payments and licenses",
+        heading: "Price and keys",
         blocks: [
           {
             kind: "p",
-            text: `License keys are issued by ${facts.operatorName}. Where a license is paid for, payment is taken in your browser on a checkout page run by ${fact(facts.paymentProvider, "payment provider that takes payment on the checkout page, if there is one")}. ${facts.productName} itself has no payment screen and never sees a card or bank number. See the [Refund Policy](#legal-refunds) for refunds and the [Terms of Service](#legal-terms) for what a license allows.`
+            text: `${facts.productName} is free: ${facts.operatorName} charges nothing for it, and it has no payment screen and never sees a card or bank number. Owner and administrator keys, which let an account look after the other accounts on a copy, are issued by ${facts.operatorName}; nobody needs one to use the software. See the [Terms of Service](#legal-terms) for what you may do with it, and the [Refund Policy](#legal-refunds) if someone charged you for it.`
           }
         ]
       }

@@ -13,7 +13,8 @@ process.env.TRHAI_LICENSE_PUBLIC_KEY = publicKey.export({ type: "spki", format: 
 const licenseDir = mkdtempSync(path.join(tmpdir(), "trhai-license-"));
 process.env.TRHAI_LICENSE_FILE = path.join(licenseDir, "license.json");
 process.env.TRHAI_TRIAL_MARKER = path.join(licenseDir, "elsewhere", "trial-started");
-delete process.env.TRHAI_PAYWALL;
+// TRH AI is free by default (licenseConfig.ts); these tests are about the paywall that can be switched back on.
+process.env.TRHAI_PAYWALL = "on";
 
 const {
   activateLicense, formatLicenseKey, licenseStatus, newLicenseId, parseLicenseKey, removeLicense,

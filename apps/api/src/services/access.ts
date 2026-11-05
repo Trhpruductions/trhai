@@ -93,6 +93,14 @@ export function accessFacts(principal: Principal, at: Date = new Date()): Access
   const status = licenseStatus(at);
   const paywallOff = status.paywallDisabled;
 
+  // A copy with no paywall - every copy, since TRH AI became free. Nothing has lapsed or can,
+  // for anyone, on a PC of one's own or on a copy other people share: a lock reason here would
+  // put the paywall screen in front of a person the gate lets through.
+  if (paywallOff) {
+    const plan: EffectivePlan = status.state === "licensed" && !authorityMode() ? status.plan as EffectivePlan : "free";
+    return { plan, lockReason: null, paywallOff, accountRequired: authorityMode() };
+  }
+
   if (authorityMode()) {
     const started = principal.account ? Date.parse(principal.account.createdAt) : NaN;
     const inTrial = Number.isFinite(started) && at.getTime() < started + trialDays * 24 * 60 * 60 * 1000;
@@ -247,8 +255,10 @@ export function entitlementView(principal: Principal, at: Date = new Date()) {
     signedIn: principal.signedIn,
     role: principal.role,
     status: principal.status,
+    /** TRH AI is free on this copy: no trial, no key, nothing to buy. */
+    free: facts.paywallOff,
     plan: facts.plan,
-    planLabel: defaultPlans[facts.plan].label,
+    planLabel: facts.paywallOff ? "Free" : defaultPlans[facts.plan].label,
     lockReason: facts.lockReason,
     accountRequired: facts.accountRequired,
     authority: authorityMode(),

@@ -3,9 +3,8 @@ import { fact, type LegalDocument } from "./model.js";
 
 // The Terms of Service.
 //
-// Written from how TRH AI actually works - a program on the person's own PC, with a
-// 14-day trial and a license key that is checked without the internet - rather than
-// from a template for a website. Where a term is a choice only the owner can make, or
+// Written from how TRH AI actually works - a free program on the person's own PC - rather
+// than from a template for a website. Where a term is a choice only the owner can make, or
 // the kind of wording a lawyer must settle (liability, governing law), it is marked, and
 // the facts are the owner's to supply in legalFacts.ts.
 
@@ -23,7 +22,7 @@ export function termsDocument(facts: LegalFacts): LegalDocument {
         id: "accept",
         heading: "1. Accepting these terms",
         blocks: [
-          { kind: "p", text: `By making an account, entering a license key or using ${product}, you agree to these terms. If you do not agree, do not use ${product}.` },
+          { kind: "p", text: `By making an account or using ${product}, you agree to these terms. If you do not agree, do not use ${product}.` },
           { kind: "p", text: "How information is handled is described separately in the [Privacy Policy](#legal-privacy). Please read it as well; it is not part of these terms, but it describes what the software does." },
           { kind: "note", tone: "info", text: `${product} runs on your own PC. Most of what these terms cover - your content, your data, how the software behaves - happens there, not on a server of ours.` }
         ]
@@ -40,14 +39,13 @@ export function termsDocument(facts: LegalFacts): LegalDocument {
         id: "license",
         heading: "3. Your license",
         blocks: [
-          { kind: "p", text: `${operator} gives you a personal, non-exclusive, non-transferable license to install and use ${product} on PCs you control, for the plan and the number of seats named by your license key.` },
+          { kind: "p", text: `${operator} gives you a personal, non-exclusive, non-transferable license to install and use ${product} on PCs you control.` },
           { kind: "list", items: [
-            "A new installation includes a **free trial of 14 days**, counted from the first time it runs. Nothing is charged for the trial and no payment details are asked for.",
-            "When the trial ends, the parts of the app that make it do new work are locked until a license key is entered. Everything you have already made stays readable, and you can copy it out or erase it at any time.",
-            "A license key is checked on your PC, without the internet. Some keys expire on a date written in the key; when it passes, the app locks again until a new key is entered.",
-            "You may not copy a key to people or seats beyond those your plan covers, sell or sub-license the software, or remove or work around the license check."
+            `**${product} is free.** There is no trial that ends, no license to buy and nothing to pay, and no part of it is locked behind a payment.`,
+            "An owner or administrator key, if you were given one, is checked on your PC without the internet. It lets the account with that email look after the other accounts on a copy; nobody needs one to use the software.",
+            "You may not sell or sub-license the software."
           ] },
-          { kind: "note", tone: "review", text: `What each plan (personal, pro, team) allows - who may use it and on how many PCs - is a business decision that is not written down anywhere in the product. ${operator} must define each plan, and this section must say it, before release.` }
+          { kind: "note", tone: "review", text: `Free means free of charge. Whether it may also be used in a business, and whether copies may be passed on to other people, has not been decided: ${operator} must decide, and this section must say. The word "personal" above comes from when licenses were sold, and should be looked at with that.` }
         ]
       },
       {
@@ -67,8 +65,8 @@ export function termsDocument(facts: LegalFacts): LegalDocument {
         id: "age",
         heading: "5. Who may use TRH AI",
         blocks: [
-          { kind: "p", text: `You must be at least ${fact(facts.minimumAge, "minimum age")} years old to make an account or buy a license. ${product} is not made for children and does not knowingly collect information from them; see the [Privacy Policy](#legal-privacy) for what to do if a child's information has been entered.` },
-          { kind: "note", tone: "review", text: "The minimum age is a decision for the owner with a lawyer: it depends on the countries where TRH AI is sold (for example, 13 under the US children's privacy law COPPA, and between 13 and 16 under the GDPR, depending on the country). The age box on the sign-up form appears only when a minimum age has been set." }
+          { kind: "p", text: `You must be at least ${fact(facts.minimumAge, "minimum age")} years old to use ${product} or make an account. ${product} is not made for children and does not knowingly collect information from them; see the [Privacy Policy](#legal-privacy) for what to do if a child's information has been entered.` },
+          { kind: "note", tone: "review", text: "The minimum age is a decision for the owner with a lawyer: it depends on the countries where TRH AI is offered (for example, 13 under the US children's privacy law COPPA, and between 13 and 16 under the GDPR, depending on the country). The models TRH AI recommends have had their refusals taken out, which is a reason to choose an older age such as 18. The age box on the sign-up form appears only when a minimum age has been set." }
         ]
       },
       {
@@ -81,7 +79,7 @@ export function termsDocument(facts: LegalFacts): LegalDocument {
             "make or spread malware, or attack, probe or interfere with systems or accounts you do not own or have no permission to test;",
             "harass, threaten, defraud or deceive anyone, or make sexual content involving children;",
             "infringe other people's copyright, trademarks, privacy or other rights;",
-            "get around the license check, or the limits and safety switches built into the app (such as the machine-access switch);",
+            "get around the limits and safety switches built into the app (such as the machine-access switch);",
             "let other devices or people reach your copy of TRH AI, or the files it can read, in a way that puts other people's data at risk."
           ] },
           { kind: "p", text: `${operator} cannot see what you do with ${product} on your PC, and does not monitor it. You alone are responsible for how you use it and for what you ask it to do.` }
@@ -121,7 +119,7 @@ export function termsDocument(facts: LegalFacts): LegalDocument {
         id: "services",
         heading: "10. Services we do not control",
         blocks: [
-          { kind: "p", text: `${product} can contact other companies' services when you ask it to or install something: GitHub and Hugging Face to download updates, the engine, models and voices; DuckDuckGo for web searches; any website you ask it to read; your own email provider if you connect an email account; and the company that takes payment on a checkout page. Those services have their own terms and privacy policies, and ${operator} is not responsible for them.` }
+          { kind: "p", text: `${product} can contact other companies' services when you ask it to or install something: GitHub and Hugging Face to download updates, the engine, models and voices; DuckDuckGo for web searches; any website you ask it to read; and your own email provider if you connect an email account. Those services have their own terms and privacy policies, and ${operator} is not responsible for them.` }
         ]
       },
       {
@@ -138,10 +136,10 @@ export function termsDocument(facts: LegalFacts): LegalDocument {
       },
       {
         id: "payments",
-        heading: "12. Payment",
+        heading: "12. Price",
         blocks: [
-          { kind: "p", text: `${product} itself never charges you and has no payment screen. A license can be obtained as the [Business information](#legal-business) page describes; where one is paid for, the price, any taxes, whether it is one-time or repeats, and how to cancel are shown on the checkout page before you pay. Nothing renews on its own inside the app.` },
-          { kind: "p", text: "If a checkout page offers a subscription, the company running it, not TRH AI, takes the renewals and handles cancellation. Refunds are covered in the [Refund Policy](#legal-refunds)." }
+          { kind: "p", text: `${product} is free. ${operator} charges nothing for it, and it has no payment screen and never asks for card or bank details. The [Refund Policy](#legal-refunds) says what to do if someone charged you for it.` },
+          { kind: "p", text: "If that ever changes, it will be a change to these terms, made as section 17 says." }
         ]
       },
       {
@@ -150,7 +148,7 @@ export function termsDocument(facts: LegalFacts): LegalDocument {
         blocks: [
           { kind: "list", items: [
             "You can stop using TRH AI at any time. Erase your data first if you want it gone (**Settings, Privacy and consent**), then uninstall.",
-            `${operator} can end your license if you seriously or repeatedly break these terms. Because a license key is checked on your PC, ${operator} cannot switch it off from outside; ending a license means you agree to stop using the software and remove the key.`,
+            `${operator} can end your license if you seriously or repeatedly break these terms. Because ${product} runs on your PC, ${operator} cannot switch it off from outside; ending your license means you agree to stop using the software.`,
             "On a copy of TRH AI that other people sign in to, the person who runs that copy can suspend an account. That is between them and you."
           ] }
         ]
@@ -169,7 +167,7 @@ export function termsDocument(facts: LegalFacts): LegalDocument {
         blocks: [
           { kind: "p", text: `As far as the law allows, ${operator} is not responsible for indirect or consequential loss, lost profits or lost data, or for harm that comes from relying on what the AI says or from commands you ask it to run. You are responsible for keeping copies of data that matters to you.` },
           { kind: "p", text: "Nothing in these terms limits responsibility that cannot be limited by law, such as for death or personal injury caused by negligence, or for fraud." },
-          { kind: "note", tone: "review", text: "This section needs a lawyer. The right limit, and any cap on liability (for example, the price paid for the license), depends on the law that applies and has not been decided." }
+          { kind: "note", tone: "review", text: "This section needs a lawyer. The right limit, and any cap on liability, depends on the law that applies and has not been decided." }
         ]
       },
       {

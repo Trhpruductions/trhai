@@ -132,4 +132,4 @@ try {
 console.log(`Issued ${rows.length} ${plan} key${rows.length === 1 ? "" : "s"}${expires ? `, each ending ${expires}` : ", none of which expire"}.`);
 console.log(`Keys:   ${path.resolve(out)}`);
 console.log(`Record: ${record}`);
-console.log("Give each person their own key; they paste it under Settings, Plan and billing. A key cannot be taken back once given.");
+console.log("Give each person their own key; they paste it under Settings, Plan. A key cannot be taken back once given.");

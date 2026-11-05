@@ -7,7 +7,7 @@ export type Section = { id: SectionId; label: string; summary: string; keywords:
 
 export const sections: Section[] = [
   { id: "account", label: "Account", summary: "Sign in, out, and your password.", keywords: "sign in out password recovery codes email login" },
-  { id: "billing", label: "Plan and billing", summary: "Your trial or license, buying one, and the key.", keywords: "plan billing payment pay buy purchase license licence key trial subscription upgrade price paywall" },
+  { id: "billing", label: "Plan", summary: "TRH AI is free. An owner or administrator key goes here.", keywords: "plan free billing payment pay buy purchase license licence key trial subscription upgrade price paywall" },
   // Listed for everyone but shown only to the owner and the administrators (SettingsView): the service refuses anyone else anyway.
   { id: "people", label: "People and access", summary: "The accounts on this copy, and who may do what.", keywords: "people accounts users administrator admin owner roles suspend audit record permissions" },
   { id: "updates", label: "Updates", summary: "What is new, and newer versions to download.", keywords: "updates update new version release notes changelog download upgrade whats new" },

@@ -23,6 +23,8 @@ export type EntitlementView = {
   signedIn: boolean;
   role: Role;
   status: "active" | "suspended";
+  /** TRH AI is free on this copy: no trial, no key, nothing to buy. */
+  free: boolean;
   plan: string;
   planLabel: string;
   lockReason: string | null;
@@ -49,8 +51,13 @@ const lapseWords: Record<string, string> = {
 };
 
 /** One line saying where things stand, for the top of the panel. */
-export function describeAccess(view: Pick<EntitlementView, "role" | "status" | "lockReason" | "planLabel">): string {
+export function describeAccess(view: Pick<EntitlementView, "role" | "status" | "lockReason" | "planLabel"> & { free?: boolean }): string {
   if (view.status === "suspended") return "This account is suspended. Ask whoever runs this copy of TRH AI.";
+  if (view.free) {
+    if (view.role === "owner") return "You are the owner. TRH AI is free, so everything is open to you, and you look after the accounts on this copy.";
+    if (view.role === "admin") return "You are an administrator. TRH AI is free, so everything is open to you, and you can look after accounts.";
+    return "TRH AI is free: everything in it is open to you.";
+  }
   if (view.role === "owner") {
     return "You are the owner. Everything in TRH AI is open to you, whatever the plan, the payments or the trial - that is never taken away.";
   }
@@ -67,7 +74,7 @@ export function featureStatus(feature: Pick<FeatureView, "allowed" | "via" | "re
     switch (feature.via) {
       case "owner": return "Open to you as the owner";
       case "admin": return "Open to you as an administrator";
-      case "paywall_off": return "Open: the paywall is off on this copy";
+      case "paywall_off": return "Open: TRH AI is free";
       default: return "In your plan";
     }
   }

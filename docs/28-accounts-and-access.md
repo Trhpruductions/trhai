@@ -48,7 +48,7 @@ is consulted.
 
   The role is inside the signed text, so it cannot be added afterwards. A key with
   a role never expires (the tool refuses `--expires` with it). The person enters it
-  under *Settings, Plan and billing*; it makes **the account with that email** the
+  under *Settings, Plan*; it makes **the account with that email** the
   owner or administrator of that copy. Take the key off the PC and the role goes
   with it, at once.
 - **On a copy that holds its own accounts** (`TRHAI_AUTHORITY=on`): the owner is
@@ -68,6 +68,13 @@ administrator key to ordinary users.**
 
 ## What a member can use
 
+**TRH AI is free (the owner's decision of 2026-11-05):** with no paywall, every part of
+it is open to anyone, and `decide` allows it `via: "paywall_off"` before a plan is read.
+Nothing lapses, on a PC of one's own or on a copy other people share; a shared copy still
+needs a sign-in, and a suspended account is still refused, because those are about the
+account and not about money. The plans below are what applies if the paywall is switched
+back on (`24-paywall-and-updates.md`).
+
 Every route that does work is listed once, in the feature catalogue
 (`featureCatalogue` in `entitlements.ts`), and gated from that list: the assistant,
 building and running apps, commands on the PC, schedules, tasks, the automation
@@ -81,7 +88,7 @@ and the voice, which was never behind the paywall, stays open. **Nothing here is
 price.** Narrowing a plan is a change to that table; it is not yet a setting in the
 app.
 
-*Settings, Plan and billing* shows each member their role, their plan and every
+*Settings, Plan* shows each member their role, their plan and every
 feature marked open or shut with the reason. It is computed by the same rules the
 routes apply, so it cannot say something the app would not do.
 
@@ -136,8 +143,8 @@ the chain makes a quiet edit show, not impossible.)
 ## Running a copy that holds its own accounts
 
 `TRHAI_AUTHORITY=on` makes a copy believe its own records: stored roles count, a plan
-belongs to the account (a new account gets the same 14-day trial a new PC does, counted
-from the day it was made), and every caller of a gated route must be signed in. Use it
+belongs to the account (with the paywall on, a new account gets the same 14-day trial a
+new PC does, counted from the day it was made), and every caller of a gated route must be signed in. Use it
 for a copy that other people sign in to - a household or a team sharing one PC or one
 machine on the network - and that its owner looks after. On such a copy:
 
@@ -172,9 +179,9 @@ Said plainly, so nothing here is mistaken for working:
   invitation. These need a mail provider's credentials.
 - **Subscriptions and a payment provider.** There is no provider and no checkout
   session, webhook, billing portal or cancellation flow, and the app holds no payment
-  credentials. A paid plan today is a signed key. Taking payment needs a provider's
-  account and keys, and a public address for its webhooks that a PC on its own cannot
-  offer.
+  credentials. TRH AI is free, so none of it is wanted now. Were that to change, taking
+  payment would need a provider's account and keys, and a public address for its webhooks
+  that a PC on its own cannot offer.
 - **Usage limits** (messages a day, storage, voice minutes). Plans decide features, not
   quantities.
 - **A service other people sign in to over the internet.** `TRHAI_AUTHORITY=on` is for a

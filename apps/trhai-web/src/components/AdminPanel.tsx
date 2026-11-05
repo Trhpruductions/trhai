@@ -136,7 +136,7 @@ export function AdminPanel() {
           {canMakeAdmins && !me.authority ? (
             <p className="os-faint os-small">
               On this copy an administrator is made with a signed key, not a setting: the owner issues one for the person&rsquo;s email
-              (<span className="os-mono">scripts/licensing/issue.mjs --role admin</span>) and they enter it under Plan and billing.
+              (<span className="os-mono">scripts/licensing/issue.mjs --role admin</span>) and they enter it under Plan.
             </p>
           ) : null}
         </div>

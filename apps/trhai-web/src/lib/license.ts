@@ -4,20 +4,25 @@
 //
 // Nothing here knows about money. Buying happens on the owner's checkout
 // page, opened in the browser; what comes back is a key, pasted in here.
+//
+// TRH AI is free (the owner's decision of 2026-11-05), so on an ordinary copy the
+// API reports paywallDisabled and nothing locks. A key then does one job: an owner
+// or administrator key says who looks after the accounts on the copy.
 
 import { apiBaseUrl, apiDelete, apiFetch, apiGet, licenseEventName, requestHeaders } from "./api";
 
 export type Plan = "personal" | "pro" | "team";
-export type LicenseState = "trial" | "licensed" | "trial_expired" | "license_expired";
+export type LicenseState = "free" | "trial" | "licensed" | "trial_expired" | "license_expired";
 
 export type LicenseStatus = {
   state: LicenseState;
   locked: boolean;
-  plan: Plan | "trial";
-  trialStartedAt: string;
-  trialEndsAt: string;
+  plan: Plan | "trial" | "free";
+  /** Null where there is no trial: TRH AI is free on this copy. */
+  trialStartedAt: string | null;
+  trialEndsAt: string | null;
   trialDaysLeft: number;
-  license: { id: string; plan: Plan; email: string; issuedAt: string; expiresAt?: string | null; seats?: number } | null;
+  license: { id: string; plan: Plan; email: string; issuedAt: string; expiresAt?: string | null; seats?: number; role?: "owner" | "admin" } | null;
   checkoutUrl: string | null;
   priceText: string | null;
   paywallDisabled: boolean;
@@ -65,18 +70,20 @@ export async function removeKey(): Promise<boolean> {
 }
 
 /** The plan's name as people see it. */
-export function planLabel(plan: Plan | "trial"): string {
+export function planLabel(plan: Plan | "trial" | "free"): string {
   switch (plan) {
     case "personal": return "Personal";
     case "pro": return "Pro";
     case "team": return "Team";
+    case "free": return "Free";
     default: return "Free trial";
   }
 }
 
 /** One line saying where things stand, for the settings section and the top of the paywall. */
 export function describeLicense(status: LicenseStatus): string {
-  if (status.paywallDisabled) return "This copy is not limited by a trial or license.";
+  if (status.paywallDisabled) return "TRH AI is free: no trial, no key and nothing to pay. Everything in it is open.";
+  const trialEnd = status.trialEndsAt ? new Date(status.trialEndsAt).toLocaleDateString() : "an earlier date";
   switch (status.state) {
     case "licensed":
       return status.license?.expiresAt
@@ -87,11 +94,11 @@ export function describeLicense(status: LicenseStatus): string {
     case "trial_expired":
       return status.trialTampered
         ? "The trial record on this PC had been changed by hand, so the free trial has ended. A license key unlocks TRH AI."
-        : `Your free trial ended on ${new Date(status.trialEndsAt).toLocaleDateString()}.`;
+        : `Your free trial ended on ${trialEnd}.`;
     default:
       return status.trialDaysLeft === 1
         ? "Free trial: this is the last day."
-        : `Free trial: ${status.trialDaysLeft} days left, until ${new Date(status.trialEndsAt).toLocaleDateString()}.`;
+        : `Free trial: ${status.trialDaysLeft} days left, until ${trialEnd}.`;
   }
 }
 

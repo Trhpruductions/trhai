@@ -52,7 +52,7 @@ test("an erasure is described with the real numbers of what it would remove, and
   ]);
   assert.deepEqual(describeErasure(held, { ownData: false, wholeCopy: true, license: true, account: true }), [
     "2 schedules, the automation flow, the preferences, the saved email account and its password",
-    "the license key on this PC",
+    "the key on this PC",
     "your account: the email address, name, password, recovery codes and every sign-in"
   ]);
   assert.deepEqual(describeErasure(held, { ownData: false, wholeCopy: false, license: false, account: false }), []);

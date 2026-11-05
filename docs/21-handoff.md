@@ -538,7 +538,7 @@ empty state says what it is. What was wrong, and is fixed in the same change:
 - The sign-in form's "optional" marker was glued to its label for a screen reader
   ("Nameoptional"); it is its own word now.
 
-Seen and left: with the paywall switched off (`TRHAI_PAYWALL=off`, a development switch) Plan
+Seen and left (and since fixed, when TRH AI became free on 2026-11-05: Settings now says Free and no dates): with the paywall switched off (`TRHAI_PAYWALL=off`, a development switch) Plan
 and billing says the copy is not limited and still shows trial dates; the About section shows
 three version numbers (service, interface, desktop app), which is what the packages carry;
 opening a legal text from Settings puts `legal%2Fprivacy` in the address, which works and is

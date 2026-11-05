@@ -1,5 +1,5 @@
 import type { LegalFacts } from "../legalFacts.js";
-import { fact, type LegalDocument } from "./model.js";
+import type { LegalDocument } from "./model.js";
 
 // "Services TRH AI can contact, and the software it is made of."
 //
@@ -33,8 +33,7 @@ export function servicesDocument(facts: LegalFacts): LegalDocument {
               ["Hugging Face (Hugging Face, Inc.)", "Downloading models and voices you choose to install.", "https://huggingface.co/privacy"],
               ["DuckDuckGo (Duck Duck Go, Inc.)", "Web searches you ask for, and the Network screen's Check now button.", "https://duckduckgo.com/privacy"],
               ["Any website you ask it to read", "Reading a page as text when you give its address.", "That site's own."],
-              ["Your email provider", "Sending an email you asked for, through the account you connected.", "Your provider's own."],
-              [`The checkout page (${fact(facts.paymentProvider, "payment provider that takes payment on the checkout page, if there is one")})`, "Paying for a license, in your browser, outside the app.", fact(facts.paymentProvider, "that provider's privacy policy address")]
+              ["Your email provider", "Sending an email you asked for, through the account you connected.", "Your provider's own."]
             ]
           },
           { kind: "p", text: `${product} does not use any advertising, analytics, crash-reporting or tracking service, and loads no fonts, scripts or images from other companies' servers.` },
@@ -101,7 +100,7 @@ export function servicesDocument(facts: LegalFacts): LegalDocument {
               ["Amy (en_US-amy-medium)", "No licence stated (Mimic 3 collection)", "Not cleared"]
             ]
           },
-          { kind: "note", tone: "review", text: "Only Cori is plainly free for any use. The owner chose on 2026-10-25 to install all five, with Alan as the default voice. Whether a paid product may ship Alan, Jarvis, Ryan and Amy is a decision for the owner with a lawyer; dropping a voice is one line in the install records." }
+          { kind: "note", tone: "review", text: "Only Cori is plainly free for any use. The owner chose on 2026-10-25 to install all five, with Alan as the default voice. Free of charge is not the same as non-commercial: whether TRH AI may ship Alan, Jarvis, Ryan and Amy is still a decision for the owner with a lawyer; dropping a voice is one line in the install records." }
         ]
       },
       {
@@ -127,7 +126,7 @@ export function servicesDocument(facts: LegalFacts): LegalDocument {
             ]
           },
           { kind: "p", text: "A model's licence is the model's, not TRH AI's. If you use TRH AI for work, use a model whose licence allows it; the two research-licence models are offered for personal use only and say so on the install screen." },
-          { kind: "note", tone: "review", text: "The no-refusals models are third parties' edits of Qwen's models, offered as the recommended defaults. Their publishers' repositories state Apache 2.0; one source repository could not be reached when checked. A lawyer should confirm that recommending them in a paid product is acceptable." }
+          { kind: "note", tone: "review", text: "The no-refusals models are third parties' edits of Qwen's models, offered as the recommended defaults. Their publishers' repositories state Apache 2.0; one source repository could not be reached when checked. A lawyer should confirm that recommending them is acceptable." }
         ]
       },
       {
