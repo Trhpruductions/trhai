@@ -2,6 +2,8 @@
 
 import { allPersonalities, type PersonalityId } from "@ascend/shared";
 import { accents, type Accent } from "../lib/theme";
+import { radioTabIndex } from "../lib/focus";
+import { moveRadio } from "../lib/radio";
 import "./personality.css";
 
 // Choosing how TRHAI answers.
@@ -62,15 +64,18 @@ export function PersonalityPicker({ active, onChange, accent, onAccentChange }: 
 
           A fixed list rather than a colour picker: an arbitrary hex cannot be
           checked for contrast against these near-black surfaces. */}
-      <div className="accent-row" role="group" aria-label="Accent colour">
-        {accents.map((option) => (
+      <div className="accent-row" role="radiogroup" aria-label="Accent colour">
+        {accents.map((option, index) => (
           <button
             key={option}
             type="button"
             className={`accent-dot accent-${option}${option === accent ? " on" : ""}`}
-            aria-pressed={option === accent}
+            role="radio"
+            aria-checked={option === accent}
+            tabIndex={radioTabIndex(accents.indexOf(accent), index)}
             title={option}
             onClick={() => onAccentChange(option)}
+            onKeyDown={(event) => moveRadio(event, accents.length, index, (next) => onAccentChange(accents[next]))}
           >
             <span className="sr-only">{option}</span>
           </button>

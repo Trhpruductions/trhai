@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { focusableSelector, nextFocusIndex } from "../lib/focus";
+import { focusableSelector, isolate, nextFocusIndex } from "../lib/focus";
 
 /**
  * Makes an element behave as a modal dialog for the keyboard: focus moves into it when it
- * opens, Tab and Shift+Tab stay inside it, Escape closes it, and focus goes back to what had
- * it before when it closes. Attach the returned ref to the dialog's element.
+ * opens, Tab and Shift+Tab stay inside it, the rest of the page is inert, Escape closes it,
+ * and focus goes back to what had it before when it closes. Attach the returned ref to the
+ * dialog's element.
  */
 export function useDialogFocus<T extends HTMLElement>(open: boolean, onClose?: () => void) {
   const ref = useRef<T | null>(null);
@@ -21,6 +22,9 @@ export function useDialogFocus<T extends HTMLElement>(open: boolean, onClose?: (
     const node = ref.current;
     if (!node) return;
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // The page behind is out of reach altogether, not only for Tab: a screen reader's own
+    // cursor and the mouse stop at the dialog too, and get the page back when it closes.
+    const release = isolate(node);
 
     const controls = () => Array.from(node.querySelectorAll<HTMLElement>(focusableSelector)).filter((item) => item.offsetParent !== null || item === document.activeElement);
     (controls()[0] ?? node).focus();
@@ -50,6 +54,7 @@ export function useDialogFocus<T extends HTMLElement>(open: boolean, onClose?: (
     document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("keydown", onKey, true);
+      release();
       before?.focus?.();
     };
   }, [open]);

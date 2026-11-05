@@ -23,6 +23,7 @@ import { useEntitlements } from "../../hooks/useEntitlements";
 import { formatBytes } from "../../lib/files";
 import { readStoredPersonality, writeStoredPersonality } from "../../lib/personality";
 import { filterSections, isSectionId, sections, type SectionId } from "../../lib/settings";
+import { KeyboardPanel } from "../../components/KeyboardPanel";
 import {
   defaultAccent, defaultBackdrop, readStoredAccent, readStoredBackdrop, writeStoredAccent, writeStoredBackdrop,
   type Accent, type BackdropMode
@@ -321,6 +322,7 @@ export function SettingsView() {
               onChange={speech.setVoice} onPreview={(line) => speech.speak(line)} />
           ) : null}
           {section === "appearance" ? <BackgroundPanel /> : null}
+          {section === "keyboard" ? <KeyboardPanel /> : null}
           {section === "messaging" ? <MessagingPanel /> : null}
           {section === "notifications" ? <NotificationsPanel /> : null}
           {section === "data" ? <DataPanel /> : null}

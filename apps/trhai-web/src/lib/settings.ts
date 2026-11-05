@@ -1,7 +1,7 @@
 // The Settings app's sections, and what a search of them keeps. Pure, so it
 // is testable without a screen.
 
-export type SectionId = "account" | "billing" | "people" | "updates" | "models" | "assistant" | "voice" | "appearance" | "messaging" | "notifications" | "data" | "privacy" | "legal" | "about";
+export type SectionId = "account" | "billing" | "people" | "updates" | "models" | "assistant" | "voice" | "appearance" | "keyboard" | "messaging" | "notifications" | "data" | "privacy" | "legal" | "about";
 
 export type Section = { id: SectionId; label: string; summary: string; keywords: string };
 
@@ -15,6 +15,7 @@ export const sections: Section[] = [
   { id: "assistant", label: "Assistant", summary: "Personality, accent colour and agent.", keywords: "personality tone agent model accent colour color" },
   { id: "voice", label: "Voice", summary: "The voice TRH AI speaks with.", keywords: "voice speech speak piper sound" },
   { id: "appearance", label: "Appearance", summary: "What stands behind everything.", keywords: "background scene theme look plain still living" },
+  { id: "keyboard", label: "Keyboard", summary: "Every shortcut, and the switch for the single-key one.", keywords: "keyboard shortcuts keys hotkeys slash accessibility" },
   { id: "messaging", label: "Texts and email", summary: "Your email account and Phone Link.", keywords: "email smtp texts sms phone link mail" },
   { id: "notifications", label: "Notifications", summary: "Desktop notifications for reminders and schedules.", keywords: "notifications reminders desktop alerts" },
   { id: "data", label: "Data and privacy", summary: "Where your data is kept, and how.", keywords: "data privacy encryption encrypted storage files backup folder key" },

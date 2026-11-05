@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useDialogFocus } from "../hooks/useDialogFocus";
 import { readSetup, setupReason } from "../lib/setup";
 import { SetupPanel } from "./SetupPanel";
 import "./paywall.css";
@@ -58,16 +59,18 @@ export function SetupScreen() {
     return () => { alive = false; };
   }, []);
 
-  if (!reason) return null;
-
   const close = () => {
     try { window.sessionStorage.setItem(dismissedKey, "1"); } catch { /* this session only, and optional */ }
     setReason(null);
   };
+  // Escape is "Not now": the offer can be made again, and every step of it is in Settings.
+  const dialog = useDialogFocus<HTMLElement>(reason !== null, close);
+
+  if (!reason) return null;
 
   return (
     <div className="paywall-scrim setup-scrim">
-      <section className="paywall setup-dialog" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+      <section ref={dialog} className="paywall setup-dialog" role="dialog" aria-modal="true" aria-labelledby="setup-title">
         {reason === "first-run" ? (
           <>
             <span className="os-label">First run</span>

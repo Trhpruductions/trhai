@@ -51,7 +51,8 @@ export function storageDocument(facts: LegalFacts): LegalDocument {
               ["`trhai.session.v1`", "A random number that stands for this browser when you are not signed in, so that your conversations and memory are found again.", "Local storage.", "You erase your data or clear the app's storage."],
               ["`trhai.update.install-tried.v1`", "The version for which an automatic restart was already tried, so a failed install cannot make the app restart again and again.", "Local storage.", "The install finishes."],
               ["`trhai.whatsnew.seen.v1`, `trhai.update.dismissed.v1`, `trhai.setup.dismissed.v1`, `trhai.setup.tools-offered.v1`, `trhai.rendering.dismissed.v1`", "Notices and offers you put away - the release notes you have seen, an update card, the first-run setup, a mockup - so the same one is not shown to you again.", "Local storage; the first-run setup one in session storage.", "A newer version comes out, the window closes (the setup one), or you clear the app's storage."],
-              ["`trhai.storage-consent.v1`", "Your answer to the question about optional settings, with the version of this text and the time you answered.", "Local storage.", "You change it, or clear the app's storage."]
+              ["`trhai.storage-consent.v1`", "Your answer to the question about optional settings, with the version of this text and the time you answered.", "Local storage.", "You change it, or clear the app's storage."],
+              ["`trhai.keys.single.v1`", "That you turned the single-key shortcut off under Settings, Keyboard, so that the / key no longer moves the keyboard to the command bar. Present only while it is off.", "Local storage.", "You turn the shortcut back on, or clear the app's storage."]
             ]
           }
         ]

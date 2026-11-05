@@ -63,6 +63,8 @@ function CodeBlock({ language, text }: { language: string | null; text: string }
         <button type="button" className="md-copy" onClick={() => void copy()}>
           {state === "copied" ? "copied" : state === "failed" ? "couldn't copy" : "copy"}
         </button>
+        {/* Said as well as shown: the button's own words change, which a screen reader does not read out by itself. */}
+        <span className="sr-only" role="status">{state === "copied" ? "Copied to the clipboard." : state === "failed" ? "The clipboard refused the copy." : ""}</span>
       </div>
       <pre className="md-pre"><code>{text}</code></pre>
     </div>

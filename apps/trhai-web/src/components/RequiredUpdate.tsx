@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useDialogFocus } from "../hooks/useDialogFocus";
 import { Icon } from "../os/ui/Icon";
 import { desktopUpdater, type DesktopUpdateStatus } from "../lib/desktopUpdates";
 import { countdownText, requiredUpdateStep, restartCountdownSeconds } from "../lib/requiredUpdate";
@@ -111,6 +112,8 @@ export function RequiredUpdate() {
     if (ready && secondsLeft === 0 && version) restartInto(version);
   }, [ready, secondsLeft, version, restartInto]);
 
+  // Nothing closes it: the update is required. The keyboard stays with it and the page behind is inert.
+  const dialog = useDialogFocus<HTMLElement>(step.kind !== "none" && Boolean(release));
   if (step.kind === "none" || !release) return null;
 
   const retry = () => {
@@ -126,7 +129,7 @@ export function RequiredUpdate() {
 
   return (
     <div className="paywall-scrim required-update-scrim">
-      <section className="paywall" role="alertdialog" aria-modal="true" aria-labelledby="required-update-title" aria-describedby="required-update-text">
+      <section ref={dialog} className="paywall" role="alertdialog" aria-modal="true" aria-labelledby="required-update-title" aria-describedby="required-update-text">
         <span className="os-label">Required update</span>
         <h2 id="required-update-title">{step.kind === "retry" ? `TRH AI v${release.version} did not finish installing` : `TRH AI v${release.version} is installing`}</h2>
         <p id="required-update-text">

@@ -25,7 +25,7 @@ export const legalVersions = {
   terms: "2026-11-01",
   privacy: "2026-11-01",
   refunds: "2026-11-01",
-  storage: "2026-11-01",
+  storage: "2026-11-02",
   ai: "2026-11-01"
 } as const;
 

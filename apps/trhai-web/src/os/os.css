@@ -27,17 +27,19 @@
   --os-line: rgba(128, 168, 255, 0.11);
   --os-line-2: rgba(128, 168, 255, 0.19);
   --os-line-3: rgba(128, 168, 255, 0.32);
+  /* A text field's edge: a dark field on a dark panel needs this much line to be seen as a field (3:1). */
+  --os-line-field: rgba(128, 168, 255, 0.56);
 
   /* Text: one bright, two quieter. */
   --os-text: #e8f1ff;
   --os-text-2: #a7b7cf;
-  --os-text-3: #6e7f9c;
+  --os-text-3: #7f8ea8;
 
   /* Signal colours. The accent follows the user's choice (theme.ts). */
   --os-accent: #3bd4ff;
   --os-accent-hi: #8ee9ff;
   --os-accent-soft: rgba(59, 212, 255, 0.13);
-  --os-accent-line: rgba(59, 212, 255, 0.42);
+  --os-accent-line: rgba(59, 212, 255, 0.5);
   --os-violet: #8f80ff;
   --os-violet-soft: rgba(143, 128, 255, 0.14);
 
@@ -123,21 +125,21 @@
   --os-accent: #a78bff;
   --os-accent-hi: #cbbcff;
   --os-accent-soft: rgba(167, 139, 255, 0.14);
-  --os-accent-line: rgba(167, 139, 255, 0.45);
+  --os-accent-line: rgba(167, 139, 255, 0.6);
   --os-glow: 0 0 22px rgba(167, 139, 255, 0.3);
 }
 :root[data-accent="emerald"] {
   --os-accent: #34d6a0;
   --os-accent-hi: #86f2cb;
   --os-accent-soft: rgba(52, 214, 160, 0.13);
-  --os-accent-line: rgba(52, 214, 160, 0.42);
+  --os-accent-line: rgba(52, 214, 160, 0.5);
   --os-glow: 0 0 22px rgba(52, 214, 160, 0.26);
 }
 :root[data-accent="amber"] {
   --os-accent: #ffbf4d;
   --os-accent-hi: #ffd98f;
   --os-accent-soft: rgba(255, 191, 77, 0.13);
-  --os-accent-line: rgba(255, 191, 77, 0.42);
+  --os-accent-line: rgba(255, 191, 77, 0.5);
   --os-glow: 0 0 22px rgba(255, 191, 77, 0.26);
 }
 
@@ -325,14 +327,14 @@
   min-height: 36px;
   padding: 0 var(--os-3);
   border-radius: var(--os-r-md);
-  border: 1px solid var(--os-line-2);
+  border: 1px solid var(--os-line-field);
   background: rgba(5, 9, 18, 0.7);
   color: var(--os-text);
   font: var(--os-fs-md)/1.4 var(--os-font-body);
   transition: border-color var(--os-fast) var(--os-ease), box-shadow var(--os-fast) var(--os-ease);
 }
 .os-input::placeholder { color: var(--os-text-3); }
-.os-input:focus { outline: none; border-color: var(--os-accent-line); box-shadow: 0 0 0 3px var(--os-accent-soft); }
+.os-input:focus { outline: none; border-color: var(--os-accent); box-shadow: 0 0 0 3px var(--os-accent-soft); }
 
 /* Status: a dot and a word. The word is the information; the colour helps. */
 .os-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--os-text-3); }
@@ -438,4 +440,39 @@
 @media (max-width: 640px) {
   .os, .os.os-slim { grid-template-columns: minmax(0, 1fr); }
   .os-view { padding: var(--os-4) var(--os-4) var(--os-5); }
+}
+
+/* --------------------------------------------------------------- Settings, Keyboard */
+
+.os-keys-table { width: 100%; border-collapse: collapse; font-size: var(--os-fs-sm); }
+.os-keys-table th, .os-keys-table td { padding: var(--os-2); border-bottom: 1px solid var(--os-line); text-align: left; vertical-align: top; }
+.os-keys-table thead th { font: 500 var(--os-fs-2xs)/1.2 var(--os-font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--os-text-2); }
+.os-keys-table tbody th { white-space: nowrap; font-weight: 400; }
+.os-keys-table tbody th .os-kbd + .os-kbd { margin-left: 3px; }
+.os-keys-switch { display: flex; align-items: center; justify-content: space-between; gap: var(--os-4); }
+.os-keys-switch > span { display: grid; gap: 2px; }
+
+/* --------------------------------------------------------------- forced colours */
+
+/* Windows' high-contrast themes replace every colour with the person's own palette, so
+   whatever a colour alone said has to be said by a line or a system colour instead: a
+   control's edge, a chosen row, the knob of a switch, the ring around the focused thing.
+   The art is hidden: words were never meant to sit on it without the scrims, and the
+   scrims go with the colours. */
+@media (forced-colors: active) {
+  .os-backdrop { visibility: hidden; }
+  .os-btn, .os-input, .os-chip, .os-menu, .os-more-sheet, .os-palette, .paywall, .legal-dialog, .os-panel, .os-choice button,
+  .os-commandbar, .os-browser-input, .os-convos-search, .os-kbd, .os-keys-table th, .os-keys-table td, [data-tip]::after { border-color: CanvasText; }
+  .os-btn.on, .os-choice button.on, [aria-pressed="true"], [aria-current="page"], [aria-selected="true"], .os-palette-results button.active,
+  .os-settings-nav li button.on, .os-file-row.on, .os-convo.open .os-convo-open, .os-nav-item.active { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+  .os-switch { forced-color-adjust: none; background: Canvas; border: 1px solid CanvasText; }
+  .os-switch-knob { background: CanvasText; }
+  .os-switch[aria-checked="true"] { background: Highlight; border-color: Highlight; }
+  .os-switch[aria-checked="true"] .os-switch-knob { background: HighlightText; }
+  .accent-dot { forced-color-adjust: none; border: 2px solid CanvasText; }
+  .accent-dot.on, [role="radio"][aria-checked="true"] { outline: 3px solid Highlight; outline-offset: 2px; }
+  .os-dot { border: 1px solid CanvasText; }
+  .os-nav-badge, .os-bell-count { forced-color-adjust: none; background: Highlight; color: HighlightText; border: 1px solid CanvasText; }
+  .setup-bar span, [role="progressbar"] > span { forced-color-adjust: none; background: Highlight; }
+  :where(.os) :focus-visible, .os-file-row:focus-visible, .os-settings-nav li button:focus-visible, .os-switch:focus-visible, .accent-dot:focus-visible, .os-input:focus { outline: 3px solid Highlight; outline-offset: 2px; }
 }

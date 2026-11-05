@@ -7,6 +7,7 @@ import { useSystem } from "../state/system";
 import { useNotices } from "../state/notify";
 import { useVoice } from "../state/assistant";
 import { useAccount } from "../../components/AppGate";
+import { useMenuKeys } from "../../hooks/useMenuKeys";
 import { viewById } from "../views";
 
 /** An account name as a person is addressed - read from the OS, never invented. */
@@ -42,6 +43,8 @@ export function TopBar() {
     window.addEventListener("pointerdown", close);
     return () => window.removeEventListener("pointerdown", close);
   }, [menuOpen]);
+  // The arrows move through it; Escape closes it and puts the keyboard back on the button.
+  const menuList = useMenuKeys<HTMLDivElement>(menuOpen, () => setMenuOpen(false));
 
   const signedIn = account.account;
   const name = signedIn ? signedIn.displayName : identity ? displayName(identity.username) : "";
@@ -92,6 +95,8 @@ export function TopBar() {
 
         <div className="os-identity" ref={menu}>
           <button type="button" className="os-identity-btn" onClick={() => setMenuOpen(!menuOpen)} aria-expanded={menuOpen} aria-haspopup="menu">
+            {/* The name and role are hidden on a narrow window (shell.css); this keeps the button named. */}
+            <span className="sr-only">Account menu</span>
             <span className="os-avatar" aria-hidden="true">{initials}</span>
             <span className="os-identity-text">
               <span className="os-identity-name">{name || "…"}</span>
@@ -100,7 +105,7 @@ export function TopBar() {
             <Icon name="chevronDown" size={14} />
           </button>
           {menuOpen ? (
-            <div className="os-menu" role="menu">
+            <div className="os-menu" role="menu" ref={menuList}>
               <div className="os-menu-head">
                 <strong>{name || "This PC"}</strong>
                 <span>{signedIn ? signedIn.email : identity ? `${identity.username} on ${identity.hostname}` : "Local owner access"}</span>

@@ -2,6 +2,8 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../lib/api";
+import { radioTabIndex } from "../lib/focus";
+import { moveRadio } from "../lib/radio";
 import { describeTexting, needsServer, phoneChoices, providerHint, type EmailAccountView, type MessagingStatus, type PhoneKind } from "../lib/messaging";
 import "./personality.css";
 
@@ -125,10 +127,12 @@ export function MessagingPanel() {
             <p className="persona-summary">{texting.text}</p>
           </div>
           {status.texts.phoneLink === "linked" ? (
-            <div className="account-actions" role="group" aria-label="The phone linked in Phone Link">
-              {phoneChoices.map((choice) => (
+            <div className="account-actions" role="radiogroup" aria-label="The phone linked in Phone Link">
+              {phoneChoices.map((choice, index) => (
                 <button key={choice.id} type="button" className={`account-button${phone === choice.id ? " primary" : ""}`}
-                  aria-pressed={phone === choice.id} disabled={busy} onClick={() => void choosePhone(choice.id)}>
+                  role="radio" aria-checked={phone === choice.id} tabIndex={radioTabIndex(phoneChoices.findIndex((other) => other.id === phone), index)}
+                  disabled={busy} onClick={() => void choosePhone(choice.id)}
+                  onKeyDown={(event) => moveRadio(event, phoneChoices.length, index, (next) => void choosePhone(phoneChoices[next].id))}>
                   {choice.label}
                 </button>
               ))}

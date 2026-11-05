@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { Icon, type IconName } from "../ui/Icon";
 import { useNav } from "../state/nav";
 import { useSystem } from "../state/system";
@@ -79,6 +80,8 @@ export function CommandPalette() {
   const [found, setFound] = useState<Found | null>(null);
   const field = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLUListElement>(null);
+  // Modal for the keyboard and the screen reader alike: the page behind is inert while it is open.
+  const dialog = useDialogFocus<HTMLDivElement>(paletteOpen, () => setPaletteOpen(false));
 
   // Fresh each time it opens - the palette searches what is saved now.
   useEffect(() => {
@@ -271,7 +274,7 @@ export function CommandPalette() {
   let lastGroup = "";
   return (
     <div className="os-palette-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) setPaletteOpen(false); }}>
-      <div className="os-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div ref={dialog} className="os-palette" role="dialog" aria-modal="true" aria-label="Command palette">
         <div className="os-palette-search">
           <Icon name="search" size={18} />
           <input

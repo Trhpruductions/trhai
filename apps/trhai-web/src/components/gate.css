@@ -7,7 +7,7 @@
   --g-cyan-bright: #8be9ff;
   --g-ink: #eaf6ff;
   --g-mut: #8aa5bd;
-  --g-faint: #5f7d94;
+  --g-faint: #628096;
   --g-line: rgba(70, 160, 230, 0.30);
   --g-line-soft: rgba(70, 160, 230, 0.16);
   --g-panel: rgba(10, 18, 32, 0.76);
@@ -308,7 +308,7 @@
   flex: 1; min-width: 0; height: 100%; background: transparent; border: 0; outline: 0;
   color: var(--g-ink); font: 14.5px var(--font-body); letter-spacing: 0.01em;
 }
-.gate-control input::placeholder { color: #4f6a80; }
+.gate-control input::placeholder { color: #667d91; }
 .gate-control input.mono { font-family: var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; }
 .gate-reveal {
   display: grid; place-items: center; width: 30px; height: 30px; margin-right: -6px;

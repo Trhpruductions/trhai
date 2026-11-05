@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { detailFromHash, hashFor, viewFromHash, type ViewId } from "../views";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { detailFromHash, hashFor, viewFromHash, viewTitle, type ViewId } from "../views";
 import { optionalStorage } from "../../lib/storageConsent";
 
 // Where the user is in TRH AI, and the shell's own open/closed state.
@@ -34,18 +34,47 @@ export function NavProvider({ children }: { children: ReactNode }) {
 
   // Read after mount: the server has no address hash and no storage, and a
   // first render that disagreed with it would fail hydration.
+  // Whether the next change of view is a person's doing - the address changed under them,
+  // or they asked for a workspace - so the keyboard should follow it.
+  const focusNext = useRef(false);
+
   useEffect(() => {
-    const read = () => setView(viewFromHash(window.location.hash));
-    read();
+    const read = (fromPerson: boolean) => {
+      focusNext.current = fromPerson;
+      setView(viewFromHash(window.location.hash));
+    };
+    read(false);
     try {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- a stored preference, unknowable on the server
       setSlimState(optionalStorage().getItem(slimKey) === "1");
     } catch {
       // Storage can be unavailable; the full sidebar is the default anyway.
     }
-    window.addEventListener("hashchange", read);
-    return () => window.removeEventListener("hashchange", read);
+    const onHash = () => read(true);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  // Each workspace is a page of its own to the browser and to a screen reader: the tab is
+  // named after it, and when a person opens one the keyboard lands on it - the <main>, which
+  // carries the workspace's name - instead of staying on the sidebar button they pressed.
+  useEffect(() => {
+    const wanted = viewTitle(view);
+    const apply = () => {
+      if (document.title !== wanted) document.title = wanted;
+    };
+    apply();
+    // Next writes the page's own <title> in after the first paint (its metadata streams in
+    // on its own), which would put the product's name back over the workspace's: watch the
+    // head and keep the title ours for as long as the shell lives.
+    const observer = new MutationObserver(apply);
+    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    if (focusNext.current) {
+      focusNext.current = false;
+      document.getElementById("os-workspace")?.focus({ preventScroll: true });
+    }
+    return () => observer.disconnect();
+  }, [view]);
 
   const go = useCallback((next: ViewId, detail?: string | null) => {
     setPaletteOpen(false);

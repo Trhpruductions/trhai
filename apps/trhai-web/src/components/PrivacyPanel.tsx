@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { legalVersions } from "@ascend/shared";
 import { Icon } from "../os/ui/Icon";
 import { useNotify } from "../os/state/notify";
+import { radioTabIndex } from "../lib/focus";
+import { moveRadio } from "../lib/radio";
 import {
   acceptTexts, describeErasure, eraseWord, fetchPrivacySummary, requestErase, requestExport, saveTextFile,
   type EraseReport, type EraseScope, type PrivacySummary
@@ -118,6 +120,7 @@ function StorageSection() {
   };
 
   const current = consent === undefined ? null : consent?.decision ?? null;
+  const storageChoices: Array<{ id: StorageDecision; label: string }> = [{ id: "all", label: "Remember my choices" }, { id: "essential", label: "Only what the app needs" }];
   return (
     <section className="os-panel">
       <header className="os-panel-head">
@@ -130,8 +133,13 @@ function StorageSection() {
           voice; the <LegalLink id="storage" /> lists every one. Nothing in it is sent anywhere.
         </p>
         <div className="os-choice" role="radiogroup" aria-label="Browser storage">
-          <button type="button" role="radio" aria-checked={current === "all"} className={current === "all" ? "on" : ""} onClick={() => choose("all")}>Remember my choices</button>
-          <button type="button" role="radio" aria-checked={current === "essential"} className={current === "essential" ? "on" : ""} onClick={() => choose("essential")}>Only what the app needs</button>
+          {storageChoices.map((choice, index) => (
+            <button key={choice.id} type="button" role="radio" aria-checked={current === choice.id} className={current === choice.id ? "on" : ""}
+              tabIndex={radioTabIndex(storageChoices.findIndex((other) => other.id === current), index)}
+              onClick={() => choose(choice.id)} onKeyDown={(event) => moveRadio(event, storageChoices.length, index, (next) => choose(storageChoices[next].id))}>
+              {choice.label}
+            </button>
+          ))}
         </div>
         {consent ? <p className="os-faint os-small">Answered {dateOf(consent.at)}, for version {consent.version} of the text.</p>
           : consent === null ? <p className="os-faint os-small">Until you answer, choices are kept for this session only.</p> : null}
