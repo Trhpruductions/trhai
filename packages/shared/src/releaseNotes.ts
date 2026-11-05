@@ -37,6 +37,24 @@ export function isRequiredReleaseText(text: string): boolean {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.1.10",
+    date: "2026-11-05",
+    title: "Reminders at a time, a to-do list you can ask for, audio files from text, and privacy, security and keyboard work",
+    notes: [
+      "Ask to be reminded once, at a date and time (\"remind me at 3 pm to call the bank\", \"remind me tomorrow at 9 to ring the school\"), and TRH AI saves a one-time schedule that shows your words when the time comes. The Tasks screen's schedule form has a Once option too. One that comes due while TRH AI is closed fires when it is next opened, if that is within two hours; later than that it is marked missed.",
+      "Ask TRH AI to add to your to-do list, read it back, tick something off or take it off: \"add buy milk to my list\", \"what's left to do?\", \"tick off the dentist\". It is the list on the Tasks screen, and taking a task off asks first.",
+      "Ask for text to be read into an audio file (a voiceover, a narration, an audio version of something written) in one of your installed voices, as MP3, WAV, M4A, FLAC, Ogg or Opus. It needs Voice installed, and Video for anything but WAV (Settings, Engine and models).",
+      "Ask TRH AI to convert a song, a recording or a video to another format, pull the sound out of a video, or cut it down to a part. It saves a new file and leaves the original alone.",
+      "A song attached to a chat, or dropped on it, opens the Music video screen with the song loaded.",
+      "Settings has a Legal section (the Terms of Service, the Privacy Policy, refunds and who makes TRH AI) and a Privacy and consent section, where you can see what you agreed to, save a copy of your data, or erase it. Creating an account asks for your agreement first, and TRH AI asks once before keeping optional settings in the browser.",
+      "TRH AI's own logs keep less: the address log drops search words, file names and session ids, a command is logged as its program and length and never the line, and logs are deleted after 30 days.",
+      "Security: the local service refuses requests sent by other websites, a page read from the web is fetched only from the address that was checked, and a copy shared between several people asks for sign-in before more of what it does.",
+      "Keyboard and screen readers: a dialog keeps the keyboard inside it and Escape closes it, menus and groups of options take the arrow keys, each screen names itself in the window title, faint text and field outlines are easier to see, Windows contrast themes are followed, and Settings has a Keyboard section listing every shortcut.",
+      "An owner or administrator key is never locked out by a trial or a plan. On a copy that keeps accounts for several people, the owner and administrators get a People and access section in Settings: find an account, suspend or reactivate it, sign it out everywhere, and read a record of what was done.",
+      "Fixed: a Settings section you may not open showed an empty panel, the storage question covered buttons at the bottom of a screen, and with no AI model running a question was told that nothing saved answers it, instead of that no model was running."
+    ]
+  },
+  {
     version: "0.1.9",
     date: "2026-10-26",
     title: "Open a site or some music by asking, and a straight answer when no model can reply",
