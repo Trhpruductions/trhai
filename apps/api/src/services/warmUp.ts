@@ -14,10 +14,16 @@
 // keeps what it had read by then. A model is only loaded for it when nothing
 // else is loaded, so it never pushes out the model a conversation is using.
 // TRHAI_WARM_UP=off switches it off.
+//
+// A model is in memory only while it is needed (the owner's rule, 2026-11-05).
+// Someone clicking into the ask box needs it in a moment, so that always warms
+// it. TRH AI merely starting is not a need: see loadsAtStart for the one kind
+// of PC where it is treated as one, and why.
 
 import { engineFetch } from "./engineFetch.js";
 import { checkAvailability, readLocalModelConfig, type LocalModelConfig } from "./localModel.js";
 import { claimWarmUp, listEngineModels, loadEngineModel, releaseWarmUp, sameModel, stopWarmUp } from "./modelEngine.js";
+import { readHardware, type Hardware } from "./modelSetup.js";
 import { alwaysOfferedTools, availableTools } from "./agentTools.js";
 import { dateLine, systemMessageFor } from "./agentLoop.js";
 import { toWireMessages } from "./engineChat.js";
@@ -43,6 +49,28 @@ export function warmUpStatus(): WarmUpState {
 
 export function warmUpEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.TRHAI_WARM_UP?.trim().toLowerCase() !== "off";
+}
+
+/**
+ * Whether a model is loaded when TRH AI starts, before anyone has gone to ask anything.
+ *
+ * Not on a PC with a graphics card. Loaded at every start, the model held the card's
+ * memory from the moment TRH AI opened until it had sat idle for five minutes, whether
+ * or not a single question was asked - memory a game or another program on that card
+ * then had to do without. There the model is loaded when it is needed: the ask box is
+ * clicked into, or a question arrives.
+ *
+ * Still on a PC without one, which is what the warm-up was built for: there the wait
+ * before a first reply is the model reading its prompt, measured in minutes (the
+ * numbers are at the top of this file), and nothing but TRH AI is waiting for that
+ * memory. TRHAI_WARM_UP_AT_START=on or =off decides it for a PC whose owner wants the
+ * other way round.
+ */
+export function loadsAtStart(hardware: Pick<Hardware, "gpu">, env: NodeJS.ProcessEnv = process.env): boolean {
+  const asked = env.TRHAI_WARM_UP_AT_START?.trim().toLowerCase();
+  if (asked === "on") return true;
+  if (asked === "off") return false;
+  return hardware.gpu === null;
 }
 
 /** The request that has the engine read the shared front: the rules, then the tools every turn is offered. */
@@ -74,6 +102,8 @@ export function warmUpEngine(options: {
   config?: LocalModelConfig;
   fetchImpl?: typeof fetch;
   now?: () => Date;
+  /** This PC, for the warm-up at start (loadsAtStart). Read from the PC itself when not given. */
+  hardware?: Pick<Hardware, "gpu">;
 } = { reason: "composer" }): Promise<WarmUpState> {
   if (running) return running;
   running = warm(options).then((result) => {
@@ -85,9 +115,15 @@ export function warmUpEngine(options: {
   return running;
 }
 
-async function warm(options: { reason: "start" | "composer"; config?: LocalModelConfig; fetchImpl?: typeof fetch; now?: () => Date }): Promise<WarmUpState> {
+async function warm(options: {
+  reason: "start" | "composer"; config?: LocalModelConfig; fetchImpl?: typeof fetch; now?: () => Date; hardware?: Pick<Hardware, "gpu">;
+}): Promise<WarmUpState> {
   const at = () => new Date().toISOString();
   if (!warmUpEnabled()) return { state: "skipped", reason: "The warm-up is switched off (TRHAI_WARM_UP=off).", at: at() };
+  // Starting is not needing: before the engine is asked anything at all.
+  if (options.reason === "start" && !loadsAtStart(options.hardware ?? readHardware())) {
+    return { state: "skipped", reason: "Nothing has been asked yet, so no model is loaded: it loads when the ask box is clicked into, or a question arrives.", at: at() };
+  }
   const config = options.config ?? readLocalModelConfig();
   const fetchImpl = options.fetchImpl ?? engineFetch;
 

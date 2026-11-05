@@ -13,7 +13,7 @@ import path from "node:path";
 process.env.ASCEND_WORKSPACE = mkdtempSync(path.join(tmpdir(), "ascend-warm-up-"));
 const { runAgent } = await import("../src/services/agentLoop.js");
 const { alwaysOfferedTools, availableTools, toolDefinitions } = await import("../src/services/agentTools.js");
-const { warmUpEngine, warmUpRequest, warmUpStatus, resetWarmUpForTests } = await import("../src/services/warmUp.js");
+const { loadsAtStart, warmUpEngine, warmUpRequest, warmUpStatus, resetWarmUpForTests } = await import("../src/services/warmUp.js");
 const { loadEngineModel } = await import("../src/services/modelEngine.js");
 const { fakeEngine } = await import("./helpers/fakeEngine.js");
 type LocalModelConfig = import("../src/services/localModel.js").LocalModelConfig;
@@ -23,6 +23,9 @@ const now = new Date("2026-10-18T09:30:00Z");
 const configFor = (baseUrl: string, model = "llama3.2"): LocalModelConfig =>
   ({ baseUrl, model, modelFromEnv: true, timeoutMs: 4000 });
 const names = (tools: Array<{ function: { name: string } }> | undefined) => (tools ?? []).map((tool) => tool.function.name);
+// The PC, said outright: what a warm-up at start does depends on it, and a test must not depend on the PC it runs on.
+const noCard = { gpu: null };
+const withCard = { gpu: { vendor: "nvidia" as const, name: "A card", memoryMiB: 8192, driver: "581.0" } };
 
 test("the tools every turn is offered come first, in one order, whatever else is offered", () => {
   for (const name of front) {
@@ -81,7 +84,7 @@ test("the warm-up reads the front once, and does nothing while the model still h
     reply: () => ({ message: { content: "Y" } })
   });
   try {
-    const first = await warmUpEngine({ reason: "start", config: configFor(engine.baseUrl), now: () => now });
+    const first = await warmUpEngine({ reason: "start", config: configFor(engine.baseUrl), now: () => now, hardware: noCard });
     assert.equal(first.state, "warm");
     assert.equal(engine.chats.length, 1);
     assert.equal(engine.chats[0].max_tokens, 1, "it asks for one token: reading the prompt is the point");
@@ -102,7 +105,7 @@ test("one warm-up at a time: a second call while one runs gets the same one", as
   const engine = await fakeEngine({ reply: () => ({ message: { content: "Y" } }) });
   try {
     const [a, b] = await Promise.all([
-      warmUpEngine({ reason: "start", config: configFor(engine.baseUrl), now: () => now }),
+      warmUpEngine({ reason: "start", config: configFor(engine.baseUrl), now: () => now, hardware: noCard }),
       warmUpEngine({ reason: "composer", config: configFor(engine.baseUrl), now: () => now })
     ]);
     assert.deepEqual(a, b);
@@ -117,7 +120,7 @@ test("a real request stops the warm-up, and is not kept waiting on it", async ()
   resetWarmUpForTests();
   const engine = await fakeEngine({ reply: (_body, index) => (index === 0 ? "hang" : { message: { content: "Answered." } }) });
   try {
-    const warming = warmUpEngine({ reason: "start", config: configFor(engine.baseUrl), now: () => now });
+    const warming = warmUpEngine({ reason: "start", config: configFor(engine.baseUrl), now: () => now, hardware: noCard });
     // Until the warm-up's request is with the engine.
     for (let tries = 0; engine.chats.length === 0 && tries < 200; tries += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(engine.chats.length, 1);
@@ -152,12 +155,73 @@ test("TRHAI_WARM_UP=off switches it off", async () => {
   const engine = await fakeEngine();
   process.env.TRHAI_WARM_UP = "off";
   try {
-    const result = await warmUpEngine({ reason: "start", config: configFor(engine.baseUrl), now: () => now });
+    const result = await warmUpEngine({ reason: "start", config: configFor(engine.baseUrl), now: () => now, hardware: noCard });
     assert.equal(result.state, "skipped");
     assert.equal(engine.chats.length, 0);
     assert.deepEqual(engine.urls, [], "the engine was not even asked");
   } finally {
     delete process.env.TRHAI_WARM_UP;
+    await engine.close();
+    resetWarmUpForTests();
+  }
+});
+
+// ---------------------------------------------------------------- only when it is needed
+
+test("starting is not needing: on a PC with a graphics card nothing is loaded at start, and the ask box still loads it", async () => {
+  resetWarmUpForTests();
+  const engine = await fakeEngine({ models: ["llama3.2:latest"], reply: () => ({ message: { content: "Y" } }) });
+  try {
+    const atStart = await warmUpEngine({ reason: "start", config: configFor(engine.baseUrl), now: () => now, hardware: withCard });
+    assert.equal(atStart.state, "skipped");
+    assert.match(atStart.state === "skipped" ? atStart.reason : "", /no model is loaded/);
+    assert.deepEqual(engine.urls, [], "the engine was not asked for anything: no list, no load, no reading");
+    assert.equal(engine.chats.length, 0);
+
+    // Someone clicks into the ask box: now it is needed, card or no card.
+    const whenAsked = await warmUpEngine({ reason: "composer", config: configFor(engine.baseUrl), now: () => now, hardware: withCard });
+    assert.equal(whenAsked.state, "warm");
+    assert.equal(engine.chats.length, 1);
+  } finally {
+    await engine.close();
+    resetWarmUpForTests();
+  }
+});
+
+test("a PC without a graphics card still reads the prompt at start, where the wait would be minutes", async () => {
+  resetWarmUpForTests();
+  const engine = await fakeEngine({ models: ["llama3.2:latest"], reply: () => ({ message: { content: "Y" } }) });
+  try {
+    const atStart = await warmUpEngine({ reason: "start", config: configFor(engine.baseUrl), now: () => now, hardware: noCard });
+    assert.equal(atStart.state, "warm");
+    assert.equal(engine.chats.length, 1);
+  } finally {
+    await engine.close();
+    resetWarmUpForTests();
+  }
+});
+
+test("which PCs load at start, and the setting that says otherwise", () => {
+  assert.equal(loadsAtStart(noCard, {}), true);
+  assert.equal(loadsAtStart(withCard, {}), false);
+  // The owner of a PC may want the other way round, either way.
+  assert.equal(loadsAtStart(withCard, { TRHAI_WARM_UP_AT_START: "on" }), true);
+  assert.equal(loadsAtStart(noCard, { TRHAI_WARM_UP_AT_START: " OFF " }), false);
+  // Anything else is not an answer, and the PC decides.
+  assert.equal(loadsAtStart(withCard, { TRHAI_WARM_UP_AT_START: "maybe" }), false);
+  assert.equal(loadsAtStart(noCard, { TRHAI_WARM_UP_AT_START: "" }), true);
+});
+
+test("the setting reaches the warm-up itself: on brings the load at start back on a PC with a card", async () => {
+  resetWarmUpForTests();
+  const engine = await fakeEngine({ models: ["llama3.2:latest"], reply: () => ({ message: { content: "Y" } }) });
+  process.env.TRHAI_WARM_UP_AT_START = "on";
+  try {
+    const atStart = await warmUpEngine({ reason: "start", config: configFor(engine.baseUrl), now: () => now, hardware: withCard });
+    assert.equal(atStart.state, "warm");
+    assert.equal(engine.chats.length, 1);
+  } finally {
+    delete process.env.TRHAI_WARM_UP_AT_START;
     await engine.close();
     resetWarmUpForTests();
   }
