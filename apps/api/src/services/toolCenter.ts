@@ -83,7 +83,7 @@ export const toolCatalogue: Record<string, CatalogueEntry> = {
   web_search: { area: "Web", title: "Search the web", summary: "Searches the web and brings back real result pages." },
   fetch_url: { area: "Web", title: "Read a web page", summary: "Reads the text of a web page." },
   list_schedules: { area: "Schedules", title: "List schedules", summary: "Lists what is scheduled, how often it runs and whether it is on." },
-  add_schedule: { area: "Schedules", title: "Add a schedule", summary: "Sets up a question or a reminder to run every day, or every so many minutes." },
+  add_schedule: { area: "Schedules", title: "Add a schedule", summary: "Sets up a question or a reminder to run every day, every so many minutes, or once at a date and time." },
   list_tasks: { area: "Tasks", title: "List tasks", summary: "Reads the to-do list on the Tasks screen: what is open and what is done." },
   add_task: { area: "Tasks", title: "Add a task", summary: "Adds a task, or several, to the to-do list, in your words." },
   complete_task: { area: "Tasks", title: "Tick a task off", summary: "Marks a task on the list done, or opens it again." },
