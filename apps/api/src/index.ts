@@ -104,7 +104,8 @@ listenOn(() => createServer(app), port, plan.hosts).then(({ listeners: bound, sk
           : `model engine not running: ${engine.reason}`);
       // So the first question does not pay for reading the whole prompt (see
       // warmUp.ts). Only this process's own engine, and not while the trial
-      // has ended and nothing new can be asked anyway.
+      // has ended and nothing new can be asked anyway. On a PC with a graphics
+      // card the warm-up itself declines: starting is not needing (loadsAtStart).
       if (engine.status === "running" && !licenseStatus().locked) {
         void warmUpEngine({ reason: "start" }).then((result) => console.log(describeWarmUp(result)));
       }

@@ -79,10 +79,16 @@ shares before anyone asks (`apps/api/src/services/warmUp.ts`):
 - What it reads: the system message (`systemMessageFor`) and the eleven
   tools offered with every turn (`alwaysOfferedTools`, which now come first
   in every tool list so that they are shared).
-- When: once the API's own engine is up, and when the chat box is clicked
-  into (`POST /v1/warm-up`, at most once a minute from the app) if the
-  engine has since let the model go. Never while the trial has ended, and
-  never by pushing out another loaded model.
+- When: when the chat box is clicked into (`POST /v1/warm-up`, at most once
+  a minute from the app) if the engine has since let the model go - and, on
+  a PC with no graphics card only, once the API's own engine is up. Never
+  while the trial has ended, and never by pushing out another loaded model.
+- Why not at start on a PC with a card (2026-11-05, the owner's rule: a
+  model is in memory only while it is needed): loaded at every start, the
+  model held the card's memory until it had sat idle for five minutes,
+  whether or not anything was asked. `loadsAtStart` decides it;
+  `TRHAI_WARM_UP_AT_START=on` or `=off` overrides it either way. The
+  numbers below are from a PC without a card, where it still runs at start.
 - It gives way to real work: any reply the engine is asked for stops it
   (`loadEngineModel` calls `stopWarmUp`), and the engine keeps what it had
   read. `GET /v1/warm-up` says where it is; `TRHAI_WARM_UP=off` turns it off.
