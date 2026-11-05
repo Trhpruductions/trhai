@@ -193,13 +193,13 @@ test("an engine with no model in it says where to put one", async () => {
   }
 });
 
-test("the vision model is not one that answers a conversation", async () => {
-  // It answers about images, on its own route. Listed alone, there is nothing
-  // to chat with; listed beside a chat model, it is not among the candidates.
+test("the vision model answers a conversation only when nothing else can", async () => {
+  // It answers about images, on its own route. Listed beside a chat model, it is
+  // not among the candidates; listed alone, it talks (see modelsThatTalk).
   const only = await standIn(() => ({ status: 200, payload: modelsBody(["qwen2.5-vl-3b"], { vision: ["qwen2.5-vl-3b"] }) }));
   const both = await standIn(() => ({ status: 200, payload: modelsBody(["qwen2.5-vl-3b", "qwen3-8b"], { vision: ["qwen2.5-vl-3b"] }) }));
   try {
-    assert.equal((await checkAvailability(configFor(only.baseUrl))).available, false);
+    assert.deepEqual(await checkAvailability(configFor(only.baseUrl)), { available: true, model: "qwen2.5-vl-3b", installedModels: ["qwen2.5-vl-3b"] });
     const result = await checkAvailability(configFor(both.baseUrl));
     assert.deepEqual(result, { available: true, model: "qwen3-8b", installedModels: ["qwen3-8b"] });
   } finally {

@@ -30,7 +30,7 @@ import {
 import { once } from "node:events";
 import os from "node:os";
 import path from "node:path";
-import { discoverModels, enginePaths, engineState, restartEngine, sameModel } from "./modelEngine.js";
+import { discoverModels, enginePaths, engineState, modelsThatTalk, restartEngine, sameModel } from "./modelEngine.js";
 import { catalogueTool, toolCatalogue, toolStatuses, type ToolDef, type ToolStatus } from "./toolCatalog.js";
 
 // ------------------------------------------------------------------ this PC
@@ -121,7 +121,7 @@ export type CatalogModel = {
   /** What it needs to run at a usable speed. */
   needs: string;
   license: ModelLicense;
-  /** True for a model that only answers about images. */
+  /** True for a model that looks at pictures. It talks as well when it is the only one here (modelsThatTalk). */
   vision: boolean;
   /** One file, saved as <id>.gguf; or several (a vision model and its projector), saved in a folder <id>. */
   files: PinnedFile[];
@@ -286,8 +286,31 @@ export function hasRoomForSevenB(hardware: Hardware): boolean {
   return (hardware.gpu !== null && hardware.gpu.memoryMiB >= 7500) || hardware.totalMemoryBytes >= 15 * gib;
 }
 
-/** The chat model to install first on this PC: the one with its refusals taken out, in the size the PC suits. */
-export function recommendedModel(hardware: Hardware): string {
+/**
+ * Whether new copies get one model for talking and for pictures, instead of a pair: the
+ * owner's choice of 2026-11-05, to keep the download down. On a PC with an 8 GB card the
+ * pair is 10.5 GB and the one model 5.8 GB, so the whole install goes from about 12 GB
+ * to about 7 GB; and there is nothing to swap when a picture arrives in a conversation.
+ *
+ * Off until it has been shown to work. The one measurement so far is a single tool call
+ * on the CPU (docs/23), and the pair's coder is what the assistant was measured and tuned
+ * with, so turning this on before a run on the graphics card with the whole tool set
+ * would be a guess made for every new install. TRHAI_ONE_MODEL=on or =off says for one copy.
+ *
+ * A copy that already has both keeps both, and keeps talking with the coder.
+ */
+export const oneModelByDefault: boolean = false;
+
+export function oneModel(env: NodeJS.ProcessEnv = process.env): boolean {
+  const asked = env.TRHAI_ONE_MODEL?.trim().toLowerCase();
+  if (asked === "on") return true;
+  if (asked === "off") return false;
+  return oneModelByDefault;
+}
+
+/** The model to talk with to install first on this PC: the one with its refusals taken out, in the size the PC suits. */
+export function recommendedModel(hardware: Hardware, env: NodeJS.ProcessEnv = process.env): string {
+  if (oneModel(env)) return recommendedVisionModel(hardware);
   return hasRoomForSevenB(hardware) ? "qwen2.5-coder-7b-abliterated" : "qwen3-4b-instruct-2507-abliterated";
 }
 
@@ -319,7 +342,7 @@ export function hardwareDefaults(hardware: Hardware, env: NodeJS.ProcessEnv): Re
   // the model that looks at pictures. (A big PC needs neither: the first
   // choice of each is already the big one.)
   if (!hasRoomForSevenB(hardware) && unset("TRHAI_MODEL") && unset("OLLAMA_MODEL")) {
-    defaults.TRHAI_MODEL = recommendedModel(hardware);
+    defaults.TRHAI_MODEL = recommendedModel(hardware, env);
   }
   if (!hasRoomForSevenB(hardware) && unset("TRHAI_VISION_MODEL")) {
     defaults.TRHAI_VISION_MODEL = recommendedVisionModel(hardware);
@@ -405,14 +428,14 @@ function listInstalled(modelsDir: string): InstalledModel[] {
  */
 export function canAnswer(env: NodeJS.ProcessEnv = process.env): boolean {
   const paths = enginePaths(env);
-  return paths.exe !== null && listInstalled(paths.modelsDir).some((model) => !model.vision);
+  return paths.exe !== null && modelsThatTalk(listInstalled(paths.modelsDir)).length > 0;
 }
 
 export function setupStatus(env: NodeJS.ProcessEnv = process.env): SetupStatus {
   const hardware = readHardware();
   const paths = enginePaths(env);
   const installed = listInstalled(paths.modelsDir);
-  const recommended = recommendedModel(hardware);
+  const recommended = recommendedModel(hardware, env);
   const recommendedVision = recommendedVisionModel(hardware);
   const variant = engineVariantFor(hardware);
   const engine = engineState();
@@ -434,7 +457,7 @@ export function setupStatus(env: NodeJS.ProcessEnv = process.env): SetupStatus {
     })),
     installed,
     tools: toolStatuses(env),
-    needsSetup: paths.exe === null || !installed.some((model) => !model.vision),
+    needsSetup: paths.exe === null || modelsThatTalk(installed).length === 0,
     recommendedModel: recommended,
     recommendedVisionModel: recommendedVision,
     runtimeDir: paths.runtimeDir,

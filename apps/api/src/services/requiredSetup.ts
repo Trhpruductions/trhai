@@ -109,11 +109,11 @@ function writeMarker(env: NodeJS.ProcessEnv, marker: Marker): void {
 
 // ---------------------------------------------------------------- what is required
 
-/** The bundle, for this PC: its engine, the model to chat with and the one that looks at pictures, and every tool. */
-export function requiredRequest(hardware: Hardware, tools: ToolDef[] = toolCatalogue): SetupRequest {
+/** The bundle, for this PC: its engine, the model to talk with and the one that looks at pictures (one and the same with oneModel), and every tool. */
+export function requiredRequest(hardware: Hardware, tools: ToolDef[] = toolCatalogue, env: NodeJS.ProcessEnv = process.env): SetupRequest {
   return {
     engine: true,
-    models: [recommendedModel(hardware), recommendedVisionModel(hardware)],
+    models: [...new Set([recommendedModel(hardware, env), recommendedVisionModel(hardware)])],
     // The tools are built for Windows; a PC that is not one is asked for none.
     tools: process.platform === "win32" ? tools.map((tool) => tool.id) : []
   };
@@ -144,7 +144,7 @@ export function requiredStatus(options: StatusOptions = {}): RequiredStatus {
   const env = options.env ?? process.env;
   const hardware = options.hardware ?? readHardware();
   const marker = readMarker(env);
-  const planned = planSetup(requiredRequest(hardware, options.tools), { ...options, env, hardware });
+  const planned = planSetup(requiredRequest(hardware, options.tools, env), { ...options, env, hardware });
   const remainingBytes = planned.ok ? planned.plan.steps.reduce((sum, step) => sum + step.totalBytes, 0) : 0;
   const needsSetup = options.needsSetup ?? !canAnswer(env);
   const applies = env.TRHAI_REQUIRED_SETUP !== "off" && !needsSetup && planned.ok && !ownEngine(env);
@@ -238,7 +238,7 @@ export function startRequiredSetup(options: { manual?: boolean } = {}, deps: Req
   const record = (state: Marker["state"], finishedAt: string | null, error: string | null) =>
     writeMarker(env, { generation: requiredSetupGeneration, state, attempts, startedAt, finishedAt, error });
 
-  const started = startSetup(requiredRequest(hardware, deps.tools), {
+  const started = startSetup(requiredRequest(hardware, deps.tools, env), {
     ...deps, env, hardware,
     restart: deps.restart ?? (() => restartWhenIdle()),
     onFinish: (job) => {

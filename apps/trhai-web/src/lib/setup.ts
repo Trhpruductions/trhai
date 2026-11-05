@@ -155,17 +155,13 @@ export function describeHardware(hardware: Hardware): string {
 }
 
 /**
- * The models picked to start with: what is recommended - the model to chat
- * with and the one that looks at pictures - unless something that can chat is
- * already there. A picture model is left out when one is installed.
+ * The models picked to start with: what is recommended, unless a model is already
+ * there. Any model can answer: one that looks at pictures talks as well when it
+ * is alone, so a PC with one is not new.
  */
 export function initialSelection(status: SetupStatus): string[] {
-  const canChat = status.installed.some((model) => !model.vision);
-  if (canChat) return [];
-  const canSee = status.installed.some((model) => model.vision);
-  return status.catalog
-    .filter((model) => model.recommended && !model.installed && !(model.vision && canSee))
-    .map((model) => model.id);
+  if (status.installed.length > 0) return [];
+  return status.catalog.filter((model) => model.recommended && !model.installed).map((model) => model.id);
 }
 
 /** The tools to offer ticked: every one this PC can use that has something left to install, so that one click installs everything. */

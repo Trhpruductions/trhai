@@ -575,6 +575,21 @@ export async function listEngineModels(baseUrl: string, fetchImpl: FetchLike = e
   });
 }
 
+/**
+ * The models that answer a conversation: those that only talk, or, where there are
+ * none, those that also look at pictures.
+ *
+ * A picture model is a whole model with a part beside it that reads images. Measured
+ * on 2026-10-25 (docs/23), the 4B and 8B ones answered, made a real tool call and used
+ * its result the same as the 4B chat model. So one alone on a PC talks, rather than
+ * the PC being told it has no model. Where both kinds are installed the talking model
+ * talks, as it always has, and the picture model waits for a picture.
+ */
+export function modelsThatTalk<T extends { vision: boolean }>(models: T[]): T[] {
+  const talking = models.filter((model) => !model.vision);
+  return talking.length > 0 ? talking : models;
+}
+
 /** The engine's model for a name: that model, or failing that a size of it. */
 export function findEngineModel<T extends { id: string }>(models: T[], name: string): T | undefined {
   return models.find((model) => sameModel(model.id, name)) ?? models.find((model) => isModelOrSize(name, model.id));

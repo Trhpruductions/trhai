@@ -307,6 +307,24 @@ nothing else changed: the same families, chat templates and Apache 2.0 licence.
   project is to ask before each run there), or in a long session with the whole
   tool set.
 
+**One model for talking and for pictures (2026-11-05; built, not on yet).** The owner
+chose this to keep the download down: the picture model does the talking too, so on a PC
+with an 8 GB card the models are 5.8 GB instead of 10.5 GB and the whole install about
+7 GB instead of about 12 GB, with nothing to swap when a picture arrives. Two parts:
+
+- `modelsThatTalk` (`modelEngine.ts`), which is on now: a picture model talks when it is
+  the only model on the PC. Where both kinds are installed the talking model talks, as
+  before. So a copy can also get the room back by removing its chat model.
+- `oneModelByDefault` (`modelSetup.ts`), which is off: new copies are recommended only the
+  picture model, and the bundle names it once. `TRHAI_ONE_MODEL=on` or `=off` says for one
+  copy. A copy that already has both keeps both.
+
+Before turning it on: run the assistant's full tool set on the graphics card with
+`TRHAI_ONE_MODEL=on` and only the picture model in the models folder, and compare it with
+the coder. The table above is one tool call on the CPU, and the coder is what the assistant
+was measured and tuned with. When it goes on, the two picture models' labels and summaries
+in `modelCatalog` need to say they talk as well.
+
 **The install that does itself** (`requiredSetup.ts`). An update replaces the
 program and nothing else, so what a version needs beside it was left for each
 person to find and tick. On a copy that is already set up, the service now

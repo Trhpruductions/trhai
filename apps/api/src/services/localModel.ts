@@ -21,7 +21,7 @@
 // rather than the app looking broken.
 
 import {
-  engineOffReason, enginePaths, engineUrl, isModelOrSize, listEngineModels, loadEngineModel, reviveEngine, type EngineModel
+  engineOffReason, enginePaths, engineUrl, isModelOrSize, listEngineModels, loadEngineModel, modelsThatTalk, reviveEngine, type EngineModel
 } from "./modelEngine.js";
 import { engineError, readCompletion } from "./engineChat.js";
 import { engineFetch } from "./engineFetch.js";
@@ -437,9 +437,9 @@ export async function checkAvailability(
     models = revived;
   }
 
-  // The models that can hold a conversation. The vision model is not one: it
-  // answers about images, on its own route.
-  const installed = models.filter((model) => !model.vision).map((model) => model.id);
+  // The models that can hold a conversation. A vision model answers about images on
+  // its own route, and talks only when nothing else here can (see modelsThatTalk).
+  const installed = modelsThatTalk(models).map((model) => model.id);
   const match = pickModel(config.model, installed, config.modelFromEnv ?? true);
   if (!match) {
     return {
