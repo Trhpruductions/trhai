@@ -22,7 +22,8 @@ process.env.ASSIST_TASKS_FILE = path.join(dir, "tasks-list.json");
 process.env.ASCEND_PREFERENCES_FILE = path.join(dir, "preferences.json");
 process.env.TRHAI_LICENSE_FILE = path.join(dir, "license.json");
 process.env.TRHAI_TRIAL_MARKER = path.join(dir, "elsewhere", "trial-started");
-delete process.env.TRHAI_PAYWALL;
+// TRH AI is free by default (licenseConfig.ts); these tests are about the paywall that can be switched back on.
+process.env.TRHAI_PAYWALL = "on";
 delete process.env.TRHAI_AUTHORITY;
 
 const accounts = await import("../src/services/accounts.js");

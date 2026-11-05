@@ -263,7 +263,7 @@ function EraseSection({ summary, signedIn, onErased }: { summary: PrivacySummary
           {wholeCopyAllowed && held?.thisCopy?.license ? (
             <label className="privacy-check">
               <input type="checkbox" checked={scope.license} disabled={busy} onChange={() => toggle("license")} />
-              <span>The license key on this PC (it carries the email address it was bought with)</span>
+              <span>The key on this PC (it carries the email address it was issued for)</span>
             </label>
           ) : null}
           {signedIn ? (

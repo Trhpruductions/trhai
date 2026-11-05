@@ -36,6 +36,18 @@ test("a member is told which kind of lapse it is, or what plan they are on", () 
   assert.equal(describeAccess({ ...base, role: "user" }), "You are on the Pro plan.");
 });
 
+test("on a free copy nobody is told about a plan, a payment or a trial", () => {
+  const free = { ...base, free: true, planLabel: "Free" };
+  assert.equal(describeAccess({ ...free, role: "user" }), "TRH AI is free: everything in it is open to you.");
+  assert.match(describeAccess({ ...free, role: "owner" }), /^You are the owner\. TRH AI is free.*look after the accounts/);
+  assert.match(describeAccess({ ...free, role: "admin" }), /^You are an administrator\. TRH AI is free.*look after accounts/);
+  for (const role of ["user", "owner", "admin"] as const) {
+    assert.doesNotMatch(describeAccess({ ...free, role }), /payment|trial|plan/i, role);
+    // Suspended is about the account, not about money, and is still said.
+    assert.match(describeAccess({ ...free, role, status: "suspended" }), /suspended/, role);
+  }
+});
+
 test("a suspended account is told so before anything else, whatever its role", () => {
   for (const role of ["owner", "admin", "user"] as const) {
     assert.match(describeAccess({ ...base, role, status: "suspended" }), /suspended/, role);
@@ -46,7 +58,7 @@ test("each feature says why it is open or shut", () => {
   assert.equal(featureStatus({ allowed: true, via: "owner" }), "Open to you as the owner");
   assert.equal(featureStatus({ allowed: true, via: "admin" }), "Open to you as an administrator");
   assert.equal(featureStatus({ allowed: true, via: "plan" }), "In your plan");
-  assert.match(featureStatus({ allowed: true, via: "paywall_off" }), /paywall is off/);
+  assert.equal(featureStatus({ allowed: true, via: "paywall_off" }), "Open: TRH AI is free");
   assert.equal(featureStatus({ allowed: false, reason: "not_in_plan" }), "Not in your plan");
   assert.equal(featureStatus({ allowed: false, reason: "suspended" }), "This account is suspended");
   assert.equal(featureStatus({ allowed: false, reason: "not_signed_in" }), "Sign in to use this");

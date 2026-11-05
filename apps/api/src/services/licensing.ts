@@ -1,4 +1,10 @@
-// The paywall: a free trial, then a license key.
+// The paywall: a free trial, then a license key - when there is one.
+//
+// TRH AI is free (the owner's decision of 2026-11-05): paidEdition is false in
+// licenseConfig.ts, so nothing is locked, no trial is started or recorded, and no
+// key is needed. What follows is kept working, and tested, because the owner can
+// bring it back with that one line, and because keys still do one job when it is
+// off: an owner or administrator key says who looks after the accounts on a copy.
 //
 // How it fits this app's rules (docs/21-handoff.md: no cloud APIs, no keys in
 // the app): the app never talks to a payment provider. Paying happens on a
@@ -23,7 +29,7 @@ import { createPublicKey, randomUUID, verify as verifySignature, type KeyObject 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { dataFile } from "./dataDirectory.js";
-import { checkoutUrl as configuredCheckoutUrl, licensePublicKeyBase64, priceText as configuredPriceText } from "./licenseConfig.js";
+import { checkoutUrl as configuredCheckoutUrl, licensePublicKeyBase64, paidEdition, priceText as configuredPriceText } from "./licenseConfig.js";
 import { assertProtectedJsonWritable, protectedJsonLooksEncrypted, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 import { runtimeDir } from "./modelEngine.js";
 
@@ -55,16 +61,18 @@ export type LicensePayload = {
   seats?: number;
 };
 
-export type LicenseState = "trial" | "licensed" | "trial_expired" | "license_expired";
+/** "free": nothing is asked for, because this copy has no paywall. A key on it still reads as licensed, or expired. */
+export type LicenseState = "free" | "trial" | "licensed" | "trial_expired" | "license_expired";
 
 export type LicenseStatus = {
   state: LicenseState;
   /** False while the app may be used; true when the trial or the license has run out. */
   locked: boolean;
-  plan: Plan | "trial";
-  trialStartedAt: string;
-  trialEndsAt: string;
-  /** Whole days of trial left, 0 once it has ended. */
+  plan: Plan | "trial" | "free";
+  /** Null where there is no trial: a copy with no paywall starts none. */
+  trialStartedAt: string | null;
+  trialEndsAt: string | null;
+  /** Whole days of trial left, 0 once it has ended or where there is none. */
   trialDaysLeft: number;
   /** The activated license, with its signature left out. */
   license: Omit<LicensePayload, "v"> | null;
@@ -72,7 +80,7 @@ export type LicenseStatus = {
   checkoutUrl: string | null;
   /** What it costs, in the owner's words, for the paywall screen. */
   priceText: string | null;
-  /** When set, nothing is ever locked: for the owner's own PCs and for tests. */
+  /** When set, nothing is ever locked and no trial is kept: TRH AI is free on this copy. */
   paywallDisabled: boolean;
   /** True when the trial record on this PC had been changed by hand, which ends the trial. */
   trialTampered: boolean;
@@ -133,8 +141,12 @@ function now(): Date {
   return new Date();
 }
 
+/** Whether this copy has no paywall: what it was built as (paidEdition), unless TRHAI_PAYWALL says otherwise. */
 function paywallDisabled(): boolean {
-  return process.env.TRHAI_PAYWALL === "off";
+  const asked = process.env.TRHAI_PAYWALL?.trim().toLowerCase();
+  if (asked === "off") return true;
+  if (asked === "on") return false;
+  return !paidEdition;
 }
 
 function publicKey(): KeyObject {
@@ -229,6 +241,13 @@ function load(): Stored {
       else tampered = true;
     }
   }
+  // No paywall, no trial to keep a record of: nothing is written, and a first run
+  // leaves no trace. What an earlier version recorded stays where it is, unread;
+  // a hand-edited file means nothing here, because there is nothing for it to win.
+  if (paywallDisabled()) {
+    tampered = false;
+    return loaded;
+  }
   const marker = readTrialMarker(nowMs);
   if (tampered) {
     // The trial has ended: as of the earliest start this PC knows of, or now.
@@ -268,22 +287,32 @@ function expired(iso: string | null | undefined, at: Date): boolean {
   return Number.isFinite(when) && when <= at.getTime();
 }
 
+/**
+ * Whether this PC holds a record of when a trial began: always with a paywall, and on a
+ * free copy only if an earlier version left one. What an erasure says it left depends on it.
+ */
+export function holdsTrialRecord(): boolean {
+  return Boolean(load().trialStartedAt) || existsSync(trialMarkerPath());
+}
+
 /** Where things stand right now. */
 export function licenseStatus(when?: Date): LicenseStatus {
   const stored = load();
   // After load(): a first run stamps the trial start in there, and "now" must
   // not fall a millisecond before it.
   const at = when ?? now();
-  const trialStartedAt = stored.trialStartedAt as string;
-  const trialEnds = new Date(Date.parse(trialStartedAt) + trialDays * dayMs);
-  const trialDaysLeft = Math.max(0, Math.ceil((trialEnds.getTime() - at.getTime()) / dayMs));
   const disabled = paywallDisabled();
+  // A date from an earlier version is not a trial on a free copy, so it is not reported as one.
+  const trialStartedAt = disabled ? null : stored.trialStartedAt as string;
+  const trialEnds = trialStartedAt ? new Date(Date.parse(trialStartedAt) + trialDays * dayMs) : null;
+  const trialDaysLeft = trialEnds ? Math.max(0, Math.ceil((trialEnds.getTime() - at.getTime()) / dayMs)) : 0;
   const base = {
     trialStartedAt,
-    trialEndsAt: trialEnds.toISOString(),
+    trialEndsAt: trialEnds ? trialEnds.toISOString() : null,
     trialDaysLeft,
-    checkoutUrl: safeCheckoutUrl(process.env.TRHAI_CHECKOUT_URL?.trim() || configuredCheckoutUrl),
-    priceText: process.env.TRHAI_PRICE_TEXT?.trim() || configuredPriceText,
+    // Nothing to buy on a free copy, whatever a setting left over from before says.
+    checkoutUrl: disabled ? null : safeCheckoutUrl(process.env.TRHAI_CHECKOUT_URL?.trim() || configuredCheckoutUrl),
+    priceText: disabled ? null : process.env.TRHAI_PRICE_TEXT?.trim() || configuredPriceText,
     paywallDisabled: disabled,
     trialTampered: tampered
   };
@@ -300,6 +329,8 @@ export function licenseStatus(when?: Date): LicenseStatus {
       license
     };
   }
+
+  if (!trialEnds) return { ...base, state: "free", locked: false, plan: "free", license: null };
 
   const trialOver = at.getTime() >= trialEnds.getTime();
   return {

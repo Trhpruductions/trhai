@@ -13,7 +13,8 @@ process.env.TRHAI_LICENSE_PUBLIC_KEY = publicKey.export({ type: "spki", format: 
 const licenseDir = mkdtempSync(path.join(tmpdir(), "trhai-license-"));
 process.env.TRHAI_LICENSE_FILE = path.join(licenseDir, "license.json");
 process.env.TRHAI_TRIAL_MARKER = path.join(licenseDir, "elsewhere", "trial-started");
-delete process.env.TRHAI_PAYWALL;
+// TRH AI is free by default (licenseConfig.ts); these tests are about the paywall that can be switched back on.
+process.env.TRHAI_PAYWALL = "on";
 
 const {
   activateLicense, formatLicenseKey, licenseStatus, newLicenseId, parseLicenseKey, removeLicense,
@@ -37,7 +38,7 @@ test("a fresh PC is on trial for the full period, and is locked the moment it en
   assert.equal(status.state, "trial");
   assert.equal(status.locked, false);
   assert.equal(status.trialDaysLeft, trialDays);
-  const later = new Date(Date.parse(status.trialEndsAt) + 1);
+  const later = new Date(Date.parse(status.trialEndsAt as string) + 1);
   const ended = licenseStatus(later);
   assert.equal(ended.state, "trial_expired");
   assert.equal(ended.locked, true);
@@ -233,5 +234,5 @@ test("the earlier of the two records wins, and a second record dated in the futu
   writeFileSync(markerFile, "2099-01-01T00:00:00.000Z");
   const status = licenseStatus();
   assert.equal(status.state, "trial");
-  assert.ok(Date.parse(status.trialStartedAt) <= Date.now());
+  assert.ok(Date.parse(status.trialStartedAt as string) <= Date.now());
 });

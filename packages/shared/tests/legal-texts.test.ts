@@ -20,9 +20,9 @@ import {
  * A fact the owner supplies changes the words too, and so is the same kind of change.
  */
 const fingerprints: Record<string, string> = {
-  "privacy@2026-11-01": "f606035ec079a01b",
-  "terms@2026-11-01": "a530f5dc055d6b67",
-  "refunds@2026-11-01": "2f456abbf38cbf37",
+  "privacy@2026-11-05": "16535ea24b684a9a",
+  "terms@2026-11-05": "2b04e7d31fb00bd2",
+  "refunds@2026-11-05": "87a80f6f084661e0",
   "storage@2026-11-02": "7271483490607e74",
   "ai@2026-11-01": "3704b3d9ee920e55"
 };
@@ -84,9 +84,7 @@ test("the open items are exactly the facts the owner has not supplied, and suppl
     governingLaw: "the laws of the State of Utah",
     disputeVenue: "the courts of Utah",
     minimumAge: 18,
-    paymentProvider: "Example Payments (https://example.com/privacy)",
-    refundWindowDays: 14,
-    salesRecordRetentionYears: 7
+    keyRecordRetentionYears: 7
   };
   assert.deepEqual(openLegalItems(supplied), [], "every open item was a fact");
   assert.equal(legalTextsReady(supplied), false, "supplied is not the same as reviewed");
@@ -95,8 +93,28 @@ test("the open items are exactly the facts the owner has not supplied, and suppl
   const terms = JSON.stringify(legalDocument("terms", supplied));
   assert.match(terms, /at least 18 years old/);
   assert.match(terms, /laws of the State of Utah/);
-  const refunds = JSON.stringify(legalDocument("refunds", supplied));
-  assert.match(refunds, /within 14 days of buying/);
+  assert.match(JSON.stringify(legalDocument("refunds", supplied)), /help@example.com/);
+});
+
+test("the texts say TRH AI is free, and none still describes buying it", () => {
+  // The owner's decision of 2026-11-05. If the paywall comes back (paidEdition in the API's
+  // licenseConfig.ts), this fails until the texts have been written for it again.
+  for (const doc of legalDocuments()) {
+    const words = canonicalTextOf(doc);
+    for (const sold of [/checkout page/i, /buy a license/i, /payment provider/i, /free trial of 14/i, /price paid/i, /refund window/i, /seats/i, /paid product/i]) {
+      assert.doesNotMatch(words, sold, doc.id);
+    }
+  }
+  assert.match(canonicalTextOf(legalDocument("terms")), /TRH AI is free\.\*\* There is no trial that ends, no license to buy and nothing to pay/);
+  assert.match(canonicalTextOf(legalDocument("refunds")), /so there is nothing to refund/);
+  assert.match(canonicalTextOf(legalDocument("business")), /TRH AI is free: TRH Development charges nothing for it/);
+  // And the owner is no longer asked for facts about selling it.
+  assert.deepEqual(openLegalItems().filter((item) => /payment|refund|provider/i.test(item)), []);
+});
+
+test("the notice that answers are not professional advice stays where it binds", () => {
+  assert.match(canonicalTextOf(legalDocument("terms")), /not professional advice/);
+  assert.match(canonicalTextOf(legalDocument("ai")), /medical, legal, financial, tax, safety or other professional advice/);
 });
 
 test("the copies for the website under docs/legal match the texts", () => {

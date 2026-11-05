@@ -31,7 +31,8 @@ process.env.ASSIST_MEMORY_FILE = path.join(dir, "memory.json");
 process.env.ASSIST_CONVERSATION_FILE = path.join(dir, "conversations.json");
 process.env.ASSIST_KNOWLEDGE_FILE = path.join(dir, "knowledge.json");
 process.env.ASCEND_PREFERENCES_FILE = path.join(dir, "preferences.json");
-delete process.env.TRHAI_PAYWALL;
+// TRH AI is free by default (licenseConfig.ts); these tests are about the paywall that can be switched back on.
+process.env.TRHAI_PAYWALL = "on";
 delete process.env.TRHAI_AUTHORITY;
 
 const accounts = await import("../src/services/accounts.js");

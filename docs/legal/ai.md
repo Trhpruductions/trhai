@@ -1,6 +1,6 @@
 # How TRH AI uses AI
 
-*Version 2026-11-01. In effect from 2026-11-01.*
+*Version 2026-11-01. In effect from 2026-11-05.*
 
 Where the AI runs, what leaves your PC, what the AI can get wrong, and which parts are still early.
 

@@ -15,7 +15,7 @@ import { clearEvents } from "./executionLog.js";
 import { clearFlow, getFlow } from "./flowStore.js";
 import { eraseSessionMemory, listForgottenFacts, listSessionMemories } from "./assistMemoryStore.js";
 import { listDocuments, resetKnowledge } from "./knowledgeStore.js";
-import { licenseStatus, removeLicense } from "./licensing.js";
+import { holdsTrialRecord, licenseStatus, removeLicense } from "./licensing.js";
 import { readPreferences, resetPreferences } from "./preferences.js";
 import { assertProtectedJsonWritable, readProtectedJsonFile, writeProtectedJsonFile } from "./protectedJson.js";
 import { listSchedules, resetSchedules } from "./scheduleStore.js";
@@ -469,13 +469,16 @@ export function eraseSubject(subject: Subject, scope: EraseScope, at: Date = new
 function keptAfter(scope: EraseScope, hadAccount: boolean): string[] {
   const kept = [
     `Your files in the workspace folder (${workspaceRoot()}). They are your own files; TRH AI does not delete them.`,
-    "The date this PC's free trial began. It stops the trial being restarted by deleting data, and holds no personal information.",
+    // Said only where one exists: a copy with no paywall records no trial, though an earlier version may have.
+    ...(holdsTrialRecord() ? [licenseStatus().paywallDisabled
+      ? "The date an earlier version of TRH AI recorded as the start of this PC's free trial. Nothing uses it now, and it holds no personal information."
+      : "The date this PC's free trial began. It stops the trial being restarted by deleting data, and holds no personal information."] : []),
     "The engine, models and voices that were downloaded. They are software, not information about you.",
     `A short record that this request was made and carried out: its date, what it covered and a random id. It has no name or email, and is deleted after ${requestRecordMonths} months.`
   ];
   if (!scope.ownData) kept.push("Your conversations, memories, documents, to-dos and task history, because you chose to keep them.");
   if (!scope.wholeCopy) kept.push("This copy's schedules, automation flow, preferences and saved email account, because you chose to keep them.");
-  if (!scope.license) kept.push("The license key on this PC, because you chose to keep it. It carries the email address it was bought with.");
+  if (!scope.license && licenseStatus().license !== null) kept.push("The key on this PC, because you chose to keep it. It carries the email address it was issued for.");
   if (hadAccount && !scope.account) kept.push("Your account, because you chose to keep it.");
   return kept;
 }

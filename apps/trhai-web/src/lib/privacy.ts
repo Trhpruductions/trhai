@@ -144,7 +144,7 @@ export function describeErasure(held: HeldCounts | null, scope: EraseScope): str
       ? `${plural(copy.schedules, "schedule", "schedules")}${copy.automationFlow ? ", the automation flow" : ""}, the preferences${copy.emailAccount ? ", the saved email account and its password" : ""}`
       : "the schedules, the automation flow, the preferences and the saved email account");
   }
-  if (scope.license) lines.push("the license key on this PC");
+  if (scope.license) lines.push("the key on this PC");
   if (scope.account) lines.push("your account: the email address, name, password, recovery codes and every sign-in");
   return lines;
 }

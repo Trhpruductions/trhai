@@ -29,7 +29,8 @@ process.env.ASSIST_FLOW_FILE = path.join(dir, "flow.json");
 process.env.ASCEND_PREFERENCES_FILE = path.join(dir, "preferences.json");
 process.env.TRHAI_LICENSE_FILE = path.join(dir, "license.json");
 process.env.TRHAI_TRIAL_MARKER = path.join(dir, "elsewhere", "trial-started");
-delete process.env.TRHAI_PAYWALL;
+// TRH AI is free by default (licenseConfig.ts); these tests are about the paywall that can be switched back on.
+process.env.TRHAI_PAYWALL = "on";
 delete process.env.TRHAI_AUTHORITY;
 
 const accounts = await import("../src/services/accounts.js");
@@ -487,7 +488,8 @@ test("on one's own PC the person may also erase what the copy holds that is not 
   assert.equal(mail.describeEmailAccount().configured, false);
   assert.equal(kept.body.data.removed.schedules, 1);
   assert.equal(kept.body.data.removed.emailAccount, 1);
-  assert.ok(kept.body.data.kept.some((line: string) => /license key on this PC, because you chose to keep it/.test(line)), "the license was not touched, and it says so");
+  // This PC holds no key, so none is said to be kept. (free-edition.test.ts has the case where it does.)
+  assert.ok(kept.body.data.kept.every((line: string) => !/key on this PC/.test(line)), "no key is named on a PC that has none");
 });
 
 test("on a copy other people share, a member cannot erase what is shared, and the owner cannot erase the owner account", async () => {

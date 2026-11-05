@@ -15,6 +15,7 @@ function status(overrides: Partial<LicenseStatus> = {}): LicenseStatus {
 
 test("plans have the names people see", () => {
   assert.equal(planLabel("trial"), "Free trial");
+  assert.equal(planLabel("free"), "Free");
   assert.equal(planLabel("personal"), "Personal");
   assert.equal(planLabel("pro"), "Pro");
   assert.equal(planLabel("team"), "Team");
@@ -28,6 +29,8 @@ test("each state is described in a sentence", () => {
   assert.match(describeLicense(status({ state: "licensed", plan: "pro", license })), /Pro plan, licensed to a@example.com\. It does not expire/);
   assert.match(describeLicense(status({ state: "licensed", plan: "pro", license: { ...license, expiresAt: new Date(Date.now() + 30 * day).toISOString() } })), /until/);
   assert.match(describeLicense(status({ state: "license_expired", locked: true, plan: "pro", license: { ...license, expiresAt: new Date(Date.now() - day).toISOString() } })), /expired/);
-  assert.match(describeLicense(status({ paywallDisabled: true })), /not limited/);
+  assert.match(describeLicense(status({ state: "free", plan: "free", paywallDisabled: true, trialStartedAt: null, trialEndsAt: null, trialDaysLeft: 0 })), /TRH AI is free: no trial, no key and nothing to pay/);
+  // A key from before changes nothing about that.
+  assert.match(describeLicense(status({ state: "licensed", plan: "pro", paywallDisabled: true, license })), /TRH AI is free/);
   assert.match(describeLicense(status({ state: "trial_expired", locked: true, trialDaysLeft: 0, trialTampered: true })), /changed by hand/);
 });

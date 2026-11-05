@@ -7,11 +7,13 @@ import {
 } from "../lib/license";
 import "./paywall.css";
 
-// Plan and billing, in settings: where things stand, where to buy, and the
-// key. The same form the paywall screen uses, so a key can be entered from
+// Plan, in settings: where things stand and the key. TRH AI is free, so on an
+// ordinary copy that is the word Free and a box for the one kind of key still
+// worth having. With the paywall switched back on it is where to buy as well,
+// and the form is the one the paywall screen uses, so a key can be entered from
 // either place.
 
-export function LicenseKeyForm({ onActivated, autoFocus = false }: { onActivated?: (status: LicenseStatus) => void; autoFocus?: boolean }) {
+export function LicenseKeyForm({ onActivated, autoFocus = false, free = false }: { onActivated?: (status: LicenseStatus) => void; autoFocus?: boolean; free?: boolean }) {
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
@@ -31,13 +33,13 @@ export function LicenseKeyForm({ onActivated, autoFocus = false }: { onActivated
       return;
     }
     setKey("");
-    setNote({ tone: "ok", text: `Thank you. ${planLabel(result.status.plan)} plan is active on this PC.` });
+    setNote({ tone: "ok", text: result.status.paywallDisabled ? "The key is on this PC." : `Thank you. ${planLabel(result.status.plan)} plan is active on this PC.` });
     onActivated?.(result.status);
   };
 
   return (
     <form className="paywall-key" onSubmit={submit}>
-      <label className="paywall-key-label" htmlFor="license-key">License key</label>
+      <label className="paywall-key-label" htmlFor="license-key">{free ? "Owner or administrator key" : "License key"}</label>
       <div className="paywall-key-row">
         <input
           id="license-key"
@@ -71,6 +73,36 @@ export function BuyButton({ status, primary = true }: { status: LicenseStatus; p
   );
 }
 
+/** A copy with no paywall: nothing to pay, nothing to count down, and the key only if there is a reason for one. */
+function FreePlan({ status, onRemove }: { status: LicenseStatus; onRemove: () => void }) {
+  return (
+    <>
+      <div className="billing-status">
+        <span className="os-label">Current plan</span>
+        <strong className="billing-plan">Free</strong>
+        <p>{describeLicense(status)}</p>
+      </div>
+      {status.license ? (
+        <>
+          <dl className="os-kv">
+            <div><dt>Key issued to</dt><dd className="os-mono">{status.license.email}</dd></div>
+            <div><dt>Key id</dt><dd className="os-mono">{status.license.id}</dd></div>
+            {status.license.role ? <div><dt>It makes that account</dt><dd>{status.license.role === "owner" ? "The owner" : "An administrator"}</dd></div> : null}
+          </dl>
+          <div className="os-view-actions">
+            <button type="button" className="os-btn os-btn-danger" onClick={onRemove}><Icon name="trash" size={15} />Remove key from this PC</button>
+          </div>
+        </>
+      ) : null}
+      <p className="os-faint os-small">
+        You do not need a key to use anything in TRH AI. If you were given an owner or administrator key, enter it here: it lets the
+        account with that email look after the other accounts on this copy.
+      </p>
+      <LicenseKeyForm free />
+    </>
+  );
+}
+
 export function BillingPanel() {
   const [status, setStatus] = useState<LicenseStatus | null>(null);
   const [failed, setFailed] = useState(false);
@@ -92,17 +124,18 @@ export function BillingPanel() {
   }, []);
 
   const remove = async () => {
-    if (!window.confirm("Remove the license key from this PC? You can enter it again at any time.")) return;
+    if (!window.confirm("Remove the key from this PC? You can enter it again at any time.")) return;
     await removeKey();
   };
 
   return (
     <section className="os-panel billing-panel">
-      <header className="os-panel-head"><h3 className="os-panel-title">Plan and billing</h3></header>
+      <header className="os-panel-head"><h3 className="os-panel-title">Plan</h3></header>
       <div className="os-panel-body">
         {failed ? <p className="paywall-note bad">TRH AI&rsquo;s service is not answering, so the plan cannot be read right now.</p> : null}
         {!status && !failed ? <p className="os-faint">Reading…</p> : null}
-        {status ? (
+        {status?.paywallDisabled ? <FreePlan status={status} onRemove={() => void remove()} /> : null}
+        {status && !status.paywallDisabled ? (
           <>
             <div className={`billing-status ${status.locked ? "locked" : ""}`}>
               <span className="os-label">{status.locked ? "Locked" : "Current plan"}</span>
@@ -111,8 +144,8 @@ export function BillingPanel() {
             </div>
 
             <dl className="os-kv">
-              <div><dt>Trial began</dt><dd className="os-mono">{new Date(status.trialStartedAt).toLocaleDateString()}</dd></div>
-              <div><dt>Trial ends</dt><dd className="os-mono">{new Date(status.trialEndsAt).toLocaleDateString()}</dd></div>
+              {status.trialStartedAt ? <div><dt>Trial began</dt><dd className="os-mono">{new Date(status.trialStartedAt).toLocaleDateString()}</dd></div> : null}
+              {status.trialEndsAt ? <div><dt>Trial ends</dt><dd className="os-mono">{new Date(status.trialEndsAt).toLocaleDateString()}</dd></div> : null}
               {status.license ? <div><dt>Licensed to</dt><dd className="os-mono">{status.license.email}</dd></div> : null}
               {status.license ? <div><dt>Key id</dt><dd className="os-mono">{status.license.id}</dd></div> : null}
               {status.license?.seats ? <div><dt>Seats</dt><dd className="os-mono">{status.license.seats}</dd></div> : null}

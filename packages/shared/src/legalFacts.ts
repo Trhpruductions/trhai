@@ -22,9 +22,9 @@ export type Fact<T> = T | null;
  * words moved and the version did not.
  */
 export const legalVersions = {
-  terms: "2026-11-01",
-  privacy: "2026-11-01",
-  refunds: "2026-11-01",
+  terms: "2026-11-05",
+  privacy: "2026-11-05",
+  refunds: "2026-11-05",
   storage: "2026-11-02",
   ai: "2026-11-01"
 } as const;
@@ -65,15 +65,11 @@ export type LegalFacts = {
   governingLaw: Fact<string>;
   disputeVenue: Fact<string>;
 
-  /** The youngest a person may be to make an account or buy a license. A decision for the owner and a lawyer. */
+  /** The youngest a person may be to use TRH AI or make an account. A decision for the owner and a lawyer. */
   minimumAge: Fact<number>;
 
-  /** The company that takes a payment on the checkout page, if there is one. TRH AI itself never sees a card. */
-  paymentProvider: Fact<string>;
-  /** How many days after buying a person may ask for their money back, if the owner offers one. */
-  refundWindowDays: Fact<number>;
-  /** How long the business keeps the record of a sale (the buyer's email, plan, date), for tax and accounts. */
-  salesRecordRetentionYears: Fact<number>;
+  /** How long the business keeps its list of the keys it issued (the email, the date, a key number). */
+  keyRecordRetentionYears: Fact<number>;
 };
 
 /**
@@ -84,7 +80,7 @@ export const legalFacts: LegalFacts = {
   productName: "TRH AI",
   operatorName: "TRH Development",
   status: "draft",
-  effectiveDate: "2026-11-01",
+  effectiveDate: "2026-11-05",
 
   legalEntityName: null,
   registrationNumber: null,
@@ -101,7 +97,5 @@ export const legalFacts: LegalFacts = {
 
   minimumAge: null,
 
-  paymentProvider: null,
-  refundWindowDays: null,
-  salesRecordRetentionYears: null
+  keyRecordRetentionYears: null
 };

@@ -1,6 +1,6 @@
 # Services TRH AI can contact, and the software it is made of
 
-*In effect from 2026-11-01.*
+*In effect from 2026-11-05.*
 
 Every outside service TRH AI can send a request to, and every program, model and voice it uses, with their licences.
 
@@ -17,7 +17,6 @@ TRH AI has no server of its own. These are the only companies' services it sends
 | DuckDuckGo (Duck Duck Go, Inc.) | Web searches you ask for, and the Network screen's Check now button. | https://duckduckgo.com/privacy |
 | Any website you ask it to read | Reading a page as text when you give its address. | That site's own. |
 | Your email provider | Sending an email you asked for, through the account you connected. | Your provider's own. |
-| The checkout page (**[TO BE SUPPLIED: payment provider that takes payment on the checkout page, if there is one]**) | Paying for a license, in your browser, outside the app. | **[TO BE SUPPLIED: that provider's privacy policy address]** |
 
 TRH AI does not use any advertising, analytics, crash-reporting or tracking service, and loads no fonts, scripts or images from other companies' servers.
 
@@ -72,7 +71,7 @@ Each voice is a separate file with its own licence, as its makers state it. The 
 | Ryan (en_US-ryan-high) | CC BY-NC-SA 4.0 (non-commercial) | No |
 | Amy (en_US-amy-medium) | No licence stated (Mimic 3 collection) | Not cleared |
 
-> **For legal review:** Only Cori is plainly free for any use. The owner chose on 2026-10-25 to install all five, with Alan as the default voice. Whether a paid product may ship Alan, Jarvis, Ryan and Amy is a decision for the owner with a lawyer; dropping a voice is one line in the install records.
+> **For legal review:** Only Cori is plainly free for any use. The owner chose on 2026-10-25 to install all five, with Alan as the default voice. Free of charge is not the same as non-commercial: whether TRH AI may ship Alan, Jarvis, Ryan and Amy is still a decision for the owner with a lawyer; dropping a voice is one line in the install records.
 
 ## 5. AI models
 
@@ -95,7 +94,7 @@ The models are made by Alibaba's Qwen team and, for the no-refusals versions, by
 
 A model's licence is the model's, not TRH AI's. If you use TRH AI for work, use a model whose licence allows it; the two research-licence models are offered for personal use only and say so on the install screen.
 
-> **For legal review:** The no-refusals models are third parties' edits of Qwen's models, offered as the recommended defaults. Their publishers' repositories state Apache 2.0; one source repository could not be reached when checked. A lawyer should confirm that recommending them in a paid product is acceptable.
+> **For legal review:** The no-refusals models are third parties' edits of Qwen's models, offered as the recommended defaults. Their publishers' repositories state Apache 2.0; one source repository could not be reached when checked. A lawyer should confirm that recommending them is acceptable.
 
 ## 6. TRH AI's own name and pictures
 

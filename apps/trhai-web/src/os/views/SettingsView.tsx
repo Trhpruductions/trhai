@@ -287,7 +287,8 @@ export function SettingsView() {
             <>
               {entitlements?.authority ? null : <BillingPanel />}
               <AccessPanel />
-              <p className="os-faint os-small">Before you buy: the <LegalLink id="refunds" /> and the <LegalLink id="terms" />. Paying happens on a checkout page in your browser; TRH AI never handles the card.</p>
+              {/* Only where there is something to buy. */}
+              {entitlements && !entitlements.free ? <p className="os-faint os-small">Before you buy: the <LegalLink id="refunds" /> and the <LegalLink id="terms" />. Paying happens on a checkout page in your browser; TRH AI never handles the card.</p> : null}
             </>
           ) : null}
           {shownSection === "people" ? <AdminPanel /> : null}

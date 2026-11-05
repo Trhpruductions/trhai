@@ -1,6 +1,6 @@
 # Cookies and browser storage
 
-*Version 2026-11-02. In effect from 2026-11-01.*
+*Version 2026-11-02. In effect from 2026-11-05.*
 
 TRH AI sets no cookies. This lists the small settings it keeps in its window, why, and how to change them.
 

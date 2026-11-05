@@ -4,6 +4,23 @@ Written 2026-10-13. This is the owner's guide to selling TRH AI and telling
 everyone who uses it about new versions. It also records why each part works
 the way it does.
 
+**TRH AI is free, as of the owner's decision of 2026-11-05: no trial, no key,
+nothing locked, for anyone.** `paidEdition` is `false` in
+`apps/api/src/services/licenseConfig.ts`, so every copy reports the state
+`free`: nothing is refused, no trial is started and no trial record is written.
+A copy an earlier version had locked opens with the update; what that version
+recorded stays on the PC, unread. Settings shows **Plan** with the word Free and a
+box for an owner or administrator key, which is the one job a key still has
+(`28-accounts-and-access.md`).
+
+The rest of this document describes the paywall as it works when it is on. It is
+kept working and tested, because bringing it back is one line. To do that, for
+every copy: set `paidEdition` to `true` **and** write the legal texts for it again
+(`packages/shared/src/legal`: the Terms, the Refund Policy, the Privacy Policy and
+Business information all now say it is free, a test holds them to that, and a
+`free-edition.test.ts` test pins the switch itself). For one copy, or a test:
+`TRHAI_PAYWALL=on` turns it on and `TRHAI_PAYWALL=off` keeps it off.
+
 ## The rule it had to keep
 
 `21-handoff.md` says TRH AI uses no cloud APIs and holds no keys. So the app
@@ -11,7 +28,7 @@ never talks to a payment provider and never sees a card. Paying happens on a
 web page in the buyer's browser. What the buyer gets back is a **license
 key**, which the app checks offline against the owner's public key.
 
-## How it works for someone using the app
+## How it works for someone using the app, with the paywall on
 
 1. A new PC gets a **14-day free trial**. It starts the first time the API
    runs and is remembered in `license.json` in the data folder, protected at
@@ -21,7 +38,7 @@ key**, which the app checks offline against the owner's public key.
    work is refused with HTTP 402 and the paywall screen appears. That covers
    the assistant, building and running apps, commands, schedules, tasks,
    flows and vision.
-3. **Settings → Plan and billing** shows the plan, the trial dates, a
+3. **Settings → Plan** shows the plan, the trial dates, a
    *Buy a license* button and the key box. The paywall has the same button
    and box.
 4. Pasting a key unlocks the PC at once, with no account and no internet.
@@ -110,7 +127,7 @@ owner and administrator keys (`--role`), and for how roles work, see
 
 ### The owner's own PCs
 
-Set `TRHAI_PAYWALL=off` in that PC's `.env`, or issue yourself a key.
+With the paywall on: set `TRHAI_PAYWALL=off` in that PC's `.env`, or issue yourself a key.
 
 ### Limits, stated plainly
 
