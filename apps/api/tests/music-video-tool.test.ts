@@ -152,7 +152,7 @@ test("how a video is getting on is told in what is true, and a finished one is t
 
 test("the tools are in the tool centre with a level, and say what they need", () => {
   const probe = (ffmpeg: boolean) => ({
-    machineAccess: { armed: false, until: null }, model: { available: false, name: null, reason: null }, visionModel: null, ffmpeg, piper: false, phoneLink: "missing" as const, emailAccount: null
+    machineAccess: { armed: false, until: null }, model: { available: false, name: null, reason: null }, visionModel: null, ffmpeg, piper: false, whisper: true, phoneLink: "missing" as const, emailAccount: null
   });
   const find = (ffmpeg: boolean, name: string) => describeTools(probe(ffmpeg)).find((tool) => tool.name === name);
   const ready = find(true, "make_music_video");

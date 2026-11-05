@@ -118,7 +118,7 @@ test("what the model is told says what to write, what it does not do, and what t
 });
 
 test("the tool center says what it makes, and that a PDF needs the window that prints it", () => {
-  const probe = { machineAccess: { armed: false, until: null }, model: { available: true, name: "m", reason: null }, visionModel: null, ffmpeg: true, piper: true, phoneLink: "linked" as const, emailAccount: null };
+  const probe = { machineAccess: { armed: false, until: null }, model: { available: true, name: "m", reason: null }, visionModel: null, ffmpeg: true, piper: true, whisper: true, phoneLink: "linked" as const, emailAccount: null };
   const entry = (extra: object) => describeTools({ ...probe, ...extra }).find((found) => found.name === "make_document")!;
   assert.equal(entry({}).readiness.state, "ready");
   assert.match(entry({ pdfPrinter: true }).readiness.note ?? "", /Word, PDF, web page/);

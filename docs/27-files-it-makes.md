@@ -274,6 +274,37 @@ Cori), with Piper, on the processor, with no account. MP3, WAV, M4A, FLAC, Ogg o
   by name (the model reads it and passes the text). It has been run for real with the installed voices and the real ffmpeg; an MP3 or
   other format needs ffmpeg, and without it a WAV is made and another format is refused in words.
 
+## Writing out a recording - `transcribe_file`
+
+The speech in an audio or video file, written out and saved: a plain transcript (`txt`, the
+default) or subtitles with times (`srt`, `vtt`). `fileTranscriber.ts`.
+
+- Asked for like "transcribe meeting.mp3", "turn this recording into text", "subtitles for
+  clip.mp4", "what do they say in interview.m4a". `wantsTranscript` (`actionIntent.ts`)
+  decides, and tells it apart from a program that transcribes, a question about the word, a
+  music video's lyrics and a caption for a picture.
+- ffmpeg makes the 16 kHz mono copy whisper.cpp reads, in a temporary folder, and whisper.cpp
+  hears it on the processor. Nothing leaves the PC, and the graphics card is not used. It is
+  allowed twice the recording's length and a minute over, and Stop ends it.
+- What is not speech is taken out, line by line: `[BLANK_AUDIO]`, `(music)`. A subtitle cue
+  with nothing left in it goes, and the rest are numbered again.
+- Nothing is put on the disk until there are words to write: a recording with no speech in it
+  leaves no empty file, and says so. Named for the recording and never replacing a file. Saved
+  beside the recording when that folder may be written in, otherwise the documents folder, or
+  where the user said.
+- Read back: what is on the disk has to be what was heard, or it is removed and said.
+- The result says where the file is, how long the recording was, about how many words, and how
+  it begins, so a person can see it heard them. `read_file` reads a transcript it made, for
+  questions about what was said.
+- The model installed with TRH AI (`ggml-base.en`) hears English only. Another model put in
+  whisper's folder is used with the language left for it to detect.
+- Needs Listening and Video installed (Settings, Engine and models); the Tool Center says which
+  is missing. Offered only to a request for it, at permission level 2.
+- Tried for real on 2026-11-05, on the processor: Piper spoke two sentences into a WAV, and whisper.cpp with
+  `ggml-base.en` wrote them back as text, SRT and VTT in about 2 s each, and again from an MP3 of
+  the same; the words matched, with "three" written as "3". Not tried yet: a long recording,
+  real microphones, or a real model choosing this tool.
+
 ## Opening what it made
 
 A reply that made a file shows it as a card with **Open** (in the program it belongs

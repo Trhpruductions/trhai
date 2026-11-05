@@ -121,7 +121,7 @@ test("what the model is told says what to write, how notes go, and what to say a
   assert.deepEqual(definition.function.parameters.required, ["content"]);
   assert.deepEqual(Object.keys(definition.function.parameters.properties).sort(), ["content", "folder", "format", "title"]);
   assert.equal(permissionLevelOf("make_presentation"), 2);
-  const probe = { machineAccess: { armed: false, until: null }, model: { available: true, name: "m", reason: null }, visionModel: null, ffmpeg: true, piper: true, phoneLink: "linked" as const, emailAccount: null };
+  const probe = { machineAccess: { armed: false, until: null }, model: { available: true, name: "m", reason: null }, visionModel: null, ffmpeg: true, piper: true, whisper: true, phoneLink: "linked" as const, emailAccount: null };
   const entry = describeTools(probe).find((found) => found.name === "make_presentation")!;
   assert.equal(entry.readiness.state, "ready");
   assert.equal(entry.asksFirst, false);

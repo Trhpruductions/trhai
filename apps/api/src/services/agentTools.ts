@@ -63,6 +63,7 @@ import { parseOnceTime } from "./onceTime.js";
 import {
   describeEvents, eventWhen, findEvent, maxEventNotesLength, maxEventTitleLength, readEventMoment, type CalendarAccess, type EventScope
 } from "./calendarTools.js";
+import { describeTranscript, parseTranscriptFormat, transcribeFile, transcriptFormatList } from "./fileTranscriber.js";
 import type { TaskItem } from "./taskListStore.js";
 import { describeTasks, findTask, maxTaskLength, sameTask, type TaskScope, type TodoAccess } from "./todoTools.js";
 
@@ -927,6 +928,33 @@ export const toolDefinitions: ToolDefinition[] = [
       }
     }
   },
+  {
+    type: "function",
+    function: {
+      name: "transcribe_file",
+      description:
+        "Write out the SPEECH in an audio or video file as text, on this PC, and save it: a plain transcript, or subtitles. "
+        + "Use this when the user asks to transcribe a recording, to turn one into text, to write out what is said in it, or "
+        + "for subtitles or captions for a video. It hears it with whisper.cpp on this PC, and nothing is sent anywhere; a long "
+        + "recording takes minutes. It makes a new file every time and never replaces one, reads it back, and says where the "
+        + "file is and how it begins - give the user that. To answer questions about what was said, read_file reads a transcript "
+        + "it made. The model installed with TRH AI hears English. To change the file's format use convert_media; to read text "
+        + "ALOUD into a file use speak_to_file.",
+      parameters: {
+        type: "object",
+        properties: {
+          source: { type: "string", description: "The path of the recording, as the user gave it." },
+          format: { type: "string", description: `${transcriptFormatList.join(", ")}. txt is a plain transcript; srt and vtt are subtitles with times. Left out, txt.` },
+          title: { type: "string", description: "What to call the new file. Left out, the recording's own name." },
+          folder: {
+            type: "string",
+            description: "Only if the user said where: a folder in the workspace, or Desktop, Downloads or Documents on this PC, or a full path (these need machine access). Left out, beside the recording."
+          }
+        },
+        required: ["source"]
+      }
+    }
+  },
   // The app has a scheduler. The assistant could not reach it.
   //
   // Asked "remind me every day at 9am to check the build", it called no tool
@@ -1402,7 +1430,7 @@ const scaffoldingTools = new Set(["build_app", "plan_app"]);
  * the port" is an ordinary thing to ask.
  */
 const machineChangingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "speak_to_file", "plan_app", "run_command", "run_script", "run_app"
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "speak_to_file", "transcribe_file", "plan_app", "run_command", "run_script", "run_app"
 ]);
 
 /**
@@ -1462,7 +1490,7 @@ const dateTools = new Set(["days_between", "shift_date"]);
  * A question does not write files, documents or apps, though.
  */
 const writingTools = new Set([
-  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "speak_to_file", "plan_app",
+  "write_file", "edit_file", "build_app", "change_app", "make_video", "make_music_video", "make_document", "make_spreadsheet", "make_presentation", "convert_media", "speak_to_file", "transcribe_file", "plan_app",
   "write_document", "update_document", "delete_document", "remember", "forget", "pin_memory", "add_schedule",
   "add_task", "complete_task", "remove_task", "add_event", "remove_event"
 ]);
@@ -1510,6 +1538,8 @@ const presentationTools = new Set(["make_presentation"]);
 const mediaTools = new Set(["convert_media"]);
 /** Offered only when the request asks for text to be read out into an audio file; see wantsSpeechFile. */
 const speechFileTools = new Set(["speak_to_file"]);
+/** Offered when a recording is to be written out; see wantsTranscript. */
+const transcriptTools = new Set(["transcribe_file"]);
 /**
  * The knowledge-base writers, withheld from a request that only reads unless
  * it asks for something to be kept. machineChangingTools already stops a read
@@ -1560,7 +1590,7 @@ export function availableTools(
     web?: boolean; time?: boolean; writes?: boolean; memory?: boolean; render?: boolean; files?: boolean;
     schedules?: boolean; video?: boolean; musicVideo?: boolean; documents?: boolean; status?: boolean; launch?: boolean;
     messaging?: boolean; summaries?: boolean; readers?: boolean; images?: boolean; fileMaking?: boolean; spreadsheets?: boolean;
-    presentations?: boolean; media?: boolean; speech?: boolean; tasks?: boolean; calendar?: boolean;
+    presentations?: boolean; media?: boolean; speech?: boolean; tasks?: boolean; calendar?: boolean; transcripts?: boolean;
   } = {}
 ): ToolDefinition[] {
   const allowScaffolding = options.scaffolding ?? true;
@@ -1593,6 +1623,7 @@ export function availableTools(
   const allowPresentations = options.presentations ?? true;
   const allowMedia = options.media ?? true;
   const allowSpeech = options.speech ?? true;
+  const allowTranscripts = options.transcripts ?? true;
 
   return toolDefinitions.filter((definition) => {
     const name = definition.function.name;
@@ -1641,6 +1672,7 @@ export function availableTools(
     if (!allowMedia && mediaTools.has(name)) return false;
     // Only when the request asks for text to be read out into an audio file; see wantsSpeechFile.
     if (!allowSpeech && speechFileTools.has(name)) return false;
+    if (!allowTranscripts && transcriptTools.has(name)) return false;
     return true;
   }).sort((a, b) => (offerOrder.get(a.function.name) ?? 0) - (offerOrder.get(b.function.name) ?? 0));
 }
@@ -3529,6 +3561,59 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
 
       noteMadeFiles(context.sessionId, [shownPath(made.file.path)].filter((shown) => !path.isAbsolute(shown)));
       return { ok: true, content: describeMadeMedia(made, shownPath), path: shownPath(made.file.path) };
+    }
+
+    case "transcribe_file": {
+      const source = requireString(call.arguments.source);
+      if (!source) return { ok: false, content: "transcribe_file needs the path of the recording to write out, in source. Nothing was made." };
+      const format = parseTranscriptFormat(call.arguments.format);
+      if (!format.ok) return { ok: false, content: `${format.reason} Nothing was made.` };
+
+      // Read and placed the way convert_media does it: in the workspace, or anywhere once machine access is on; an unattended
+      // run stays in the workspace. The path as given comes first, then a name for one of this PC's own folders.
+      const readAccess = (candidate: string) => resolveForAccess(candidate, {
+        granted: commandsArmed() && !context.unattended,
+        intent: "read",
+        insideWorkspace: resolveInWorkspace
+      });
+      let readable = readAccess(source);
+      if (!(readable.ok && existsSync(readable.path))) {
+        const inAKnownFolder = expandKnownFolder(source);
+        if (inAKnownFolder) readable = readAccess(inAKnownFolder);
+      }
+      if (!readable.ok) return { ok: false, content: `${readable.reason} Nothing was made.` };
+
+      let directory: string;
+      let title: string | null = null;
+      if (requireString(call.arguments.folder)) {
+        const target = madeFileTarget(call.arguments, context, transcriptFormatList.join("|"));
+        if (!target.ok) return { ok: false, content: `${target.reason} Nothing was made.` };
+        directory = target.directory;
+        title = target.title;
+      } else {
+        const beside = resolveForAccess(path.dirname(readable.path), {
+          granted: commandsArmed() && !context.unattended,
+          intent: "write",
+          insideWorkspace: resolveInWorkspace
+        });
+        if (beside.ok) {
+          directory = beside.path;
+        } else {
+          const fallback = madeFileTarget({}, context, transcriptFormatList.join("|"));
+          if (!fallback.ok) return { ok: false, content: `${fallback.reason} Nothing was made.` };
+          directory = fallback.directory;
+        }
+      }
+
+      const made = await transcribeFile(
+        { source: readable.path, format: format.format, title: requireString(call.arguments.title) ?? title ?? undefined },
+        directory,
+        { signal: context.cancel }
+      );
+      if (!made.ok) return { ok: false, content: describeTranscript(made) };
+
+      noteMadeFiles(context.sessionId, [shownPath(made.file.path)].filter((shown) => !path.isAbsolute(shown)));
+      return { ok: true, content: describeTranscript(made, shownPath), path: shownPath(made.file.path) };
     }
 
     case "speak_to_file": {
