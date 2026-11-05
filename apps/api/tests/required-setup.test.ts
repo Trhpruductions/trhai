@@ -150,16 +150,14 @@ test("a new install is left to its first-run screen: nothing is forced, and noth
   assert.equal(f.marker(), null, "and nothing is written down about it");
 });
 
-test("an engine and only a picture model cannot answer yet, so that is a new install too", () => {
+test("an engine and only a picture model can answer, since it talks as well, so that is not a new install", () => {
   const f = fixture({ setUp: false });
   mkdirSync(path.join(f.root, "engine", "b11366"), { recursive: true });
   writeFileSync(path.join(f.root, "engine", "b11366", exeName), "engine");
   mkdirSync(path.join(f.root, "models", "some-picture-model"), { recursive: true });
   writeFileSync(path.join(f.root, "models", "some-picture-model", "Model.gguf"), "x");
   writeFileSync(path.join(f.root, "models", "some-picture-model", "mmproj-Model.gguf"), "x");
-  assert.equal(requiredStatus(f.deps).applies, false);
-  const started = startRequiredSetup({}, f.deps);
-  assert.equal(!started.started && started.reason, "new-install");
+  assert.equal(requiredStatus(f.deps).applies, true);
 });
 
 test("an engine of the person's own, or none to run, is not given models: nothing applies and nothing starts", () => {

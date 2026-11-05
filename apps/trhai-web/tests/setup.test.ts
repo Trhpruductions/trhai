@@ -44,16 +44,16 @@ test("a new PC starts with the recommended chat model and the recommended pictur
   });
   assert.deepEqual(initialSelection(fresh), ["small", "see"]);
   assert.equal(plannedBytes(fresh, initialSelection(fresh)), 2.5 * gib + 2.9 * gib + 19_328_326);
-  // A picture model already there is not picked again; one that is not the recommended is no reason to leave it out.
+  // A picture model already there talks as well, so that PC can answer, and is left as it is.
   const seeing = { ...fresh, installed: [{ id: "other-vl", sizeBytes: 1, vision: true, inCatalog: false }] };
-  assert.deepEqual(initialSelection(seeing), ["small"]);
+  assert.deepEqual(initialSelection(seeing), []);
   // A PC that can already chat is left as it is.
   assert.deepEqual(initialSelection({ ...fresh, installed: [{ id: "x", sizeBytes: 1, vision: false, inCatalog: false }] }), []);
 });
 
-test("a PC that can already chat starts with nothing picked; a vision model alone does not count", () => {
+test("a PC that can already answer starts with nothing picked, and a picture model alone can: it talks as well", () => {
   assert.deepEqual(initialSelection(status({ installed: [{ id: "x", sizeBytes: 1, vision: false, inCatalog: false }] })), []);
-  assert.deepEqual(initialSelection(status({ installed: [{ id: "vl", sizeBytes: 1, vision: true, inCatalog: true }] })), ["small"]);
+  assert.deepEqual(initialSelection(status({ installed: [{ id: "vl", sizeBytes: 1, vision: true, inCatalog: true }] })), []);
 });
 
 test("progress is by bytes across every step", () => {

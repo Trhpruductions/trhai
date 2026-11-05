@@ -1,11 +1,11 @@
 import { pickModel, type LocalModelConfig } from "./localModel.js";
-import { discoverModels, enginePaths, listEngineModels, type EngineModel } from "./modelEngine.js";
+import { discoverModels, enginePaths, listEngineModels, modelsThatTalk, type EngineModel } from "./modelEngine.js";
 import { engineFetch } from "./engineFetch.js";
 
 // The models a conversation can be answered by: what is in TRH AI's models
-// folder, less the ones that cannot hold a conversation - the vision model (it
-// is used for images on its own route) and embedding models (they turn text
-// into numbers and answer nothing).
+// folder, less embedding models (they turn text into numbers and answer nothing)
+// and less the vision model while something else can talk (it is used for images
+// on its own route; see modelsThatTalk).
 //
 // A conversation may name one of these. A name that is not installed, or no
 // name at all, means the usual choice (pickModel) - never an error, because a
@@ -38,9 +38,7 @@ export function sizeFromName(name: string): string | null {
  */
 export function chatModelsFrom(entries: EngineModel[], onDisk: ReadonlyMap<string, number> = new Map()): ChatModel[] {
   const models: ChatModel[] = [];
-  for (const entry of entries) {
-    if (entry.vision) continue;
-    if (/embed|bert/i.test(entry.id)) continue;
+  for (const entry of modelsThatTalk(entries.filter((candidate) => !/embed|bert/i.test(candidate.id)))) {
     models.push({
       name: entry.id,
       parameterSize: sizeFromName(entry.id),
