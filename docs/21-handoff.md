@@ -516,6 +516,34 @@ the session or account exactly as the screen is (`todoAccessFor` in the server's
 context; without a session each tool says there is no list). Tests: `todo-tools.test.ts`,
 `wants-todo.test.ts`.
 
+## QA pass over the fourteen workspaces (2026-11-04)
+
+Every workspace and every Settings section was opened on an isolated stack (no model, a
+fresh data folder, a test account made through the real form), with the console read for
+script errors and each form exercised: remember, pin and forget a memory; add, tick and
+remove a to-do; make, pause, run and delete a schedule; search the workspace; send a
+message with no model; create an account, sign out and sign back in. No script errors; every
+empty state says what it is. What was wrong, and is fixed in the same change:
+
+- A section a person may not open (People and access, for a member) fell back to Account in
+  the heading and the navigation, but the panels still checked the asked-for section, so the
+  Account heading stood over an empty panel. Every panel follows the shown section now.
+- The storage question's banner floats over the bottom of the window and covered whatever
+  sat there (the Sign out button on a short Settings page). While it is up, the workspace
+  keeps that much room free at its end (`--os-banner-space`), so everything scrolls clear.
+- With no model, a plain question that nothing saved answers was told "I don't have anything
+  saved that answers that yet" - true, and not the reason. It now says the model is missing,
+  with the reason, and still offers to keep what the person tells it (`no-model-question.test.ts`).
+- The Files screen showed the workspace path in capitals, a chip's style: a path keeps its case.
+- The sign-in form's "optional" marker was glued to its label for a screen reader
+  ("Nameoptional"); it is its own word now.
+
+Seen and left: with the paywall switched off (`TRHAI_PAYWALL=off`, a development switch) Plan
+and billing says the copy is not limited and still shows trial dates; the About section shows
+three version numbers (service, interface, desktop app), which is what the packages carry;
+opening a legal text from Settings puts `legal%2Fprivacy` in the address, which works and is
+only ugly.
+
 ## How to verify anything you change
 
 ```

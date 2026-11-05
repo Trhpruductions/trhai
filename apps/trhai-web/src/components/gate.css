@@ -286,7 +286,7 @@
 .gate-field { display: grid; gap: 6px; }
 .gate-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .gate-label { font-family: var(--font-display); font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--g-mut); }
-.gate-optional { font-family: var(--font-body); font-size: 10.5px; letter-spacing: 0; text-transform: none; color: var(--g-faint); margin-left: 6px; }
+.gate-optional { font-family: var(--font-body); font-size: 10.5px; letter-spacing: 0; text-transform: none; color: var(--g-faint); margin-left: 2px; }
 .gate-link { padding: 0; border: 0; background: none; cursor: pointer; color: var(--g-cyan-bright); font: 12px var(--font-body); text-decoration: none; }
 .gate-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 

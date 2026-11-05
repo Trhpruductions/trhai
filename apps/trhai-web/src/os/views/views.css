@@ -12,6 +12,8 @@
 @media (max-width: 1100px) { .os-files-layout { grid-template-columns: minmax(0, 1fr); } }
 .os-file-browser { display: grid; gap: var(--os-2); padding: var(--os-3); min-width: 0; }
 .os-file-toolbar { display: grid; gap: var(--os-2); }
+/* A folder path keeps its case and its letters close: a chip's capitals would show a name the disk does not have. */
+.os-chip-path { text-transform: none; letter-spacing: 0.02em; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .os-file-toolbar .os-choice button { min-height: 28px; font-size: var(--os-fs-xs); }
 .os-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: var(--os-fs-sm); min-width: 0; }
 .os-crumbs button {

@@ -194,6 +194,8 @@
   min-width: 0;
   overflow: auto;
   scrollbar-gutter: stable;
+  /* Room for the storage question's banner while it floats over the bottom (StorageConsentBanner.tsx). */
+  padding-bottom: var(--os-banner-space, 0px);
 }
 .os-workspace:focus { outline: none; }
 

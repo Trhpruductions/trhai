@@ -281,9 +281,9 @@ export function SettingsView() {
 
         <div className="os-settings-body" aria-label={current.label}>
           <h3 className="os-settings-heading">{current.label}</h3>
-          {section === "account" ? <AccountPanel account={account.account} onSignOut={() => void account.signOut()} onSignIn={account.openSignIn} /> : null}
+          {shownSection === "account" ? <AccountPanel account={account.account} onSignOut={() => void account.signOut()} onSignIn={account.openSignIn} /> : null}
           {/* On a copy that holds its own accounts the plan belongs to the account, not to this PC's trial and license box. */}
-          {section === "billing" ? (
+          {shownSection === "billing" ? (
             <>
               {entitlements?.authority ? null : <BillingPanel />}
               <AccessPanel />
@@ -291,14 +291,14 @@ export function SettingsView() {
             </>
           ) : null}
           {shownSection === "people" ? <AdminPanel /> : null}
-          {section === "updates" ? <UpdatesPanel /> : null}
-          {section === "models" ? (
+          {shownSection === "updates" ? <UpdatesPanel /> : null}
+          {shownSection === "models" ? (
             <section className="os-panel">
               <header className="os-panel-head"><h3 className="os-panel-title">Engine and models</h3></header>
               <div className="os-panel-body"><SetupPanel mode="settings" /></div>
             </section>
           ) : null}
-          {section === "assistant" ? (
+          {shownSection === "assistant" ? (
             <>
               <PersonalityPicker
                 accent={accent}
@@ -317,18 +317,18 @@ export function SettingsView() {
               <p className="os-faint os-small">Each conversation can use its own model - pick it in Chat, beside the conversation.</p>
             </>
           ) : null}
-          {section === "voice" ? (
+          {shownSection === "voice" ? (
             <VoicePicker choice={speech.voice} voices={speech.installedVoices} speaking={speech.speaking || speech.preparing}
               onChange={speech.setVoice} onPreview={(line) => speech.speak(line)} />
           ) : null}
-          {section === "appearance" ? <BackgroundPanel /> : null}
-          {section === "keyboard" ? <KeyboardPanel /> : null}
-          {section === "messaging" ? <MessagingPanel /> : null}
-          {section === "notifications" ? <NotificationsPanel /> : null}
-          {section === "data" ? <DataPanel /> : null}
-          {section === "privacy" ? <PrivacyPanel /> : null}
-          {section === "legal" ? <LegalPanel docId={isLegalDocId(subsection) ? subsection : null} onOpen={(id: LegalDocId | null) => go("settings", id ? `legal/${id}` : "legal")} /> : null}
-          {section === "about" ? <AboutPanel /> : null}
+          {shownSection === "appearance" ? <BackgroundPanel /> : null}
+          {shownSection === "keyboard" ? <KeyboardPanel /> : null}
+          {shownSection === "messaging" ? <MessagingPanel /> : null}
+          {shownSection === "notifications" ? <NotificationsPanel /> : null}
+          {shownSection === "data" ? <DataPanel /> : null}
+          {shownSection === "privacy" ? <PrivacyPanel /> : null}
+          {shownSection === "legal" ? <LegalPanel docId={isLegalDocId(subsection) ? subsection : null} onOpen={(id: LegalDocId | null) => go("settings", id ? `legal/${id}` : "legal")} /> : null}
+          {shownSection === "about" ? <AboutPanel /> : null}
         </div>
       </div>
     </ViewFrame>
