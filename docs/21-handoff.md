@@ -572,6 +572,24 @@ scoped per session or account like the to-do list, protected at rest like the ot
   client, which keeps its events in the browser; this store is separate and they do not meet.
   Tests: `calendar.test.ts`.
 
+## When a request asks for an action, the action happens (2026-11-05)
+
+On the graphics card, 0.1.10's coder model answered "add buy milk to my to-do list" with "Task
+added", and did the same for a reminder and a calendar event, having called nothing. Asked for an
+audio file, it overwrote notes.txt. `requiredAction.ts` decides from the request, using the same
+intent checks that offer each tool, and the agent loop acts on it in three steps:
+
+- Until one of that family's tools has run, only that family (and what it may need to look up) is
+  on offer, and the request carries `tool_choice: "required"`, which llama.cpp enforces with a grammar.
+- For the whole turn the general writers and the shell are withheld, unless the request names a file
+  of its own (`namesAFilePath`).
+- If the call was required and none ran, the model is told once. After that the person gets
+  `notDoneReply`, never the model's claim.
+
+A family that is not on offer, as in a turn that may not write, requires nothing. Tests:
+`required-action.test.ts`, which use a fake engine, so they prove the request and the replies but
+not that a real model obeys. That takes a run on the card.
+
 ## How to verify anything you change
 
 ```
