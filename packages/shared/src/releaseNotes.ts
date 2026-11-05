@@ -37,6 +37,29 @@ export function isRequiredReleaseText(text: string): boolean {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.1.10",
+    date: "2026-11-05",
+    title: "Free for everyone, with a calendar, reminders at a time, recordings written out and answers without a caveat",
+    notes: [
+      "TRH AI is now free for everyone: no trial, no key, nothing locked. A PC that had been locked opens with this update, and Settings has a Plan section that says so.",
+      "Replies no longer end with a note that they are not medical, legal or financial advice, whichever personality or agent you choose, and the Lawyer, Doctor and Financial advisor agents are no longer told to hold back. The Terms of Service still say that answers are not professional advice.",
+      "A calendar: ask what you have on, or say \"put the dentist on my calendar on Friday at 3\". It is on the Tasks screen too.",
+      "Ask TRH AI to write out a recording: \"transcribe meeting.mp3\" makes a text file, and it makes subtitles for a video too. It hears it on your PC and nothing is sent anywhere. The model installed with TRH AI hears English, and this needs Listening and Video installed (Settings, Engine and models).",
+      "On a PC with a graphics card, no AI model is loaded when TRH AI opens: one loads when you go to ask something, and is let go when it has sat idle.",
+      "Ask to be reminded once, at a date and time (\"remind me at 3 pm to call the bank\"), and your words show when the time comes. The Tasks screen's schedule form has a Once option too. One due while TRH AI is closed fires when it is next opened, if that is within two hours; later than that it is marked missed.",
+      "Ask TRH AI to add to your to-do list, read it back, tick something off or take it off: \"add buy milk to my list\", \"what's left to do?\", \"tick off the dentist\". It is the list on the Tasks screen, and taking a task off asks first.",
+      "Ask for text to be read into an audio file (a voiceover, a narration, an audio version of something written) in one of your installed voices, as MP3, WAV, M4A, FLAC, Ogg or Opus. It needs Voice installed, and Video for anything but WAV (Settings, Engine and models).",
+      "Ask TRH AI to convert a song, a recording or a video to another format, pull the sound out of a video, or cut it down to a part. It saves a new file and leaves the original alone.",
+      "A song attached to a chat, or dropped on it, opens the Music video screen with the song loaded.",
+      "Settings has a Legal section and a Privacy and consent section, where you can see what you agreed to, save a copy of your data, or erase it. Creating an account asks for your agreement first, TRH AI asks once before keeping optional settings in the browser, and if you already have an account you will be asked to agree to the current Terms and Privacy Policy.",
+      "TRH AI's own logs keep less: no search words, file names or session ids, a command logged as its program and length, and logs deleted after 30 days.",
+      "Security: the local service refuses requests sent by other websites, and a copy shared between several people asks for sign-in before more of what it does.",
+      "Keyboard and screen readers: dialogs keep the keyboard inside them, menus and groups of options take the arrow keys, each screen names itself in the window title, faint text is easier to see, Windows contrast themes are followed, and Settings lists every shortcut.",
+      "On a copy that keeps accounts for several people, the owner and administrators get a People and access section in Settings: find an account, suspend or reactivate it, sign it out everywhere, and read a record of what was done.",
+      "Fixed: a Settings section you may not open showed an empty panel, the storage question covered buttons at the bottom of a screen, and with no AI model running a question was told that nothing saved answers it, instead of that no model was running."
+    ]
+  },
+  {
     version: "0.1.9",
     date: "2026-10-26",
     title: "Open a site or some music by asking, and a straight answer when no model can reply",
