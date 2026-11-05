@@ -200,8 +200,12 @@ function ScheduleRow({ schedule, now, onChanged }: { schedule: ScheduleView; now
   };
 
   const last = schedule.running ? null : (schedule.lastStatus as ScheduleRun["status"] | null | undefined) ?? null;
+  // A one-time schedule that has had its time is over, not paused.
+  const fired = schedule.cadence?.kind === "once" && !schedule.enabled && Boolean(schedule.lastStatus);
   const next = schedule.running
     ? "Running now"
+    : fired
+      ? "Ran once"
     : !schedule.enabled
       ? "Paused"
       : schedule.nextDueAt ? `Next ${dueLabel(schedule.nextDueAt, now)} · ${clockTime(schedule.nextDueAt, now)}` : "";
@@ -238,8 +242,8 @@ function ScheduleRow({ schedule, now, onChanged }: { schedule: ScheduleView; now
             onClick={() => setConfirming(true)}>
             <Icon name="trash" size={14} />
           </button>
-          <button type="button" role="switch" aria-checked={schedule.enabled} className="os-switch"
-            aria-label={`${name} is ${schedule.enabled ? "on" : "paused"}`} data-tip={schedule.enabled ? "Pause" : "Turn on"} data-tip-pos="below"
+          <button type="button" role="switch" aria-checked={schedule.enabled} className="os-switch" disabled={fired}
+            aria-label={fired ? `${name} has run` : `${name} is ${schedule.enabled ? "on" : "paused"}`} data-tip={fired ? "Ran once" : schedule.enabled ? "Pause" : "Turn on"} data-tip-pos="below"
             onClick={() => void toggle()}>
             <span className="os-switch-knob" />
           </button>
@@ -277,7 +281,7 @@ function ScheduleRow({ schedule, now, onChanged }: { schedule: ScheduleView; now
   );
 }
 
-type When = "daily" | "weekdays" | "interval";
+type When = "daily" | "weekdays" | "interval" | "once";
 
 function NewScheduleForm({ onDone }: { onDone: (created: boolean) => void }) {
   const { notify } = useNotify();
@@ -286,13 +290,15 @@ function NewScheduleForm({ onDone }: { onDone: (created: boolean) => void }) {
   const [text, setText] = useState("");
   const [when, setWhen] = useState<When>("daily");
   const [time, setTime] = useState("09:00");
+  const [at, setAt] = useState("");
   const [every, setEvery] = useState("30");
   const [unit, setUnit] = useState<"minutes" | "hours">("minutes");
   const [saving, setSaving] = useState(false);
 
   const cadence = cadenceFrom(when === "interval"
     ? { kind: "interval", every: Number(every), unit }
-    : { kind: "daily", time, weekdaysOnly: when === "weekdays" });
+    : when === "once" ? { kind: "once", at }
+      : { kind: "daily", time, weekdaysOnly: when === "weekdays" });
   const ready = Boolean(name.trim() && (what === "flow" || text.trim()) && cadence) && !saving;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -336,7 +342,7 @@ function NewScheduleForm({ onDone }: { onDone: (created: boolean) => void }) {
         <span className="os-label" id="sched-when">When</span>
         <div className="os-sched-when-row">
           <div className="os-choice" role="radiogroup" aria-labelledby="sched-when">
-            {([["daily", "Every day"], ["weekdays", "Weekdays"], ["interval", "Every…"]] as const).map(([id, label]) => (
+            {([["daily", "Every day"], ["weekdays", "Weekdays"], ["interval", "Every…"], ["once", "Once"]] as const).map(([id, label]) => (
               <button key={id} type="button" role="radio" aria-checked={when === id} className={when === id ? "on" : ""} onClick={() => setWhen(id)}>{label}</button>
             ))}
           </div>
@@ -350,14 +356,16 @@ function NewScheduleForm({ onDone }: { onDone: (created: boolean) => void }) {
                 ))}
               </div>
             </>
+          ) : when === "once" ? (
+            <input className="os-input os-sched-time" type="datetime-local" value={at} onChange={(event) => setAt(event.target.value)} aria-label="Date and time" />
           ) : (
             <input className="os-input os-sched-time" type="time" value={time} onChange={(event) => setTime(event.target.value)} aria-label="Time of day" />
           )}
         </div>
-        {!cadence ? <span className="os-small os-warn-text">{when === "interval" ? "Somewhere from 1 minute to 24 hours." : "Pick a time of day."}</span> : null}
+        {!cadence ? <span className="os-small os-warn-text">{when === "interval" ? "Somewhere from 1 minute to 24 hours." : when === "once" ? "Pick a date and time still to come." : "Pick a time of day."}</span> : null}
       </div>
       <p className="os-faint os-small os-sched-note">
-        It runs on this PC while TRH AI is running. This window does not need to be open.{what === "ask" ? " Each answer is kept in the run log." : what === "flow" ? " What each step did is kept in the run log." : " It shows as a notification."}
+        It runs on this PC while TRH AI is running. This window does not need to be open.{when === "once" ? " It runs once, then stays on the list switched off until you delete it." : ""}{what === "ask" ? " Each answer is kept in the run log." : what === "flow" ? " What each step did is kept in the run log." : " It shows as a notification."}
       </p>
       <div className="os-sched-form-actions">
         <button type="submit" className="os-btn os-btn-primary" disabled={!ready}><Icon name="clock" size={15} />{saving ? "Saving…" : "Save schedule"}</button>

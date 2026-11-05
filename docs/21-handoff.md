@@ -475,6 +475,19 @@ with their tests. Do not leave them drifting.
 
 ---
 
+## Reminders at a date and time (2026-11-03)
+
+A schedule can now run once: cadence `{ kind: "once", at }` (an ISO instant, described as
+"Once, on Wed 4 Nov 2026 at 3:00 PM"). It is due at its moment and for two hours after
+(`onceGraceMs`); later than that it is recorded as missed. Fired or missed, it is switched off
+and stays on the list so it is seen to have happened; it cannot be turned on again once its
+moment has passed, and a moment already past is refused when it is made. The chat tool takes
+`at` as `YYYY-MM-DD HH:MM` in local time (the model works "tomorrow" out from
+`current_datetime`; `parseOnceTime` in `onceTime.ts` reads nothing looser) and `reminder` for
+the words to show without asking a model; the time of day comes from the user's own words
+where they said it, as for a daily one. The Tasks screen's form has a "Once" option with a
+date and time, and shows a fired one as "Ran once". Tests: `schedule-once.test.ts`.
+
 ## How to verify anything you change
 
 ```

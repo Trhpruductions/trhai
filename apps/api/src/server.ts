@@ -2072,9 +2072,14 @@ export function createApp(options: AppOptions = {}) {
     if (!isCadence(cadence)) {
       res.status(400).json({
         code: "INVALID_REQUEST",
-        message: "cadence must be {kind:'daily',minuteOfDay} or {kind:'interval',minutes}",
+        message: "cadence must be {kind:'daily',minuteOfDay}, {kind:'interval',minutes} or {kind:'once',at}",
         traceId: "trace-local"
       });
+      return;
+    }
+
+    if (cadence.kind === "once" && new Date(cadence.at).getTime() <= Date.now()) {
+      res.status(400).json({ code: "INVALID_REQUEST", message: "That time has already passed; a one-time schedule needs a moment still to come", traceId: "trace-local" });
       return;
     }
 

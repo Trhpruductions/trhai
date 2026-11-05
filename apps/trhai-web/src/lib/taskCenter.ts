@@ -251,10 +251,17 @@ export function countWork(current: CurrentLike | null | undefined, history: Fini
  */
 export type CadenceDraft =
   | { kind: "daily"; time: string; weekdaysOnly: boolean }
-  | { kind: "interval"; every: number; unit: "minutes" | "hours" };
+  | { kind: "interval"; every: number; unit: "minutes" | "hours" }
+  | { kind: "once"; at: string };
 
-export function cadenceFrom(draft: CadenceDraft):
-  { kind: "daily"; minuteOfDay: number; weekdaysOnly?: boolean } | { kind: "interval"; minutes: number } | null {
+export function cadenceFrom(draft: CadenceDraft, now: Date = new Date()):
+  { kind: "daily"; minuteOfDay: number; weekdaysOnly?: boolean } | { kind: "interval"; minutes: number } | { kind: "once"; at: string } | null {
+  if (draft.kind === "once") {
+    // The form's date-and-time value is local time with no zone, and must be a moment still to come.
+    const at = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(draft.at) ? new Date(draft.at) : null;
+    if (!at || Number.isNaN(at.getTime()) || at.getTime() <= now.getTime()) return null;
+    return { kind: "once", at: at.toISOString() };
+  }
   if (draft.kind === "daily") {
     const match = /^(\d{1,2}):(\d{2})$/.exec(draft.time.trim());
     if (!match) return null;

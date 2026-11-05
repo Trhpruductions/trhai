@@ -57,8 +57,9 @@ import { beginEvent, endEvent, recordEvent } from "./executionLog.js";
 import { recordToolUse } from "./toolUsage.js";
 import { enterStage } from "./reasoningStage.js";
 import {
-  addSchedule, describeAction, describeCadence, listSchedules, type Cadence
+  addSchedule, calendarWords, describeAction, describeCadence, listSchedules, type Cadence
 } from "./scheduleStore.js";
+import { parseOnceTime } from "./onceTime.js";
 
 // What the assistant can actually do.
 //
@@ -935,19 +936,26 @@ export const toolDefinitions: ToolDefinition[] = [
     type: "function",
     function: {
       name: "add_schedule",
-      description: "Save a recurring schedule that asks the assistant something on a cadence. "
-        + "Use it when the user asks to be reminded of something, or for something to happen "
-        + "daily or every so many minutes.",
+      description: "Save a schedule: something that happens every day at a time, every so many minutes, or once at a "
+        + "date and time. Use it when the user asks to be reminded of something at a time or on a day, or for "
+        + "something to happen daily or every so many minutes. For a plain reminder give the words in reminder; "
+        + "to have the assistant answer something when it fires, give prompt.",
       parameters: {
         type: "object",
         properties: {
           name: { type: "string", description: "A short name for the schedule." },
-          prompt: { type: "string", description: "What to ask the assistant when it fires." },
+          prompt: { type: "string", description: "What to ask the assistant when it fires. Leave out when reminder is given." },
+          reminder: { type: "string", description: "The words to show when it fires, for a plain reminder: nothing is asked of the assistant." },
           daily_at: { type: "string", description: "A 24-hour time like 09:00 to run once a day." },
           weekdays_only: { type: "boolean", description: "With daily_at: true to skip Saturday and Sunday (\"every weekday\", \"on workdays\")." },
-          every_minutes: { type: "string", description: "Run every N minutes instead of daily." }
+          every_minutes: { type: "string", description: "Run every N minutes instead of daily." },
+          at: {
+            type: "string",
+            description: "To run once: the date and time as YYYY-MM-DD HH:MM in the user's local time, worked out from "
+              + "current_datetime for \"tomorrow\" or \"in two hours\". Not with daily_at or every_minutes."
+          }
         },
-        required: ["name", "prompt"]
+        required: ["name"]
       }
     }
   },
@@ -3505,16 +3513,18 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
       }
       const lines = saved.map((entry) =>
         `- ${entry.name}: ${describeCadence(entry.cadence)}`
-        + `${entry.enabled ? "" : " (paused)"} - ${describeAction(entry.action)}`);
+        + `${entry.enabled ? "" : entry.cadence.kind === "once" && entry.lastStatus ? " (done)" : " (paused)"} - ${describeAction(entry.action)}`);
       return { ok: true, content: lines.join("\n") };
     }
 
     case "add_schedule": {
       const name = requireString(call.arguments.name);
-      const prompt = requireString(call.arguments.prompt);
+      const reminder = requireString(call.arguments.reminder);
+      const prompt = requireString(call.arguments.prompt) ?? reminder;
       if (!name || !prompt) {
-        return { ok: false, content: "add_schedule needs a name and what to ask." };
+        return { ok: false, content: "add_schedule needs a name, and what to ask (prompt) or the words to show (reminder)." };
       }
+      const atRaw = requireString(call.arguments.at);
 
       // Either a time of day or an interval, never both. A caller that supplies
       // both has not decided, and picking one for them would be a guess the
@@ -3541,10 +3551,27 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
         cadence = { kind: "interval", minutes: Math.round(every) };
       }
 
+      // Once, at a date and time. The model gives the moment; the time of day comes from the
+      // user's own words where they said it plainly, as for a daily one.
+      if (atRaw) {
+        if (cadence) {
+          return { ok: false, content: "at is for a one-time schedule; daily_at and every_minutes are for a repeating one. Give one or the other." };
+        }
+        const now = (context.now ?? (() => new Date()))();
+        const once = parseOnceTime(atRaw, now);
+        if (!once.ok) return { ok: false, content: `${once.reason} Nothing was scheduled.` };
+        const spoken = context.request ? timeAskedFor(context.request) : null;
+        if (spoken !== null) once.at.setHours(Math.floor(spoken / 60), spoken % 60, 0, 0);
+        if (once.at.getTime() <= now.getTime()) {
+          return { ok: false, content: `${calendarWords(once.at)} has already passed. Nothing was scheduled.` };
+        }
+        cadence = { kind: "once", at: once.at.toISOString() };
+      }
+
       if (!cadence) {
         return {
           ok: false,
-          content: "add_schedule needs either daily_at (a time like 09:00) or every_minutes."
+          content: "add_schedule needs daily_at (a time like 09:00), every_minutes, or at (a date and time, for once)."
         };
       }
 
@@ -3577,7 +3604,14 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
         };
       }
 
-      const saved = addSchedule({ id: randomUUID(), name, prompt, cadence });
+      const saved = addSchedule({
+        id: randomUUID(),
+        name,
+        // A reminder is its own words, shown when it fires; anything else is put to the assistant.
+        action: reminder && !requireString(call.arguments.prompt) ? { kind: "remind", text: reminder } : { kind: "ask", prompt },
+        cadence,
+        now: (context.now ?? (() => new Date()))()
+      });
       if (!saved) {
         // Reports the outcome, not the attempt - the store refuses a bad
         // cadence or a full list, and saying "scheduled" either way is the
