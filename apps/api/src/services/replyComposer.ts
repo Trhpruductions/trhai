@@ -457,7 +457,7 @@ export function buildCapabilityReply(localModel?: string): string {
     "- Remember what you tell me. Just say it — I pick the facts out myself.",
     "- Text someone from your phone through Phone Link, or email them from your own account. You see every message and say yes before it goes.",
     "- Answer from your documents. Add them under Knowledge and I'll quote the relevant passage back with its source.",
-    "- Run flows you build under Automation, and keep your schedule under Calendar.",
+    "- Run flows you build under Automation, and keep your schedules, to-dos and calendar under Tasks.",
     "",
     "Ask me to build something, or tell me a fact to remember.",
     "",

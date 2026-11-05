@@ -57,6 +57,7 @@ export type HeldCounts = {
   memories: number;
   documents: number;
   todos: number;
+  calendarEvents: number;
   finishedWork: number;
   thisCopy: null | { schedules: number; automationFlow: boolean; emailAccount: boolean; license: boolean };
 };
@@ -135,8 +136,8 @@ export function describeErasure(held: HeldCounts | null, scope: EraseScope): str
   const lines: string[] = [];
   if (scope.ownData) {
     lines.push(held
-      ? `${plural(held.conversations, "conversation", "conversations")}, ${plural(held.memories, "memory", "memories")}, ${plural(held.documents, "document", "documents")}, ${plural(held.todos, "to-do", "to-dos")} and ${plural(held.finishedWork, "finished task", "finished tasks")} kept for you`
-      : "the conversations, memories, documents, to-dos and finished tasks kept for you");
+      ? `${plural(held.conversations, "conversation", "conversations")}, ${plural(held.memories, "memory", "memories")}, ${plural(held.documents, "document", "documents")}, ${plural(held.todos, "to-do", "to-dos")}, ${plural(held.calendarEvents, "calendar event", "calendar events")} and ${plural(held.finishedWork, "finished task", "finished tasks")} kept for you`
+      : "the conversations, memories, documents, to-dos, calendar events and finished tasks kept for you");
   }
   if (scope.wholeCopy) {
     const copy = held?.thisCopy;

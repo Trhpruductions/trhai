@@ -106,6 +106,10 @@ export const toolPermissions: Record<string, PermissionLevel> = {
   convert_media: 2,
   // A new audio file spoken from text the user gave, never replacing a file.
   speak_to_file: 2,
+  // The calendar, like the to-do list: reading it, adding to it, and taking something off for good.
+  list_events: 1,
+  add_event: 2,
+  remove_event: 3,
   write_file: 2,
   // Targeted rather than wholesale, so if anything it is the safer of the two:
   // it changes the text it was given and cannot silently drop the rest of a file.

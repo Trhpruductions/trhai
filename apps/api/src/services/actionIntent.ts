@@ -1158,6 +1158,27 @@ const listWords = /\b(?:to-?dos?|to-?do\s+list|task\s+list|tasks?|checklist|chor
 const listVerbs = /\b(?:add|adding|put|note|jot|write\s+down|writing\s+down|show|see|read|what|which|anything|display|view|mark|tick|cross|check\s+off|finish|finished|done|complete|completed|remove|delete|clear|drop|take\s+off|cancel|scratch|left|remaining|open|pending|outstanding|got)\b/i;
 const reminderToDoSomething = /\b(?:remind\s+me\s+to|don'?t\s+let\s+me\s+forget\s+to|i\s+need\s+to\s+remember\s+to|note\s+to\s+self)\b/i;
 const repeating = /\b(?:every|each|daily|weekly|hourly|nightly|monthly|weekdays?|recurring|repeat\w*)\b/i;
+
+const calendarNamed = /\b(?:calendar|diary|agenda)\b/i;
+const notMyCalendar = /\b(?:calendar|diary|agenda)\s+(?:app|application|website|site|component|widget|api|library|module|view|year|month|quarter|days?)\b|\b(?:gregorian|lunar|julian|advent|google|outlook)\s+calendar\b/i;
+const calendarVerbs = /\b(?:add|adding|put|note|mark|block|book|schedule|show|see|read|list|what|what's|whats|when|anything|remove|delete|cancel|clear|take|check|look|got|have|free|busy)\b/i;
+const whensMyNext = /\b(?:when(?:'s|\s+is)|what(?:'s|\s+is))\s+my\s+next\s+(?:appointment|meeting|event)\b|\bwhen(?:'s|\s+is)\s+my\s+(?:appointment|meeting)\b/i;
+const haveIGotAnything = /\b(?:do|have|am)\s+i\b[^.?!\n]{0,30}\b(?:anything|something|free|busy)\b[^.?!\n]{0,30}\b(?:today|tonight|tomorrow|this\s+\w+|next\s+\w+|on\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+const whatHaveIGotOn = /\bwhat(?:'s|\s+is|\s+have\s+i\s+got|\s+do\s+i\s+have)\s+on\b[^.?!\n]{0,30}\b(?:today|tonight|tomorrow|this\s+\w+|next\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+const bookingAnAppointment = /\b(?:add|book|make|put|note|set\s+up)\b[^.?!\n]{0,40}\bappointment\b/i;
+
+/**
+ * Whether a request is about the person's own calendar - "put the dentist on my calendar on Friday at
+ * 3", "what's on my calendar?", "do I have anything on Tuesday?", "when is my next appointment?" - so
+ * the calendar tools are worth offering. Not a calendar app to build, a question about what one is, or
+ * someone else's system (Google, Outlook), which this has no way into.
+ */
+export function wantsCalendar(message: string): boolean {
+  const text = message ?? "";
+  if (notMyCalendar.test(text) || asksWhatItIs.test(text)) return false;
+  if (calendarNamed.test(text) && calendarVerbs.test(text)) return true;
+  return whensMyNext.test(text) || haveIGotAnything.test(text) || whatHaveIGotOn.test(text) || bookingAnAppointment.test(text);
+}
 /**
  * When a reminder is for, said as a time: a clock time ("at 3 pm", "at 15:30", "at noon", "at three o'clock") or a
  * stretch from now ("in twenty minutes", "in an hour"). Only where it is said as the time - "about the 3pm appointment"

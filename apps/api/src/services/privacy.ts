@@ -22,6 +22,7 @@ import { listSchedules, resetSchedules } from "./scheduleStore.js";
 import { clearTask, getTask } from "./taskStore.js";
 import { clearFinishedTasks, listFinishedTasks } from "./taskHistory.js";
 import { listTasks, resetTasks } from "./taskListStore.js";
+import { listEvents, resetCalendar } from "./calendarStore.js";
 import { workspaceRoot } from "./workspace.js";
 
 // What a person agreed to, what they can take with them, and how they leave.
@@ -191,6 +192,7 @@ export type PersonalDataExport = {
   forgottenNotes: string[];
   documents: ReturnType<typeof listDocuments>;
   todos: ReturnType<typeof listTasks>;
+  calendar: ReturnType<typeof listEvents>;
   currentWork: ReturnType<typeof getTask>;
   finishedWork: ReturnType<typeof listFinishedTasks>;
   /** What the copy of TRH AI holds that is not kept under a person's key; present only where it is theirs to take. */
@@ -241,6 +243,7 @@ export function buildExport(subject: Subject, options: { wholeCopy: boolean }, a
     forgottenNotes: listForgottenFacts(key),
     documents: listDocuments(key),
     todos: listTasks(key),
+    calendar: listEvents(key),
     currentWork: getTask(key),
     finishedWork: listFinishedTasks(key),
     thisCopy: options.wholeCopy
@@ -261,6 +264,7 @@ export type HeldCounts = {
   memories: number;
   documents: number;
   todos: number;
+  calendarEvents: number;
   finishedWork: number;
   /** Only where the person may deal with the whole copy; otherwise null. */
   thisCopy: null | { schedules: number; automationFlow: boolean; emailAccount: boolean; license: boolean };
@@ -274,6 +278,7 @@ export function heldBy(subject: Subject, options: { wholeCopy: boolean }): HeldC
     memories: listSessionMemories(key).length,
     documents: listDocuments(key).length,
     todos: listTasks(key).length,
+    calendarEvents: listEvents(key).length,
     finishedWork: listFinishedTasks(key).length,
     thisCopy: options.wholeCopy
       ? {
@@ -401,6 +406,7 @@ export function eraseSubject(subject: Subject, scope: EraseScope, at: Date = new
     });
     attempt("documents", () => { removed.documents = listDocuments(key).length; resetKnowledge(key); return `${removed.documents} removed`; });
     attempt("to-dos", () => { removed.todos = listTasks(key).length; resetTasks(key); return `${removed.todos} removed`; });
+    attempt("calendar", () => { removed.calendarEvents = listEvents(key).length; resetCalendar(key); return `${removed.calendarEvents} removed`; });
     attempt("current work", () => { removed.currentWork = clearTask(key) ? 1 : 0; return removed.currentWork ? "removed" : "none"; });
     attempt("finished work", () => { removed.finishedWork = clearFinishedTasks(key); return `${removed.finishedWork} removed`; });
     attempt("run trace", () => { clearEvents(key); return "cleared"; });
@@ -476,7 +482,7 @@ function keptAfter(scope: EraseScope, hadAccount: boolean): string[] {
     "The engine, models and voices that were downloaded. They are software, not information about you.",
     `A short record that this request was made and carried out: its date, what it covered and a random id. It has no name or email, and is deleted after ${requestRecordMonths} months.`
   ];
-  if (!scope.ownData) kept.push("Your conversations, memories, documents, to-dos and task history, because you chose to keep them.");
+  if (!scope.ownData) kept.push("Your conversations, memories, documents, to-dos, calendar and task history, because you chose to keep them.");
   if (!scope.wholeCopy) kept.push("This copy's schedules, automation flow, preferences and saved email account, because you chose to keep them.");
   if (!scope.license && licenseStatus().license !== null) kept.push("The key on this PC, because you chose to keep it. It carries the email address it was issued for.");
   if (hadAccount && !scope.account) kept.push("Your account, because you chose to keep it.");

@@ -88,7 +88,7 @@ test("readiness comes from the checks: machine access, the vision model, ffmpeg 
 
 test("asking first is the deletes and the sends; machine access is run_command's permission instead", () => {
   const asking = describeTools(probe()).filter((entry) => entry.asksFirst).map((entry) => entry.name).sort();
-  assert.deepEqual(asking, ["delete_document", "forget", "remove_task", "send_email", "send_text"]);
+  assert.deepEqual(asking, ["delete_document", "forget", "remove_event", "remove_task", "send_email", "send_text"]);
   assert.equal(tool("run_command").asksFirst, false);
 });
 

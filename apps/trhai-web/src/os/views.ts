@@ -56,7 +56,7 @@ export const views: ViewDef[] = [
     icon: "M8.5 8 4.5 12l4 4M15.5 8l4 4-4 4M13.5 5.5l-3 13", keywords: "apps projects build run preview terminal commands code"
   },
   {
-    id: "tasks", label: "Tasks", group: "Work", blurb: "What TRH AI is working on, what runs on a schedule, everything it has finished - and your to-dos.",
+    id: "tasks", label: "Tasks", group: "Work", blurb: "What TRH AI is working on, what runs on a schedule, everything it has finished - and your to-dos and calendar.",
     icon: "M4 7h4M4 12h4M4 17h4M12 6l2 2 4-4M12 12h7M12 17h7", keywords: "todo work jobs queue history schedule reminders running failed"
   },
   {

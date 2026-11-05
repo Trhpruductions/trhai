@@ -3,10 +3,29 @@
 // what a search keeps. Pure, so the wording and the ordering are testable
 // without a screen.
 
+import { formatEventTime, toLocalInput, type CalendarEvent } from "@ascend/shared";
+
 export type TaskFilter = "all" | "running" | "scheduled" | "done" | "failed";
 
 /** One of your own to-dos, as /v1/tasks keeps it. */
 export type TaskItem = { id: string; title: string; done: boolean; createdAt: string };
+
+/** Still to come: an all-day event for the whole of its day, the rest until they start. Soonest first. */
+export function upcomingOnCalendar(events: CalendarEvent[], now: Date): CalendarEvent[] {
+  const today = toLocalInput(now);
+  return events
+    .filter((event) => (event.allDay ? event.startsAt.slice(0, 10) >= today.slice(0, 10) : event.startsAt >= today))
+    .sort((left, right) => left.startsAt.localeCompare(right.startsAt));
+}
+
+/** "Fri 6 Nov, 3:00 PM", or "Fri 6 Nov, all day". The year only when it is not this one. */
+export function calendarWhen(event: Pick<CalendarEvent, "startsAt" | "allDay">, now: Date): string {
+  const at = new Date(event.startsAt);
+  const day = at.toLocaleDateString(undefined, {
+    weekday: "short", day: "numeric", month: "short", ...(at.getFullYear() === now.getFullYear() ? {} : { year: "numeric" })
+  });
+  return `${day}, ${event.allDay ? "all day" : formatEventTime(event.startsAt)}`;
+}
 
 /**
  * The session's current piece of work, as /v1/agent-tasks reports it. There

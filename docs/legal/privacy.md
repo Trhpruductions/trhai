@@ -32,7 +32,7 @@ All of it is in files on your PC, in TRH AI's data folder. You can see each file
 | Your account | Email address, display name, the date you made the account and last signed in, a salted hash of your password and hashes of your recovery codes (never the password or codes), hashes of your sign-in sessions, and what you agreed to: which text, which version, when. | Until you erase the account. A sign-in session lasts up to 30 days or until you sign out. |
 | Conversations | Every message you send and every answer, with the conversation's title, whether it is pinned or archived, and the model used. | Until you delete them or erase your data. Each conversation keeps its latest 200 messages. |
 | Memory | Facts you ask TRH AI to remember, with a short note of anything you asked it to forget (so it does not bring it back up from the conversation), and a record of changes to your memory. | Until you delete them or erase your data. |
-| Documents, to-dos, finished work | Documents you give it to read, your to-do list, the job it is working on or last worked on (your request and its result), and the work it has finished, with the steps it took and the commands it ran. | Until you delete them or erase your data. |
+| Documents, to-dos, calendar, finished work | Documents you give it to read, your to-do list, your calendar, the job it is working on or last worked on (your request and its result), and the work it has finished, with the steps it took and the commands it ran. | Until you delete them or erase your data. |
 | Schedules and the automation flow | What you have set to run on a timer and the result of each run; the automation flow you saved. | Until you delete them or erase your data. |
 | Preferences | The assistant's personality you chose, and the kind of phone you linked in Phone Link. | Until you change or erase them. |
 | An email account, if you connect one | The address, the mail server, the port and the app password you gave, so the assistant can send email on your behalf when you ask. | Until you remove it or erase your data. |
@@ -114,7 +114,7 @@ The table in section 3 gives each period. In short: your information stays on yo
 - **See what is stored:** Settings, Data and privacy.
 - **Get a copy:** Settings, Privacy and consent, Copy my data. It is one file you can open, in plain words.
 - **Erase it:** Settings, Privacy and consent, Erase. You choose what to erase and type a word to confirm; with an account, you also enter your password. A short note says what was and was not removed.
-- **Correct it:** edit conversations, memories, documents and to-dos in the app. To change an account's name or email, erase the account and make a new one.
+- **Correct it:** edit conversations, memories, documents, to-dos and calendar events in the app. To change an account's name or email, erase the account and make a new one.
 - **Say no to optional storage:** the choices in **Settings, Privacy and consent** control the optional settings kept in your browser.
 - **Ask us:** about information held by TRH Development, write to the privacy address in section 2.
 

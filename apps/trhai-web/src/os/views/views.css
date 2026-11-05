@@ -486,6 +486,11 @@ select.os-input { color-scheme: dark; }
 /* Your own list. */
 .os-todo-add { display: flex; gap: var(--os-2); }
 .os-todo-add .os-input { flex: 1; min-width: 0; }
+.os-calendar-add { flex-wrap: wrap; }
+.os-calendar-add .os-input { flex: 1 1 100%; }
+.os-calendar-add .os-input[type="datetime-local"] { flex: 1 1 0; }
+.os-calendar-entry { flex: 1; display: grid; gap: 1px; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.os-calendar-entry strong { font-weight: 500; }
 .os-todo-list { gap: 2px; }
 .os-todo-list li { display: flex; align-items: center; gap: var(--os-2); padding: 4px var(--os-2); border-radius: var(--os-r-sm); }
 .os-todo-list li:hover { background: var(--os-surface-hover); }
