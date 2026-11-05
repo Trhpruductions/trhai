@@ -1158,20 +1158,30 @@ const listWords = /\b(?:to-?dos?|to-?do\s+list|task\s+list|tasks?|checklist|chor
 const listVerbs = /\b(?:add|adding|put|note|jot|write\s+down|writing\s+down|show|see|read|what|which|anything|display|view|mark|tick|cross|check\s+off|finish|finished|done|complete|completed|remove|delete|clear|drop|take\s+off|cancel|scratch|left|remaining|open|pending|outstanding|got)\b/i;
 const reminderToDoSomething = /\b(?:remind\s+me\s+to|don'?t\s+let\s+me\s+forget\s+to|i\s+need\s+to\s+remember\s+to|note\s+to\s+self)\b/i;
 const repeating = /\b(?:every|each|daily|weekly|hourly|nightly|monthly|weekdays?|recurring|repeat\w*)\b/i;
+/**
+ * When a reminder is for, said as a time: a clock time ("at 3 pm", "at 15:30", "at noon", "at three o'clock") or a
+ * stretch from now ("in twenty minutes", "in an hour"). Only where it is said as the time - "about the 3pm appointment"
+ * and "the 9:15 train" are the words of the thing to do, and "by 5 pm" is a deadline, not the moment to be told.
+ */
+const reminderMoment = /\b(?:at|around)\s+(?:\d{1,2}(?::[0-5]\d)?\s*[ap]\.?\s*m\b|(?:[01]?\d|2[0-3]):[0-5]\d\b|(?:noon|midday|midnight)\b|(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*o'?clock\b)|\bin\s+(?:\d+|an?|one|two|three|four|five|ten|fifteen|twenty|thirty|half\s+an|a\s+couple\s+of|a\s+few)\s+(?:minutes?|mins?|hours?|hrs?)\b/i;
 const tickingOff = /\b(?:mark|tick|cross|check)\b[^.?!\n]{0,40}\b(?:as\s+done|done|off|complete|completed|finished)\b/i;
 const sayingItIsDone = /\bi(?:'ve|\s+have)?\s+(?:done|finished|completed)\b[^.?!\n]{0,60}\b(?:task|that|it|the|my)\b/i;
 
 /**
  * Whether a request is about the user's own to-do list - the one on the Tasks screen - so the
  * task tools are worth offering: adding to it, reading it, ticking something off, taking
- * something off. A reminder with no repeat in it ("remind me to call the bank") is a task; one
- * with a cadence ("every day at 9") is a schedule, which mentionsScheduling covers. A task app,
- * the Task Manager, the system's scheduled tasks and the assistant's own work are not the list,
- * and neither is a question about what a to-do list is.
+ * something off. A reminder that says no when ("remind me to call the bank") is a task; one with
+ * a cadence ("every day at 9") or a moment ("at 3 pm", "in an hour") is a schedule - repeating or
+ * once - which mentionsScheduling covers, and the task tools are kept out of its way so that which
+ * of the two it becomes is not left to the model: on the list, nothing would ever fire. A task app,
+ * the Task Manager, the system's scheduled tasks and the assistant's own work are not the list, and
+ * neither is a question about what a to-do list is.
  */
 export function wantsTodo(message: string): boolean {
   const text = message ?? "";
   if (notTheList.test(text) || asksWhatItIs.test(text)) return false;
+  // "Remind me at 3 pm to call the bank", "remind me to call the bank in an hour": for a moment, so a schedule.
+  if (/\bremind\s+me\b/i.test(text) && reminderMoment.test(text)) return false;
   if (reminderToDoSomething.test(text) && !repeating.test(text)) return true;
   if (tickingOff.test(text) || sayingItIsDone.test(text)) return true;
   return listWords.test(text) && listVerbs.test(text);

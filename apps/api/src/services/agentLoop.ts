@@ -1795,7 +1795,7 @@ export async function runAgent(
         //
         // But "extract the audio from clip.mp4 as an mp3" has no verb the classifier knows and is taken for a statement,
         // which only asks: the tool that does it would be withheld from the very request for it. Likewise "read this to an mp3",
-        // and "remind me to call the bank", which is a task to add.
+        // and "remind me to call the bank", which is a task to add (with a time in it, a one-time schedule; see wantsTodo).
         writes: !onlyAsks || wantsMediaConverted(question) || wantsSpeechFile(question) || wantsTodo(question),
         memory: asksToRemember(question),
         // A question does not get to scaffold a project. Decided from the

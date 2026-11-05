@@ -48,3 +48,31 @@ test("a task app, the Task Manager, the assistant's own work and a plain questio
     assert.equal(wantsTodo(request), false, request);
   }
 });
+
+test("a reminder that says when is for that moment - a schedule - and one that does not is a task", () => {
+  for (const request of [
+    "remind me to call the bank at 3 pm",
+    "remind me to call the bank at 3pm tomorrow",
+    "Remind me at 15:30 to call the bank",
+    "remind me at three o'clock to call the bank",
+    "remind me to take the roast out at noon",
+    "remind me to call the bank in 20 minutes",
+    "remind me in an hour to check the oven",
+    "remind me in half an hour to stretch",
+    "remind me around 9 a.m. to ring the school"
+  ]) {
+    assert.equal(wantsTodo(request), false, request);
+  }
+  // A time that is part of the thing to do, a deadline, or a day with no time: still a task.
+  for (const request of [
+    "remind me to call the bank",
+    "remind me to call the bank tomorrow",
+    "remind me to call the bank about the 3pm appointment",
+    "remind me to catch the 9:15 train",
+    "remind me to send the form by 5 pm",
+    "remind me to buy 2 litres of milk",
+    "note to self: the dentist is at 3 pm on Friday"
+  ]) {
+    assert.equal(wantsTodo(request), true, request);
+  }
+});

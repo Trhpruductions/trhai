@@ -508,7 +508,10 @@ handlers in `agentTools.ts`):
 Offered when the request is about the list (`wantsTodo` in `actionIntent.ts`: "add milk
 to my list", "remind me to call the bank", "what's left to do?", "tick off the dentist"),
 and not for a task app, the Task Manager, the system's scheduled tasks or a question about
-what a to-do list is. A reminder with a repeat in it is a schedule, not a task. Scoped to
+what a to-do list is. A reminder with a repeat in it, or one that says when ("remind me to
+call the bank at 3 pm", "in an hour"), is a schedule, not a task: the task tools are
+withheld from it, so it is the one-time schedule above that takes it (`reminderMoment`;
+`reminder-or-task.test.ts` checks which tool each wording is handed). Scoped to
 the session or account exactly as the screen is (`todoAccessFor` in the server's tool
 context; without a session each tool says there is no list). Tests: `todo-tools.test.ts`,
 `wants-todo.test.ts`.

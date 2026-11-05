@@ -992,8 +992,8 @@ export const toolDefinitions: ToolDefinition[] = [
       name: "add_task",
       description:
         "Add one or more tasks to the user's own to-do list, the one on the Tasks screen. Use it when the user asks "
-        + "to add, note or write down something to do, or asks to be reminded of something with no repeat in it - "
-        + "\"remind me to call the bank\" is a task; \"every day at 9\" is add_schedule. Each task is its own short line "
+        + "to add, note or write down something to do, or asks to be reminded of something without saying when - "
+        + "\"remind me to call the bank\" is a task; \"remind me at 3 pm\" and \"every day at 9\" are add_schedule. Each task is its own short line "
         + "in the user's words, never a paragraph. It says what was added; tell the user that.",
       parameters: {
         type: "object",
