@@ -114,9 +114,14 @@ test("the lines the conversion tool writes are read as made files, with the leng
     "- converted/take.flac (FLAC audio, 0:03)",
     "- converted/take.ogg (Ogg audio)",
     "- converted/take.opus (Opus audio, 0:41)",
+    "- documents/Hello from TRH AI This is.wav (WAV audio, 0:04)",
+    "- documents/Read to me.m4a (M4A audio, 12:30)",
     "The original is untouched."
   ].join("\n");
-  assert.deepEqual(madeFilesInText(reply), ["songs/neon.mp3", "songs/talk.mp4", "converted/take.flac", "converted/take.ogg", "converted/take.opus"]);
+  assert.deepEqual(madeFilesInText(reply), [
+    "songs/neon.mp3", "songs/talk.mp4", "converted/take.flac", "converted/take.ogg", "converted/take.opus",
+    "documents/Hello from TRH AI This is.wav", "documents/Read to me.m4a"
+  ]);
   assert.deepEqual(madeFilesInText("- songs/odd.mp3 (MP3 audio, soon)"), [], "a length that is not one");
   assert.deepEqual(madeFilesInText("- songs/odd.mp3 (MP3 audio, 3:7)"), [], "seconds are two digits");
   assert.deepEqual(madeFilesInText("- C:\\Music\\x.mp3 (MP3 audio, 3:12)"), [], "outside the workspace is not offered");
