@@ -612,6 +612,15 @@ now the default for new copies (docs/23). Its four misses were the app's, fixed 
 - `remember` and recall between conversations: not a fault. Memory is per install (the UI keeps one
   session id in localStorage), and the test had used a new id per request.
 
+**The second run, 2026-11-16, with those fixes:** the 4B picture model 20 of 21 at 77 tokens a
+second, the coder 15 of 21 at 53. The picture model's one miss was a "what's on my to-do list?" it
+answered with no call, so `readInstead` now runs a list or calendar read for the model when it will
+not (the read takes no arguments). The coder still greeted as "I'm Claude" with the prompt saying
+otherwise, so `inOwnName` puts a reply that names the assistant as another one right, at the one
+place the agent's text becomes the message (orchestrator.ts). Its other misses were a calendar
+read with nothing called, three files it tried to put in the real Documents folder (refused, with
+machine access off in the test), and pictures, which it cannot see.
+
 Two test files were written to the owner's real Documents and OneDrive\Documents folders, because
 machine access is on by default and the coder asked for "the Documents folder": a test stack sets
 `TRHAI_MACHINE_ACCESS=off`. The harness is the scratchpad's `gpu-eval.mjs` (session folder of
