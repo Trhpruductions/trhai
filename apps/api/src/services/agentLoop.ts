@@ -22,7 +22,7 @@ import {
 } from "./contradictedClaims.js";
 import { asksAboutMachineState, asksForAReading, asksForCodeInTheReply, asksForWordsInTheReply, asksToStartSomething, drivePath, mentionsTheMachine, wantsSomethingBuilt, wantsToSendAMessage, wantsASummary, mentionsAnImage, changesAskedFor, clarificationFor, classifyIntent, isExplanatoryQuestion, looksArithmetic, reshapesAnEarlierReply, looksLikeClockMath, looksLikeDateMath, mentionsMusicVideo, mentionsScheduling, mentionsTime, mentionsVideo, mentionsWeb, wantsWebSearch, wantsRendering, wantsToStopAnApp, mentionsDocument, namesAFilePath, wantsAFileMade, wantsAPresentationMade, wantsASpreadsheetMade, wantsMediaConverted, wantsSpeechFile, wantsTodo, wantsCalendar, wantsTranscript, type ActionKind } from "./actionIntent.js";
 import { analyzeRequest, looksDeclarative } from "./requestAnalysis.js";
-import { actedOn, actionAskedFor, narrowForAction, notDoneReply } from "./requiredAction.js";
+import { actedOn, actionAskedFor, narrowForAction, notDoneReply, readInstead } from "./requiredAction.js";
 import { createToolActivity, type ToolActivity } from "./toolActivity.js";
 import { changesSomething } from "./toolPermissions.js";
 import { describeWorkspace, summariseWorkspace } from "./projectContext.js";
@@ -2456,6 +2456,21 @@ export async function runAgent(
           spendCorrection();
           messages.push({ role: "user", content: `You did not do that: you called no tool. Call ${actionFamily.tools.join(" or ")} now.` });
           continue;
+        }
+        // A plain read the model would not make is made for it; see readInstead.
+        const reader = readInstead(actionFamily, context.request ?? question);
+        if (reader) {
+          const read = await runTool({ name: reader, arguments: {} }, context);
+          toolsUsed.push({ name: reader, ok: read.ok });
+          if (read.ok) {
+            return {
+              ok: true,
+              text: read.content,
+              model: typeof response.model === "string" ? response.model : config.model,
+              toolsUsed,
+              actionAudit: auditFor("prose")
+            };
+          }
         }
         return {
           ok: true,

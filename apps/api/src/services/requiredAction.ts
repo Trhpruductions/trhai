@@ -76,5 +76,28 @@ export function narrowForAction<T extends { function: { name: string } }>(
   return { tools: namesAFile ? offered : offered.filter((definition) => !generalWriters.has(definition.function.name)), onlyTheFamily: false };
 }
 
+/**
+ * A plain question about the list or the calendar that the model would not act on is read for it: the
+ * read takes no arguments, so the app can run it as well as the model can. On the card the 4B model
+ * answered one "what's on my to-do list?" in twenty with no call; the list is the answer either way.
+ * Null for anything that changes something, which stays the model's to do or to be told it did not.
+ */
+export function readInstead(family: ActionFamily, question: string): string | null {
+  const text = question ?? "";
+  if (/\b(?:add|put|remind|remove|delete|cancel|tick|complete|done|mark|finish|clear|move|change|rename)\b/i.test(text)) return null;
+  if (!/\b(?:what|which|show|list|read|tell|anything|something|have i|do i|is there|are there|how many|when)\b/i.test(text)) return null;
+  for (const reader of ["list_tasks", "list_events"]) if (family.tools.includes(reader)) return reader;
+  return null;
+}
+
+/**
+ * The assistant's own name in its reply. The coder model, told in its prompt that it is TRH AI, still
+ * opened "hello, how are you?" with "I'm Claude" on the card (2026-11-16); the words in which a model
+ * names itself are the one claim here that is always false, so they are put right.
+ */
+export function inOwnName(text: string): string {
+  return text.replace(/\b(I(?:'m| am)|this is|my name is)\s+(?:Claude|ChatGPT|GPT-?4o?|Gemini|Copilot|Llama|Qwen)\b(?:,?\s+an? AI (?:assistant|model)(?: (?:made|developed|created|trained) by [A-Z]\w*)?)?/gi, "$1 TRH AI");
+}
+
 /** Said instead of a claim, when the model would not act. Short, true, and something to do next. */
 export const notDoneReply = "That did not get done: nothing was read, added, saved or changed. Please try asking again.";

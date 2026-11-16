@@ -131,3 +131,35 @@ test("asked for an audio file, a model that writes over another file cannot", as
   assert.equal(result.ok, true);
   if (result.ok) assert.deepEqual(result.toolsUsed.filter((used) => used.name === "write_file" && used.ok), []);
 });
+
+test("a plain question about the list that the model will not act on is read for it", async () => {
+  resetTasks();
+  const { addTask } = await import("../src/services/taskListStore.js");
+  addTask(key, { id: "milk", title: "Buy milk" });
+  const { result } = await run("what's on my to-do list?", [
+    { message: { content: "Here is your list: 1. Walk the dog" } },
+    { message: { content: "Here is your list: 1. Walk the dog" } }
+  ]);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.match(result.text, /Buy milk/);
+    assert.doesNotMatch(result.text, /Walk the dog/, "the list, not the model's invention");
+    assert.deepEqual(result.toolsUsed.map((used) => used.name), ["list_tasks"]);
+  }
+  // A change is never made for it.
+  const { readInstead } = await import("../src/services/requiredAction.js");
+  const family = { tools: ["list_tasks", "add_task", "complete_task", "remove_task"], lookups: [] };
+  assert.equal(readInstead(family, "what's on my to-do list?"), "list_tasks");
+  assert.equal(readInstead(family, "add buy milk to my to-do list"), null);
+  assert.equal(readInstead(family, "tick off buy milk"), null);
+  assert.equal(readInstead({ tools: ["list_events", "add_event", "remove_event"], lookups: [] }, "what's on my calendar?"), "list_events");
+  assert.equal(readInstead({ tools: ["speak_to_file"], lookups: [] }, "what can you read aloud?"), null);
+});
+
+test("the assistant keeps its own name, whatever a model calls itself", async () => {
+  const { inOwnName } = await import("../src/services/requiredAction.js");
+  assert.match(inOwnName("Hello! I'm Claude, an AI assistant designed to help."), /^Hello! I'm TRH AI designed to help\.$/);
+  assert.equal(inOwnName("I am ChatGPT, an AI model developed by OpenAI."), "I am TRH AI.");
+  assert.equal(inOwnName("My name is Gemini."), "My name is TRH AI.");
+  assert.equal(inOwnName("Claude Monet painted water lilies; I'm TRH AI."), "Claude Monet painted water lilies; I'm TRH AI.", "a name that is not the assistant's is left alone");
+});
