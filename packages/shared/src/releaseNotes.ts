@@ -37,6 +37,20 @@ export function isRequiredReleaseText(text: string): boolean {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.1.11",
+    date: "2026-11-16",
+    title: "What you ask for gets done, reminders land on the right day, and one model does it all",
+    required: true,
+    notes: [
+      "When you ask TRH AI to add a task, set a reminder, put something on your calendar, make a document, spreadsheet or presentation, read text into an audio file, write out a recording or convert a file, it now does that thing. Before, it could answer \"Task added\" having added nothing. If the model will not act, TRH AI now says plainly that it did not get done, instead of claiming it did.",
+      "A reminder or an appointment lands on the day you said: \"remind me tomorrow at 3 pm\" is once, tomorrow, and \"next Friday\" is next Friday. Before, both could be saved as every weekday, or on the wrong day.",
+      "Asked what is on your calendar or your to-do list, TRH AI reads the list, rather than repeating what you said earlier in the conversation.",
+      "New copies install one model that both talks and reads pictures, Qwen3 VL 4B, about 3 GB instead of 7.6 GB for the pair. Tested on a graphics card with 8 GB, it did more of what was asked than the two models did, and faster. A copy that already has both models keeps them. The larger 8B picture model is now offered only to a card with 12 GB, where it runs well.",
+      "TRH AI keeps its own name in its replies, whatever the model behind it was trained to call itself.",
+      "A plain file name you give, like notes.txt, is read from your workspace; the assistant no longer invents a folder for it."
+    ]
+  },
+  {
     version: "0.1.10",
     date: "2026-11-05",
     title: "Free for everyone, with a calendar, reminders at a time, recordings written out and answers without a caveat",
