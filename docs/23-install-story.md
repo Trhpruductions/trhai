@@ -332,7 +332,9 @@ have called a tool. The four the picture model missed were faults in the app, fi
 same change. The 8B picture model is not for an 8 GB card: measured on 2026-11-05 it ran at
 4 to 10 seconds a token there and timed out, so `recommendedVisionModel` wants a 12 GB card
 for it (a PC with no card goes by memory, as before). With the 4B the models on an 8 GB
-card are about 3 GB instead of the pair's 7.6 GB.
+card are about 3 GB instead of the pair's 7.6 GB. The required bundle (`requiredRequest`)
+asks a copy that already has a picture model for no model at all, whatever is recommended
+now: a 0.1.10 copy with the coder and the 8B keeps them, and does not download the 4B too.
 
 **The install that does itself** (`requiredSetup.ts`). An update replaces the
 program and nothing else, so what a version needs beside it was left for each

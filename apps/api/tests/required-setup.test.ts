@@ -119,7 +119,9 @@ const total = (fixture: Fixture) => Object.values(fixture.files).reduce((sum, bo
 // ---------------------------------------------------------------- what is required
 
 test("the bundle is the engine, the model to chat with, the one that looks at pictures, and every tool", () => {
-  const pair = { TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv;
+  // A runtime folder with nothing in it: this PC's real one may hold a picture model, which changes the answer.
+  const nothing = { TRHAI_RUNTIME_DIR: path.join(tmpdir(), "trhai-nothing-here") } as NodeJS.ProcessEnv;
+  const pair = { ...nothing, TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv;
   assert.deepEqual(requiredRequest(smallPc, toolCatalogue, pair), {
     engine: true, models: ["qwen3-4b-instruct-2507-abliterated", "qwen3-vl-4b-abliterated"],
     tools: process.platform === "win32" ? toolCatalogue.map((tool) => tool.id) : []
@@ -127,9 +129,25 @@ test("the bundle is the engine, the model to chat with, the one that looks at pi
   // An 8 GB card gets the 4B picture model (modelSetup.ts, recommendedVisionModel).
   assert.deepEqual(requiredRequest(bigPc, toolCatalogue, pair).models, ["qwen2.5-coder-7b-abliterated", "qwen3-vl-4b-abliterated"]);
   // By default one model does both, named once.
-  assert.deepEqual(requiredRequest(smallPc, toolCatalogue, {} as NodeJS.ProcessEnv).models, ["qwen3-vl-4b-abliterated"]);
+  assert.deepEqual(requiredRequest(smallPc, toolCatalogue, nothing).models, ["qwen3-vl-4b-abliterated"]);
   if (process.platform === "win32") assert.deepEqual(requiredRequest(smallPc, toolCatalogue, pair).tools, ["speech", "listening", "video"]);
   assert.equal(requiredSetupGeneration, 1);
+});
+
+test("a copy that already has a model that looks at pictures is asked for no model, whatever is recommended now", () => {
+  // 0.1.10 copies on an 8 GB card have the coder and the 8B picture model; 0.1.11 recommends the 4B alone. They keep what they have.
+  const root = mkdtempSync(path.join(tmpdir(), "trhai-has-pictures-"));
+  mkdirSync(path.join(root, "models", "qwen3-vl-8b-abliterated"), { recursive: true });
+  writeFileSync(path.join(root, "models", "qwen3-vl-8b-abliterated", "weights.gguf"), "w");
+  writeFileSync(path.join(root, "models", "qwen3-vl-8b-abliterated", "mmproj-x.gguf"), "p");
+  writeFileSync(path.join(root, "models", "qwen2.5-coder-7b-abliterated.gguf"), "c");
+  const env = { TRHAI_RUNTIME_DIR: root } as NodeJS.ProcessEnv;
+  assert.deepEqual(requiredRequest(bigPc, toolCatalogue, env).models, []);
+  assert.deepEqual(requiredRequest(bigPc, toolCatalogue, { ...env, TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv).models, []);
+  // Only a chat model: the picture model that talks is still wanted.
+  rmSync(path.join(root, "models", "qwen3-vl-8b-abliterated"), { recursive: true, force: true });
+  assert.deepEqual(requiredRequest(bigPc, toolCatalogue, env).models, ["qwen3-vl-4b-abliterated"]);
+  rmSync(root, { recursive: true, force: true });
 });
 
 test("a copy that is set up and short of the bundle is told what it lacks, in bytes, and is not yet running", () => {
