@@ -7,6 +7,7 @@ import { isCodeWork } from "./machinePaths.js";
 import { pickAuthorModel } from "./appAuthor.js";
 import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
+import { inOwnName } from "./requiredAction.js";
 import { appNamedIn, driveNamedIn, readingsFor, readMachineStatus, runTool, type AgentLens } from "./agentTools.js";
 import type { TodoAccess } from "./todoTools.js";
 import type { CalendarAccess } from "./calendarTools.js";
@@ -2263,7 +2264,7 @@ async function answerWithLocalModel(
     if (result.ok) {
       return {
         ok: true,
-        text: result.text,
+        text: inOwnName(result.text),
         model: `local/${result.model}`,
         toolsUsed: result.toolsUsed,
         ...(result.awaitingConfirmation ? { awaitingConfirmation: result.awaitingConfirmation } : {})

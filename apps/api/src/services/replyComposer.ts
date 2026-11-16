@@ -12,6 +12,7 @@
 import { analyzeRequest, isContinuationRequest, looksDeclarative, type RequestAnalysis } from "./requestAnalysis.js";
 import { statesFact } from "./factWording.js";
 import { classifyIntent } from "./actionIntent.js";
+import { actionAskedFor } from "./requiredAction.js";
 import { selectRelevantMemories, type ScorableMemory, type ScoredMemory } from "./memoryRelevance.js";
 import { answeringSentence } from "./passageFocus.js";
 import { buildTaskPlan } from "./taskPlanning.js";
@@ -553,6 +554,10 @@ export function composeReply(input: ComposerInput): ComposedReply {
     const query = resolveQuery(message, history);
     const matches = selectRelevantMemories(query, input.memories);
     const fromKnowledge = selectRelevantMemories(query, input.knowledge ?? [], 2);
+    // What is on the to-do list or the calendar is read with its tool, never recited from a saved
+    // memory or an earlier turn: "what's on my calendar?" was answered "You mentioned this earlier:
+    // put the dentist on my calendar", which is the request, not the calendar.
+    const readWithATool = actionAskedFor(message) !== null;
 
     // A fact the user dictated outranks a passage that merely shares vocabulary
     // with the question — but as a preference, not a veto.
@@ -569,7 +574,7 @@ export function composeReply(input: ComposerInput): ComposedReply {
     const bestPassage = fromKnowledge[0]?.score ?? 0;
     const knowledgeIsDecisivelyBetter = bestPassage > bestMemory * memoryPreference;
 
-    if (matches.length > 0 && !knowledgeIsDecisivelyBetter) {
+    if (!readWithATool && matches.length > 0 && !knowledgeIsDecisivelyBetter) {
       return {
         text: `${answerLead(analysis)}\n\n${citeMemories(matches)}\n\nIf that's out of date, tell me and I'll update it.`,
         strategy: "answer",
@@ -581,7 +586,7 @@ export function composeReply(input: ComposerInput): ComposedReply {
       };
     }
 
-    if (fromKnowledge.length > 0) {
+    if (!readWithATool && fromKnowledge.length > 0) {
       // Quoted verbatim with its source named. Matching here is lexical, so the
       // passage is evidence, not an interpretation — presenting it as a settled
       // answer would overstate what a term-overlap match establishes.
@@ -606,7 +611,7 @@ export function composeReply(input: ComposerInput): ComposedReply {
     }
 
     // Nothing saved matches, but the answer may simply have been said earlier.
-    const fromHistory = selectRelevantMemories(query, searchableHistory(history, input.forgottenFacts ?? []), 2);
+    const fromHistory = readWithATool ? [] : selectRelevantMemories(query, searchableHistory(history, input.forgottenFacts ?? []), 2);
     if (fromHistory.length > 0) {
       const quoted = fromHistory.map((entry) => `- "${entry.memory.body}"`).join("\n");
       return {

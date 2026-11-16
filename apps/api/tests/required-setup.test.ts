@@ -81,7 +81,8 @@ function fixture(options: { setUp?: boolean; hardware?: Hardware } = {}) {
   resetSetupForTests();
   resetRequiredSetupForTests();
   const root = mkdtempSync(path.join(tmpdir(), "trhai-required-"));
-  const env = { TRHAI_RUNTIME_DIR: root } as NodeJS.ProcessEnv;
+  // The pair, so the bundle's mechanics are tried with two models; one model by default is one-model.test.ts.
+  const env = { TRHAI_RUNTIME_DIR: root, TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv;
   if (options.setUp !== false) {
     mkdirSync(path.join(root, "engine", "b11366"), { recursive: true });
     writeFileSync(path.join(root, "engine", "b11366", exeName), "engine");
@@ -118,12 +119,16 @@ const total = (fixture: Fixture) => Object.values(fixture.files).reduce((sum, bo
 // ---------------------------------------------------------------- what is required
 
 test("the bundle is the engine, the model to chat with, the one that looks at pictures, and every tool", () => {
-  assert.deepEqual(requiredRequest(smallPc), {
+  const pair = { TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv;
+  assert.deepEqual(requiredRequest(smallPc, toolCatalogue, pair), {
     engine: true, models: ["qwen3-4b-instruct-2507-abliterated", "qwen3-vl-4b-abliterated"],
     tools: process.platform === "win32" ? toolCatalogue.map((tool) => tool.id) : []
   });
-  assert.deepEqual(requiredRequest(bigPc).models, ["qwen2.5-coder-7b-abliterated", "qwen3-vl-8b-abliterated"]);
-  if (process.platform === "win32") assert.deepEqual(requiredRequest(smallPc).tools, ["speech", "listening", "video"]);
+  // An 8 GB card gets the 4B picture model (modelSetup.ts, recommendedVisionModel).
+  assert.deepEqual(requiredRequest(bigPc, toolCatalogue, pair).models, ["qwen2.5-coder-7b-abliterated", "qwen3-vl-4b-abliterated"]);
+  // By default one model does both, named once.
+  assert.deepEqual(requiredRequest(smallPc, toolCatalogue, {} as NodeJS.ProcessEnv).models, ["qwen3-vl-4b-abliterated"]);
+  if (process.platform === "win32") assert.deepEqual(requiredRequest(smallPc, toolCatalogue, pair).tools, ["speech", "listening", "video"]);
   assert.equal(requiredSetupGeneration, 1);
 });
 

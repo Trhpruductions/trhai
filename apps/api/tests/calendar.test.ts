@@ -349,3 +349,15 @@ test("a repeating reminder is still a schedule, not an event", () => {
   assert.equal(wantsCalendar("remind me every day at 9 to stretch"), false);
   assert.equal(mentionsScheduling("remind me every day at 9 to stretch"), true);
 });
+
+test("the day comes from the user's own words too, where they named one", async () => {
+  resetCalendar();
+  // Sunday 8 November 2026: "next Friday" is the 13th, whatever the model worked out (a Tuesday and a Thursday, live).
+  const sunday = new Date(2026, 10, 8, 10, 30);
+  const added = await tool("add_event", { title: "Dentist", at: "2026-11-17 14:00" }, { request: "put the dentist on my calendar for next Friday at 2 pm", now: () => sunday });
+  assert.match(added.content, /Fri 13 Nov 2026 at 2:00 PM/);
+  const tomorrow = await tool("add_event", { title: "Vet", at: "2026-11-12" }, { request: "the vet tomorrow", now: () => sunday });
+  assert.match(tomorrow.content, /Mon 9 Nov 2026, all day/);
+  const theirs = await tool("add_event", { title: "Party", at: "2026-11-20 19:00" }, { request: "put the party on my calendar at 7 pm", now: () => sunday });
+  assert.match(theirs.content, /Fri 20 Nov 2026 at 7:00 PM/, "no day in the words: the model's stands");
+});

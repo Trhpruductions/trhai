@@ -42,6 +42,7 @@ import { messageProblem, sendEmail, sendingTools, sendText, type MessagingDeps }
 import { extractDocumentText, isDocumentPath, maxDocumentBytes } from "./documentText.js";
 import { readableAtOnce, summarizeLongText, type GenerateText } from "./summarize.js";
 import { daysAskedFor, timeAskedFor } from "./scheduleRequest.js";
+import { dayAskedFor, localDay } from "./dayWords.js";
 import { imageKind, lookAtImages, maxImageBytes, type VisionImage, type VisionResult } from "./vision.js";
 import { readLocalModelConfig, stoppedBeforeFinishing } from "./localModel.js";
 import { describeTelemetry, readFreeSpace, readGpuHeadroom, readTelemetry, readTopMemoryPrograms } from "./systemTelemetry.js";
@@ -657,8 +658,8 @@ export const toolDefinitions: ToolDefinition[] = [
       name: "list_files",
       description:
         "List files. Omit the directory for the workspace — the folder where apps you build are "
-        + "kept. Pass a full path such as D:/projects/app to look inside a real project on this "
-        + "machine when machine access is on. Use this to find out what is actually there before "
+        + "kept. Pass the full path of a real folder the user named to look inside it, when machine "
+        + "access is on; never a path you made up. Use this to find out what is actually there before "
         + "guessing at filenames.",
       parameters: {
         type: "object",
@@ -703,8 +704,9 @@ export const toolDefinitions: ToolDefinition[] = [
       name: "read_file",
       description:
         "Read a file. Use it to look at code before changing or explaining it. Accepts a "
-        + "workspace path, or a full path to anywhere on this machine such as "
-        + "D:/projects/app/src/index.ts when machine access is on. Never answer questions about "
+        + "workspace path (a file the user names with no folder, such as notes.txt, is in the "
+        + "workspace: pass it as written), or the full path the user gave to a file anywhere on this "
+        + "machine when machine access is on; never a path you made up. Never answer questions about "
         + "the contents of a file without reading it first. A long file shows its start and end "
         + "and names the lines left out; pass start_line and end_line to read those lines.",
       parameters: {
@@ -3845,15 +3847,20 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
       const notes = requireString(call.arguments.notes) ?? undefined;
       if (notes && notes.length > maxEventNotesLength) return { ok: false, content: `Notes are at most ${maxEventNotesLength} letters. Nothing was added.` };
 
-      // The time of day comes from the user's own words where they said it plainly, as for a schedule.
+      // The time of day comes from the user's own words where they said it plainly, as for a schedule;
+      // so does the day where they named one. On the card, "next Friday" came back as a Tuesday from
+      // one model and a Thursday from the other (dayWords.ts).
+      const now = (context.now ?? (() => new Date()))();
       const spoken = context.request ? timeAskedFor(context.request) : null;
-      const startsAt = spoken === null
-        ? moment.startsAt
-        : `${moment.startsAt.slice(0, 10)}T${String(Math.floor(spoken / 60)).padStart(2, "0")}:${String(spoken % 60).padStart(2, "0")}`;
+      const spokenDay = context.request ? dayAskedFor(context.request, now) : null;
+      const dayPart = spokenDay ? localDay(spokenDay) : moment.startsAt.slice(0, 10);
+      const timePart = spoken === null
+        ? moment.startsAt.slice(10)
+        : `T${String(Math.floor(spoken / 60)).padStart(2, "0")}:${String(spoken % 60).padStart(2, "0")}`;
+      const startsAt = `${dayPart}${timePart}`;
       const allDay = moment.allDay && spoken === null;
 
-      const now = (context.now ?? (() => new Date()))();
-      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const today = localDay(now);
       // Most often a wrong year worked out by the model, and a calendar is for what is on.
       if (startsAt.slice(0, 10) < today) {
         return { ok: false, content: `${eventWhen({ startsAt, allDay: true }).replace(", all day", "")} has already passed. Nothing was added.` };
@@ -3923,13 +3930,28 @@ async function runToolUncounted(call: ToolCall, context: ToolContext): Promise<T
         cadence = { kind: "interval", minutes: Math.round(every) };
       }
 
-      // Once, at a date and time. The model gives the moment; the time of day comes from the
-      // user's own words where they said it plainly, as for a daily one.
-      if (atRaw) {
+      // A day named in the request is the day, and one day is once: "remind me tomorrow at 3 pm"
+      // came back from both models on the card as every weekday at 3 (dayWords.ts). A repeat in
+      // the words ("every Friday at 9") is left to the model's reading.
+      const asked = context.request ?? "";
+      const now = (context.now ?? (() => new Date()))();
+      const spokenDay = asked ? dayAskedFor(asked, now) : null;
+      const repeats = daysAskedFor(asked) !== null || /\b(?:every|each|daily|weekly|nightly|hourly)\b/i.test(asked);
+      if (spokenDay && !repeats) {
+        const inAt = atRaw ? /(\d{1,2}):(\d{2})\s*$/.exec(atRaw) : null;
+        const minuteInAt = inAt && Number(inAt[1]) < 24 && Number(inAt[2]) < 60 ? Number(inAt[1]) * 60 + Number(inAt[2]) : null;
+        const minute = timeAskedFor(asked) ?? (cadence?.kind === "daily" ? cadence.minuteOfDay : null) ?? minuteInAt;
+        if (minute === null) return { ok: false, content: `${calendarWords(spokenDay).replace(/ at .*$/, "")}: at what time? Nothing was scheduled.` };
+        const at = new Date(spokenDay);
+        at.setHours(Math.floor(minute / 60), minute % 60, 0, 0);
+        if (at.getTime() <= now.getTime()) return { ok: false, content: `${calendarWords(at)} has already passed. Nothing was scheduled.` };
+        cadence = { kind: "once", at: at.toISOString() };
+      } else if (atRaw) {
+        // Once, at a date and time. The model gives the moment; the time of day comes from the
+        // user's own words where they said it plainly, as for a daily one.
         if (cadence) {
           return { ok: false, content: "at is for a one-time schedule; daily_at and every_minutes are for a repeating one. Give one or the other." };
         }
-        const now = (context.now ?? (() => new Date()))();
         const once = parseOnceTime(atRaw, now);
         if (!once.ok) return { ok: false, content: `${once.reason} Nothing was scheduled.` };
         const spoken = context.request ? timeAskedFor(context.request) : null;

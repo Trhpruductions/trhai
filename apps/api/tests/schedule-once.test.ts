@@ -125,3 +125,29 @@ test("the tool schedules a reminder once at a date and time, with the time of da
   const listed = await runTool({ name: "list_schedules", arguments: {} }, context);
   assert.match(listed.content, /Call the bank: Once, on Wed 4 Nov 2026 at 3:00 PM - Reminds you/);
 });
+
+test("a day in the request makes it once, on that day, whatever the model filled in", async () => {
+  resetSchedules();
+  // Live on the card, "remind me tomorrow at 3 pm to call the bank" was saved by both models as every weekday at 3.
+  const context = { memories: [], knowledge: [], now: morning, request: "remind me tomorrow at 3 pm to call the bank" };
+  const weekdays = await runTool({ name: "add_schedule", arguments: { name: "call bank", prompt: "call the bank", daily_at: "15:00", weekdays_only: true } }, context);
+  assert.equal(weekdays.ok, true, weekdays.content);
+  assert.match(weekdays.content, /Once, on Thu 5 Nov 2026 at 3:00 PM/);
+  assert.equal(listSchedules()[0].cadence.kind, "once");
+
+  resetSchedules();
+  const wordy = await runTool({ name: "add_schedule", arguments: { name: "bank", reminder: "Call the bank", at: "tomorrow" } }, context);
+  assert.equal(wordy.ok, true, wordy.content);
+  assert.match(wordy.content, /Once, on Thu 5 Nov 2026 at 3:00 PM/);
+
+  resetSchedules();
+  const noTime = await runTool({ name: "add_schedule", arguments: { name: "plants", reminder: "Water the plants" } }, { ...context, request: "remind me on Friday to water the plants" });
+  assert.equal(noTime.ok, false);
+  assert.match(noTime.content, /Fri 6 Nov 2026: at what time\?/);
+  assert.equal(listSchedules().length, 0);
+
+  // A repeat stays a repeat.
+  const repeat = await runTool({ name: "add_schedule", arguments: { name: "standup", prompt: "standup", daily_at: "09:00" } }, { ...context, request: "every Friday at 9 am remind me about standup" });
+  assert.equal(repeat.ok, true, repeat.content);
+  assert.equal(listSchedules()[0].cadence.kind, "daily");
+});
