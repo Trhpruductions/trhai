@@ -26,9 +26,9 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { engineRequestsInFlight } from "./engineFetch.js";
-import { enginePaths, restartEngine } from "./modelEngine.js";
+import { discoverModels, enginePaths, restartEngine } from "./modelEngine.js";
 import {
-  canAnswer, planSetup, readHardware, recommendedModel, recommendedVisionModel, setupJob, setupStatus, startSetup,
+  canAnswer, modelCatalog, planSetup, readHardware, recommendedModel, recommendedVisionModel, setupJob, setupStatus, startSetup,
   type Hardware, type SetupDeps, type SetupJob, type SetupRequest, type SetupStatus
 } from "./modelSetup.js";
 import { toolCatalogue, type ToolDef } from "./toolCatalog.js";
@@ -109,11 +109,20 @@ function writeMarker(env: NodeJS.ProcessEnv, marker: Marker): void {
 
 // ---------------------------------------------------------------- what is required
 
-/** The bundle, for this PC: its engine, the model to talk with and the one that looks at pictures (one and the same with oneModel), and every tool. */
+/**
+ * The bundle, for this PC: its engine, the model to talk with and the one that looks at pictures (one and the
+ * same with oneModel), and every tool.
+ *
+ * A copy that already has a model that looks at pictures is asked for no model: a picture model talks as well,
+ * and what is recommended for a new copy changes (one model since 2026-11-16, the 4B on an 8 GB card), which
+ * must not make every copy with the coder and the 8B download the 4B too.
+ */
 export function requiredRequest(hardware: Hardware, tools: ToolDef[] = toolCatalogue, env: NodeJS.ProcessEnv = process.env): SetupRequest {
+  const installed = discoverModels(enginePaths(env).modelsDir);
+  const hasPictures = installed.some((model) => (model as { vision?: boolean }).vision === true || modelCatalog.some((entry) => entry.vision && entry.id === model.id));
   return {
     engine: true,
-    models: [...new Set([recommendedModel(hardware, env), recommendedVisionModel(hardware)])],
+    models: hasPictures ? [] : [...new Set([recommendedModel(hardware, env), recommendedVisionModel(hardware)])],
     // The tools are built for Windows; a PC that is not one is asked for none.
     tools: process.platform === "win32" ? tools.map((tool) => tool.id) : []
   };

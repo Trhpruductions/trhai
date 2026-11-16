@@ -26,7 +26,9 @@ type EngineModel = import("../src/services/modelEngine.js").EngineModel;
 const gib = 1024 ** 3;
 const bigPc: Hardware = { totalMemoryBytes: 32 * gib, cpuCores: 12, gpu: { vendor: "nvidia", name: "A card", memoryMiB: 8192, driver: "581.0" } };
 const smallPc: Hardware = { totalMemoryBytes: 8 * gib, cpuCores: 4, gpu: null };
-const on = { TRHAI_ONE_MODEL: "on" } as NodeJS.ProcessEnv;
+// A runtime folder with nothing in it: this PC's real one may hold a picture model, and a copy that has one is asked for none.
+const nothing = path.join(tmpdir(), "trhai-nothing-here");
+const on = { TRHAI_ONE_MODEL: "on", TRHAI_RUNTIME_DIR: nothing } as NodeJS.ProcessEnv;
 const entry = (id: string, vision: boolean): EngineModel => ({ id, status: "unloaded", windowTokens: null, sizeBytes: 1, vision, failed: false });
 const picture = "qwen3-vl-8b-abliterated";
 const smallPicture = "qwen3-vl-4b-abliterated";
@@ -125,7 +127,7 @@ test("it is on, since the run on the graphics card of 2026-11-08, and the settin
 });
 
 test("off, a new copy is recommended the pair, as before", () => {
-  const off = { TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv;
+  const off = { TRHAI_ONE_MODEL: "off", TRHAI_RUNTIME_DIR: nothing } as NodeJS.ProcessEnv;
   assert.equal(recommendedModel(bigPc, off), coder);
   assert.equal(recommendedVisionModel(bigPc), smallPicture, "an 8 GB card gets the 4B picture model since the measurement of 2026-11-05");
   assert.equal(recommendedVisionModel(biggerCard), picture);
