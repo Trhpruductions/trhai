@@ -187,9 +187,9 @@ export const modelCatalog: CatalogModel[] = [
   },
   {
     id: "qwen3-vl-8b-abliterated",
-    label: "Qwen3 VL 8B (pictures, no refusals)",
-    summary: "Reads the pictures, screenshots and documents you share, the text in them included, and describes what it sees without refusing.",
-    needs: "16 GB of memory, or a graphics card with 8 GB",
+    label: "Qwen3 VL 8B (talks and reads pictures, no refusals)",
+    summary: "Talks, uses the tools, and reads the pictures, screenshots and documents you share, the text in them included, without refusing. On its own it is the whole assistant.",
+    needs: "16 GB of memory, or a graphics card with 12 GB",
     license: apache,
     vision: true,
     files: [
@@ -199,8 +199,8 @@ export const modelCatalog: CatalogModel[] = [
   },
   {
     id: "qwen3-vl-4b-abliterated",
-    label: "Qwen3 VL 4B (pictures, no refusals)",
-    summary: "Reads pictures and screenshots on a smaller PC, text in them included, and describes what it sees without refusing.",
+    label: "Qwen3 VL 4B (talks and reads pictures, no refusals)",
+    summary: "Talks, uses the tools, and reads pictures and screenshots, text in them included, without refusing: the whole assistant on a PC with an 8 GB card or less.",
     needs: "8 GB of memory",
     license: apache,
     vision: true,
@@ -292,14 +292,15 @@ export function hasRoomForSevenB(hardware: Hardware): boolean {
  * pair is 10.5 GB and the one model 5.8 GB, so the whole install goes from about 12 GB
  * to about 7 GB; and there is nothing to swap when a picture arrives in a conversation.
  *
- * Off until it has been shown to work. The one measurement so far is a single tool call
- * on the CPU (docs/23), and the pair's coder is what the assistant was measured and tuned
- * with, so turning this on before a run on the graphics card with the whole tool set
- * would be a guess made for every new install. TRHAI_ONE_MODEL=on or =off says for one copy.
+ * On since the run on the graphics card of 2026-11-08 (docs/21): put the same twenty-one
+ * requests to each, the 4B picture model alone did seventeen (every tool asked for, and the
+ * picture), the 7B coder eleven, answering in words where it should have called a tool; and
+ * the picture model was faster, at 60 tokens a second to the coder's 40 on an 8 GB card.
+ * TRHAI_ONE_MODEL=on or =off says for one copy.
  *
  * A copy that already has both keeps both, and keeps talking with the coder.
  */
-export const oneModelByDefault: boolean = false;
+export const oneModelByDefault: boolean = true;
 
 export function oneModel(env: NodeJS.ProcessEnv = process.env): boolean {
   const asked = env.TRHAI_ONE_MODEL?.trim().toLowerCase();
@@ -314,9 +315,15 @@ export function recommendedModel(hardware: Hardware, env: NodeJS.ProcessEnv = pr
   return hasRoomForSevenB(hardware) ? "qwen2.5-coder-7b-abliterated" : "qwen3-4b-instruct-2507-abliterated";
 }
 
-/** The model that looks at pictures, to install beside it, in the size the PC suits. */
+/**
+ * The model that looks at pictures, in the size the PC suits. The 8B wants more card than the
+ * 7B coder: on an 8 GB card, with its picture encoder beside it, it ran at 4 to 10 seconds a
+ * token and timed out (measured 2026-11-05), while the 4B ran at 60 tokens a second. So a card
+ * has to have 12 GB for the 8B; a PC with no card goes by memory, as for the coder.
+ */
 export function recommendedVisionModel(hardware: Hardware): string {
-  return hasRoomForSevenB(hardware) ? "qwen3-vl-8b-abliterated" : "qwen3-vl-4b-abliterated";
+  const roomForEightB = hardware.gpu !== null ? hardware.gpu.memoryMiB >= 11500 : hardware.totalMemoryBytes >= 15 * gib;
+  return roomForEightB ? "qwen3-vl-8b-abliterated" : "qwen3-vl-4b-abliterated";
 }
 
 /**

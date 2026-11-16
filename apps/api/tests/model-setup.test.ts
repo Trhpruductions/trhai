@@ -58,9 +58,15 @@ async function finished(): Promise<NonNullable<ReturnType<typeof setupJob>>> {
 
 test("a small PC without a card gets the CPU engine, the 4B model and settings that suit it", () => {
   assert.equal(engineVariantFor(smallPc), "cpu");
-  assert.equal(recommendedModel(smallPc), "qwen3-4b-instruct-2507-abliterated");
+  // One model by default (modelSetup.ts): the 4B picture model talks too. Asked for the pair, the 4B chat model.
+  assert.equal(recommendedModel(smallPc), "qwen3-vl-4b-abliterated");
+  assert.equal(recommendedModel(smallPc, { TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv), "qwen3-4b-instruct-2507-abliterated");
   assert.equal(recommendedVisionModel(smallPc), "qwen3-vl-4b-abliterated");
   assert.deepEqual(hardwareDefaults(smallPc, {}), {
+    TRHAI_CONTEXT_TOKENS: "8192", TRHAI_MODEL_TIMEOUT_MS: "600000", TRHAI_IDLE_UNLOAD_SECONDS: "1800",
+    TRHAI_MODEL: "qwen3-vl-4b-abliterated", TRHAI_VISION_MODEL: "qwen3-vl-4b-abliterated"
+  });
+  assert.deepEqual(hardwareDefaults(smallPc, { TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv), {
     TRHAI_CONTEXT_TOKENS: "8192", TRHAI_MODEL_TIMEOUT_MS: "600000", TRHAI_IDLE_UNLOAD_SECONDS: "1800",
     TRHAI_MODEL: "qwen3-4b-instruct-2507-abliterated", TRHAI_VISION_MODEL: "qwen3-vl-4b-abliterated"
   });
@@ -76,20 +82,26 @@ test("what .env already says is never overridden", () => {
   assert.equal(hardwareDefaults(smallPc, { TRHAI_VISION_MODEL: "llava-7b" }).TRHAI_VISION_MODEL, undefined);
 });
 
-test("a PC with an 8 GB card keeps the defaults and gets the 7B coder and the 8B picture model; the driver picks the CUDA build", () => {
-  assert.deepEqual(hardwareDefaults(bigPc, {}), {});
-  assert.equal(recommendedModel(bigPc), "qwen2.5-coder-7b-abliterated");
-  assert.equal(recommendedVisionModel(bigPc), "qwen3-vl-8b-abliterated");
+test("a PC with an 8 GB card keeps the defaults and gets the 7B coder but the 4B picture model; the driver picks the CUDA build", () => {
+  const pair = { TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv;
+  assert.deepEqual(hardwareDefaults(bigPc, pair), {});
+  assert.equal(recommendedModel(bigPc, pair), "qwen2.5-coder-7b-abliterated");
+  // Measured 2026-11-05: the 8B picture model on an 8 GB card ran at seconds a token and timed out; the 4B at 60 a second.
+  assert.equal(recommendedVisionModel(bigPc), "qwen3-vl-4b-abliterated");
+  const twelveGbCard: Hardware = { ...bigPc, gpu: { ...bigPc.gpu!, memoryMiB: 12288 } };
+  assert.equal(recommendedVisionModel(twelveGbCard), "qwen3-vl-8b-abliterated");
   assert.equal(engineVariantFor(bigPc), "cuda-13.4");
   assert.equal(engineVariantFor({ gpu: { ...bigPc.gpu!, driver: "551.86" } }), "cuda-12.4");
   const sixteenGb: Hardware = { totalMemoryBytes: 16 * gib, cpuCores: 8, gpu: null };
-  assert.equal(recommendedModel(sixteenGb), "qwen2.5-coder-7b-abliterated", "16 GB of memory runs the 7B too");
+  assert.equal(recommendedModel(sixteenGb, pair), "qwen2.5-coder-7b-abliterated", "16 GB of memory runs the 7B too");
   assert.equal(recommendedVisionModel(sixteenGb), "qwen3-vl-8b-abliterated");
 });
 
 test("what is recommended is a model that chats and a model that looks at pictures, both with their refusals taken out", () => {
   for (const hardware of [smallPc, bigPc]) {
-    const chat = modelCatalog.find((entry) => entry.id === recommendedModel(hardware));
+    // By default the one model recommended is the picture model, which talks (one-model.test.ts); the pair, when asked for:
+    assert.equal(recommendedModel(hardware), recommendedVisionModel(hardware));
+    const chat = modelCatalog.find((entry) => entry.id === recommendedModel(hardware, { TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv));
     const pictures = modelCatalog.find((entry) => entry.id === recommendedVisionModel(hardware));
     assert.ok(chat && pictures, "both are in the catalogue");
     assert.equal(chat.vision, false);
@@ -108,7 +120,8 @@ test("what is recommended is a model that chats and a model that looks at pictur
 test("the status flags both recommended models, and a picture model's parts are named the way the engine finds them", () => {
   const status = setupStatus({ TRHAI_RUNTIME_DIR: path.join(tmpdir(), "trhai-nothing-here") } as NodeJS.ProcessEnv);
   const flagged = status.catalog.filter((entry) => entry.recommended).map((entry) => entry.id).sort();
-  assert.deepEqual(flagged, [status.recommendedModel, status.recommendedVisionModel].sort());
+  // One model by default, so the two names are usually one; the pair, when asked for, flags two.
+  assert.deepEqual(flagged, [...new Set([status.recommendedModel, status.recommendedVisionModel])].sort());
   assert.equal(status.recommendedVisionModel, recommendedVisionModel(readHardware()));
   // discoverModels finds a model's picture part by a name that starts with "mmproj", and its model by
   // the other .gguf in the folder: a picture model whose files are named otherwise would be installed

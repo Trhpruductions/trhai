@@ -29,6 +29,9 @@ const smallPc: Hardware = { totalMemoryBytes: 8 * gib, cpuCores: 4, gpu: null };
 const on = { TRHAI_ONE_MODEL: "on" } as NodeJS.ProcessEnv;
 const entry = (id: string, vision: boolean): EngineModel => ({ id, status: "unloaded", windowTokens: null, sizeBytes: 1, vision, failed: false });
 const picture = "qwen3-vl-8b-abliterated";
+const smallPicture = "qwen3-vl-4b-abliterated";
+/** A card with the room the 8B picture model needs. */
+const biggerCard: Hardware = { ...bigPc, gpu: { ...bigPc.gpu!, memoryMiB: 12288 } };
 const coder = "qwen2.5-coder-7b-abliterated";
 const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489", "hex");
 const configFor = (baseUrl: string) => ({ baseUrl, model: "qwen2.5-coder", modelFromEnv: false, timeoutMs: 5000 });
@@ -111,10 +114,10 @@ test("a PC with an engine and only a picture model is set up, and one with no mo
 
 // ---------------------------------------------------------------- new copies, when it goes on
 
-test("it is off until it has been shown to work, and the setting decides it for one copy", () => {
-  // Turning this on is a decision that follows a run on the graphics card, not a default to drift into.
-  assert.equal(oneModelByDefault, false);
-  assert.equal(oneModel({} as NodeJS.ProcessEnv), false);
+test("it is on, since the run on the graphics card of 2026-11-08, and the setting decides it for one copy", () => {
+  // Turned on after the run on the card, not drifted into: see modelSetup.ts.
+  assert.equal(oneModelByDefault, true);
+  assert.equal(oneModel({} as NodeJS.ProcessEnv), true);
   assert.equal(oneModel(on), true);
   assert.equal(oneModel({ TRHAI_ONE_MODEL: " ON " } as NodeJS.ProcessEnv), true);
   assert.equal(oneModel({ TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv), false);
@@ -124,22 +127,26 @@ test("it is off until it has been shown to work, and the setting decides it for 
 test("off, a new copy is recommended the pair, as before", () => {
   const off = { TRHAI_ONE_MODEL: "off" } as NodeJS.ProcessEnv;
   assert.equal(recommendedModel(bigPc, off), coder);
-  assert.equal(recommendedVisionModel(bigPc), picture);
-  assert.deepEqual(requiredRequest(bigPc, [], off).models, [coder, picture]);
+  assert.equal(recommendedVisionModel(bigPc), smallPicture, "an 8 GB card gets the 4B picture model since the measurement of 2026-11-05");
+  assert.equal(recommendedVisionModel(biggerCard), picture);
+  assert.deepEqual(requiredRequest(bigPc, [], off).models, [coder, smallPicture]);
 });
 
 test("on, a new copy is recommended one model, the one that suits the PC, named once", () => {
-  assert.equal(recommendedModel(bigPc, on), picture);
-  assert.equal(recommendedModel(smallPc, on), "qwen3-vl-4b-abliterated");
-  assert.deepEqual(requiredRequest(bigPc, [], on).models, [picture]);
-  assert.deepEqual(requiredRequest(smallPc, [], on).models, ["qwen3-vl-4b-abliterated"]);
+  assert.equal(recommendedModel(bigPc, on), smallPicture);
+  assert.equal(recommendedModel(biggerCard, on), picture);
+  assert.equal(recommendedModel(smallPc, on), smallPicture);
+  assert.deepEqual(requiredRequest(bigPc, [], on).models, [smallPicture]);
+  assert.deepEqual(requiredRequest(biggerCard, [], on).models, [picture]);
+  assert.deepEqual(requiredRequest(smallPc, [], on).models, [smallPicture]);
 });
 
-test("on, the download is what the owner was told: the models 5.8 GB instead of 10.5 GB on a PC with an 8 GB card", () => {
+test("on, the download is one model instead of the pair: 3.0 GB instead of 7.6 GB on a PC with an 8 GB card", () => {
   const size = (id: string) => modelSize(modelCatalog.find((model) => model.id === id) as (typeof modelCatalog)[number]);
-  const pair = size(coder) + size(picture);
-  assert.ok(Math.abs(pair / 1e9 - 10.46) < 0.01, `the pair is ${pair / 1e9} GB`);
-  assert.ok(Math.abs(size(picture) / 1e9 - 5.78) < 0.01, `the one model is ${size(picture) / 1e9} GB`);
+  const pair = size(coder) + size(smallPicture);
+  assert.ok(Math.abs(pair / 1e9 - 7.63) < 0.01, `the pair is ${pair / 1e9} GB`);
+  assert.ok(Math.abs(size(smallPicture) / 1e9 - 2.95) < 0.01, `the one model is ${size(smallPicture) / 1e9} GB`);
+  assert.ok(Math.abs(size(picture) / 1e9 - 5.78) < 0.01, `the 8B, for a 12 GB card, is ${size(picture) / 1e9} GB`);
 
   // And that is what would really be planned. A step for each model, once.
   const empty = mkdtempSync(path.join(tmpdir(), "trhai-one-model-plan-"));
@@ -147,7 +154,7 @@ test("on, the download is what the owner was told: the models 5.8 GB instead of 
     const planned = planSetup(requiredRequest(bigPc, [], on), { env: { TRHAI_RUNTIME_DIR: empty } as NodeJS.ProcessEnv, hardware: bigPc, tools: [] });
     assert.equal(planned.ok, true);
     if (planned.ok) {
-      assert.deepEqual(planned.plan.steps.filter((step) => step.kind === "model").map((step) => step.id), [picture]);
+      assert.deepEqual(planned.plan.steps.filter((step) => step.kind === "model").map((step) => step.id), [smallPicture]);
     }
   } finally {
     rmSync(empty, { recursive: true, force: true });

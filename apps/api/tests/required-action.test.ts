@@ -7,8 +7,8 @@ import { fakeEngine, type ScriptedReply } from "./helpers/fakeEngine.js";
 
 // Found on the graphics card on 2026-11-05: the model answered "Task added" and "Reminder added" having
 // called nothing, and asked for an audio file it overwrote notes.txt. When a request plainly asks for one
-// kind of thing, the engine is told a call is required, the general writers are out of reach, and a reply
-// with nothing done does not get to say it was.
+// kind of thing, only its tools are on offer, the general writers are out of reach, and a reply with
+// nothing done does not get to say it was.
 
 const workspace = mkdtempSync(path.join(tmpdir(), "trhai-required-"));
 process.env.ASCEND_WORKSPACE = workspace;
@@ -56,19 +56,19 @@ test("until it has acted only that family is on offer, then the writers stay out
   const offered = named("add_task", "list_tasks", "current_datetime", "write_file", "edit_file", "run_command", "read_file");
   const family = { tools: ["add_task", "list_tasks"], lookups: ["current_datetime"] };
   const before = narrowForAction(offered, family, false);
-  assert.equal(before.forced, true);
+  assert.equal(before.onlyTheFamily, true);
   assert.deepEqual(namesOf(before.tools), ["add_task", "list_tasks", "current_datetime"]);
   const after = narrowForAction(offered, family, true);
-  assert.equal(after.forced, false);
+  assert.equal(after.onlyTheFamily, false);
   assert.deepEqual(namesOf(after.tools), ["add_task", "list_tasks", "current_datetime", "read_file"]);
   assert.ok(namesOf(narrowForAction(offered, family, true, true).tools).includes("write_file"));
   // Not on offer at all, as in a turn that may not write: nothing to require.
-  assert.equal(narrowForAction(named("read_file"), family, false).forced, false);
+  assert.equal(narrowForAction(named("read_file"), family, false).onlyTheFamily, false);
   assert.equal(actedOn(family, [{ name: "current_datetime" }]), false, "looking something up is not doing it");
   assert.equal(actedOn(family, [{ name: "add_task" }]), true);
 });
 
-test("the engine is told a call is required, and is offered only the family, then released", async () => {
+test("only the family is on offer until it has acted, and the engine is never told a call is required", async () => {
   resetTasks();
   const { result, engine } = await run("add buy milk to my to-do list", [
     { message: { content: "", tool_calls: [{ function: { name: "add_task", arguments: { title: "Buy milk" } } }] } },
@@ -76,7 +76,8 @@ test("the engine is told a call is required, and is offered only the family, the
   ]);
   const first = engine.chats[0] as unknown as { tool_choice?: string; tools: Array<{ function: { name: string } }> };
   const second = engine.chats[1] as unknown as { tool_choice?: string; tools?: Array<{ function: { name: string } }> };
-  assert.equal(first.tool_choice, "required");
+  // On the real model that setting stops the reply from ever ending; see requiredAction.ts.
+  assert.equal(first.tool_choice, undefined);
   assert.deepEqual(namesOf(first.tools).sort(), ["add_task", "complete_task", "list_tasks", "remove_task"]);
   assert.equal(second.tool_choice, undefined);
   assert.equal(namesOf(second.tools).includes("write_file"), false);
@@ -85,9 +86,10 @@ test("the engine is told a call is required, and is offered only the family, the
   if (result.ok) assert.match(result.text, /Added to your tasks: Buy milk/);
 });
 
-test("an ordinary question is not forced to anything", async () => {
-  const { engine } = await run("what is the capital of Australia?", [{ message: { content: "Canberra." } }]);
-  assert.equal((engine.chats[0] as unknown as { tool_choice?: string }).tool_choice, undefined);
+test("an ordinary question keeps everything it was offered", async () => {
+  const { result, engine } = await run("what is the capital of Australia?", [{ message: { content: "Canberra." } }]);
+  assert.equal(engine.chats.length, 1);
+  if (result.ok) assert.equal(result.text, "Canberra.");
 });
 
 test("a model that says it added something and called nothing is told so, and then the person is told the truth", async () => {

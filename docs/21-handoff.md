@@ -580,15 +580,42 @@ audio file, it overwrote notes.txt. `requiredAction.ts` decides from the request
 intent checks that offer each tool, and the agent loop acts on it in three steps:
 
 - Until one of that family's tools has run, only that family (and what it may need to look up) is
-  on offer, and the request carries `tool_choice: "required"`, which llama.cpp enforces with a grammar.
+  on offer. Do not add `tool_choice: "required"`: the coder model writes its call as text in a fence,
+  the grammar does not accept that, and the reply never ends (22,000 tokens on the card).
 - For the whole turn the general writers and the shell are withheld, unless the request names a file
   of its own (`namesAFilePath`).
-- If the call was required and none ran, the model is told once. After that the person gets
+- If the offer was cut down and none of the family ran, the model is told once. After that the person gets
   `notDoneReply`, never the model's claim.
 
 A family that is not on offer, as in a turn that may not write, requires nothing. Tests:
 `required-action.test.ts`, which use a fake engine, so they prove the request and the replies but
-not that a real model obeys. That takes a run on the card.
+not that a real model obeys.
+
+**The run on the card, 2026-11-08** (RTX 4060 Ti, 8 GB; twenty-one requests, each checked by what
+really happened, each model alone on its own ports and data, machine access off): the 7B coder did
+11 and the 4B picture model 17. The coder, offered only the right tools, still answered in words -
+a to-do list it made up, "I've added water the plants" with nothing called, a CSV in the chat instead
+of `make_spreadsheet` - so for it the honest reply is what shows. The picture model called every
+tool asked for, read the picture, and ran at 60 tokens a second to the coder's 40; so one model is
+now the default for new copies (docs/23). Its four misses were the app's, fixed here:
+
+- "remind me tomorrow at 3 pm" was saved by both models as every weekday at 3, and "next Friday" on
+  a Sunday went on the calendar as a Tuesday by one and a Thursday by the other. `dayWords.ts` reads
+  the day from the user's own words, as `scheduleRequest.ts` already reads the time: `add_event` and
+  `add_schedule` take it from there where one day is named, and one day with no repeat is once.
+- "what's on my calendar?" was answered by the composer from the conversation ("You mentioned this
+  earlier: put the dentist on my calendar"), never reaching the tool. A question that
+  `actionAskedFor` maps to a tool is no longer answered from memory, a document or history.
+- `read_file` was given `D:/projects/app/notes.txt`: the model copied the example path from the
+  tool's description. The descriptions now say to pass a bare name as written and never a path of
+  the model's own.
+- `remember` and recall between conversations: not a fault. Memory is per install (the UI keeps one
+  session id in localStorage), and the test had used a new id per request.
+
+Two test files were written to the owner's real Documents and OneDrive\Documents folders, because
+machine access is on by default and the coder asked for "the Documents folder": a test stack sets
+`TRHAI_MACHINE_ACCESS=off`. The harness is the scratchpad's `gpu-eval.mjs` (session folder of
+2026-11-05).
 
 ## How to verify anything you change
 

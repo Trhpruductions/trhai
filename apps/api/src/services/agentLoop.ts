@@ -1545,7 +1545,7 @@ export async function runAgent(
   // A request that plainly asks for one kind of thing to be done; see requiredAction.ts.
   const actionFamily = actionAskedFor(context.request ?? question);
   // Whether a call was required of the model this turn: a turn that may not write never offers the tool, and is not held to it.
-  let callWasRequired = false;
+  let familyWasOffered = false;
   const shape = analyzeRequest(question).shape;
   // "Make that answer one sentence" asks for words, the same as a question
   // does; see reshapesAnEarlierReply.
@@ -1897,7 +1897,7 @@ export async function runAgent(
       : [];
     // Narrowed to what was asked for, and a call required until it has happened; see requiredAction.ts.
     const narrowed = actionFamily && offerTools ? narrowForAction(allOffered, actionFamily, actedOn(actionFamily, toolsUsed), namesAFilePath(context.request ?? question)) : null;
-    if (narrowed?.forced) callWasRequired = true;
+    if (narrowed?.onlyTheFamily) familyWasOffered = true;
     const offeredTools = narrowed ? narrowed.tools : allOffered;
     const offeredNames = new Set(offeredTools.map((definition) => definition.function.name));
 
@@ -1948,8 +1948,7 @@ export async function runAgent(
           // Withheld while disarmed rather than offered and refused: a
           // model that can see run_command will reason about it and try to
           // talk its way into it; one that never sees it cannot.
-          ...(offerTools ? { tools: offeredTools } : {}),
-          ...(narrowed?.forced ? { tool_choice: "required" } : {})
+          ...(offerTools ? { tools: offeredTools } : {})
         }),
         signal: deadline.signal
       });
@@ -2451,7 +2450,7 @@ export async function runAgent(
       // and the reply the user got was "I'm sorry, but I can't assist with
       // that."
       // Asked plainly for something and none of its tools ran: whatever the words say, it was not done.
-      if (actionFamily && callWasRequired && !actedOn(actionFamily, toolsUsed) && !awaitingConfirmation) {
+      if (actionFamily && familyWasOffered && !actedOn(actionFamily, toolsUsed) && !awaitingConfirmation) {
         if (!correctedMutationClaim) {
           correctedMutationClaim = true;
           spendCorrection();

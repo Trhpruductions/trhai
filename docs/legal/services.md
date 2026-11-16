@@ -83,8 +83,8 @@ The models are made by Alibaba's Qwen team and, for the no-refusals versions, by
 | --- | --- | --- |
 | Qwen2.5 Coder 7B (no refusals) | Apache 2.0 | Yes |
 | Qwen3 4B Instruct (no refusals) | Apache 2.0 | Yes |
-| Qwen3 VL 8B (pictures, no refusals) | Apache 2.0 | Yes |
-| Qwen3 VL 4B (pictures, no refusals) | Apache 2.0 | Yes |
+| Qwen3 VL 8B (talks and reads pictures, no refusals) | Apache 2.0 | Yes |
+| Qwen3 VL 4B (talks and reads pictures, no refusals) | Apache 2.0 | Yes |
 | Qwen3 4B Instruct | Apache 2.0 | Yes |
 | Qwen2.5 Coder 7B | Apache 2.0 | Yes |
 | Qwen3 8B | Apache 2.0 | Yes |

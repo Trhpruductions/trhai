@@ -11,13 +11,18 @@ import {
 // for an audio file, it overwrote notes.txt instead. Telling the model what to do does not reach that far.
 //
 // So the request decides, in three steps the agent loop takes:
-//   - until one of the tools has run, only that family is offered, and the engine is told a call is
-//     required (tool_choice), which it enforces with a grammar: the model cannot answer in words instead;
+//   - until one of the tools has run, only that family is offered, which on the card is enough for the
+//     model to call one;
 //   - for the whole turn the general file writers and the shell are out of reach, unless the request
 //     names a file of its own, so a request for one thing cannot write over another;
 //   - a reply with none of the family having run does not get to say it was done.
 //
 // What counts is decided by the same intent checks that offer each family, so nothing new is matched here.
+//
+// Not tool_choice: "required". Tried on the card on 2026-11-05: this model writes its call as text in a
+// ```json fence, which that setting's grammar does not take as a call, and the grammar will not let the
+// reply end without one. It wrote 22,000 tokens of "let me know" before the run was stopped. With the same
+// narrowed tools and no such setting, it wrote the call and stopped in a second.
 
 export type ActionFamily = {
   /** Any of these having run, well or not, means the request was acted on: what it said is the answer. */
@@ -55,21 +60,21 @@ export function actedOn(family: ActionFamily, toolsUsed: ReadonlyArray<{ name: s
   return toolsUsed.some((used) => family.tools.includes(used.name));
 }
 
-/** What to offer this round. `forced` is whether the engine should be told a call is required. */
+/** What to offer this round. `onlyTheFamily` is whether the offer was cut down to the family, so a reply with none of it run is not done. */
 export function narrowForAction<T extends { function: { name: string } }>(
   offered: T[],
   family: ActionFamily,
   acted: boolean,
   /** The request names a file of its own: once the action is done, writing that file is still part of what was asked. */
   namesAFile = false
-): { tools: T[]; forced: boolean } {
+): { tools: T[]; onlyTheFamily: boolean } {
   if (!acted) {
     const fromTheFamily = offered.filter((definition) => family.tools.includes(definition.function.name) || family.lookups.includes(definition.function.name));
     // None of them on offer, as in a turn that may not write: nothing to require.
-    if (fromTheFamily.some((definition) => family.tools.includes(definition.function.name))) return { tools: fromTheFamily, forced: true };
+    if (fromTheFamily.some((definition) => family.tools.includes(definition.function.name))) return { tools: fromTheFamily, onlyTheFamily: true };
   }
-  return { tools: namesAFile ? offered : offered.filter((definition) => !generalWriters.has(definition.function.name)), forced: false };
+  return { tools: namesAFile ? offered : offered.filter((definition) => !generalWriters.has(definition.function.name)), onlyTheFamily: false };
 }
 
 /** Said instead of a claim, when the model would not act. Short, true, and something to do next. */
-export const notDoneReply = "That did not get done: nothing was added, saved or changed. Please try asking again.";
+export const notDoneReply = "That did not get done: nothing was read, added, saved or changed. Please try asking again.";

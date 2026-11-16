@@ -1271,3 +1271,18 @@ test("a spoken instruction is a command, so it is not quoted back as something t
   const reply = composeReply({ message: "What is 12 times 12?", history, memories: [], knowledge: [] } as never);
   assert.doesNotMatch(reply.text, /You mentioned this earlier/);
 });
+
+test("what is on the calendar or the list is read with a tool, not recited from the conversation", () => {
+  const history = [
+    { role: "user" as const, content: "put the dentist on my calendar for next Friday at 2 pm" },
+    { role: "assistant" as const, content: "Added to your calendar: Fri 13 Nov 2026 at 2:00 PM: Dentist" }
+  ];
+  const calendar = composeReply({ mode: "general", message: "what's on my calendar?", memories: [], history, knowledge: [] });
+  assert.equal(calendar.strategy, "no-answer");
+  assert.doesNotMatch(calendar.text, /mentioned this earlier/);
+  const list = composeReply({ mode: "general", message: "what's on my to-do list?", memories: [], history: [{ role: "user", content: "add buy milk to my to-do list" }, { role: "assistant", content: "Added to your tasks: buy milk" }], knowledge: [] });
+  assert.equal(list.strategy, "no-answer");
+  // Anything else said earlier is still found there.
+  const dog = composeReply({ mode: "general", message: "what's my dog's name?", memories: [], history: [{ role: "user", content: "my dog's name is Biscuit" }, { role: "assistant", content: "Noted." }], knowledge: [] });
+  assert.match(dog.text, /mentioned this earlier/);
+});
