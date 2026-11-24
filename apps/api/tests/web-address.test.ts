@@ -174,9 +174,12 @@ test("a question about a page is answered by the conversation's own model, and a
     assert.ok(forThePage.length > 0, "the model was asked");
     assert.deepEqual([...new Set(forThePage)], ["qwen3-8b"], "the model the conversation chose, and only that one");
 
-    // The control: a file on a drive is code work, and goes to the coding model first.
+    // A file on a drive is code work, which the coder suits - but the conversation chose its model,
+    // and a choice a person made is kept whatever the task (modelRouting.ts, 2026-11-23). The coder
+    // is next in the order, for when the chosen one will not load. Before, the coder went ahead of
+    // the conversation's choice for code work.
     const forTheFile = await ask("web-address-file", "what's in D:/projects/app/server.js?");
-    assert.equal(forTheFile[0], "qwen2.5-coder-7b");
+    assert.equal(forTheFile[0], "qwen3-8b");
   } finally {
     if (previous === undefined) delete process.env.TRHAI_ENGINE_URL;
     else process.env.TRHAI_ENGINE_URL = previous;
