@@ -53,15 +53,28 @@ export function crossSiteVerdict(marks: Marks, method: string, path: string, con
   return { refused: false };
 }
 
-/** The guard, as middleware. Sits before CORS, so a refused request is never answered at all. */
+/**
+ * The guard, as middleware. Sits before CORS, so a refused request is never answered at all.
+ *
+ * A refusal is logged, once per origin and route for the life of the process: it happens before
+ * the request log, and for two versions nobody could tell from the log that the app's own window
+ * was being refused. Once, because a window that is refused asks again every two seconds.
+ */
 export function refuseCrossSite(configuredOrigins?: string) {
+  const noted = new Set<string>();
   return (req: Request, res: Response, next: NextFunction): void => {
-    const verdict = crossSiteVerdict({
+    const marks = {
       origin: req.headers.origin,
       secFetchSite: req.get("sec-fetch-site"),
       secFetchDest: req.get("sec-fetch-dest")
-    }, req.method, req.path, configuredOrigins);
+    };
+    const verdict = crossSiteVerdict(marks, req.method, req.path, configuredOrigins);
     if (verdict.refused) {
+      const key = `${marks.origin ?? "-"} ${marks.secFetchSite ?? "-"} ${req.method} ${req.path}`;
+      if (!noted.has(key)) {
+        noted.add(key);
+        console.warn(`[origin] refused ${key}: ${verdict.message}`);
+      }
       res.status(403).json({ code: "CROSS_SITE_REFUSED", message: verdict.message, traceId: "trace-local" });
       return;
     }
