@@ -36,7 +36,7 @@ function Message({ message, last, onConfirm, onRegenerate }: {
       </div>
     );
   }
-  const credit = replyProvenance(message.strategy, message.model);
+  const credit = replyProvenance(message.strategy, message.model, message.routing);
   // The files this reply made: from the API when it just arrived, from its own text when the conversation was opened again.
   const files = message.streaming ? [] : message.files ?? madeFilesInText(message.text);
   const sending = message.pendingConfirmation?.tool === "send_text" || message.pendingConfirmation?.tool === "send_email";

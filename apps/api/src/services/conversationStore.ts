@@ -34,6 +34,8 @@ export type StoredTurn = {
    */
   strategy?: string;
   model?: string;
+  /** Why that model: the kind of task the request was read as (modelRouting.ts). */
+  routing?: { kind: string; reason: string };
 };
 
 export type StoredConversation = {
@@ -322,7 +324,7 @@ export function appendTurn(
   key: string,
   role: StoredTurn["role"],
   content: string,
-  provenance?: { strategy?: string; model?: string },
+  provenance?: { strategy?: string; model?: string; routing?: { kind: string; reason: string } },
   conversationId?: string
 ): StoredTurn | null {
   const trimmed = typeof content === "string" ? content.trim() : "";
@@ -336,7 +338,8 @@ export function appendTurn(
     content: trimmed.length > maxContentLength ? trimmed.slice(0, maxContentLength) : trimmed,
     createdAt: new Date().toISOString(),
     ...(provenance?.strategy ? { strategy: provenance.strategy } : {}),
-    ...(provenance?.model ? { model: provenance.model } : {})
+    ...(provenance?.model ? { model: provenance.model } : {}),
+    ...(provenance?.routing ? { routing: { kind: provenance.routing.kind, reason: provenance.routing.reason } } : {})
   };
 
   // Oldest turns fall off first once the cap is reached.

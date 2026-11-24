@@ -250,7 +250,7 @@ export function readLocalModelConfig(env: NodeJS.ProcessEnv = process.env): Loca
 }
 
 export type ModelAvailability =
-  | { available: true; model: string; installedModels: string[] }
+  | { available: true; model: string; installedModels: string[]; loadedModels?: string[] }
   | { available: false; reason: string };
 
 type FetchLike = typeof fetch;
@@ -449,7 +449,13 @@ export async function checkAvailability(
     };
   }
 
-  return { available: true, model: match, installedModels: installed };
+  return {
+    available: true,
+    model: match,
+    installedModels: installed,
+    // What is in memory now, so a task any model does well keeps it rather than loading another (modelRouting.ts).
+    loadedModels: models.filter((model) => model.status === "loaded").map((model) => model.id)
+  };
 }
 
 export type GenerationRequest = {

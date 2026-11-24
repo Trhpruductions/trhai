@@ -648,6 +648,28 @@ logged, which is why the API log looked healthy. Three fixes, in 0.1.12:
 Copies on 0.1.10 and 0.1.11 cannot see 0.1.12: they install it by hand from the release page. The
 owner's own copy is installed by hand too (data backed up first, as for every release).
 
+## The right model for the task (2026-11-23)
+
+The owner's brief: not the same model for everything. `modelRouting.ts` reads each request as one
+kind of task - `pictures`, `code`, `actions` (a tool to call), `research`, `creative`, `reasoning`,
+`quick`, `general` - from the same intent checks the tools use plus a few word lists, and
+`modelOrderFor` turns that into the order of installed models to try: the coder for code, tools
+and research (it calls tools best), Qwen3 8B for reasoning and writing (it thinks first), the
+Qwen3 4B instruct for a quick one, the picture models for pictures, and every other installed
+model after, as the fallback that was always there. Three rules shape the order: a model the
+person chose (`TRHAI_MODEL`, or the conversation's own pick) goes first whatever the task; a model
+the PC has no room for (`hasRoomForSevenB`) is not tried first; and for a task any model does
+well (`anyModelWillDo`: quick, general) a model already loaded is kept, because a swap is seconds
+of loading for no better answer. The orchestrator uses it where it used to put the coder first,
+`checkAvailability` now also says which models are loaded, the reply carries `routing` (kind and
+reason) through the API and the stored turn, and the credit line under a reply says "Written by
+qwen3-8b, chosen for reasoning". Tests: `model-routing.test.ts`, `provenance.test.ts`.
+
+Not done, and said so: no model here is trained for research or writing in particular, so those
+go to the best general talker; "several models on one task" is not built (one card, one model at
+a time); there is no per-model scorekeeping yet. The table of what suits what is from the runs on
+the card (docs/21 above, docs/23), not from names, and a new model needs a run before it is placed.
+
 ## How to verify anything you change
 
 ```

@@ -80,12 +80,14 @@ export function answeredFromModelAlone(
  * labelled as that. It fell through to "Answered on this PC", under a reply
  * whose whole content was that nothing had been answered.
  */
-export function replyProvenance(strategy: string | undefined, model: string | undefined): string | null {
+export function replyProvenance(strategy: string | undefined, model: string | undefined, routing?: { kind: string; reason: string } | null): string | null {
   // "local/" is how the API labels a model's name; replies stored while the
   // models were Ollama's carry "ollama/", and are read the same way.
   const name = model?.replace(/^(?:local|ollama)\//, "").replace(/:latest$/, "");
+  // Why that model, when the API chose it for the kind of task: "Written by qwen3-8b, chosen for reasoning".
+  const chosen = routing?.reason ? `, chosen for ${routing.reason}` : "";
   switch (strategy) {
-    case "generated": return name ? `Written by ${name}` : "Written by the local model";
+    case "generated": return name ? `Written by ${name}${chosen}` : "Written by the local model";
     case "vision": return name ? `Looked at with ${name}` : "Looked at with the vision model";
     case "answer": return "Quoted from your saved notes";
     case "calendar": case "conversion": case "arithmetic": case "reading": return "Worked out on this PC";
