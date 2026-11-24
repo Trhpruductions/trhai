@@ -453,7 +453,7 @@ function recordExchange(
   req: express.Request,
   sessionId: string,
   message: string,
-  result: { assistantMessage: string; strategy?: string; model?: string }
+  result: { assistantMessage: string; strategy?: string; model?: string; routing?: { kind: string; reason: string } }
 ): string {
   const conversation = resolveConversation(sessionId, requestedConversation(req));
   const conversationId = conversation.id;
@@ -465,7 +465,7 @@ function recordExchange(
   appendTurn(sessionId, "user", userTurnText(message, req), undefined, conversationId);
   // The assistant turn carries how it was produced, so a reloaded transcript
   // still shows whether an answer was quoted or generated.
-  appendTurn(sessionId, "assistant", result.assistantMessage, { strategy: result.strategy, model: result.model }, conversationId);
+  appendTurn(sessionId, "assistant", result.assistantMessage, { strategy: result.strategy, model: result.model, routing: result.routing }, conversationId);
   return conversationId;
 }
 
@@ -850,7 +850,9 @@ export function createApp(options: AppOptions = {}) {
           buildRequest: result.buildRequest,
           // Which tools the assistant actually called. Reported so the interface
           // can show what it did rather than only what it said.
-          toolsUsed: result.toolsUsed ?? []
+          toolsUsed: result.toolsUsed ?? [],
+          // Why this model: the kind of task the request was read as (modelRouting.ts).
+          ...(result.routing ? { routing: result.routing } : {})
         },
         traceId: "trace-local"
       });

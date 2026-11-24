@@ -1,10 +1,7 @@
 import { ModelRouter, type ComposerKnowledge, type MemoryWriteOutcome } from "./modelRouter.js";
-import {
-  checkAvailability, orderedCandidates, pinnedModel, readLocalModelConfig, stoppedBeforeFinishing, withCoderFirst
-} from "./localModel.js";
+import { checkAvailability, pinnedModel, readLocalModelConfig, stoppedBeforeFinishing } from "./localModel.js";
 import { withChosenModel } from "./modelCatalog.js";
-import { isCodeWork } from "./machinePaths.js";
-import { pickAuthorModel } from "./appAuthor.js";
+import { knownHardware, modelOrderFor, taskKindFor, type Routing } from "./modelRouting.js";
 import { buildCapabilityReply, trailingRequest } from "./replyComposer.js";
 import { runAgent, type ToolOutcome } from "./agentLoop.js";
 import { inOwnName } from "./requiredAction.js";
@@ -206,6 +203,8 @@ export type OrchestratorResult = {
   groundedOn: string[];
   /** Conversation turns the reply was actually grounded on, not merely sent. */
   groundedOnHistory: number;
+  /** Which kind of task this was read as, and so why the model that answered was chosen (modelRouting.ts). */
+  routing?: Routing;
 };
 
 const modelRouter = new ModelRouter();
@@ -791,6 +790,7 @@ export async function runAssistantOrchestrator(
         // anything the user saved, and the client labels provenance from it.
         strategy: "generated",
         toolsUsed: generated.toolsUsed,
+        ...(generated.routing ? { routing: generated.routing } : {}),
         ...(nowPending && described
           ? { pendingConfirmation: { tool: nowPending.tool, ...described } }
           : {}),
@@ -2094,6 +2094,8 @@ type LocalModelAttempt =
     text: string;
     model: string;
     toolsUsed: ToolOutcome[];
+    /** Why that model: the kind of task the request was read as (modelRouting.ts). */
+    routing?: Routing;
     awaitingConfirmation?: { tool: string; arguments: Record<string, unknown> };
   }
   | {
@@ -2180,13 +2182,17 @@ async function answerWithLocalModel(
   //
   // Put in front of the ordinary candidates rather than replacing them, so if
   // it fails to load the existing fallback still works its way down the list.
-  const codeWork = isCodeWork(input.mode, input.userMessage ?? "");
-  const ordinary = orderedCandidates(config.model, availability.installedModels, config.modelFromEnv ?? true);
-  // TRHAI_MODEL stays first even then: it says which model fits this PC. A
-  // model the conversation chose does not - the coder still goes ahead of it
-  // for code work, as it always has. See withCoderFirst.
-  const coder = codeWork ? pickAuthorModel(availability.installedModels, "") : "";
-  const candidates = withCoderFirst(ordinary, coder, pinnedModel(base, availability.installedModels));
+  //
+  // Widened on 2026-11-23 to every kind of task (modelRouting.ts): a quick question goes to the
+  // fast model, a hard one to the model that thinks, code and tools to the coder, writing to the
+  // model that writes best. A model the person chose - TRHAI_MODEL, or the conversation's own
+  // pick - still goes first; the rest of the order is the fallback if it will not load.
+  const routing = taskKindFor(input.userMessage ?? "", { mode: input.mode });
+  const candidates = modelOrderFor(routing.kind, availability.installedModels, {
+    hardware: knownHardware(),
+    loaded: availability.loadedModels ?? [],
+    pinned: pinnedModel(config, availability.installedModels)
+  });
   const attempted: string[] = [];
   // Why the last model that could not be used was not, for when none could.
   let lastUnusable = "";
@@ -2267,6 +2273,7 @@ async function answerWithLocalModel(
         text: inOwnName(result.text),
         model: `local/${result.model}`,
         toolsUsed: result.toolsUsed,
+        routing,
         ...(result.awaitingConfirmation ? { awaitingConfirmation: result.awaitingConfirmation } : {})
       };
     }

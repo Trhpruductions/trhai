@@ -164,3 +164,10 @@ test("a sum worked out by the app is labelled as worked out, and credited to no 
     assert.equal(unanswered(strategy), false, strategy);
   }
 });
+
+test("the credit says why that model, when the API chose it for the kind of task", () => {
+  assert.equal(replyProvenance("generated", "local/qwen3-8b", { kind: "reasoning", reason: "reasoning" }), "Written by qwen3-8b, chosen for reasoning");
+  assert.equal(replyProvenance("generated", "local/qwen3-4b-instruct-2507-abliterated", { kind: "quick", reason: "a quick one" }), "Written by qwen3-4b-instruct-2507-abliterated, chosen for a quick one");
+  assert.equal(replyProvenance("generated", "local/qwen3-8b", null), "Written by qwen3-8b", "a reply from before, with no reason recorded");
+  assert.equal(replyProvenance("answer", "local/qwen3-8b", { kind: "quick", reason: "a quick one" }), "Quoted from your saved notes", "only a written reply names its model");
+});

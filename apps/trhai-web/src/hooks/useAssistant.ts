@@ -20,6 +20,8 @@ export type ChatMessage = {
   at: number;
   strategy?: string;
   model?: string;
+  /** Why that model: the kind of task the request was read as, in a few words. */
+  routing?: { kind: string; reason: string };
   toolsUsed?: Array<{ name: string; ok: boolean }>;
   /** Files this reply made, as paths in the workspace, so the screen can offer to open them. */
   files?: string[];
@@ -72,7 +74,9 @@ export type ConversationSummary = {
 
 export type ConversationFilter = { query?: string; archived?: boolean };
 
-type StoredTurnPayload = { id?: string; role: ChatRole; content: string; createdAt?: string; strategy?: string; model?: string };
+type StoredTurnPayload = {
+  id?: string; role: ChatRole; content: string; createdAt?: string; strategy?: string; model?: string; routing?: { kind: string; reason: string }
+};
 
 /** Which conversation was open, so a reload comes back to it. */
 const conversationKey = "trhai.chat.conversation.v1";
@@ -115,8 +119,14 @@ function restoredMessages(turns: StoredTurnPayload[]): ChatMessage[] {
     text: turn.content,
     at: Date.parse(turn.createdAt ?? "") || Date.now(),
     strategy: turn.strategy,
-    model: turn.model
+    model: turn.model,
+    ...(isRouting(turn.routing) ? { routing: turn.routing } : {})
   }));
+}
+
+function isRouting(value: unknown): value is { kind: string; reason: string } {
+  const candidate = value as { kind?: unknown; reason?: unknown } | null;
+  return Boolean(candidate) && typeof candidate?.kind === "string" && typeof candidate?.reason === "string";
 }
 
 function isPendingConfirmation(value: unknown): value is { tool: string; verb: string; target: string } {
@@ -445,6 +455,7 @@ export function useAssistant() {
         at: Date.now(),
         strategy: data.strategy as string | undefined,
         model: data.model as string | undefined,
+        ...(isRouting(data.routing) ? { routing: data.routing } : {}),
         toolsUsed: data.toolsUsed as ChatMessage["toolsUsed"],
         ...(madeFilesFrom(data.files).length > 0 ? { files: madeFilesFrom(data.files) } : {}),
         ...(isContextUse(data.context) ? { context: data.context } : {}),

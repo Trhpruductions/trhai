@@ -199,9 +199,9 @@ test("the vision model answers a conversation only when nothing else can", async
   const only = await standIn(() => ({ status: 200, payload: modelsBody(["qwen2.5-vl-3b"], { vision: ["qwen2.5-vl-3b"] }) }));
   const both = await standIn(() => ({ status: 200, payload: modelsBody(["qwen2.5-vl-3b", "qwen3-8b"], { vision: ["qwen2.5-vl-3b"] }) }));
   try {
-    assert.deepEqual(await checkAvailability(configFor(only.baseUrl)), { available: true, model: "qwen2.5-vl-3b", installedModels: ["qwen2.5-vl-3b"] });
+    assert.deepEqual(await checkAvailability(configFor(only.baseUrl)), { available: true, model: "qwen2.5-vl-3b", installedModels: ["qwen2.5-vl-3b"], loadedModels: ["qwen2.5-vl-3b"] });
     const result = await checkAvailability(configFor(both.baseUrl));
-    assert.deepEqual(result, { available: true, model: "qwen3-8b", installedModels: ["qwen3-8b"] });
+    assert.deepEqual(result, { available: true, model: "qwen3-8b", installedModels: ["qwen3-8b"], loadedModels: ["qwen2.5-vl-3b", "qwen3-8b"] });
   } finally {
     only.server.close();
     both.server.close();
