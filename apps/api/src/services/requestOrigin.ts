@@ -32,12 +32,16 @@ const outboundRoutes = ["/v1/web/"];
 
 export function crossSiteVerdict(marks: Marks, method: string, path: string, configuredOrigins?: string): OriginVerdict {
   if (method === "OPTIONS") return { refused: false };
-  if (marks.origin !== undefined && marks.origin !== "null" && !isAllowedOrigin(marks.origin, configuredOrigins)) {
-    return { refused: true, message: "This request came from a page that is not TRH AI, so it was not acted on." };
-  }
-  if (marks.origin === "null") {
-    // A sandboxed frame, a file: page, or a redirect from another site: not the app.
-    return { refused: true, message: "This request came from a page that is not TRH AI, so it was not acted on." };
+  if (marks.origin !== undefined) {
+    // A sandboxed frame, a file: page, or a redirect from another site sends "null": not the app.
+    if (marks.origin === "null" || !isAllowedOrigin(marks.origin, configuredOrigins)) {
+      return { refused: true, message: "This request came from a page that is not TRH AI, so it was not acted on." };
+    }
+    // The app's own page. Its Origin decides, and `Sec-Fetch-Site` is not read for it: the
+    // installed app's window is served at 127.0.0.1:3210 and calls the API at localhost:4000,
+    // two spellings of this PC that a browser calls two different sites. From 0.1.10 to 0.1.11
+    // that pair was refused here, and every installed copy sat on "Checking local service".
+    return { refused: false };
   }
   if (marks.secFetchSite?.toLowerCase() === "cross-site") {
     return { refused: true, message: "This request was placed on a page from another site, so it was not acted on." };
@@ -49,15 +53,28 @@ export function crossSiteVerdict(marks: Marks, method: string, path: string, con
   return { refused: false };
 }
 
-/** The guard, as middleware. Sits before CORS, so a refused request is never answered at all. */
+/**
+ * The guard, as middleware. Sits before CORS, so a refused request is never answered at all.
+ *
+ * A refusal is logged, once per origin and route for the life of the process: it happens before
+ * the request log, and for two versions nobody could tell from the log that the app's own window
+ * was being refused. Once, because a window that is refused asks again every two seconds.
+ */
 export function refuseCrossSite(configuredOrigins?: string) {
+  const noted = new Set<string>();
   return (req: Request, res: Response, next: NextFunction): void => {
-    const verdict = crossSiteVerdict({
+    const marks = {
       origin: req.headers.origin,
       secFetchSite: req.get("sec-fetch-site"),
       secFetchDest: req.get("sec-fetch-dest")
-    }, req.method, req.path, configuredOrigins);
+    };
+    const verdict = crossSiteVerdict(marks, req.method, req.path, configuredOrigins);
     if (verdict.refused) {
+      const key = `${marks.origin ?? "-"} ${marks.secFetchSite ?? "-"} ${req.method} ${req.path}`;
+      if (!noted.has(key)) {
+        noted.add(key);
+        console.warn(`[origin] refused ${key}: ${verdict.message}`);
+      }
       res.status(403).json({ code: "CROSS_SITE_REFUSED", message: verdict.message, traceId: "trace-local" });
       return;
     }

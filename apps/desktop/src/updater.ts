@@ -12,19 +12,29 @@
 // check every other bridge call has.
 
 import { spawn } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow } from "electron";
 import updaterPackage from "electron-updater";
-import { encodedCommand, helperLaunches, helperPowerShell, plainUpdateError, relaunchScript, updateSupport, type DesktopUpdateStatus } from "./updateState.js";
+import {
+  encodedCommand, helperLaunches, helperPowerShell, plainUpdateError, relaunchScript, takesRequiredByItself, updateSupport, type DesktopUpdateStatus
+} from "./updateState.js";
 
 const { autoUpdater } = updaterPackage;
 
 const statusChannel = "ascend:update-status";
 const recheckMs = 6 * 60 * 60 * 1000;
+/** The API's own reading of the release page, which says whether the release is required. The packaged API is always on 4000. */
+const apiUpdatesUrl = "http://127.0.0.1:4000/v1/updates";
+/** How long after a required update is ready the app restarts into it by itself: the window's own countdown, when it can show one. */
+const requiredRestartMs = 120_000;
 
 let status: DesktopUpdateStatus = { state: "idle" };
 /** The version last seen as available, for progress lines that need it. */
 let offered: string | null = null;
+/** A required version this process started downloading by itself; see takeRequiredByItself. */
+let requiredPending: string | null = null;
+let installing = false;
 
 function publish(next: DesktopUpdateStatus): void {
   status = next;
@@ -84,6 +94,56 @@ function startRelaunchHelper(): void {
   attempt(0);
 }
 
+/** Quits and runs the installer, once, with the helper that brings the new version up; see the install handler. */
+function installNow(): void {
+  if (installing || status.state !== "downloaded") return;
+  installing = true;
+  setImmediate(() => {
+    startRelaunchHelper();
+    autoUpdater.quitAndInstall(true, true);
+  });
+}
+
+// ---- a required update, taken by this process when the window cannot (takesRequiredByItself says why)
+
+function requiredTriedFile(): string {
+  return path.join(app.getPath("userData"), "update-required-tried.json");
+}
+
+function requiredTried(): string | null {
+  try {
+    return (JSON.parse(readFileSync(requiredTriedFile(), "utf8")) as { version?: string }).version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function noteRequiredTried(version: string): void {
+  try {
+    mkdirSync(path.dirname(requiredTriedFile()), { recursive: true });
+    writeFileSync(requiredTriedFile(), `${JSON.stringify({ version, at: new Date().toISOString() })}\n`, "utf8");
+  } catch { /* the restart goes ahead without the note */ }
+}
+
+/** The latest release as the API read it from the release page, or null when the API could not say. */
+async function latestOnThePage(): Promise<{ version: string; required?: boolean } | null> {
+  try {
+    const response = await fetch(apiUpdatesUrl, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) return null;
+    const body = await response.json() as { data?: { latest?: { version: string; required?: boolean } | null } };
+    return body.data?.latest ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function takeRequiredByItself(version: string): Promise<void> {
+  if (!takesRequiredByItself(await latestOnThePage(), version, requiredTried())) return;
+  requiredPending = version;
+  console.log(`[updater] ${version} is a required update: downloading it without being asked`);
+  await download();
+}
+
 type Register = (channel: string, listener: () => unknown) => void;
 
 export function startUpdater(register: Register): void {
@@ -94,14 +154,10 @@ export function startUpdater(register: Register): void {
   register("ascend:update-check", async () => { await check(); return status; });
   register("ascend:update-download", async () => { await download(); return status; });
   register("ascend:update-install", () => {
-    if (status.state !== "downloaded") return status;
     // Quits - which stops the API and the web app, as any quit does - and
     // runs the installer without its pages. The helper started first brings
     // the new version up once the installer has finished (see relaunchScript).
-    setImmediate(() => {
-      startRelaunchHelper();
-      autoUpdater.quitAndInstall(true, true);
-    });
+    installNow();
     return status;
   });
 
@@ -118,12 +174,23 @@ export function startUpdater(register: Register): void {
   autoUpdater.on("update-available", (info) => {
     offered = info.version;
     publish({ state: "available", version: info.version });
+    void takeRequiredByItself(info.version);
   });
   autoUpdater.on("update-not-available", (info) => publish({ state: "not-available", version: info?.version ?? null }));
   autoUpdater.on("download-progress", (progress) => publish({
     state: "downloading", version: offered ?? "", percent: Math.floor(progress.percent), bytesPerSecond: Math.round(progress.bytesPerSecond)
   }));
-  autoUpdater.on("update-downloaded", (info) => publish({ state: "downloaded", version: info.version }));
+  autoUpdater.on("update-downloaded", (info) => {
+    publish({ state: "downloaded", version: info.version });
+    // A required one this process fetched by itself restarts by itself, after the same two minutes the
+    // window counts down when it can; noted first, so a restart that does not take is not repeated.
+    if (requiredPending === info.version && requiredTried() !== info.version) {
+      setTimeout(() => {
+        noteRequiredTried(info.version);
+        installNow();
+      }, requiredRestartMs).unref();
+    }
+  });
   autoUpdater.on("error", (error) => publish({ state: "error", message: plainUpdateError(error) }));
 
   // A little after start, when the window and the services are up, then every

@@ -9,7 +9,25 @@
 
 import { currentAuthHeaders } from "./auth";
 
-export const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+/**
+ * Where the API is, for this page.
+ *
+ * Set at build (NEXT_PUBLIC_API_BASE_URL) it is that. Otherwise the API is on this PC at port
+ * 4000, spelt the way this page's own address is spelt: a page at 127.0.0.1:3210 calls
+ * 127.0.0.1:4000, a page at localhost:3210 calls localhost:4000. A browser treats "localhost" and
+ * "127.0.0.1" as two different sites, and the installed app's window (127.0.0.1:3210) calling a
+ * fixed localhost:4000 was marked cross-site and refused by the API from 0.1.10 to 0.1.11. The
+ * API accepts the pair now as well; this keeps the two on one site to begin with.
+ */
+export function resolveApiBaseUrl(configured: string | undefined, location: { hostname: string } | null): string {
+  if (configured && configured.trim()) return configured.trim();
+  const host = location?.hostname?.toLowerCase() ?? "";
+  if (host === "127.0.0.1" || host === "localhost") return `http://${host}:4000`;
+  if (host === "::1" || host === "[::1]") return "http://[::1]:4000";
+  return "http://localhost:4000";
+}
+
+export const apiBaseUrl = resolveApiBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL, typeof window === "undefined" ? null : window.location);
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; reason: string };
 

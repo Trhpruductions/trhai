@@ -134,3 +134,23 @@ export function helperLaunches(powershell: string[]): HelperLaunch[] {
     { file: "conhost.exe", args: ["--headless", ...powershell] }
   ];
 }
+
+/**
+ * Whether the app takes a required update by itself, from its main process, with no window asking.
+ *
+ * The window drives an update, a required one too, when it can reach the API. From 0.1.10 to 0.1.11
+ * it could not (the API refused its page as cross-site; requestOrigin.ts in the API says why), so a
+ * required release was found by the updater and never downloaded, and every installed copy stayed
+ * where it was. The main process can always reach the API, so it asks it whether the release the
+ * updater found is required, and acts on that once per version: a restart that does not take is
+ * not repeated every two minutes.
+ */
+export function takesRequiredByItself(
+  release: { version: string; required?: boolean } | null | undefined,
+  available: string | null,
+  tried: string | null
+): boolean {
+  if (!release || release.required !== true || !available) return false;
+  if (release.version !== available) return false;
+  return tried !== available;
+}

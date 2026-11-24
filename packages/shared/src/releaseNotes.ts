@@ -37,6 +37,17 @@ export function isRequiredReleaseText(text: string): boolean {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.1.12",
+    date: "2026-11-23",
+    title: "The installed app reaches its own service again, and takes a required update by itself",
+    required: true,
+    notes: [
+      "Since 0.1.10 the installed app could sit on \"Checking local service\" for good. Its window and its local service used two spellings of this PC, 127.0.0.1 and localhost; a browser treats those as two different websites, and the security rule added in 0.1.10 refused the window's requests as coming from another site. The service now accepts its own window whichever spelling it uses, and the window uses the service's spelling to begin with.",
+      "Because of that, a copy on 0.1.10 or 0.1.11 cannot see this update by itself: install it once by hand from this page (TRH-AI-Setup-0.1.12.exe keeps your data and settings). From now on the app downloads and installs a required update itself, even when its window cannot ask for it.",
+      "This version carries everything in 0.1.11, which most copies never got to run: what you ask for gets done or you are told it did not, reminders and appointments land on the day you said, your calendar and to-do list are read when you ask, one model both talks and reads pictures, and TRH AI keeps its own name."
+    ]
+  },
+  {
     version: "0.1.11",
     date: "2026-11-16",
     title: "What you ask for gets done, reminders land on the right day, and one model does it all",

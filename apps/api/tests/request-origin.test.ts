@@ -75,3 +75,18 @@ test("through the server: a foreign page's request is refused before any route r
     server.close();
   }
 });
+
+test("the app's own page at one spelling of this PC may call the API at the other, which a browser marks cross-site", () => {
+  // The installed app: window at 127.0.0.1:3210, API at localhost:4000. Refused from 0.1.10 to 0.1.11, and the
+  // window never got past "Checking local service".
+  const ownPage = { origin: "http://127.0.0.1:3210", secFetchSite: "cross-site", secFetchDest: "empty" };
+  assert.equal(crossSiteVerdict(ownPage, "GET", "/health").refused, false);
+  assert.equal(crossSiteVerdict(ownPage, "POST", "/v1/assist").refused, false);
+  assert.equal(crossSiteVerdict({ ...ownPage, origin: "http://localhost:3210" }, "GET", "/v1/updates").refused, false);
+  // Its Origin still decides: another page's request, however marked, is refused.
+  assert.equal(crossSiteVerdict({ origin: "https://evil.example", secFetchSite: "cross-site" }, "GET", "/health").refused, true);
+  assert.equal(crossSiteVerdict({ origin: "null", secFetchSite: "same-origin" }, "GET", "/health").refused, true);
+  // And the outbound routes still answer only the app's own fetch.
+  assert.equal(crossSiteVerdict({ ...ownPage, secFetchDest: "image" }, "GET", "/v1/web/read").refused, false, "with an Origin it is a fetch from the app's page; an <img> sends none");
+  assert.equal(crossSiteVerdict({ secFetchSite: "same-site", secFetchDest: "image" }, "GET", "/v1/web/read").refused, true);
+});
