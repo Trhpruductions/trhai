@@ -626,6 +626,28 @@ machine access is on by default and the coder asked for "the Documents folder": 
 `TRHAI_MACHINE_ACCESS=off`. The harness is the scratchpad's `gpu-eval.mjs` (session folder of
 2026-11-05).
 
+## The installed app could not reach its own service, 0.1.10 to 0.1.11 (found 2026-11-23)
+
+0.1.11 was published as a required update on 2026-11-16 and the owner's installed 0.1.10 never
+took it. The reason, read from inside the installed window over a DevTools port (scratchpad
+`launch-app-isolated.mjs` + `cdp-eval.mjs`): the window is served at `http://127.0.0.1:3210` and
+the web bundle calls the API at the baked `http://localhost:4000`; the browser marks that pair
+`Sec-Fetch-Site: cross-site`, and #146's `refuseCrossSite` answered 403 with no CORS header, so the
+boot screen sat on "Checking local service" and nothing behind it ever ran. Refused requests are not
+logged, which is why the API log looked healthy. Three fixes, in 0.1.12:
+
+- `requestOrigin.ts`: a request that carries an `Origin` is judged by that Origin alone (the app's
+  own pages pass, anything else is refused); `Sec-Fetch-Site` is read only when there is no Origin.
+- `lib/api.ts` (`resolveApiBaseUrl`): the window addresses the API by its own page's spelling of
+  this PC, so the two are one site to begin with.
+- `updater.ts` (`takesRequiredByItself`, `updateState.ts`): when the updater finds a release, the
+  main process asks the API itself whether it is required and, if so, downloads it and restarts
+  into it after two minutes, once per version (`update-required-tried.json` under userData), so a
+  copy whose window cannot ask still moves.
+
+Copies on 0.1.10 and 0.1.11 cannot see 0.1.12: they install it by hand from the release page. The
+owner's own copy is installed by hand too (data backed up first, as for every release).
+
 ## How to verify anything you change
 
 ```

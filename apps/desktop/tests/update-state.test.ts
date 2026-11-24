@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { encodedCommand, helperLaunches, helperPowerShell, plainUpdateError, relaunchScript, updateSupport } from "../src/updateState.js";
+import { encodedCommand, helperLaunches, helperPowerShell, plainUpdateError, relaunchScript, takesRequiredByItself, updateSupport } from "../src/updateState.js";
 
 // Which copies update themselves, and how a failure is said.
 
@@ -90,4 +90,16 @@ test("the helper's PowerShell asks nothing, loads nothing, shows nothing", () =>
   assert.equal(args[0], "powershell.exe");
   for (const flag of ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden"]) assert.ok(args.includes(flag), flag);
   assert.deepEqual(args.slice(-2), ["-EncodedCommand", "QQBCAEMA"]);
+});
+
+test("a required release the updater has found is taken by the main process itself, once per version", () => {
+  const required = { version: "0.1.12", required: true };
+  assert.equal(takesRequiredByItself(required, "0.1.12", null), true);
+  assert.equal(takesRequiredByItself(required, "0.1.12", "0.1.11"), true, "an earlier version's note does not count");
+  assert.equal(takesRequiredByItself(required, "0.1.12", "0.1.12"), false, "already restarted into it once");
+  assert.equal(takesRequiredByItself({ version: "0.1.12", required: false }, "0.1.12", null), false, "an ordinary release is the window's to offer");
+  assert.equal(takesRequiredByItself({ version: "0.1.12" }, "0.1.12", null), false);
+  assert.equal(takesRequiredByItself(required, "0.1.13", null), false, "the page and the updater name different versions: wait");
+  assert.equal(takesRequiredByItself(required, null, null), false);
+  assert.equal(takesRequiredByItself(null, "0.1.12", null), false, "the API could not say");
 });
